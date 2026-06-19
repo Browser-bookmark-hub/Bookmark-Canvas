@@ -598,6 +598,7 @@ function __buildTempGroupToolbar() {
     const t = {
         create: isEn ? 'Create card group' : '创建卡片组',
         color: isEn ? 'Color' : '颜色',
+        search: isEn ? 'Search in current scope' : '当前范围搜索',
         locate: isEn ? 'Locate and zoom' : '定位并放大',
         pin: isEn ? 'Pin all' : '全部置顶',
         del: isEn ? 'Delete all' : '全部删除'
@@ -607,6 +608,7 @@ function __buildTempGroupToolbar() {
     toolbar.innerHTML = `
         <button class="md-node-toolbar-btn temp-group-toolbar-btn" data-action="temp-group-create" data-tooltip="${t.create}"><i class="fas fa-object-group"></i></button>
         <button class="md-node-toolbar-btn temp-group-toolbar-btn" data-action="temp-group-color" data-tooltip="${t.color}"><i class="fas fa-palette"></i></button>
+        <button class="md-node-toolbar-btn temp-group-toolbar-btn" data-action="temp-group-search" data-tooltip="${t.search}"><i class="fas fa-search"></i></button>
         <button class="md-node-toolbar-btn temp-group-toolbar-btn" data-action="temp-group-locate" data-tooltip="${t.locate}"><i class="fas fa-search-plus"></i></button>
         <button class="md-node-toolbar-btn temp-group-toolbar-btn" data-action="temp-group-pin" data-tooltip="${t.pin}"><i class="fas fa-thumbtack"></i></button>
         <button class="md-node-toolbar-btn md-delete-danger-btn temp-group-toolbar-btn temp-group-toolbar-btn-danger" data-action="temp-group-delete" data-tooltip="${t.del}"><i class="far fa-trash-alt"></i></button>
@@ -962,6 +964,22 @@ function __bindTempGroupToolbarActions(toolbar) {
                 };
                 document.addEventListener('mousedown', onDoc, true);
             }
+        } else if (action === 'temp-group-search') {
+            closeColorPop();
+            try {
+                if (__tempGroup && Array.isArray(__tempGroup.members)) {
+                    const memberIds = __tempGroup.members.map(m => m.id).filter(Boolean);
+                    if (typeof window.triggerAreaSearch === 'function') {
+                        window.triggerAreaSearch({
+                            kind: 'temp',
+                            id: 'temp-group-selection',
+                            memberIds: memberIds
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error('[TempGroup] failed to trigger area search:', err);
+            }
         } else if (action === 'temp-group-locate') {
             __locateToTempGroup();
         } else if (action === 'temp-group-pin') {
@@ -978,6 +996,7 @@ function __tempGroupContextMenuLabels() {
     return {
         create: isEn ? 'Create card group' : '创建卡片组',
         color: isEn ? 'Color' : '颜色',
+        search: isEn ? 'Search in current scope' : '当前范围搜索',
         locate: isEn ? 'Locate' : '定位',
         pin: isEn ? 'Pin' : '置顶',
         del: isEn ? 'Delete' : '删除',
@@ -1042,6 +1061,21 @@ function __handleTempGroupContextMenuAction(action, options = {}) {
         __convertTempGroupToCardGroup();
     } else if (action === 'temp-group-context-color') {
         __openTempGroupContextColorPopover(options.anchorPoint || null);
+    } else if (action === 'temp-group-context-search') {
+        try {
+            if (__tempGroup && Array.isArray(__tempGroup.members)) {
+                const memberIds = __tempGroup.members.map(m => m.id).filter(Boolean);
+                if (typeof window.triggerAreaSearch === 'function') {
+                    window.triggerAreaSearch({
+                        kind: 'temp',
+                        id: 'temp-group-selection',
+                        memberIds: memberIds
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('[TempGroup] failed to trigger area search from context menu:', err);
+        }
     } else if (action === 'temp-group-context-locate') {
         __locateToTempGroup();
     } else if (action === 'temp-group-context-pin') {
@@ -1077,6 +1111,7 @@ function showTempGroupContextMenu(event) {
     const items = [
         { action: 'temp-group-context-create', label: labels.create, icon: 'object-group' },
         { action: 'temp-group-context-color', label: labels.color, icon: 'palette' },
+        { action: 'temp-group-context-search', label: labels.search, icon: 'search' },
         { action: 'temp-group-context-locate', label: labels.locate, icon: 'crosshairs' },
         { action: 'temp-group-context-pin', label: labels.pin, icon: 'thumbtack' },
         { action: 'temp-group-context-delete', label: labels.del, icon: 'trash-alt', className: 'color-red' },

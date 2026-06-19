@@ -1279,6 +1279,50 @@ html.side-panel-mode .search-mode-trigger.mode-color-green {
     transform: translateY(-50%) scale(0.95);
 }
 
+/* Area Search Indicator */
+.search-area-indicator {
+    position: absolute;
+    right: 28px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(37, 99, 235, 0.1);
+    border: 1px solid var(--accent-primary, #2563eb);
+    color: var(--accent-primary, #2563eb);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 600;
+    pointer-events: auto;
+    z-index: 10;
+}
+
+[data-theme="dark"] .search-area-indicator {
+    background: rgba(96, 165, 250, 0.15);
+    border-color: var(--accent-primary, #60a5fa);
+    color: var(--accent-primary, #60a5fa);
+}
+
+.search-area-exit-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    font-size: 9px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.search-input-wrapper.has-area-search input {
+    padding-right: 80px !important;
+}
+
 /* Search Mode Trigger Button (Left - Expanded) */
 .search-mode-trigger {
     display: flex;

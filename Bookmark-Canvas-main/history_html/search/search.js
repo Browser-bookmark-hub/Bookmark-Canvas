@@ -63,7 +63,10 @@ const searchUiState = {
 
     // Tag browser: when query is "#" / "{#}", first-level shows color+tag navigator.
     // Click one entry to enter second-level bookmark result view.
-    tagBrowseDetail: null
+    tagBrowseDetail: null,
+
+    // Localized area search range
+    areaSearchScope: null
 };
 
 const TEMP_SECTION_BUILD_YIELD_EVERY = 180;
@@ -494,6 +497,10 @@ function resetMainSearchUI(options = {}) {
             searchUiState.bookmarkGroupModel = null;
             searchUiState.bookmarkGroupCollapse = new Map();
             searchUiState.domainGroupCollapse = new Map();
+            searchUiState.areaSearchScope = null;
+            if (typeof updateSearchAreaIndicatorUI === 'function') {
+                updateSearchAreaIndicatorUI();
+            }
         }
     } catch (_) { }
 
@@ -1940,6 +1947,16 @@ function initSearchEvents() {
         });
     }
 
+    const searchAreaExitBtn = document.getElementById('searchAreaExitBtn');
+    if (searchAreaExitBtn && !searchAreaExitBtn.hasAttribute('data-exit-bound')) {
+        searchAreaExitBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            exitAreaSearch();
+        });
+        searchAreaExitBtn.setAttribute('data-exit-bound', 'true');
+    }
+
     const searchInput = document.getElementById('searchInput');
     const searchResultsPanel = getSearchResultsPanel();
 
@@ -2171,6 +2188,128 @@ function getCanvasFullscreenSearchScope() {
     } catch (_) {
         return null;
     }
+}
+
+function isItemInAreaSearchScope(item, scope) {
+    if (!scope || !Array.isArray(scope.memberIds)) return true;
+    const memberIds = scope.memberIds;
+
+    // Check if the item itself is one of the member nodes
+    if (item.type === 'temp-section' || item.type === 'permanent-section' || item.type === 'md-node') {
+        if (memberIds.includes(item.id)) return true;
+        // Fix ID discrepancy for permanent sections (main / copies) between canvas/DOM and search indexes
+        if (item.type === 'permanent-section' && item.id) {
+            if (item.id === 'permanentSection' && memberIds.includes('permanent-section')) {
+                return true;
+            }
+            if (memberIds.includes(`permanent-section-copy-${item.id}`)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Check if the item is a bookmark item
+    if (item.type === 'bookmark-item') {
+        if (item.source === 'temporary') {
+            return memberIds.includes(item.sectionId);
+        } else if (item.source === 'permanent') {
+            return memberIds.some(id => 
+                id === 'permanentSection' || 
+                id.startsWith('permanent-section') || 
+                id.startsWith('permanentSection')
+            );
+        }
+    }
+
+    // Check if the item is a connection line (edge)
+    if (item.type === 'edge') {
+        if (memberIds.includes(item.id)) return true;
+        if (memberIds.includes(item.fromId) || memberIds.includes(item.toId)) return true;
+        // Align connection lines attached to permanent section / copies
+        const connectsToPermanent = (nodeId) => {
+            if (!nodeId) return false;
+            if (nodeId === 'permanentSection' || nodeId === 'permanent-section') {
+                return memberIds.includes('permanent-section') || memberIds.includes('permanentSection');
+            }
+            if (nodeId.startsWith('permanent-section-copy-')) {
+                const pureId = nodeId.slice('permanent-section-copy-'.length);
+                return memberIds.includes(nodeId) || memberIds.includes(pureId) || memberIds.includes(`permanent-section-copy-${pureId}`);
+            }
+            return memberIds.includes(`permanent-section-copy-${nodeId}`) || memberIds.includes(nodeId);
+        };
+        return connectsToPermanent(item.fromId) || connectsToPermanent(item.toId);
+    }
+
+    // Check if it's the group card itself
+    if (item.type === 'group') {
+        return item.id === scope.id || memberIds.includes(item.id);
+    }
+
+    return false;
+}
+
+function triggerAreaSearch(scope) {
+    if (!scope) return;
+    
+    searchUiState.areaSearchScope = {
+        kind: scope.kind,
+        id: scope.id || null,
+        memberIds: Array.isArray(scope.memberIds) ? scope.memberIds : []
+    };
+    
+    updateSearchAreaIndicatorUI();
+    
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        if (typeof setSidePanelSearchExpanded === 'function') {
+            setSidePanelSearchExpanded(true);
+        }
+        searchInput.focus();
+        
+        const q = (searchInput.value || '').trim();
+        if (typeof searchCanvasAndRender === 'function') {
+            searchCanvasAndRender(q);
+        }
+    }
+}
+
+function exitAreaSearch() {
+    searchUiState.areaSearchScope = null;
+    updateSearchAreaIndicatorUI();
+    
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        const q = (searchInput.value || '').trim();
+        if (typeof searchCanvasAndRender === 'function') {
+            searchCanvasAndRender(q);
+        }
+    }
+}
+
+function updateSearchAreaIndicatorUI() {
+    const indicator = document.getElementById('searchAreaIndicator');
+    const inputWrap = document.querySelector('.search-input-wrapper');
+    if (!indicator || !inputWrap) return;
+    
+    if (searchUiState.areaSearchScope) {
+        const isEn = String(typeof currentLang !== 'undefined' ? currentLang : 'zh').toLowerCase().startsWith('en');
+        const labelText = isEn ? 'Area' : '区域';
+        const labelEl = indicator.querySelector('.search-area-indicator-label');
+        if (labelEl) {
+            labelEl.textContent = labelText;
+        }
+        indicator.style.display = 'inline-flex';
+        inputWrap.classList.add('has-area-search');
+    } else {
+        indicator.style.display = 'none';
+        inputWrap.classList.remove('has-area-search');
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.triggerAreaSearch = triggerAreaSearch;
+    window.exitAreaSearch = exitAreaSearch;
 }
 
 function getPreferredSearchModeByFullscreenScope(scope) {
@@ -2932,7 +3071,7 @@ function getCanvasSearchSignature() {
     const activeCanvasState = getActiveCanvasState();
     if (!activeCanvasState) return '';
 
-    return `v3:${stringifyCanvasSearchSignaturePayload(buildCanvasSearchSignaturePayload(activeCanvasState))}`;
+    return `v4:${stringifyCanvasSearchSignaturePayload(buildCanvasSearchSignaturePayload(activeCanvasState))}`;
 }
 
 /**
@@ -3697,8 +3836,8 @@ function parseCanvasLayoutSlice(db, coords) {
             id: edge.id,
             type: 'edge',
             label: edge.label,
-            fromId: edge.from || edge.fromId,
-            toId: edge.to || edge.toId,
+            fromId: edge.fromNode || edge.from || edge.fromId,
+            toId: edge.toNode || edge.to || edge.toId,
             color: edge.colorHex || canvasSearchPresetToHex(edge.color) || '#999',
             direction: edge.direction || 'none',
             __label: edge.label.toLowerCase()
@@ -6653,6 +6792,11 @@ function searchCanvasAndRender(query, options = {}) {
     }
 
     for (const item of sourceIndex) {
+        if (searchUiState.areaSearchScope) {
+            if (!isItemInAreaSearchScope(item, searchUiState.areaSearchScope)) {
+                continue;
+            }
+        }
         // [Optim] Strict Partitioning: We already selected the sourceIndex.
         if (searchUiState.activeMode === 'description') {
             // Description Mode: Only MD Nodes, Edges, Section Descriptions

@@ -39,6 +39,7 @@ function __cardGroupToolbarBuild(node, opts) {
     const t = {
         rename: isEn ? 'Rename' : '重命名',
         color: isEn ? 'Color' : '颜色',
+        search: isEn ? 'Search in current scope' : '当前范围搜索',
         locate: isEn ? 'Locate and zoom' : '定位并放大',
         pin: isEn ? 'Pin' : '置顶',
         unpin: isEn ? 'Unpin' : '取消置顶',
@@ -62,6 +63,7 @@ function __cardGroupToolbarBuild(node, opts) {
     toolbar.innerHTML = `
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-rename" data-tooltip="${t.rename}"><i class="fas fa-pen"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-color" data-tooltip="${t.color}"><i class="fas fa-palette"></i></button>
+        <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-search" data-tooltip="${t.search}"><i class="fas fa-search"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-locate" data-tooltip="${t.locate}"><i class="fas fa-search-plus"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn${memberPinState.allPinned ? ' pinned' : ''}" data-action="card-group-pin" data-tooltip="${pinTitle}">${pinIcon}</button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-delete-frame" data-tooltip="${t.deleteFrame}">
@@ -247,6 +249,26 @@ function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
                 };
                 document.addEventListener('mousedown', onDoc, true);
             }
+        } else if (action === 'card-group-search') {
+            closeColorPop();
+            try {
+                if (window.__BCSCardGroup && typeof window.__BCSCardGroup.collectCardGroupChildElementsRecursive === 'function') {
+                    const members = window.__BCSCardGroup.collectCardGroupChildElementsRecursive(node);
+                    const memberIds = Array.isArray(members) ? members.map(m => m.data && m.data.id).filter(Boolean) : [];
+                    if (!memberIds.includes(node.id)) {
+                        memberIds.push(node.id);
+                    }
+                    if (typeof window.triggerAreaSearch === 'function') {
+                        window.triggerAreaSearch({
+                            kind: 'group',
+                            id: node.id,
+                            memberIds: memberIds
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error('[CardGroup] failed to trigger area search:', err);
+            }
         } else if (action === 'card-group-locate') {
             try { if (typeof locateAndZoomToMdNode === 'function') locateAndZoomToMdNode(node.id, 'fit'); } catch (_) { }
         } else if (action === 'card-group-pin') {
@@ -287,6 +309,7 @@ function __cardGroupContextMenuLabels(node) {
     } catch (_) { }
     return {
         color: isEn ? 'Color' : '颜色',
+        search: isEn ? 'Search in current scope' : '当前范围搜索',
         locate: isEn ? 'Locate' : '定位',
         pin: memberPinState.allPinned ? (isEn ? 'Unpin' : '取消置顶') : (isEn ? 'Pin' : '置顶'),
         deleteFrame: isEn ? 'Delete Frame Only' : '仅删除框体',
@@ -356,6 +379,25 @@ function __cardGroupHandleContextMenuAction(action, node, options = {}) {
     if (!node) return;
     if (action === 'card-group-context-color') {
         __cardGroupOpenContextColorPopover(node, options.anchorPoint || null);
+    } else if (action === 'card-group-context-search') {
+        try {
+            if (window.__BCSCardGroup && typeof window.__BCSCardGroup.collectCardGroupChildElementsRecursive === 'function') {
+                const members = window.__BCSCardGroup.collectCardGroupChildElementsRecursive(node);
+                const memberIds = Array.isArray(members) ? members.map(m => m.data && m.data.id).filter(Boolean) : [];
+                if (!memberIds.includes(node.id)) {
+                    memberIds.push(node.id);
+                }
+                if (typeof window.triggerAreaSearch === 'function') {
+                    window.triggerAreaSearch({
+                        kind: 'group',
+                        id: node.id,
+                        memberIds: memberIds
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('[CardGroup] failed to trigger area search from context menu:', err);
+        }
     } else if (action === 'card-group-context-locate') {
         try { if (typeof locateAndZoomToMdNode === 'function') locateAndZoomToMdNode(node.id, 'fit'); } catch (_) { }
     } else if (action === 'card-group-context-pin') {
@@ -396,6 +438,7 @@ function showCardGroupContextMenu(event, node) {
     const lang = (typeof currentLang !== 'undefined') ? currentLang : 'zh_CN';
     const items = [
         { action: 'card-group-context-color', label: labels.color, icon: 'palette' },
+        { action: 'card-group-context-search', label: labels.search, icon: 'search' },
         { action: 'card-group-context-locate', label: labels.locate, icon: 'crosshairs' },
         { action: 'card-group-context-pin', label: labels.pin, icon: 'thumbtack' },
         { action: 'card-group-context-delete', label: labels.deleteFrame, icon: 'trash-alt', group: 'delete' },
