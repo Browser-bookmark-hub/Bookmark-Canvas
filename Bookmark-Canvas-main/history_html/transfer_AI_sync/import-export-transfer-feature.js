@@ -1745,9 +1745,9 @@ async function __performOverwriteImport(payload) {
             try { console.warn('[Incremental Import] Error encountered, falling back to Overwrite:', incErr); } catch (_) {}
             runOverwrite = true;
         }
-        if (runOverwrite) {
-            await executeOverwriteBranch();
-        }
+    }
+    if (runOverwrite) {
+        await executeOverwriteBranch();
     }
 
         // 5. Overwrite non-Chrome state directly (temp sections, mdNodes, edges, canvas state, copies).
