@@ -10633,7 +10633,7 @@ function isCanvasVirtualizationEnabled() {
         const totals = __getCanvasTotalDataStatsSync();
         const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && isFinite(CanvasState.virtualizationMinColumns))
             ? CanvasState.virtualizationMinColumns
-            : 50;
+            : 25;
         if (totals && totals.totalColumnCount < minCols) {
             return false;
         }
@@ -41043,7 +41043,7 @@ function loadCanvasDataIntensiveSettings() {
         if (minCols !== null) {
             CanvasState.virtualizationMinColumns = parseInt(minCols, 10);
         } else {
-            CanvasState.virtualizationMinColumns = 50;
+            CanvasState.virtualizationMinColumns = 25;
         }
 
     } catch (e) {
@@ -41116,10 +41116,10 @@ function openCanvasPerfSettingsModal() {
     if (toggleLow) toggleLow.checked = !!CanvasState.lowDetailEnabled;
 
     const toggleVirt = document.getElementById('perfToggleVirtualization');
-    if (toggleVirt) toggleVirt.checked = isCanvasVirtualizationEnabled();
+    if (toggleVirt) toggleVirt.checked = CanvasState.virtualizationEnabled !== false;
     const inputVirtMinCols = document.getElementById('perfInputVirtualizationMinCols');
     if (inputVirtMinCols) {
-        inputVirtMinCols.value = typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 50;
+        inputVirtMinCols.value = typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 25;
     }
 
     // [P5] Zoom magnet toggles
@@ -41315,7 +41315,7 @@ function updateCanvasPerfSettingsUI() {
     // 超过用户设置的启用虚拟化的最小栏目数时，将总栏目数高亮显示为警告色（橙色）
     const minColsLimit = (typeof CanvasState.virtualizationMinColumns === 'number' && Number.isFinite(CanvasState.virtualizationMinColumns))
         ? CanvasState.virtualizationMinColumns
-        : 50;
+        : 25;
     const overTotalSec = (totals.totalColumnCount || 0) >= minColsLimit;
     setTotalColor('perfStatVisSec', overTotalSec ? 'var(--warning)' : null);
 
@@ -41939,6 +41939,26 @@ function createCanvasPerfSettingsModal() {
                 updateCanvasPerfSettingsUI();
             });
         }
+        if (selector === '#perfToggleVirtualization') {
+            el.addEventListener('change', () => {
+                if (el.checked) {
+                    try {
+                        const totals = __getCanvasTotalDataStatsSync();
+                        const currentTotalCols = (totals && typeof totals.totalColumnCount === 'number') ? totals.totalColumnCount : 0;
+                        const minColsInput = document.getElementById('perfInputVirtualizationMinCols');
+                        if (minColsInput) {
+                            const val = parseInt(minColsInput.value, 10);
+                            if (Number.isFinite(val) && currentTotalCols < val) {
+                                // 自动将最小栏目数下调到当前总栏目数（最少为 1）
+                                minColsInput.value = Math.max(1, currentTotalCols);
+                                CanvasState.virtualizationMinColumns = Math.max(1, currentTotalCols);
+                            }
+                        }
+                    } catch (_) {}
+                }
+                updateCanvasPerfSettingsUI();
+            });
+        }
     });
 }
 
@@ -41977,7 +41997,7 @@ function restoreDefaultZoomSettings() {
 
 function restoreDefaultVirtualizationSettings() {
     const minCols = document.getElementById('perfInputVirtualizationMinCols');
-    if (minCols) minCols.value = 50;
+    if (minCols) minCols.value = 25;
 }
 
 function restoreDefaultZoomMagnetSettings() {
