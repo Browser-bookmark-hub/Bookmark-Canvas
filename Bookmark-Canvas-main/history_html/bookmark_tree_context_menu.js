@@ -6183,7 +6183,7 @@ async function editTempNode(context) {
         titlePlaceholder: lang === 'zh_CN' ? '输入名称...' : 'Enter name...',
         urlPlaceholder: 'https://...',
         titleValue: nodeTitle || '',
-        urlValue: nodeUrl || 'https://',
+        urlValue: nodeUrl || '',
         showUrl: !isFolder,
         requireUrl: !isFolder
     });
@@ -7477,7 +7477,7 @@ async function __createTempBookmarkViaModal(target) {
         titlePlaceholder: lang === 'zh_CN' ? '输入书签名称...' : 'Enter bookmark name...',
         urlPlaceholder: 'https://...',
         titleValue: '',
-        urlValue: 'https://',
+        urlValue: '',
         showUrl: true,
         requireUrl: true,
         requireTitle: true
@@ -9592,7 +9592,7 @@ async function addBookmark(parentId, options = {}) {
         titlePlaceholder: lang === 'zh_CN' ? '输入书签名称...' : 'Enter bookmark name...',
         urlPlaceholder: 'https://...',
         titleValue: '',
-        urlValue: 'https://',
+        urlValue: '',
         showUrl: true,
         requireUrl: true,
         requireTitle: true
