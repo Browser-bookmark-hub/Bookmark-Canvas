@@ -13210,10 +13210,10 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
 
 .canvas-help-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    padding: 2.5px 0;
-    gap: 10px;
+    padding: 4px 0;
+    gap: 12px;
 }
 
 .canvas-help-key {
@@ -13221,7 +13221,10 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     color: var(--text-primary);
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 4px;
+    flex: 1;
+    min-width: 0;
 }
 
 .canvas-help-key kbd {
@@ -13249,6 +13252,9 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     font-size: 13px;
     color: var(--text-secondary);
     text-align: right;
+    max-width: 50%;
+    flex-shrink: 1;
+    word-break: break-word;
 }
 
 [data-theme="dark"] .canvas-help-modal {
