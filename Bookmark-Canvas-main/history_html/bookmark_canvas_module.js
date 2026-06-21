@@ -11591,6 +11591,9 @@ function runCanvasVirtualizationUpdate(options = {}) {
             if (!shouldBeLowDetail && viewportLowDetail) {
                 shouldBeLowDetail = __shouldNodeBeLowDetail(cardId, isOutside);
             }
+            if (card.classList && card.classList.contains('canvas-node-maximized')) {
+                shouldBeLowDetail = false;
+            }
             const wasActive = card.classList.contains('low-detail-active');
             if (shouldBeLowDetail !== wasActive) {
                 card.classList.toggle('low-detail-active', shouldBeLowDetail);
@@ -11825,6 +11828,9 @@ function runCanvasVirtualizationUpdate(options = {}) {
                 const h = Number(section.height || baseSize.height);
                 const isOutside = __isCanvasRectOutsideBounds(x, y, w, h, visualBounds);
                 isLowDetail = __shouldNodeBeLowDetail(section.id, isOutside);
+            }
+            if (element.classList && element.classList.contains('canvas-node-maximized')) {
+                isLowDetail = false;
             }
 
             const wasActive = element.classList.contains('low-detail-active');
@@ -13090,7 +13096,10 @@ function __applyCardGroupLowDetailMembershipState(options = {}) {
 
     desiredGroupNodes.forEach((node, el) => {
         try {
-            if (!el.classList.contains('low-detail-active')) {
+            if (el.classList.contains('canvas-node-maximized') && el.classList.contains('low-detail-active')) {
+                el.classList.remove('low-detail-active');
+                changed = true;
+            } else if (!el.classList.contains('low-detail-active') && !el.classList.contains('canvas-node-maximized')) {
                 el.classList.add('low-detail-active');
                 changed = true;
             }
@@ -13249,6 +13258,9 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
             const isOutside = !__isMdNodeInViewportBounds(node, visualBounds, el);
             shouldActive = __shouldNodeBeLowDetail(node.id, isOutside);
         }
+        if (el && el.classList.contains('canvas-node-maximized')) {
+            shouldActive = false;
+        }
 
         // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
         if (!inLazyRange && !shouldKeepLoaded) {
@@ -13329,6 +13341,9 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
             const isOutside = __isCardOutsideViewportBounds(mainEl, visualBounds);
             shouldActive = __shouldNodeBeLowDetail('permanentSection', isOutside);
         }
+        if (mainEl.classList.contains('canvas-node-maximized')) {
+            shouldActive = false;
+        }
 
         if (outsideLazyRange && !shouldKeepLoaded) {
             const canUnload = __shouldNodeBeUnloaded('permanentSection');
@@ -13338,7 +13353,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
             }
         } else {
             __setCanvasViewportLazyShellClass(mainEl, false);
-            if (!CanvasState.lowDetailActive && !shouldActive) {
+            if ((!CanvasState.lowDetailActive || mainEl.classList.contains('canvas-node-maximized')) && !shouldActive) {
                 if (doLoad) {
                     try { __ensurePermanentSectionTreeLoadedInPlace(mainEl); } catch (_) { }
                 }
@@ -13379,6 +13394,9 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         if (!shouldActive && allowViewportLowDetail) {
             const isOutside = __isCanvasRectOutsideBounds(cardState.left, cardState.top, cardState.width, cardState.height, visualBounds);
             shouldActive = __shouldNodeBeLowDetail(elId, isOutside);
+        }
+        if (el && el.classList.contains('canvas-node-maximized')) {
+            shouldActive = false;
         }
 
         // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
@@ -13423,7 +13441,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
             if (el.classList.contains('card-group-low-detail-child-hidden')) return;
 
             __setCanvasViewportLazyShellClass(el, false);
-            if (!CanvasState.lowDetailActive && !shouldActive) {
+            if ((!CanvasState.lowDetailActive || el.classList.contains('canvas-node-maximized')) && !shouldActive) {
                 if (doLoad) {
                     try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
                 }
@@ -13454,6 +13472,9 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         if (!shouldActive && allowViewportLowDetail) {
             const isOutside = !__isMdNodeInViewportBounds(node, visualBounds, el);
             shouldActive = __shouldNodeBeLowDetail(node.id, isOutside);
+        }
+        if (el && el.classList.contains('canvas-node-maximized')) {
+            shouldActive = false;
         }
 
         // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
@@ -13737,6 +13758,7 @@ function __ensureLowDetailOverlayForCard(card) {
 function __shouldKeepCardLowDetailAfterGlobalExit(card, bounds) {
     if (!card || !card.classList) return false;
     if (card.classList.contains('card-group-low-detail-child-hidden')) return true;
+    if (card.classList.contains('canvas-node-maximized')) return false;
 
     if (card.classList.contains('md-canvas-node') ||
         card.classList.contains('permanent-bookmark-section') ||
@@ -21672,7 +21694,7 @@ function __prepareMdNodeShellElement(el, node, options = {}) {
             if (hostGroup) {
                 el.dataset.lowDetailHostGroupId = hostGroup.id;
             }
-        } else {
+        } else if (!(el.classList && el.classList.contains('canvas-node-maximized'))) {
             el.classList.add('low-detail-active');
         }
         el.classList.remove('editing');
@@ -21852,7 +21874,7 @@ function __renderMdNodeImpl(node, options = {}) {
         if (el.dataset) delete el.dataset.lowDetailHostGroupId;
     }
 
-    if (CanvasState && CanvasState.lowDetailActive) {
+    if (CanvasState && CanvasState.lowDetailActive && !(el.classList && el.classList.contains('canvas-node-maximized'))) {
         if (node.subtype === 'card-group') {
             el.classList.add('low-detail-active');
         } else if (__isNodeGeometricallyInsideAnyCardGroup(node, 'md-node')) {
@@ -30314,6 +30336,9 @@ function __renderTempNodeImpl(section, options = {}) {
         if (visualBounds) {
             isLowDetail = __isCanvasRectOutsideBounds(section.x, section.y, section.width || baseSize.width, section.height || baseSize.height, visualBounds);
         }
+    }
+    if (nodeElement.classList && nodeElement.classList.contains('canvas-node-maximized')) {
+        isLowDetail = false;
     }
 
     if (isLowDetail) {
