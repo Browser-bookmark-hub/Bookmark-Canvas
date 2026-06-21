@@ -14728,6 +14728,11 @@ function runEdgeAutoScroll() {
         adjustDragReferenceForPan(panDeltaX, panDeltaY, CanvasState.dragState.lastClientX, CanvasState.dragState.lastClientY);
     }
 
+    // 同步更新框选临时组拖动位置
+    if (window.__BCSLassoTempGroup && typeof window.__BCSLassoTempGroup.updateDragPositionForScroll === 'function') {
+        window.__BCSLassoTempGroup.updateDragPositionForScroll();
+    }
+
     // 继续动画
     state.intervalId = requestAnimationFrame(runEdgeAutoScroll);
 }
@@ -14748,7 +14753,10 @@ function stopEdgeAutoScroll() {
     state.targetVelocityY = 0;
 
     // 停止后进行最终更新
-    if (CanvasState.dragState.isDragging) {
+    const isTempGroupDragging = window.__BCSLassoTempGroup && 
+                               typeof window.__BCSLassoTempGroup.isDragging === 'function' && 
+                               window.__BCSLassoTempGroup.isDragging();
+    if (CanvasState.dragState.isDragging || isTempGroupDragging) {
         const container = getCachedContainer();
         const content = getCachedContent();
         if (container && content) {

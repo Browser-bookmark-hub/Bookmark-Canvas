@@ -56,6 +56,38 @@ function __resolvePermanentSectionNodeId(el) {
 }
 let __tempGroupEdgeRaf = 0;
 
+let __tempGroupDrag = {
+    dragging: false,
+    startCanvas: { x: 0, y: 0 },
+    snapshot: [],
+    edgeMeta: null,
+    lastDx: 0,
+    lastDy: 0,
+    lastClientX: 0,
+    lastClientY: 0
+};
+
+function __updateTempGroupDragPositionForScroll() {
+    if (!__tempGroup || !__tempGroupDrag.dragging) return;
+    const currentCanvas = __clientToCanvas(__tempGroupDrag.lastClientX, __tempGroupDrag.lastClientY);
+    __tempGroupDrag.lastDx = currentCanvas.x - __tempGroupDrag.startCanvas.x;
+    __tempGroupDrag.lastDy = currentCanvas.y - __tempGroupDrag.startCanvas.y;
+
+    __applyMemberTranslateDuringDrag(
+        __tempGroupDrag.snapshot,
+        __tempGroupDrag.lastDx,
+        __tempGroupDrag.lastDy,
+        __tempGroupDrag.edgeMeta
+    );
+    if (__tempGroup.maskEl) {
+        __tempGroup.maskEl.style.transform = `translate3d(${__tempGroupDrag.lastDx}px, ${__tempGroupDrag.lastDy}px, 0)`;
+    }
+    if (__tempGroup.toolbarEl) {
+        __tempGroup.toolbarEl.style.transform = `translate3d(${__tempGroupDrag.lastDx}px, ${__tempGroupDrag.lastDy}px, 0) translateX(-50%) scale(var(--canvas-scale-inv, 1))`;
+    }
+}
+
+
 function __clientToCanvas(clientX, clientY) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace || typeof CanvasState === 'undefined') return { x: 0, y: 0 };
@@ -530,55 +562,72 @@ function __positionTempGroupChrome() {
 }
 
 function __attachMaskDrag(maskEl) {
-    let dragging = false;
-    let startClient = { x: 0, y: 0 };
-    let snapshot = [];
-    let edgeMeta = null;
-    let lastDx = 0;
-    let lastDy = 0;
-
     maskEl.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         if (!__tempGroup) return;
         e.preventDefault();
         e.stopPropagation();
-        dragging = true;
-        startClient = { x: e.clientX, y: e.clientY };
-        lastDx = 0;
-        lastDy = 0;
-        snapshot = __captureMemberStartPositions(__tempGroup.members || []);
-        edgeMeta = __tempGroupBuildDragEdgeMeta(snapshot);
-        __setTempGroupDragActive(snapshot, true);
+
+        __tempGroupDrag.dragging = true;
+        __tempGroupDrag.startCanvas = __clientToCanvas(e.clientX, e.clientY);
+        __tempGroupDrag.lastClientX = e.clientX;
+        __tempGroupDrag.lastClientY = e.clientY;
+        __tempGroupDrag.lastDx = 0;
+        __tempGroupDrag.lastDy = 0;
+        __tempGroupDrag.snapshot = __captureMemberStartPositions(__tempGroup.members || []);
+        __tempGroupDrag.edgeMeta = __tempGroupBuildDragEdgeMeta(__tempGroupDrag.snapshot);
+
+        __setTempGroupDragActive(__tempGroupDrag.snapshot, true);
         maskEl.classList.add('dragging');
 
         const onMove = (ev) => {
-            if (!dragging) return;
-            const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-            lastDx = (ev.clientX - startClient.x) / zoom;
-            lastDy = (ev.clientY - startClient.y) / zoom;
-            __applyMemberTranslateDuringDrag(snapshot, lastDx, lastDy, edgeMeta);
+            if (!__tempGroupDrag.dragging) return;
+            __tempGroupDrag.lastClientX = ev.clientX;
+            __tempGroupDrag.lastClientY = ev.clientY;
+
+            const currentCanvas = __clientToCanvas(ev.clientX, ev.clientY);
+            __tempGroupDrag.lastDx = currentCanvas.x - __tempGroupDrag.startCanvas.x;
+            __tempGroupDrag.lastDy = currentCanvas.y - __tempGroupDrag.startCanvas.y;
+
+            __applyMemberTranslateDuringDrag(
+                __tempGroupDrag.snapshot,
+                __tempGroupDrag.lastDx,
+                __tempGroupDrag.lastDy,
+                __tempGroupDrag.edgeMeta
+            );
             if (__tempGroup) {
                 if (__tempGroup.maskEl) {
-                    __tempGroup.maskEl.style.transform = `translate3d(${lastDx}px, ${lastDy}px, 0)`;
+                    __tempGroup.maskEl.style.transform = `translate3d(${__tempGroupDrag.lastDx}px, ${__tempGroupDrag.lastDy}px, 0)`;
                 }
                 if (__tempGroup.toolbarEl) {
-                    __tempGroup.toolbarEl.style.transform = `translate3d(${lastDx}px, ${lastDy}px, 0) translateX(-50%) scale(var(--canvas-scale-inv, 1))`;
+                    __tempGroup.toolbarEl.style.transform = `translate3d(${__tempGroupDrag.lastDx}px, ${__tempGroupDrag.lastDy}px, 0) translateX(-50%) scale(var(--canvas-scale-inv, 1))`;
                 }
             }
+
+            if (typeof window.checkEdgeAutoScroll === 'function') {
+                window.checkEdgeAutoScroll(ev.clientX, ev.clientY);
+            }
         };
+
         const onUp = () => {
-            if (!dragging) return;
-            dragging = false;
+            if (!__tempGroupDrag.dragging) return;
+            __tempGroupDrag.dragging = false;
             maskEl.classList.remove('dragging');
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
-            __commitMemberTranslate(snapshot, lastDx, lastDy);
-            __setTempGroupDragActive(snapshot, false);
-            edgeMeta = null;
+
+            __commitMemberTranslate(
+                __tempGroupDrag.snapshot,
+                __tempGroupDrag.lastDx,
+                __tempGroupDrag.lastDy
+            );
+            __setTempGroupDragActive(__tempGroupDrag.snapshot, false);
+            __tempGroupDrag.edgeMeta = null;
+
             if (__tempGroup) {
                 __tempGroup.rect = {
-                    x: __tempGroup.rect.x + lastDx,
-                    y: __tempGroup.rect.y + lastDy,
+                    x: __tempGroup.rect.x + __tempGroupDrag.lastDx,
+                    y: __tempGroup.rect.y + __tempGroupDrag.lastDy,
                     w: __tempGroup.rect.w,
                     h: __tempGroup.rect.h
                 };
@@ -586,11 +635,17 @@ function __attachMaskDrag(maskEl) {
                 if (__tempGroup.toolbarEl) __tempGroup.toolbarEl.style.transform = '';
                 __positionTempGroupChrome();
             }
+
+            if (typeof window.stopEdgeAutoScroll === 'function') {
+                window.stopEdgeAutoScroll();
+            }
         };
+
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
     });
 }
+
 
 function __buildTempGroupToolbar() {
     const lang = (typeof currentLang !== 'undefined') ? currentLang : 'zh';
@@ -1273,7 +1328,9 @@ if (typeof window !== 'undefined') {
     window.__BCSLassoTempGroup = {
         wire: __wireLassoSelect,
         dismiss: dismissTempGroup,
-        showForMembers: showTempGroupForMembers
+        showForMembers: showTempGroupForMembers,
+        isDragging: () => __tempGroupDrag.dragging,
+        updateDragPositionForScroll: __updateTempGroupDragPositionForScroll
     };
 }
 
