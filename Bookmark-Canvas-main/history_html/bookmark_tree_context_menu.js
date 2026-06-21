@@ -6829,10 +6829,13 @@ function __getBookmarkAddPositionOptions(context) {
     const lang = currentLang || 'zh_CN';
 
     if (context && context.blankRoot) {
+        const isCanvasBlank = context.sectionId === '__canvas-blank-add-target__';
         return [
             {
                 value: 'inside',
-                label: lang === 'zh_CN' ? '生成特殊临时栏目' : 'Generate Special Temporary Section'
+                label: isCanvasBlank
+                    ? (lang === 'zh_CN' ? '生成特殊临时栏目' : 'Generate Special Temporary Section')
+                    : (lang === 'zh_CN' ? '根目录' : 'Root Directory')
             }
         ];
     }
@@ -7927,7 +7930,7 @@ function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsF
         icon: 'window-maximize'
     });
 
-    if (context && context.blankRoot === true) {
+    if (context && context.blankRoot === true && context.sectionId === '__canvas-blank-add-target__') {
         options.push({
             value: 'add-all-windows-card-group',
             label: lang === 'zh_CN' ? '一键存档（所有窗口）' : 'Archive All (All Windows)',
@@ -8013,7 +8016,7 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
     if (initialActionType === 'add-current-tab' && !__isSidePanelModeForAdd()) {
         initialActionType = 'add-page';
     }
-    if (initialActionType === 'add-all-windows-card-group' && !(context && context.blankRoot === true)) {
+    if (initialActionType === 'add-all-windows-card-group' && !(context && context.blankRoot === true && context.sectionId === '__canvas-blank-add-target__')) {
         initialActionType = 'add-page';
     }
 
@@ -8058,7 +8061,7 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
             positionField.style.display = isArchiveAll ? 'none' : '';
         }
         if (locateField) {
-            locateField.style.display = (isArchiveAll || (context && context.blankRoot)) ? 'none' : '';
+            locateField.style.display = (isArchiveAll || (context && context.blankRoot && context.sectionId === '__canvas-blank-add-target__')) ? 'none' : '';
         }
     };
 
@@ -8101,7 +8104,7 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
             const parentChoice = checkedRadio ? checkedRadio.closest('.bookmark-add-secondary-choice') : null;
             const inlineWindowFolderInput = parentChoice ? parentChoice.querySelector('.bookmark-add-secondary-window-folder-checkbox') : null;
             const windowAsFolder = (normalizedActionType === 'add-current-window' || normalizedActionType === 'add-all-windows-card-group') && !!(inlineWindowFolderInput && inlineWindowFolderInput.checked);
-            const locateAfterAction = (context && context.blankRoot) ? false : !!(locateAfterActionInput && locateAfterActionInput.checked);
+            const locateAfterAction = (context && context.blankRoot && context.sectionId === '__canvas-blank-add-target__') ? false : !!(locateAfterActionInput && locateAfterActionInput.checked);
             closeModal({
                 actionType: normalizedActionType,
                 position: __normalizeBookmarkAddPosition(context, position),
@@ -8141,12 +8144,12 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
 async function executeBookmarkAddAction(context, config, options = {}) {
     const lang = currentLang || 'zh_CN';
     let actionType = __normalizeBookmarkAddActionType(config && config.actionType);
-    if (actionType === 'add-all-windows-card-group' && !(context && context.blankRoot === true)) {
+    if (actionType === 'add-all-windows-card-group' && !(context && context.blankRoot === true && context.sectionId === '__canvas-blank-add-target__')) {
         actionType = 'add-page';
     }
     const preferredPosition = __normalizeBookmarkAddPosition(context, config && config.position);
     const windowAsFolder = (actionType === 'add-current-window' || actionType === 'add-all-windows-card-group') && __normalizeBookmarkAddWindowAsFolder(config && config.windowAsFolder);
-    const locateAfterAction = (context && context.blankRoot) ? false : __normalizeBookmarkAddLocateAfterAction(config && config.locateAfterAction);
+    const locateAfterAction = (context && context.blankRoot && context.sectionId === '__canvas-blank-add-target__') ? false : __normalizeBookmarkAddLocateAfterAction(config && config.locateAfterAction);
     const saveTemplate = options && options.saveTemplate !== false;
     const permanentCopyId = (context && context.permanentCopyId)
         ? String(context.permanentCopyId).trim()
@@ -14435,8 +14438,10 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
     if (treeType !== 'canvas') {
         menuItems.push({
             action: 'add-entry-blank',
+            labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></div>`,
             label: lang === 'zh_CN' ? '添加' : 'Add',
             icon: 'plus-circle',
+            className: 'add-entry-option',
             sectionId,
             treeType,
             preferredParentId: preferredPermanentParentId
@@ -14473,15 +14478,47 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
             return '<div class="context-menu-separator"></div>';
         }
         const icon = item.icon ? `<i class="fas fa-${item.icon}"></i>` : '';
+        const extraClass = item.className ? item.className : '';
+        const labelContent = item.labelHTML ? item.labelHTML : `<span>${item.label}</span>`;
         return `
-            <div class="context-menu-item" data-action="${item.action}" data-section-id="${item.sectionId || ''}" data-tree-type="${item.treeType || ''}" data-parent-id="${item.preferredParentId || ''}" data-canvas-left="${item.canvasLeft || ''}" data-canvas-top="${item.canvasTop || ''}">
+            <div class="context-menu-item ${extraClass}" data-action="${item.action}" data-section-id="${item.sectionId || ''}" data-tree-type="${item.treeType || ''}" data-parent-id="${item.preferredParentId || ''}" data-canvas-left="${item.canvasLeft || ''}" data-canvas-top="${item.canvasTop || ''}">
                 ${icon}
-                <span>${item.label}</span>
+                <span class="context-menu-item-label">${labelContent}</span>
             </div>
         `;
     }).join('');
 
     contextMenu.innerHTML = menuHTML;
+
+    // 绑定子徽章（如“模版”）点击事件
+    contextMenu.querySelectorAll('.sub-badge[data-sub-action]').forEach(badge => {
+        badge.addEventListener('click', async (clickEvent) => {
+            const subAction = badge.dataset.subAction;
+            if (!subAction) return;
+            clickEvent.preventDefault();
+            clickEvent.stopPropagation();
+            
+            const item = badge.closest('.context-menu-item');
+            if (!item) return;
+            const sid = item.dataset.sectionId;
+            const ttype = item.dataset.treeType;
+            const preferredParentId = item.dataset.parentId;
+
+            hideContextMenu();
+
+            if (subAction === 'add-template-run') {
+                const addContext = {
+                    treeType: ttype === 'temporary' ? 'temporary' : 'permanent',
+                    sectionId: ttype === 'temporary' ? sid : null,
+                    nodeId: null,
+                    isFolder: true,
+                    blankRoot: true,
+                    preferredParentId: ttype === 'permanent' && preferredParentId ? preferredParentId : null
+                };
+                await openBookmarkAddByTemplateAction(addContext);
+            }
+        });
+    });
 
     // 绑定点击事件
     contextMenu.querySelectorAll('.context-menu-item').forEach(item => {
