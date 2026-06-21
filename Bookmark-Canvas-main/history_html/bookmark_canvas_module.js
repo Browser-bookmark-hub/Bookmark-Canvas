@@ -11527,6 +11527,9 @@ function runCanvasVirtualizationUpdate(options = {}) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
 
+    // Block virtualization updates during low-detail visual ripple transition to avoid conflicts
+    if (workspace.classList && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)) return;
+
     if (typeof options !== 'object' || options === null) {
         options = {};
     }
@@ -12135,6 +12138,20 @@ function __unloadTempSectionTreeInPlace(sectionId) {
         (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(sectionId));
     if (alreadyUnloaded) return false;
 
+    // 保存滚动位置，避免卸载 DOM 后 scrollTop 重置丢失
+    const body = element.querySelector('.temp-node-body');
+    if (body && typeof __flushCanvasSectionScrollPersistence === 'function') {
+        const scrollBaseKey = __getTempSectionScrollBaseKey(sectionId);
+        if (scrollBaseKey) {
+            try {
+                __flushCanvasSectionScrollPersistence(body, {
+                    baseKey: scrollBaseKey,
+                    readFromDom: true
+                });
+            } catch (_) { }
+        }
+    }
+
     // 卸载 DOM（释放大量节点的布局/样式/事件负担）；后续可通过 renderTempNode / __ensureTempSectionTreeLoadedInPlace 恢复
     try { treeContainer.innerHTML = ''; } catch (_) { }
     try { treeContainer.style.display = 'none'; } catch (_) { }
@@ -12315,6 +12332,23 @@ function __ensureTempSectionTreeLoadedInPlace(section) {
     try { if (typeof attachTreeEvents === 'function') attachTreeEvents(treeContainer); } catch (_) { }
     try { if (typeof attachDragEvents === 'function') attachDragEvents(treeContainer); } catch (_) { }
     try { if (typeof attachPointerDragEvents === 'function') attachPointerDragEvents(treeContainer); } catch (_) { }
+
+    // 恢复滚动位置，避免懒加载重新渲染后页面重置到顶部
+    const persisted = typeof __readPartitionedViewJSON === 'function' ? __readPartitionedViewJSON(__getTempSectionScrollKey(section.id), null) : null;
+    if (persisted && typeof persisted.top === 'number') {
+        const body = element.querySelector('.temp-node-body');
+        if (body && typeof __scheduleCanvasBodyScrollRestore === 'function') {
+            try {
+                __scheduleCanvasBodyScrollRestore(body, {
+                    top: persisted.top || 0,
+                    left: persisted.left || 0
+                }, {
+                    target: element,
+                    fallbackDelays: [10, 50, 100]
+                });
+            } catch (_) { }
+        }
+    }
 
     // 小数据加载时保留淡入；大数据/刚退出低细节时避免批量 opacity/transform 动画放大闪烁。
     try {
@@ -13815,8 +13849,10 @@ function __startCanvasLowDetailVisualRipple(shouldActive, workspace = null) {
             ws.classList.add('canvas-low-detail');
             try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
             try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+            try { runCanvasVirtualizationUpdate({ force: true, doLoad: false, doUnload: true, lowDetailPrune: true }); } catch (_) { }
         } else {
             __finalizeCanvasLowDetailExitVisualState(ws);
+            try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: true }); } catch (_) { }
         }
         try { scheduleEdgesRender(0); } catch (_) { }
     };
@@ -19899,6 +19935,7 @@ function createPermanentSectionCopy(sourceSection, options = {}) {
     // Assign stable copy id
     const copyId = `permanent-copy-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     copySection.dataset.permanentSectionCopyId = copyId;
+    copySection.id = `permanent-section-copy-${copyId}`;
     __setPermanentSectionCopyDisplayIndexToElement(copySection, displayIndex);
 
     // Copy title + tip content from origin to keep visual parity
@@ -20026,6 +20063,7 @@ function __createPermanentSectionCopyFromStorage(copyData) {
         });
         try {
             existed.classList.add('permanent-section-copy');
+            existed.id = `permanent-section-copy-${copyData.id}`;
             __applyPermanentViewShellToSectionElement(existed, shell);
         } catch (_) { }
         try { makePermanentSectionDraggable(existed); } catch (_) { }
@@ -20048,6 +20086,7 @@ function __createPermanentSectionCopyFromStorage(copyData) {
     __stripIds(copySection);
     copySection.classList.add('permanent-section-copy');
     copySection.dataset.permanentSectionCopyId = copyData.id;
+    copySection.id = `permanent-section-copy-${copyData.id}`;
     __setPermanentSectionCopyDisplayIndexToElement(copySection, copyData.displayIndex);
 
     // Copy visual state from origin
