@@ -8221,13 +8221,13 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .temp-node-title {
     flex: 1;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     background: transparent;
     border: none;
     color: inherit;
     outline: none;
-    letter-spacing: -0.1px;
+    letter-spacing: -0.2px;
     min-width: 0;
     text-shadow: var(--temp-header-text-shadow, 0 1px 3px rgba(0, 0, 0, 0.4));
 }
