@@ -100,6 +100,14 @@ const CanvasState = {
         isPinchGestureActive: false,
         gestureEventsSupported: false
     },
+    physicalModifiers: {
+        Control: false,
+        Alt: false,
+        Shift: false,
+        Meta: false
+    },
+    lastModifierKeyReleaseTime: 0,
+    zoomOccurredWithModifier: false,
     lastCanvasScrollTime: 0,
     // 自动滚动状态（拖动到边缘时）
     autoScrollState: {
@@ -124,6 +132,15 @@ const CanvasState = {
     },
     // 低缩放细节降级（性能优化）
     lowDetailEnabled: true,
+    viewportLowDetailEnabled: 'auto', // 'on' | 'off' | 'auto'
+    virtualizationEnabled: 'auto', // 'on' | 'off' | 'auto'
+    viewportLowDetailDelayS: 5.0, // 进入低细节模式的离屏延迟时间（秒）
+    viewportLowDetailMinLoadedNodes: 100, // 已加载书签+文件夹数超过此值时自动触发视野外低细节模式
+    _loadedNodeCount: 0, // 缓存的已加载节点总数（书签+文件夹）
+    _loadedNodeCountAt: 0, // 缓存刷新时间戳
+    __viewportLowDetailWasActive: false, // 追踪视野外低细节是否曾激活（用于状态转换清理）
+    virtualizationUnloadDelayS: 10.0, // 进入懒加载/卸载的离屏延迟时间（秒）
+    offScreenNodesTime: new Map(), // 离屏节点的时间戳映射表 (nodeId -> Date.now())
     lowDetailActive: false,
     lowDetailFreezeInv: null,
     lowDetailPrewarmRunning: false,
@@ -7145,10 +7162,21 @@ function setupCanvasZoomAndPan() {
 
         // [Fix] 消除 缩放 结束并释放 Ctrl/修饰键 时，由于触控板惯性产生的突然平移 (突然加速、连带了一下)
         const now = Date.now();
+
+        // 强力打断：如果刚刚松开了修饰键，且当前物理键盘上没有按下修饰键，
+        const isModifierInertiaReleased = (now - (CanvasState.lastModifierKeyReleaseTime || 0) < 300);
+        const hasPhysicalModifier = !!(CanvasState.physicalModifiers.Control || CanvasState.physicalModifiers.Meta || CanvasState.physicalModifiers.Alt || CanvasState.physicalModifiers.Shift);
+        if (isModifierInertiaReleased && !hasPhysicalModifier) {
+            e.preventDefault();
+            e.stopPropagation();
+            __cancelCanvasActiveZoomGesture('ctrl-key-release-wheel-inertia');
+            return;
+        }
+
         const lastZoomTime = CanvasState.touchpadState?.lastZoomInputTime || 0;
         const workspaceEl = document.getElementById('canvasWorkspace');
         const isZoomingActive = workspaceEl && (workspaceEl.classList.contains('is-zooming') || workspaceEl._zoomEndTimer);
-        const hasRecentZoom = isZoomingActive || (now - lastZoomTime < 800);
+        const hasRecentZoom = isZoomingActive || (now - lastZoomTime < 300);
 
         // 如果是触控板物理捏合，但物理手势已经结束（手指抬起），且不是缩放激活状态，忽略后续的物理捏合惯性事件
         // 仅在支持且已触发过 gesture 事件的设备/浏览器上启用此惯性拦截，避免在 Windows/Linux 或不支持 gesturestart 的环境下导致缩放完全失效
@@ -7161,6 +7189,7 @@ function setupCanvasZoomAndPan() {
         // 如果近期有缩放，且当前不是任何缩放控制输入，说明是释放修饰键后的惯性滚动，直接拦截
         if (hasRecentZoom && !isCustomCtrlKeyPressed(e) && !e.metaKey && !__isCanvasTouchpadPinch(e)) {
             e.preventDefault();
+            __cancelCanvasActiveZoomGesture('ctrl-key-release-wheel-inertia');
             return;
         }
 
@@ -7243,7 +7272,25 @@ function setupCanvasZoomAndPan() {
             return;
         }
 
-        if (isCustomCtrlKeyPressed(e) || e.metaKey || __isCanvasTouchpadPinch(e)) {
+        // 缩放修饰键是否有效
+        let hasActiveModifier = false;
+
+        if (isCustomCtrlKeyPressed(e)) {
+            hasActiveModifier = true;
+        } else if (e.metaKey) {
+            // 对 metaKey 做物理状态和时间窗口拦截以防惯性穿透
+            if (!isModifierInertiaReleased || CanvasState.physicalModifiers.Meta) {
+                hasActiveModifier = true;
+            }
+        }
+
+        // 拦截触控板 Pinch 的惯性穿透：如果刚松开过修饰键且当前物理上没有按修饰键，则判定为无效 Pinch
+        let isPinch = __isCanvasTouchpadPinch(e);
+        if (isPinch && isModifierInertiaReleased && !CanvasState.physicalModifiers.Control && !CanvasState.physicalModifiers.Meta && !CanvasState.physicalModifiers.Alt && !CanvasState.physicalModifiers.Shift) {
+            isPinch = false;
+        }
+
+        if (hasActiveModifier || isPinch) {
             // [Feature] 全屏模式（卡片最大化）下禁用 Ctrl 缩放
             // 避免在全屏模式下缩放画布导致内部的书签树（虚拟列表）加载异常
             if (__isCanvasNodeMaximizedActive()) {
@@ -7556,6 +7603,11 @@ function setupCanvasZoomAndPan() {
         const isSpaceShortcut = isCustomSpaceKeyCode(e.code);
         const isCtrlShortcut = isCustomCtrlKeyCode(e.code);
 
+        if (e.code.startsWith('Control')) CanvasState.physicalModifiers.Control = true;
+        if (e.code.startsWith('Alt')) CanvasState.physicalModifiers.Alt = true;
+        if (e.code.startsWith('Shift')) CanvasState.physicalModifiers.Shift = true;
+        if (e.code.startsWith('Meta')) CanvasState.physicalModifiers.Meta = true;
+
         if (isCtrlShortcut) {
             CanvasState.isCtrlPressed = true;
             workspace.classList.add('ctrl-pressed');
@@ -7582,6 +7634,32 @@ function setupCanvasZoomAndPan() {
     }, true);
 
     document.addEventListener('keyup', (e) => {
+        let modifierReleased = false;
+        const key = canvasShortcuts.ctrlKey;
+        if (e.code.startsWith('Control')) {
+            CanvasState.physicalModifiers.Control = false;
+            if (key === 'Control') modifierReleased = true;
+        }
+        if (e.code.startsWith('Alt')) {
+            CanvasState.physicalModifiers.Alt = false;
+            if (key === 'Alt') modifierReleased = true;
+        }
+        if (e.code.startsWith('Shift')) {
+            CanvasState.physicalModifiers.Shift = false;
+            if (key === 'Shift') modifierReleased = true;
+        }
+        if (e.code.startsWith('Meta')) {
+            CanvasState.physicalModifiers.Meta = false;
+            if (key === 'Meta') modifierReleased = true;
+        }
+        if (modifierReleased) {
+            if (CanvasState.zoomOccurredWithModifier) {
+                CanvasState.lastModifierKeyReleaseTime = Date.now();
+                CanvasState.zoomOccurredWithModifier = false;
+            }
+            __cancelCanvasActiveZoomGesture('modifier-key-release');
+        }
+
         if (isCustomSpaceKeyCode(e.code)) {
             CanvasState.isSpacePressed = false;
             workspace.classList.remove('space-pressed');
@@ -7614,6 +7692,7 @@ function setupCanvasZoomAndPan() {
                 onScrollStop();
                 savePanOffsetThrottled();
             }
+            __cancelCanvasActiveZoomGesture('ctrl-key-release');
         }
     }, true);
 
@@ -7624,10 +7703,19 @@ function setupCanvasZoomAndPan() {
         CanvasState.isPanning = false;
         workspace.classList.remove('space-pressed', 'ctrl-pressed', 'panning');
         setSectionCtrlModeActive(false);
+        CanvasState.physicalModifiers.Control = false;
+        CanvasState.physicalModifiers.Alt = false;
+        CanvasState.physicalModifiers.Shift = false;
+        CanvasState.physicalModifiers.Meta = false;
+        if (CanvasState.zoomOccurredWithModifier) {
+            CanvasState.lastModifierKeyReleaseTime = Date.now();
+            CanvasState.zoomOccurredWithModifier = false;
+        }
         if (wasPanning) {
             onScrollStop();
             savePanOffsetThrottled();
         }
+        __cancelCanvasActiveZoomGesture('blur');
     });
 
     // 空格/Control + 鼠标拖动画布（Obsidian方式）
@@ -9271,6 +9359,12 @@ function stopShortcutRecording(newKey) {
 
 function isCustomCtrlKeyPressed(e) {
     const key = canvasShortcuts.ctrlKey;
+    const now = Date.now();
+    const isModifierKey = ['Control', 'Alt', 'Shift', 'Meta'].includes(key);
+    if (isModifierKey && !CanvasState.physicalModifiers[key] && (now - (CanvasState.lastModifierKeyReleaseTime || 0) < 800)) {
+        return false;
+    }
+
     // 修饰键使用事件属性检测
     switch (key) {
         case 'Control': return e.ctrlKey;
@@ -9690,7 +9784,7 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
     const magnets = [];
 
     try {
-        if (settings.enableSafeZone && isCanvasSafeZoneEnabled()) {
+        if (settings.enableSafeZone) {
             const safe = getCanvasSafeZoneThreshold();
             if (Number.isFinite(safe) && safe > 0) {
                 // Safe Zone 附近更明显（范围更宽、减速更强）
@@ -10204,7 +10298,7 @@ function getCanvasSafeZoneThreshold() {
 }
 
 function isCanvasSafeZoneEnabled() {
-    return true; // 默认就是开启的，不再支持关闭
+    return false;
 }
 
 function isCanvasHugeData() {
@@ -10400,6 +10494,8 @@ function getCanvasViewportDataStats() {
         totalVisibleNodeCount: 0,
         visibleBookmarkCount: 0,
         visibleFolderCount: 0,
+        loadedBookmarkCount: 0,
+        loadedFolderCount: 0,
         avgBookmarksPerSection: 0
     };
 
@@ -10426,6 +10522,9 @@ function getCanvasViewportDataStats() {
     let visibleBookmarkCount = 0;
     let visibleFolderCount = 0;
     let loadedSectionCount = 0; // count of sections with DOM loaded
+    // 已加载书签/文件夹：统计所有 DOM 实际加载的栏目中的节点（不限于视口）
+    let loadedBookmarkCount = 0;
+    let loadedFolderCount = 0;
 
     for (const section of (CanvasState.tempSections || [])) {
         if (!section || !section.id) continue;
@@ -10435,6 +10534,19 @@ function getCanvasViewportDataStats() {
         const w = Number(section.width || baseSize.width);
         const h = Number(section.height || baseSize.height);
         if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
+
+        // 严格检查 DOM 是否存在（不限于视口范围——用于"已加载"计数）
+        const secEl = document.getElementById(section.id);
+        const isContentUnloaded = CanvasState.unloadedTempSectionTrees.has(section.id);
+        const isDomLoaded = !!(secEl && !isContentUnloaded);
+
+        // 统计已加载 DOM 节点（只查询一次，视口内的可视计数复用同一结果）
+        let counts = null;
+        if (isDomLoaded && !isLowDetail) {
+            counts = countVisibleDOMNodes(section.id);
+            loadedBookmarkCount += counts.bookmarks;
+            loadedFolderCount += counts.folders;
+        }
 
         // 检测是否在视口内（有任意交集即算可见）
         const inViewport = !(
@@ -10447,17 +10559,11 @@ function getCanvasViewportDataStats() {
         if (inViewport) {
             visibleSectionCount++;
 
-            // 严格检查 DOM 是否存在
-            const secEl = document.getElementById(section.id);
-            // 且内容未被卸载
-            const isContentUnloaded = CanvasState.unloadedTempSectionTrees.has(section.id);
-
-            if (secEl && !isContentUnloaded) {
+            if (isDomLoaded) {
                 loadedSectionCount++;
 
-                if (!isLowDetail) {
-                    // [Fix] 统计当前可视节点（已展开的书签/文件夹）
-                    const counts = countVisibleDOMNodes(section.id);
+                if (counts) {
+                    // 复用已计算的 counts，避免重复 DOM 查询
                     visibleBookmarkCount += counts.bookmarks;
                     visibleFolderCount += counts.folders;
                     totalVisibleNodeCount += (counts.bookmarks + counts.folders);
@@ -10466,7 +10572,7 @@ function getCanvasViewportDataStats() {
         }
     }
 
-    // 永久书签栏目（含副本）也算，但必须在可视范围内
+    // 永久书签栏目（含副本）也算
     try {
         const permSections = Array.from(document.querySelectorAll('.permanent-bookmark-section'));
         permSections.forEach((permEl) => {
@@ -10476,6 +10582,15 @@ function getCanvasViewportDataStats() {
             const w = parseFloat(permEl.style.width) || permEl.offsetWidth || 0;
             const h = parseFloat(permEl.style.height) || permEl.offsetHeight || 0;
             if (w <= 0 || h <= 0) return;
+
+            // 永久栏目 DOM 始终加载，只查询一次复用结果
+            let counts = null;
+            if (!isLowDetail) {
+                counts = countVisibleDOMNodes(permEl);
+                loadedBookmarkCount += counts.bookmarks;
+                loadedFolderCount += counts.folders;
+            }
+
             const isPermVisible = !(
                 x + w < viewportLeft ||
                 x > viewportRight ||
@@ -10486,8 +10601,8 @@ function getCanvasViewportDataStats() {
 
             visibleSectionCount++;
             loadedSectionCount++;
-            if (!isLowDetail) {
-                const counts = countVisibleDOMNodes(permEl);
+            if (counts) {
+                // 复用已计算的 counts
                 visibleBookmarkCount += counts.bookmarks;
                 visibleFolderCount += counts.folders;
                 totalVisibleNodeCount += (counts.bookmarks + counts.folders);
@@ -10523,12 +10638,18 @@ function getCanvasViewportDataStats() {
         ? Math.round(totalVisibleNodeCount / loadedSectionCount)
         : 0;
 
+    // 同步更新缓存，避免运行时 __isViewportLowDetailEffective() 发起额外 DOM 查询
+    CanvasState._loadedNodeCount = loadedBookmarkCount + loadedFolderCount;
+    CanvasState._loadedNodeCountAt = Date.now();
+
     return {
         visibleSectionCount,
         loadedSectionCount,
         totalVisibleNodeCount,
         visibleBookmarkCount,
         visibleFolderCount,
+        loadedBookmarkCount,
+        loadedFolderCount,
         avgBookmarksPerSection
     };
 }
@@ -10544,53 +10665,9 @@ function getCanvasViewportDataStats() {
 function updateDataIntensiveMode(force = false, options = {}) {
     const dim = CanvasState.dataIntensiveMode;
     if (!dim) return false;
-    const opts = (options && typeof options === 'object') ? options : {};
-
-    // [New] 如果功能被禁用，直接返回 false
-    if (!dim.enabled) {
-        dim.active = false;
-        return false;
-    }
-
-    if (!force && opts.useCached === true) {
-        return dim.active;
-    }
-
-    const now = performance.now();
-    if (!force && (now - dim.lastCheckTime) < dim.checkIntervalMs) {
-        return dim.active;
-    }
-    dim.lastCheckTime = now;
-
-    const stats = getCanvasViewportDataStats();
-    dim.cachedStats = stats;
-
-    const th = dim.thresholds;
-
-    // [P4] 总量触发（忽略可视统计）：当画布总书签/总文件夹过大时，进入“始终低细节”。
-    // 注意：永久树统计需要异步 getTree()，这里触发一次后台刷新（有缓存）。
-    const totalTh = dim.totalAlwaysThresholds || __createDefaultCanvasTotalAlwaysThresholds();
-    let isTotalAlways = false;
-    if (dim.totalAlwaysEnabled) {
-        try { __refreshCanvasPermanentBaseStatsForPerfTotals(); } catch (_) { }
-        const totals = __getCanvasTotalDataStatsSync();
-        isTotalAlways = !!(totals && (
-            (Number.isFinite(totalTh.bookmarks) && totalTh.bookmarks > 0 && (totals.totalBookmarkCount || 0) >= totalTh.bookmarks) ||
-            (Number.isFinite(totalTh.folders) && totalTh.folders > 0 && (totals.totalFolderCount || 0) >= totalTh.folders)
-        ));
-    }
-    dim.totalAlwaysActive = isTotalAlways;
-
-    // 数据密集模式判定（只看“可视栏目数”）
-    // - 口径：永久栏目（含副本）+ 临时栏目 + 空白栏目 + 卡片组
-    // - 仅当“可视栏目数”超过阈值时才激活 P2。
-    // - 书签/文件夹阈值仅用于橙色预警展示（不参与 P2 激活判定）。
-    // [P2] 数据密集模式判定（只看“可视栏目数”）
-    // 备注：P4(totalAlways) 不应该影响 P2 的 active 状态（P4 会在低细节逻辑里单独接管）。
-    const isIntensive = stats.visibleSectionCount >= th.visibleSectionCount;
-
-    dim.active = isIntensive;
-    return isIntensive;
+    dim.active = false;
+    dim.totalAlwaysActive = false;
+    return false;
 }
 
 /**
@@ -10626,9 +10703,11 @@ function shouldInstantLowDetailOnZoom() {
 }
 
 function isCanvasVirtualizationEnabled() {
-    if (CanvasState.virtualizationEnabled === false) return false;
+    const mode = CanvasState.virtualizationEnabled;
+    if (mode === 'off') return false;
+    if (mode === 'on') return true;
+    // 'auto': 保留原有自动判断逻辑（栏目数阈值）
 
-    // 仅根据用户设置的栏目卡片数阈值自动绕过（小画布不启用虚拟化以保证零延迟）
     try {
         const totals = __getCanvasTotalDataStatsSync();
         const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && isFinite(CanvasState.virtualizationMinColumns))
@@ -11079,15 +11158,162 @@ function __scheduleCanvasLowDetailDomRestore(delayMs = CANVAS_LOW_DETAIL_DOM_RES
     }, Math.max(0, Number(delayMs) || 0));
 }
 
+function __updateNodeOffScreenState(id, isOffScreen) {
+    if (!CanvasState.offScreenNodesTime) {
+        CanvasState.offScreenNodesTime = new Map();
+    }
+    if (isOffScreen) {
+        if (!CanvasState.offScreenNodesTime.has(id)) {
+            CanvasState.offScreenNodesTime.set(id, Date.now());
+        }
+    } else {
+        CanvasState.offScreenNodesTime.delete(id);
+    }
+}
+
+/**
+ * 轻量级缓存：获取当前 DOM 中已加载的书签+文件夹节点总数
+ * 使用 3 秒 TTL 缓存避免频繁 DOM 查询
+ */
+function __getLoadedNodeCountFast() {
+    try {
+        const totals = __getCanvasTotalDataStatsSync();
+        return (totals.totalBookmarkCount || 0) + (totals.totalFolderCount || 0);
+    } catch (_) {
+        return 0;
+    }
+}
+
+/**
+ * 判断视野外低细节模式是否在运行时实际生效：
+ * - 用户开关必须打开
+ * - 已加载节点数（书签+文件夹）必须 >= 自动触发阈值
+ */
+function __isViewportLowDetailEffective() {
+    if (CanvasState.lowDetailEnabled === false) return false;
+
+    const mode = CanvasState.viewportLowDetailEnabled;
+    if (mode === 'off') return false;
+    if (mode === 'on') return true;
+    // 'auto': 保留原有自动判断逻辑
+
+    const minNodes = (typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' &&
+                      Number.isFinite(CanvasState.viewportLowDetailMinLoadedNodes))
+        ? CanvasState.viewportLowDetailMinLoadedNodes
+        : 100;
+
+    return __getLoadedNodeCountFast() >= minNodes;
+}
+
+function __shouldNodeBeLowDetail(id, defaultIsLowDetail) {
+    if (!defaultIsLowDetail) {
+        return false;
+    }
+    if (CanvasState.lowDetailActive) {
+        return true;
+    }
+    const delayS = CanvasState.viewportLowDetailDelayS;
+    if (typeof delayS !== 'number' || delayS <= 0) {
+        return true;
+    }
+    const offScreenTime = CanvasState.offScreenNodesTime ? CanvasState.offScreenNodesTime.get(id) : null;
+    if (offScreenTime === null) {
+        return false;
+    }
+    return (Date.now() - offScreenTime) >= (delayS * 1000);
+}
+
+function __shouldNodeBeUnloaded(id) {
+    const delayS = CanvasState.virtualizationUnloadDelayS;
+    if (typeof delayS !== 'number' || delayS <= 0) {
+        return true;
+    }
+    const offScreenTime = CanvasState.offScreenNodesTime ? CanvasState.offScreenNodesTime.get(id) : null;
+    if (offScreenTime === null) {
+        return false;
+    }
+    return (Date.now() - offScreenTime) >= (delayS * 1000);
+}
+
+let canvasVirtualizationWakeupTimer = null;
+function __scheduleCanvasVirtualizationWakeup(delayMs) {
+    if (canvasVirtualizationWakeupTimer) {
+        clearTimeout(canvasVirtualizationWakeupTimer);
+        canvasVirtualizationWakeupTimer = null;
+    }
+    if (Number.isFinite(delayMs) && delayMs > 0 && delayMs !== Infinity) {
+        canvasVirtualizationWakeupTimer = setTimeout(() => {
+            canvasVirtualizationWakeupTimer = null;
+            try {
+                runCanvasVirtualizationUpdate({ force: true });
+            } catch (_) {}
+        }, delayMs + 50);
+    }
+}
+
+function __updateVirtualizationWakeupScheduler() {
+    let minWakeup = Infinity;
+    const nowTime = Date.now();
+    if (CanvasState.offScreenNodesTime && CanvasState.offScreenNodesTime.size > 0) {
+        const lowDetailDelayMs = (CanvasState.viewportLowDetailDelayS || 5.0) * 1000;
+        const unloadDelayMs = (CanvasState.virtualizationUnloadDelayS || 10.0) * 1000;
+        
+        for (const [id, offScreenTime] of CanvasState.offScreenNodesTime.entries()) {
+            const elapsed = nowTime - offScreenTime;
+            
+            if (__isViewportLowDetailEffective() && elapsed < lowDetailDelayMs) {
+                const rem = lowDetailDelayMs - elapsed;
+                if (rem < minWakeup) minWakeup = rem;
+            }
+            if (isCanvasVirtualizationEnabled() && elapsed < unloadDelayMs) {
+                const rem = unloadDelayMs - elapsed;
+                if (rem < minWakeup) minWakeup = rem;
+            }
+        }
+    }
+    __scheduleCanvasVirtualizationWakeup(minWakeup);
+}
+
 function cancelCanvasVirtualizationUnloadUpdate() {
     if (!canvasVirtualizationUnloadTimer) return;
     clearTimeout(canvasVirtualizationUnloadTimer);
     canvasVirtualizationUnloadTimer = null;
 }
 
+function cancelAllCanvasVirtualizationTimers() {
+    if (canvasVirtualizationUnloadTimer) {
+        clearTimeout(canvasVirtualizationUnloadTimer);
+        canvasVirtualizationUnloadTimer = null;
+    }
+    if (canvasVirtualizationWakeupTimer) {
+        clearTimeout(canvasVirtualizationWakeupTimer);
+        canvasVirtualizationWakeupTimer = null;
+    }
+    if (canvasVirtualizationTimer) {
+        clearTimeout(canvasVirtualizationTimer);
+        canvasVirtualizationTimer = null;
+        canvasVirtualizationPending = false;
+    }
+}
+
+if (!window.__canvasVirtualizationVisibilityBound) {
+    window.__canvasVirtualizationVisibilityBound = true;
+    document.addEventListener('visibilitychange', () => {
+        try {
+            if (document.visibilityState === 'hidden') {
+                cancelAllCanvasVirtualizationTimers();
+            } else if (document.visibilityState === 'visible') {
+                if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
+                    scheduleCanvasVirtualizationUpdate(60);
+                }
+            }
+        } catch (_) { }
+    });
+}
+
 // 虚拟化：卸载额外防抖（避免频繁缩放/窗口变化导致树内容反复卸载/重建）
 function scheduleCanvasVirtualizationUnloadUpdate(delayMs = null) {
-    if (!isCanvasVirtualizationEnabled()) return;
+    if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective()) return;
 
     cancelCanvasVirtualizationUnloadUpdate();
 
@@ -11111,8 +11337,8 @@ function scheduleCanvasVirtualizationUnloadUpdate(delayMs = null) {
 }
 
 function scheduleCanvasVirtualizationUpdate(delayMs = null) {
-    if (!isCanvasVirtualizationEnabled()) {
-        cancelCanvasVirtualizationUnloadUpdate();
+    if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective()) {
+        cancelAllCanvasVirtualizationTimers();
         return;
     }
     cancelCanvasVirtualizationUnloadUpdate();
@@ -11285,14 +11511,19 @@ function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoom
 
 function runCanvasVirtualizationUpdate(options = {}) {
     const enabled = isCanvasVirtualizationEnabled();
-    if (!enabled) {
-        if (CanvasState.__virtualizationWasEnabled !== false) {
+    const viewportLowDetail = __isViewportLowDetailEffective();
+    if (!enabled && !viewportLowDetail) {
+        if (CanvasState.__virtualizationWasEnabled !== false || CanvasState.__viewportLowDetailWasActive) {
             CanvasState.__virtualizationWasEnabled = false;
+            CanvasState.__viewportLowDetailWasActive = false;
+            cancelAllCanvasVirtualizationTimers();
+            if (CanvasState.offScreenNodesTime) {
+                CanvasState.offScreenNodesTime.clear();
+            }
             try { __restoreAllVirtualisedNodes(); } catch (_) {}
         }
         return;
     }
-    CanvasState.__virtualizationWasEnabled = true;
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
 
@@ -11341,6 +11572,64 @@ function runCanvasVirtualizationUpdate(options = {}) {
         return;
     }
     lastCanvasVirtualizationRunAt = now;
+
+    if (!enabled) {
+        CanvasState.__virtualizationWasEnabled = false;
+        CanvasState.__viewportLowDetailWasActive = true;
+        const bounds = __getCanvasViewportBounds(workspace, 0);
+        const cards = Array.from(workspace.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
+        const isGlobalLowDetail = !!CanvasState.lowDetailActive;
+        cards.forEach(card => {
+            const cardId = card.id;
+            const isOutside = __isCardOutsideViewportBounds(card, bounds);
+            __updateNodeOffScreenState(cardId, isOutside);
+
+            let shouldBeLowDetail = isGlobalLowDetail;
+            if (!shouldBeLowDetail && viewportLowDetail) {
+                shouldBeLowDetail = __shouldNodeBeLowDetail(cardId, isOutside);
+            }
+            const wasActive = card.classList.contains('low-detail-active');
+            if (shouldBeLowDetail !== wasActive) {
+                card.classList.toggle('low-detail-active', shouldBeLowDetail);
+            }
+            if (shouldBeLowDetail) {
+                __ensureLowDetailOverlayForCard(card);
+            } else {
+                const sectionId = card.id;
+                if (card.classList.contains('temp-canvas-node')) {
+                    const section = (CanvasState.tempSections || []).find(s => s && s.id === sectionId);
+                    if (section) {
+                        try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
+                    }
+                } else if (card.classList.contains('permanent-bookmark-section')) {
+                    try { __ensurePermanentSectionTreeLoadedInPlace(card); } catch (_) { }
+                } else if (card.classList.contains('md-canvas-node')) {
+                    const node = (CanvasState.mdNodes || []).find(n => n && n.id === sectionId);
+                    if (node) {
+                        try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
+                    }
+                }
+            }
+        });
+        try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+
+        // Wakeup logic for non-virtualized delay low detail transitions
+        let minWakeup = Infinity;
+        const nowTime = Date.now();
+        if (CanvasState.offScreenNodesTime && CanvasState.offScreenNodesTime.size > 0) {
+            const lowDetailDelayMs = (CanvasState.viewportLowDetailDelayS || 5.0) * 1000;
+            for (const [id, offScreenTime] of CanvasState.offScreenNodesTime.entries()) {
+                const elapsed = nowTime - offScreenTime;
+                if (viewportLowDetail && elapsed < lowDetailDelayMs) {
+                    const rem = lowDetailDelayMs - elapsed;
+                    if (rem < minWakeup) minWakeup = rem;
+                }
+            }
+        }
+        __scheduleCanvasVirtualizationWakeup(minWakeup);
+        return;
+    }
+    CanvasState.__virtualizationWasEnabled = true;
 
     // Detect movement directions for sequential queue loading
     const prevZoom = CanvasState.previousZoom !== null ? CanvasState.previousZoom : (CanvasState.zoom || 1);
@@ -11411,6 +11700,7 @@ function runCanvasVirtualizationUpdate(options = {}) {
             y > viewportBottom0
         );
         if (inViewport) mustLoad.add(section.id);
+        __updateNodeOffScreenState(section.id, !inViewport);
         const inRange = !(
             x + w < viewportLeft ||
             x > viewportRight ||
@@ -11481,7 +11771,8 @@ function runCanvasVirtualizationUpdate(options = {}) {
         const shouldKeepLoaded = element && __shouldKeepLazyCardDomLoaded(element);
 
         if (!shouldLoad && !shouldKeepLoaded) {
-            if (doUnload && element) {
+            const canUnload = __shouldNodeBeUnloaded(section.id);
+            if (doUnload && element && canUnload) {
                 try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
                 try { element.remove(); } catch (_) { }
                 element = null;
@@ -11522,8 +11813,25 @@ function runCanvasVirtualizationUpdate(options = {}) {
 
         if (element) {
             __setCanvasViewportLazyShellClass(element, false);
-            if (CanvasState.lowDetailActive) {
-                if (doUnload) {
+            let isLowDetail = !!CanvasState.lowDetailActive;
+            if (!isLowDetail && __isViewportLowDetailEffective()) {
+                const baseSize = getTempSectionBaseSize(section);
+                const x = Number(section.x);
+                const y = Number(section.y);
+                const w = Number(section.width || baseSize.width);
+                const h = Number(section.height || baseSize.height);
+                const isOutside = __isCanvasRectOutsideBounds(x, y, w, h, visualBounds);
+                isLowDetail = __shouldNodeBeLowDetail(section.id, isOutside);
+            }
+
+            const wasActive = element.classList.contains('low-detail-active');
+            if (isLowDetail !== wasActive) {
+                element.classList.toggle('low-detail-active', isLowDetail);
+            }
+
+            if (isLowDetail) {
+                const canUnload = __shouldNodeBeUnloaded(section.id);
+                if (doUnload && canUnload) {
                     try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
                 }
             } else if (doLoad) {
@@ -11545,11 +11853,20 @@ function runCanvasVirtualizationUpdate(options = {}) {
     CanvasState.previousZoom = currentZoom;
     CanvasState.previousPanOffsetX = currentPanX;
     CanvasState.previousPanOffsetY = currentPanY;
+
+    try { __updateVirtualizationWakeupScheduler(); } catch (_) { }
 }
 
 function __restoreAllVirtualisedNodes() {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
+
+    // 清除所有卡片的低细节样式与屏蔽状态
+    try {
+        workspace.querySelectorAll('.low-detail-active').forEach(el => el.classList.remove('low-detail-active'));
+        workspace.querySelectorAll('.card-group-low-detail-child-hidden').forEach(el => el.classList.remove('card-group-low-detail-child-hidden'));
+        __clearCardGroupLowDetailMembershipState();
+    } catch (_) {}
 
     // 1. Temp sections
     if (Array.isArray(CanvasState.tempSections)) {
@@ -12413,13 +12730,15 @@ function __isCardOutsideViewportBounds(el, bounds) {
 
 function __isCanvasRectOutsideBounds(x, y, width, height, bounds) {
     if (!bounds) return false;
+    const nx = Number(x) || 0;
+    const ny = Number(y) || 0;
     const w = Number(width) || 0;
     const h = Number(height) || 0;
     return (
-        x + w < bounds.left ||
-        x > bounds.right ||
-        y + h < bounds.top ||
-        y > bounds.bottom
+        nx + w < bounds.left ||
+        nx > bounds.right ||
+        ny + h < bounds.top ||
+        ny > bounds.bottom
     );
 }
 
@@ -12770,6 +13089,23 @@ function __applyCardGroupLowDetailMembershipState(options = {}) {
                 if (el.classList.contains(hostedClass)) {
                     el.classList.remove(hostedClass);
                     changed = true;
+                    // 当离开卡片组低细节屏蔽状态时，如果全局低细节模式未开启，则立即加载卡片树内容
+                    if (!CanvasState.lowDetailActive) {
+                        const sectionId = el.id;
+                        if (el.classList.contains('temp-canvas-node')) {
+                            const section = (CanvasState.tempSections || []).find(s => s && s.id === sectionId);
+                            if (section) {
+                                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
+                            }
+                        } else if (el.classList.contains('permanent-bookmark-section')) {
+                            try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
+                        } else if (el.classList.contains('md-canvas-node')) {
+                            const node = (CanvasState.mdNodes || []).find(n => n && n.id === sectionId);
+                            if (node) {
+                                try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
+                            }
+                        }
+                    }
                 }
                 if (el.dataset && el.dataset.lowDetailHostGroupId) {
                     delete el.dataset.lowDetailHostGroupId;
@@ -12860,8 +13196,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
     const visualBounds = __getCanvasViewportBounds(workspace, 0);
     const lazyBounds = __getCanvasViewportBounds(workspace, __getCanvasViewportLazyMarginPx());
     const isGlobalLowDetail = !!CanvasState.lowDetailActive;
-    const isSafeZoneActive = __isCanvasSafeZoneActive();
-    const allowViewportLowDetail = !!CanvasState.lowDetailEnabled && !isSafeZoneActive;
+    const allowViewportLowDetail = __isViewportLowDetailEffective();
 
     const isRippleOrLowDetail = isGlobalLowDetail || (workspace && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS));
 
@@ -12872,21 +13207,25 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         const inLazyRange = __isMdNodeInViewportBounds(node, lazyBounds, el);
         const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
 
+        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
+        __updateNodeOffScreenState(node.id, !inViewportStrict);
+
         let shouldActive = isGlobalLowDetail;
         if (!shouldActive && allowViewportLowDetail) {
-            shouldActive = !__isMdNodeInViewportBounds(node, visualBounds, el);
+            const isOutside = !__isMdNodeInViewportBounds(node, visualBounds, el);
+            shouldActive = __shouldNodeBeLowDetail(node.id, isOutside);
         }
 
         // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
         if (!inLazyRange && !shouldKeepLoaded) {
-            if (doUnload && el) {
+            const canUnload = __shouldNodeBeUnloaded(node.id);
+            if (doUnload && el && canUnload) {
                 try { el.remove(); } catch (_) { }
                 el = null;
             }
             return;
         }
 
-        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
         const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
 
         if (!el) {
@@ -12911,7 +13250,8 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
             if (el.classList.contains('card-group-low-detail-child-hidden')) return;
 
             if (shouldActive && !shouldKeepLoaded) {
-                if (doUnload) {
+                const canUnload = __shouldNodeBeUnloaded(node.id);
+                if (doUnload && canUnload) {
                     try { __unloadMdNodeContentInPlace(node); } catch (_) { }
                     el = document.getElementById(node.id) || el;
                 }
@@ -12946,13 +13286,19 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
     if (mainEl) {
         const outsideLazyRange = __isCardOutsideViewportBounds(mainEl, lazyBounds);
         const shouldKeepLoaded = __shouldKeepLazyCardDomLoaded(mainEl);
+
+        const inViewportStrict = !__isCardOutsideViewportBounds(mainEl, visualBounds);
+        __updateNodeOffScreenState('permanentSection', !inViewportStrict);
+
         let shouldActive = isGlobalLowDetail;
         if (!shouldActive && allowViewportLowDetail) {
-            shouldActive = __isCardOutsideViewportBounds(mainEl, visualBounds);
+            const isOutside = __isCardOutsideViewportBounds(mainEl, visualBounds);
+            shouldActive = __shouldNodeBeLowDetail('permanentSection', isOutside);
         }
 
         if (outsideLazyRange && !shouldKeepLoaded) {
-            if (doUnload) {
+            const canUnload = __shouldNodeBeUnloaded('permanentSection');
+            if (doUnload && canUnload) {
                 try { __unloadPermanentSectionTreeInPlace(mainEl); } catch (_) { }
                 __setCanvasViewportLazyShellClass(mainEl, true);
             }
@@ -12992,14 +13338,19 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         let el = document.getElementById(elId);
         const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
 
+        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(cardState.left), Number(cardState.top), Number(cardState.width || 100), Number(cardState.height || 100), visualBounds);
+        __updateNodeOffScreenState(elId, !inViewportStrict);
+
         let shouldActive = isGlobalLowDetail;
         if (!shouldActive && allowViewportLowDetail) {
-            shouldActive = __isCanvasRectOutsideBounds(cardState.left, cardState.top, cardState.width, cardState.height, visualBounds);
+            const isOutside = __isCanvasRectOutsideBounds(cardState.left, cardState.top, cardState.width, cardState.height, visualBounds);
+            shouldActive = __shouldNodeBeLowDetail(elId, isOutside);
         }
 
         // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
         if (outsideLazyRange && !shouldKeepLoaded) {
-            if (doUnload && el) {
+            const canUnload = __shouldNodeBeUnloaded(elId);
+            if (doUnload && el && canUnload) {
                 try { __unloadPermanentSectionTreeInPlace(el); } catch (_) { }
                 try { el.remove(); } catch (_) { }
                 el = null;
@@ -13007,7 +13358,6 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
             return;
         }
 
-        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(cardState.left), Number(cardState.top), Number(cardState.width || 100), Number(cardState.height || 100), visualBounds);
         const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
 
         if (!el) {
@@ -13063,21 +13413,25 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         const inLazyRange = __isMdNodeInViewportBounds(node, lazyBounds, el);
         const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
 
+        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
+        __updateNodeOffScreenState(node.id, !inViewportStrict);
+
         let shouldActive = isGlobalLowDetail;
         if (!shouldActive && allowViewportLowDetail) {
-            shouldActive = !__isMdNodeInViewportBounds(node, visualBounds, el);
+            const isOutside = !__isMdNodeInViewportBounds(node, visualBounds, el);
+            shouldActive = __shouldNodeBeLowDetail(node.id, isOutside);
         }
 
         // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
         if (!inLazyRange && !shouldKeepLoaded) {
-            if (doUnload && el) {
+            const canUnload = __shouldNodeBeUnloaded(node.id);
+            if (doUnload && el && canUnload) {
                 try { el.remove(); } catch (_) { }
                 el = null;
             }
             return;
         }
 
-        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
         const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
 
         if (!el) {
@@ -13117,6 +13471,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
     });
 
     try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+    try { __updateVirtualizationWakeupScheduler(); } catch (_) { }
 }
 
 function __ensureCanvasLowDetailOverlaysReady(workspace = null) {
@@ -13222,6 +13577,15 @@ function __forceCanvasLowDetailVisualExit(workspace = null, options = {}) {
         if (clearAllCards) {
             try { ws.querySelectorAll('.low-detail-active').forEach(el => el.classList.remove('low-detail-active')); } catch (_) { }
             try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
+        } else {
+            const bounds = __getCanvasViewportBounds(ws, 0);
+            const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
+            cards.forEach(card => {
+                const activeForCard = __shouldKeepCardLowDetailAfterGlobalExit(card, bounds);
+                if (card.classList && !card.classList.contains('card-group-low-detail-child-hidden')) {
+                    card.classList.toggle('low-detail-active', activeForCard);
+                }
+            });
         }
     }
     __clearCanvasLowDetailFreezeInv();
@@ -13235,6 +13599,8 @@ function __forceCanvasLowDetailVisualExit(workspace = null, options = {}) {
     }
     if (clearAllCards) {
         try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: false }); } catch (_) { }
+    } else {
+        try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: true }); } catch (_) { }
     }
     if (opts.scheduleVirtualization !== false) {
         try { scheduleCanvasVirtualizationUpdate(0); } catch (_) { }
@@ -13336,16 +13702,18 @@ function __ensureLowDetailOverlayForCard(card) {
 
 function __shouldKeepCardLowDetailAfterGlobalExit(card, bounds) {
     if (!card || !card.classList) return false;
-    if (!CanvasState.lowDetailEnabled) return false;
-    if (__isCanvasSafeZoneActive()) return false;
     if (card.classList.contains('card-group-low-detail-child-hidden')) return true;
-    if (card.classList.contains('dormant-content') || card.classList.contains('temp-tree-unloaded')) return true;
-    if (card.classList.contains('permanent-tree-unloaded')) return true;
+
     if (card.classList.contains('md-canvas-node') ||
         card.classList.contains('permanent-bookmark-section') ||
-        card.classList.contains('card-group-canvas-node')) {
-        return __isCardOutsideViewportBounds(card, bounds);
+        card.classList.contains('card-group-canvas-node') ||
+        card.classList.contains('temp-canvas-node')) {
+        if (__isViewportLowDetailEffective()) {
+            return __isCardOutsideViewportBounds(card, bounds);
+        }
     }
+
+    if (card.classList.contains('dormant-content')) return true;
     return false;
 }
 
@@ -13681,12 +14049,11 @@ function updateCanvasLowDetailMode(force = false) {
             try { maybeStartCanvasLowDetailPrewarmJob(); } catch (_) { }
         } else if (!shouldActive && (force || __hasCanvasGlobalLowDetailResidue(workspace))) {
             __forceCanvasLowDetailVisualExit(workspace, {
-                clearAllCards: false,
+                clearAllCards: !__isViewportLowDetailEffective(),
                 restoreDom: true,
                 scheduleVirtualization: force,
                 reason: force ? 'force-state-sync' : 'visual-residue-sync'
             });
-            try { __scheduleCanvasLowDetailDomRestore(); } catch (_) { }
         }
         return;
     }
@@ -13707,15 +14074,17 @@ function updateCanvasLowDetailMode(force = false) {
         // 退出低细节
         CanvasState.suppressTreeLoadAnimationUntil = Date.now() + CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS;
         clearFreezeInv();
-        cancelCanvasLowDetailPrewarmJob();
+        try { cancelCanvasLowDetailPrewarmJob(); } catch (_) { }
         const edgeToolbar = document.getElementById('edge-toolbar');
         if (edgeToolbar) edgeToolbar.style.display = '';
-        try { __scheduleCanvasLowDetailDomRestore(); } catch (_) { }
+        try { __scheduleCanvasLowDetailDomRestore(0); } catch (_) { }
 
         // 如果不在交互中，可以尝试加载视口内内容
         if (!isInteracting) {
             requestAnimationFrame(() => {
-                if (!CanvasState.lowDetailActive) runCanvasVirtualizationUpdate();
+                if (!CanvasState.lowDetailActive) {
+                    try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: !__isViewportLowDetailEffective() }); } catch (_) { }
+                }
             });
         }
         try { scheduleEdgesRender(0); } catch (_) { }
@@ -13776,6 +14145,9 @@ function setCanvasZoom(zoom, centerX = null, centerY = null, options = {}) {
 
     // 应用新的缩放
     CanvasState.zoom = zoom;
+    if (CanvasState.physicalModifiers && (CanvasState.physicalModifiers.Control || CanvasState.physicalModifiers.Meta || CanvasState.physicalModifiers.Alt || CanvasState.physicalModifiers.Shift)) {
+        CanvasState.zoomOccurredWithModifier = true;
+    }
 
     // 调整平移偏移，使中心点保持在相同的视觉位置
     CanvasState.panOffsetX = centerX - canvasCenterX * zoom;
@@ -13935,7 +14307,7 @@ function onScrollStop() {
     try { updateDataIntensiveMode(); } catch (_) { }
 
     // 更新休眠/按需加载状态
-    if (isCanvasVirtualizationEnabled()) {
+    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
         scheduleCanvasVirtualizationUpdate();
     } else if (!CanvasState.lowDetailActive || !isCanvasHugeData()) {
         scheduleDormancyUpdate();
@@ -13975,7 +14347,7 @@ function scheduleDormancyUpdate(delayMs = null) {
     if (dormancyUpdatePending) return;
 
     // 极限/大数据：用虚拟化按需加载替代 dormancy 全量扫描
-    if (isCanvasVirtualizationEnabled()) {
+    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
         cancelCanvasBlockDormancyUnloadUpdate();
         scheduleCanvasVirtualizationUpdate();
         return;
@@ -14736,7 +15108,7 @@ function __onCanvasZoomEndCleanup() {
         try { prewarmCanvasLowDetailVisibleTrees(); } catch (_) { }
     }
     // 缩放真正停止后再统一恢复/按需加载（避免 is-zooming 阶段被判定为交互中而跳过补渲染）
-    if (isCanvasVirtualizationEnabled()) {
+    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
         try { scheduleCanvasVirtualizationUpdate(); } catch (_) { }
     } else {
         try { scheduleDormancyUpdate(); } catch (_) { }
@@ -29873,7 +30245,16 @@ function __renderTempNodeImpl(section, options = {}) {
         if (nodeElement.dataset) delete nodeElement.dataset.lowDetailHostGroupId;
     }
 
-    if (CanvasState && CanvasState.lowDetailActive) {
+    let isLowDetail = !!CanvasState.lowDetailActive;
+    if (!isLowDetail && __isViewportLowDetailEffective()) {
+        const workspace = document.getElementById('canvasWorkspace');
+        const visualBounds = workspace ? __getCanvasViewportBounds(workspace, 0) : null;
+        if (visualBounds) {
+            isLowDetail = __isCanvasRectOutsideBounds(section.x, section.y, section.width || baseSize.width, section.height || baseSize.height, visualBounds);
+        }
+    }
+
+    if (isLowDetail) {
         if (__isNodeGeometricallyInsideAnyCardGroup(section, 'temp-section')) {
             nodeElement.classList.add('card-group-low-detail-child-hidden');
             const hostGroup = __findHostCardGroup(section, 'temp-section');
@@ -35596,6 +35977,9 @@ function __handleCanvasRealtimeLocalStorageSync(key, rawValue) {
         || key === 'canvasDataIntensiveTotalAlwaysEnabled'
         || key === 'canvasDataIntensiveTotalAlwaysThresholds'
         || key === 'canvasLowDetailEnabled'
+        || key === 'canvasViewportLowDetailEnabled'
+        || key === 'canvasVirtualizationEnabled'
+        || key === 'canvasVirtualizationMinColumns'
         || key === 'canvasZoomThresholds'
         || key === 'canvasSafeZoneSettings'
         || key === 'canvasMinZoomLimit'
@@ -35914,7 +36298,7 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
     updateScrollbarThumbs();
 
     // 初始化按需加载 / 休眠状态
-    if (isCanvasVirtualizationEnabled()) {
+    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
         scheduleCanvasVirtualizationUpdate(60);
     } else {
         // 区块休眠/普通休眠：尽快执行一次按需加载（启动阶段不必等待 200ms 的默认节流）
@@ -40022,7 +40406,7 @@ function __renderOtherZoomMagnetCurve(modal) {
 
     const settings = getCanvasZoomMagnetSettings();
     const magnetEnabled = !!(settings && settings.enabled);
-    const safeEnabled = magnetEnabled && !!settings.enableSafeZone && isCanvasSafeZoneEnabled();
+    const safeEnabled = magnetEnabled && !!settings.enableSafeZone;
     const midEnabled = magnetEnabled && !!settings.enableLowDetailMid;
     const useDefaultCurve = (modal && typeof modal._useDefaultZoomCurve === 'boolean')
         ? modal._useDefaultZoomCurve
@@ -40419,7 +40803,7 @@ function __bindOtherCurveInteractions(modal, onChange) {
         const p3y = toY(__scaleZoomCurveFactor(curve.p3 ? curve.p3.y : 1));
         const settings = getCanvasZoomMagnetSettings();
         const magnetEnabled = !!(settings && settings.enabled);
-        const safeEnabled = magnetEnabled && !!settings.enableSafeZone && isCanvasSafeZoneEnabled();
+        const safeEnabled = magnetEnabled && !!settings.enableSafeZone;
         const midEnabled = magnetEnabled && !!settings.enableLowDetailMid;
         const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
         const maxPercent = 100;
@@ -41033,11 +41417,55 @@ function loadCanvasDataIntensiveSettings() {
         if (savedLowDetail !== null) {
             CanvasState.lowDetailEnabled = (savedLowDetail === 'true');
         }
+        const savedViewportLow = localStorage.getItem('canvasViewportLowDetailEnabled');
+        if (savedViewportLow !== null) {
+            // 三态：'on' | 'off' | 'auto'；向后兼容旧 boolean 值
+            if (savedViewportLow === 'on' || savedViewportLow === 'off' || savedViewportLow === 'auto') {
+                CanvasState.viewportLowDetailEnabled = savedViewportLow;
+            } else if (savedViewportLow === '"on"' || savedViewportLow === '"off"' || savedViewportLow === '"auto"') {
+                CanvasState.viewportLowDetailEnabled = JSON.parse(savedViewportLow);
+            } else {
+                // 旧 boolean：'true' -> 'auto'（保留原行为），'false' -> 'off'
+                CanvasState.viewportLowDetailEnabled = (savedViewportLow === 'true' || savedViewportLow === '"true"') ? 'auto' : 'off';
+            }
+        } else {
+            CanvasState.viewportLowDetailEnabled = 'auto';
+        }
+
+        const savedViewportLowDelay = localStorage.getItem('canvasViewportLowDetailDelayS');
+        if (savedViewportLowDelay !== null) {
+            const val = parseFloat(savedViewportLowDelay);
+            CanvasState.viewportLowDetailDelayS = Number.isFinite(val) && val >= 0 ? val : 5.0;
+        } else {
+            CanvasState.viewportLowDetailDelayS = 5.0;
+        }
+        const savedViewportLowMinNodes = localStorage.getItem('canvasViewportLowDetailMinLoadedNodes');
+        if (savedViewportLowMinNodes !== null) {
+            const val = parseInt(savedViewportLowMinNodes, 10);
+            CanvasState.viewportLowDetailMinLoadedNodes = Number.isFinite(val) && val >= 1 ? val : 100;
+        } else {
+            CanvasState.viewportLowDetailMinLoadedNodes = 100;
+        }
+        const savedUnloadDelay = localStorage.getItem('canvasVirtualizationUnloadDelayS');
+        if (savedUnloadDelay !== null) {
+            const val = parseFloat(savedUnloadDelay);
+            CanvasState.virtualizationUnloadDelayS = Number.isFinite(val) && val >= 0 ? val : 10.0;
+        } else {
+            CanvasState.virtualizationUnloadDelayS = 10.0;
+        }
+
         const savedVirtualization = localStorage.getItem('canvasVirtualizationEnabled');
         if (savedVirtualization !== null) {
-            CanvasState.virtualizationEnabled = (savedVirtualization === 'true');
+            // 三态：'on' | 'off' | 'auto'；向后兼容旧 boolean 值
+            if (savedVirtualization === 'on' || savedVirtualization === 'off' || savedVirtualization === 'auto') {
+                CanvasState.virtualizationEnabled = savedVirtualization;
+            } else if (savedVirtualization === '"on"' || savedVirtualization === '"off"' || savedVirtualization === '"auto"') {
+                CanvasState.virtualizationEnabled = JSON.parse(savedVirtualization);
+            } else {
+                CanvasState.virtualizationEnabled = (savedVirtualization === 'true' || savedVirtualization === '"true"') ? 'auto' : 'off';
+            }
         } else {
-            CanvasState.virtualizationEnabled = true;
+            CanvasState.virtualizationEnabled = 'auto';
         }
         const minCols = localStorage.getItem('canvasVirtualizationMinColumns');
         if (minCols !== null) {
@@ -41045,6 +41473,8 @@ function loadCanvasDataIntensiveSettings() {
         } else {
             CanvasState.virtualizationMinColumns = 25;
         }
+
+        CanvasState.virtualizationUnloadDebounceMs = CanvasState.virtualizationUnloadDelayS * 1000;
 
     } catch (e) {
         console.warn('Failed to load data intensive settings:', e);
@@ -41072,6 +41502,26 @@ function setupCanvasPerfSettingsBtn() {
 let perfSettingsUpdateTimer = null;
 
 function openCanvasPerfSettingsModal() {
+    // -- 三态控件辅助函数 --
+    // 设置三态控件的值
+    if (typeof window.__setTriStateValue === 'undefined') {
+        window.__setTriStateValue = function(container, value) {
+            if (!container) return;
+            const validValues = ['on', 'off', 'auto'];
+            const v = validValues.includes(value) ? value : 'auto';
+            container.querySelectorAll('button[data-value]').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-value') === v);
+            });
+            container.setAttribute('data-current', v);
+        };
+    }
+    // 读取三态控件的当前值
+    if (typeof window.__getTriStateValue === 'undefined') {
+        window.__getTriStateValue = function(container) {
+            if (!container) return 'auto';
+            return container.getAttribute('data-current') || 'auto';
+        };
+    }
     // 每次打开都重新创建，以支持语言切换后的动态更新
     let modal = document.getElementById('canvasPerfSettingsModal');
     if (modal) {
@@ -41080,46 +41530,33 @@ function openCanvasPerfSettingsModal() {
     createCanvasPerfSettingsModal();
     modal = document.getElementById('canvasPerfSettingsModal');
 
-    // 初始化输入框值
-    const th = CanvasState.dataIntensiveMode.thresholds;
-    document.getElementById('perfInputVisSec').value = th.visibleSectionCount;
-    document.getElementById('perfInputVisBm').value = th.totalBookmarkCount;
-    document.getElementById('perfInputAvg').value = th.sectionBookmarkAvg;
-
     // 初始化缩放阈值输入框 (显示为百分比)
     document.getElementById('perfInputEnterLowDetail').value = __formatPercentInputValue(getCanvasLowDetailDisplayZoomThreshold() * 100);
     document.getElementById('perfInputExitLowDetail').value = __formatPercentInputValue(getCanvasLowDetailPrewarmDisplayZoomThreshold() * 100);
 
-    // 初始化安全区阈值输入框 (显示为百分比)
-    const safeZoneInput = document.getElementById('perfInputSafeZone');
-    if (safeZoneInput) safeZoneInput.value = __formatPercentInputValue(getCanvasSafeZoneThreshold() * 100);
-
-
-
-    // [New] 初始化开关状态
-    const toggleSafeZone = document.getElementById('perfToggleSafeZone');
-    if (toggleSafeZone) toggleSafeZone.checked = isCanvasSafeZoneEnabled();
-
-    const toggleDim = document.getElementById('perfToggleDataIntensive');
-    if (toggleDim) toggleDim.checked = !!CanvasState.dataIntensiveMode.enabled;
-
-    const toggleTotalAlways = document.getElementById('perfToggleTotalAlways');
-    if (toggleTotalAlways) toggleTotalAlways.checked = !!CanvasState.dataIntensiveMode.totalAlwaysEnabled;
-
-    const totalTh = CanvasState.dataIntensiveMode.totalAlwaysThresholds || __createDefaultCanvasTotalAlwaysThresholds();
-    const totalBm = document.getElementById('perfInputTotalAlwaysBm');
-    const totalFo = document.getElementById('perfInputTotalAlwaysFolder');
-    if (totalBm) totalBm.value = Number.isFinite(totalTh.bookmarks) ? totalTh.bookmarks : CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT;
-    if (totalFo) totalFo.value = Number.isFinite(totalTh.folders) ? totalTh.folders : CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT;
-
     const toggleLow = document.getElementById('perfToggleLowDetail');
     if (toggleLow) toggleLow.checked = !!CanvasState.lowDetailEnabled;
 
-    const toggleVirt = document.getElementById('perfToggleVirtualization');
-    if (toggleVirt) toggleVirt.checked = CanvasState.virtualizationEnabled !== false;
+    const triViewportLow = document.getElementById('perfTriStateViewportLowDetail');
+    if (triViewportLow) __setTriStateValue(triViewportLow, CanvasState.viewportLowDetailEnabled || 'auto');
+    const inputViewportLowDelay = document.getElementById('perfInputViewportLowDetailDelay');
+    if (inputViewportLowDelay) {
+        inputViewportLowDelay.value = typeof CanvasState.viewportLowDetailDelayS === 'number' ? CanvasState.viewportLowDetailDelayS : 5.0;
+    }
+    const inputViewportLowMinNodes = document.getElementById('perfInputViewportLowDetailMinLoadedNodes');
+    if (inputViewportLowMinNodes) {
+        inputViewportLowMinNodes.value = typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' ? CanvasState.viewportLowDetailMinLoadedNodes : 100;
+    }
+
+    const triVirt = document.getElementById('perfTriStateVirtualization');
+    if (triVirt) __setTriStateValue(triVirt, CanvasState.virtualizationEnabled || 'auto');
     const inputVirtMinCols = document.getElementById('perfInputVirtualizationMinCols');
     if (inputVirtMinCols) {
         inputVirtMinCols.value = typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 25;
+    }
+    const inputUnloadDelay = document.getElementById('perfInputVirtualizationUnloadDelay');
+    if (inputUnloadDelay) {
+        inputUnloadDelay.value = typeof CanvasState.virtualizationUnloadDelayS === 'number' ? CanvasState.virtualizationUnloadDelayS : 10.0;
     }
 
     // [P5] Zoom magnet toggles
@@ -41143,7 +41580,6 @@ function openCanvasPerfSettingsModal() {
     };
     const exitInput = document.getElementById('perfInputExitLowDetail');
     const enterInput = document.getElementById('perfInputEnterLowDetail');
-    if (safeZoneInput) safeZoneInput.addEventListener('input', clearLinked);
     if (exitInput) exitInput.addEventListener('input', clearLinked);
     if (enterInput) enterInput.addEventListener('input', clearLinked);
 
@@ -41186,66 +41622,62 @@ function updateCanvasPerfSettingsUI() {
     const toggleLow = document.getElementById('perfToggleLowDetail');
     const isLowEnabled = toggleLow ? toggleLow.checked : true;
     const subContainer = document.getElementById('perfLowDetailSubContainer');
-    const section2Container = document.getElementById('perfSection2Container');
 
-    [subContainer, section2Container].forEach(container => {
-        if (!container) return;
-        container.classList.toggle('perf-disabled-section', !isLowEnabled);
-        container.querySelectorAll('input, button, select').forEach(el => {
+    if (subContainer) {
+        subContainer.classList.toggle('perf-disabled-section', !isLowEnabled);
+        subContainer.querySelectorAll('input, button, select').forEach(el => {
             el.disabled = !isLowEnabled;
         });
-    });
+    }
 
-    // 动态更新性能负载自适应优化范围的数值范围
-    const enterInput = document.getElementById('perfInputEnterLowDetail');
-    const safeInput = document.getElementById('perfInputSafeZone');
-    const section2Title = document.getElementById('perfSection2Title');
-    if (enterInput && safeInput && section2Title) {
-        const enterVal = enterInput.value || '0';
-        const safeVal = safeInput.value || '0';
-        const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
-        const isEn = lang === 'en';
-        section2Title.textContent = isEn
-            ? `2. Adaptive Overload Optimization Range (${enterVal}%--${safeVal}%)`
-            : `2. 性能超载自适应优化范围 (${enterVal}%--${safeVal}%)`;
+    const triViewportLow = document.getElementById('perfTriStateViewportLowDetail');
+    const viewportLowValue = __getTriStateValue(triViewportLow);
+    const isViewportLowDelayEnabled = (viewportLowValue === 'on' || viewportLowValue === 'auto');
+    const isViewportLowMinNodesEnabled = (viewportLowValue === 'auto');
+
+    const viewportDelayGroup = document.getElementById('perfViewportLowDetailDelayGroup');
+    if (viewportDelayGroup) {
+        viewportDelayGroup.classList.toggle('perf-disabled-section', !isViewportLowDelayEnabled);
+        viewportDelayGroup.querySelectorAll('input').forEach(el => {
+            el.disabled = !isViewportLowDelayEnabled;
+        });
+    }
+    const viewportMinNodesGroup = document.getElementById('perfViewportLowDetailMinNodesGroup');
+    if (viewportMinNodesGroup) {
+        viewportMinNodesGroup.classList.toggle('perf-disabled-section', !isViewportLowMinNodesEnabled);
+        viewportMinNodesGroup.querySelectorAll('input').forEach(el => {
+            el.disabled = !isViewportLowMinNodesEnabled;
+        });
+    }
+
+    const triVirt = document.getElementById('perfTriStateVirtualization');
+    const virtValue = __getTriStateValue(triVirt);
+    const isVirtDelayEnabled = (virtValue === 'on' || virtValue === 'auto');
+    const isVirtMinColsEnabled = (virtValue === 'auto');
+
+    const virtMinColsInput = document.getElementById('perfInputVirtualizationMinCols');
+    if (virtMinColsInput) {
+        virtMinColsInput.disabled = !isVirtMinColsEnabled;
+        const parentGroup = document.getElementById('perfVirtualizationMinColsGroup') || virtMinColsInput.closest('.perf-input-group');
+        if (parentGroup) {
+            parentGroup.classList.toggle('perf-disabled-section', !isVirtMinColsEnabled);
+        }
+    }
+    const virtUnloadDelayGroup = document.getElementById('perfVirtualizationUnloadDelayGroup');
+    if (virtUnloadDelayGroup) {
+        virtUnloadDelayGroup.classList.toggle('perf-disabled-section', !isVirtDelayEnabled);
+        virtUnloadDelayGroup.querySelectorAll('input').forEach(el => {
+            el.disabled = !isVirtDelayEnabled;
+        });
     }
 
     __applyPerfLinkedStyles();
 
-    // 更新状态指示器
-    const statusBadge = document.getElementById('perfStatusBadge');
-    // Force one refresh so P2/P4 status matches latest totals/viewport
+    // Force one refresh
     try { updateDataIntensiveMode(true); } catch (_) { }
 
-    const dim = CanvasState.dataIntensiveMode;
-    const isActive = !!(dim && (dim.active || dim.totalAlwaysActive));
-
-    // 获取实时视口统计 (不强制更新，使用缓存，或者这里可以强制更新一次以便演示)
-    // 为了显示准确，我们调用一次 calculate
-    const stats = getCanvasViewportDataStats(true); // force calc for UI
-
-    if (statusBadge) {
-        const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
-        const isEn = lang === 'en';
-        statusBadge.textContent = isActive
-            ? (isEn ? 'Active' : '已激活')
-            : (isEn ? 'Inactive' : '未激活');
-        statusBadge.className = 'perf-status-badge ' + (isActive ? 'active' : 'inactive');
-    }
-
-    // P4 status
-    const p4Badge = document.getElementById('perfTotalAlwaysStatusBadge');
-    if (p4Badge) {
-        const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
-        const isEn = lang === 'en';
-        const p4Active = !!(dim && dim.totalAlwaysEnabled && dim.totalAlwaysActive);
-        p4Badge.textContent = p4Active
-            ? (isEn ? 'Active' : '已激活')
-            : (isEn ? 'Inactive' : '未激活');
-        p4Badge.className = 'perf-status-badge ' + (p4Active ? 'active' : 'inactive');
-    }
-
     const totals = __getCanvasTotalDataStatsSync();
+    const stats = getCanvasViewportDataStats(true); // force calc for UI
     const fmt = (visible, total) => {
         const v = Number.isFinite(visible) ? visible : 0;
         const t = Number.isFinite(total) ? total : 0;
@@ -41259,7 +41691,6 @@ function updateCanvasPerfSettingsUI() {
             return clamp(base - (extra * step), min, base);
         };
 
-        // Keep on one line; as digits grow, shrink both sides a bit.
         const visibleFont = `${scaleEm(vDigits, 1.00, 0.06, 0.64).toFixed(2)}em`;
         const totalFont = `${scaleEm(tDigits, 0.74, 0.05, 0.48).toFixed(2)}em`;
         const totalGap = (vDigits >= 5 || tDigits >= 5) ? 4 : 6;
@@ -41273,19 +41704,13 @@ function updateCanvasPerfSettingsUI() {
 </span>`;
     };
 
-    // 更新数值显示：可视 / 总量
-    document.getElementById('perfStatVisSec').innerHTML = fmt(stats.visibleSectionCount, totals.totalColumnCount);
-    document.getElementById('perfStatVisBm').innerHTML = fmt(stats.visibleBookmarkCount, totals.totalBookmarkCount);
-    document.getElementById('perfStatAvg').innerHTML = fmt(stats.visibleFolderCount, totals.totalFolderCount);
-
-    const setVisibleColor = (id, color) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        // Don't color the whole container (keeps total part neutral)
-        el.style.color = '';
-        const vis = el.querySelector('.perf-stat-visible');
-        if (vis) vis.style.color = color || 'var(--text-primary)';
-    };
+    // 更新数值显示：可视 / 已加载（替代原来的"总量"）
+    const statVisSec = document.getElementById('perfStatVisSec');
+    const statVisBm = document.getElementById('perfStatVisBm');
+    const statAvg = document.getElementById('perfStatAvg');
+    if (statVisSec) statVisSec.innerHTML = fmt(stats.visibleSectionCount, totals.totalColumnCount);
+    if (statVisBm) statVisBm.innerHTML = fmt(stats.visibleBookmarkCount, stats.loadedBookmarkCount);
+    if (statAvg) statAvg.innerHTML = fmt(stats.visibleFolderCount, stats.loadedFolderCount);
 
     const setTotalColor = (id, color) => {
         const el = document.getElementById(id);
@@ -41294,24 +41719,6 @@ function updateCanvasPerfSettingsUI() {
         if (totNum) totNum.style.color = color || 'var(--text-secondary)';
     };
 
-    // 突出显示超标项 (使用 Orange/Warning 色)
-    const th = CanvasState.dataIntensiveMode.thresholds;
-
-    // 超过栏目数硬触发阈值
-    setVisibleColor('perfStatVisSec', (stats.visibleSectionCount >= th.visibleSectionCount) ? 'var(--warning)' : null);
-
-    setVisibleColor('perfStatVisBm', (isActive && stats.visibleBookmarkCount >= th.totalBookmarkCount) ? 'var(--warning)' : null);
-
-    setVisibleColor('perfStatAvg', (isActive && stats.visibleFolderCount >= th.sectionBookmarkAvg) ? 'var(--warning)' : null);
-
-    // P4 totals feedback: when totals reach thresholds, highlight the "/ total" part in warning color
-    const totalTh = (dim && dim.totalAlwaysThresholds) ? dim.totalAlwaysThresholds : __createDefaultCanvasTotalAlwaysThresholds();
-    const totalAlwaysEnabled = !!(dim && dim.totalAlwaysEnabled);
-    const overTotalBm = totalAlwaysEnabled && Number.isFinite(totalTh.bookmarks) && totalTh.bookmarks > 0 && (totals.totalBookmarkCount || 0) >= totalTh.bookmarks;
-    const overTotalFo = totalAlwaysEnabled && Number.isFinite(totalTh.folders) && totalTh.folders > 0 && (totals.totalFolderCount || 0) >= totalTh.folders;
-    setTotalColor('perfStatVisBm', overTotalBm ? 'var(--warning)' : null);
-    setTotalColor('perfStatAvg', overTotalFo ? 'var(--warning)' : null);
-
     // 超过用户设置的启用虚拟化的最小栏目数时，将总栏目数高亮显示为警告色（橙色）
     const minColsLimit = (typeof CanvasState.virtualizationMinColumns === 'number' && Number.isFinite(CanvasState.virtualizationMinColumns))
         ? CanvasState.virtualizationMinColumns
@@ -41319,15 +41726,16 @@ function updateCanvasPerfSettingsUI() {
     const overTotalSec = (totals.totalColumnCount || 0) >= minColsLimit;
     setTotalColor('perfStatVisSec', overTotalSec ? 'var(--warning)' : null);
 
-    // P5: compute magnet positions from current inputs (live)
-    const safeEl = document.getElementById('perfMagnetSafeValue');
+    // 已加载书签+文件夹超过视野外低细节自动触发阈值时，将已加载书签/文件夹数高亮为橙色
+    const minLoadedLimit = (typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' && Number.isFinite(CanvasState.viewportLowDetailMinLoadedNodes))
+        ? CanvasState.viewportLowDetailMinLoadedNodes
+        : 100;
+    const totalLoadedNodes = (stats.loadedBookmarkCount || 0) + (stats.loadedFolderCount || 0);
+    const overLoadedNodes = totalLoadedNodes >= minLoadedLimit;
+    setTotalColor('perfStatVisBm', overLoadedNodes ? 'var(--warning)' : null);
+    setTotalColor('perfStatAvg', overLoadedNodes ? 'var(--warning)' : null);
+
     const midEl = document.getElementById('perfMagnetMidValue');
-    if (safeEl) {
-        const input = document.getElementById('perfInputSafeZone');
-        const v = input ? parseFloat(input.value) : NaN;
-        const pct = (Number.isFinite(v) && v > 0) ? v : Math.round(getCanvasSafeZoneThreshold() * 100);
-        safeEl.textContent = `${pct.toFixed(0)}%`;
-    }
     if (midEl) {
         const enterInput = document.getElementById('perfInputEnterLowDetail');
         const enterV = enterInput ? parseFloat(enterInput.value) : NaN;
@@ -41340,15 +41748,6 @@ function saveCanvasPerfSettings(options = {}) {
     const modal = document.getElementById('canvasPerfSettingsModal');
     if (!modal) return;
     const closeAfterSave = options && options.close !== false;
-    const visSec = parseInt(document.getElementById('perfInputVisSec').value, 10);
-    const visBm = parseInt(document.getElementById('perfInputVisBm').value, 10);
-    const avg = parseInt(document.getElementById('perfInputAvg').value, 10);
-
-    if (Number.isFinite(visSec) && visSec > 0) CanvasState.dataIntensiveMode.thresholds.visibleSectionCount = visSec;
-    if (Number.isFinite(visBm) && visBm > 0) CanvasState.dataIntensiveMode.thresholds.totalBookmarkCount = visBm;
-    if (Number.isFinite(avg) && avg > 0) CanvasState.dataIntensiveMode.thresholds.sectionBookmarkAvg = avg;
-
-    saveSharedState('canvasDataIntensiveThresholds', CanvasState.dataIntensiveMode.thresholds);
 
     // 保存缩放阈值 (从百分比转换为小数)
     const enterLowDetailInput = document.getElementById('perfInputEnterLowDetail');
@@ -41364,61 +41763,50 @@ function saveCanvasPerfSettings(options = {}) {
 
     saveSharedState('canvasZoomThresholds', zoomThresholds);
 
-    // 保存安全区设置 (从百分比转换为小数)
-    const safeZoneInput = document.getElementById('perfInputSafeZone');
-    const toggleSafeZone = document.getElementById('perfToggleSafeZone');
-    const safeZoneValue = safeZoneInput ? parseFloat(safeZoneInput.value) : NaN;
-    const safeZoneSettings = {
-        threshold: Number.isFinite(safeZoneValue) && safeZoneValue > 0
-            ? safeZoneValue / 100
-            : 0.70,
-        enabled: toggleSafeZone ? toggleSafeZone.checked : true
-    };
-    saveSharedState('canvasSafeZoneSettings', safeZoneSettings);
+    // Keep dummy safeZone value for compatibility
     __writePerfManualBaseline({
-        safeZone: safeZoneSettings.threshold * 100,
+        safeZone: 70,
         exitLowDetail: zoomThresholds.exitLowDetail * 100,
         enterLowDetail: zoomThresholds.enterLowDetail * 100
     });
-
-
-
-    // [New] 保存开关状态
-    const toggleDim = document.getElementById('perfToggleDataIntensive');
-    if (toggleDim) {
-        CanvasState.dataIntensiveMode.enabled = toggleDim.checked;
-        saveSharedState('canvasDataIntensiveEnabled', toggleDim.checked);
-    }
-
-    const toggleTotalAlways = document.getElementById('perfToggleTotalAlways');
-    if (toggleTotalAlways) {
-        CanvasState.dataIntensiveMode.totalAlwaysEnabled = toggleTotalAlways.checked;
-        saveSharedState('canvasDataIntensiveTotalAlwaysEnabled', toggleTotalAlways.checked);
-    }
-
-    const totalBm = parseInt((document.getElementById('perfInputTotalAlwaysBm') || {}).value, 10);
-    const totalFo = parseInt((document.getElementById('perfInputTotalAlwaysFolder') || {}).value, 10);
-    if (!CanvasState.dataIntensiveMode.totalAlwaysThresholds) {
-        CanvasState.dataIntensiveMode.totalAlwaysThresholds = __createDefaultCanvasTotalAlwaysThresholds();
-    }
-    if (Number.isFinite(totalBm) && totalBm > 0) CanvasState.dataIntensiveMode.totalAlwaysThresholds.bookmarks = totalBm;
-    if (Number.isFinite(totalFo) && totalFo > 0) CanvasState.dataIntensiveMode.totalAlwaysThresholds.folders = totalFo;
-    try {
-        saveSharedState('canvasDataIntensiveTotalAlwaysThresholds', CanvasState.dataIntensiveMode.totalAlwaysThresholds);
-    } catch (_) { }
 
     const toggleLow = document.getElementById('perfToggleLowDetail');
     if (toggleLow) {
         CanvasState.lowDetailEnabled = toggleLow.checked;
         saveSharedState('canvasLowDetailEnabled', toggleLow.checked);
     }
-    const toggleVirt = document.getElementById('perfToggleVirtualization');
-    if (toggleVirt) {
-        const oldVal = CanvasState.virtualizationEnabled !== false;
-        const newVal = toggleVirt.checked;
+
+    const triViewportLow = document.getElementById('perfTriStateViewportLowDetail');
+    if (triViewportLow) {
+        const val = __getTriStateValue(triViewportLow);
+        CanvasState.viewportLowDetailEnabled = val;
+        saveSharedState('canvasViewportLowDetailEnabled', val, { asJSON: false });
+    }
+    const inputViewportLowDelay = document.getElementById('perfInputViewportLowDetailDelay');
+    if (inputViewportLowDelay) {
+        const val = parseFloat(inputViewportLowDelay.value);
+        if (Number.isFinite(val) && val >= 0) {
+            CanvasState.viewportLowDetailDelayS = val;
+            saveSharedState('canvasViewportLowDetailDelayS', val.toString(), { asJSON: false });
+        }
+    }
+    const inputViewportLowMinNodes = document.getElementById('perfInputViewportLowDetailMinLoadedNodes');
+    if (inputViewportLowMinNodes) {
+        const val = parseInt(inputViewportLowMinNodes.value, 10);
+        if (Number.isFinite(val) && val >= 1) {
+            CanvasState.viewportLowDetailMinLoadedNodes = val;
+            saveSharedState('canvasViewportLowDetailMinLoadedNodes', val, { asJSON: false });
+        }
+    }
+
+    const triVirt = document.getElementById('perfTriStateVirtualization');
+    if (triVirt) {
+        const oldVal = CanvasState.virtualizationEnabled;
+        const newVal = __getTriStateValue(triVirt);
         CanvasState.virtualizationEnabled = newVal;
-        saveSharedState('canvasVirtualizationEnabled', newVal);
-        if (oldVal && !newVal) {
+        saveSharedState('canvasVirtualizationEnabled', newVal, { asJSON: false });
+        // If switching to 'off' from a previously enabled state, restore all virtualized nodes
+        if (oldVal !== 'off' && newVal === 'off') {
             try { __restoreAllVirtualisedNodes(); } catch (e) { console.error('Failed to restore virtualized nodes:', e); }
         }
     }
@@ -41430,8 +41818,17 @@ function saveCanvasPerfSettings(options = {}) {
             saveSharedState('canvasVirtualizationMinColumns', val, { asJSON: false });
         }
     }
+    const inputUnloadDelay = document.getElementById('perfInputVirtualizationUnloadDelay');
+    if (inputUnloadDelay) {
+        const val = parseFloat(inputUnloadDelay.value);
+        if (Number.isFinite(val) && val >= 0) {
+            CanvasState.virtualizationUnloadDelayS = val;
+            saveSharedState('canvasVirtualizationUnloadDelayS', val.toString(), { asJSON: false });
+            CanvasState.virtualizationUnloadDebounceMs = val * 1000;
+        }
+    }
     // If virtualization is enabled but now dynamically bypassed because the values changed, restore nodes
-    if (CanvasState.virtualizationEnabled !== false) {
+    if (CanvasState.virtualizationEnabled !== 'off') {
         if (!isCanvasVirtualizationEnabled()) {
             if (CanvasState.__virtualizationWasEnabled !== false) {
                 CanvasState.__virtualizationWasEnabled = false;
@@ -41439,7 +41836,6 @@ function saveCanvasPerfSettings(options = {}) {
             }
         }
     }
-
 
     // [P5] 保存缩放磁矩设置
     const toggleMagnet = document.getElementById('perfToggleZoomMagnet');
@@ -41471,10 +41867,13 @@ function saveCanvasPerfSettings(options = {}) {
             });
         }
     } catch (_) { }
-    if (closeAfterSave) closeCanvasPerfSettingsModal();
 
-    // Show toast? simple alert for now or custom toast if available
-    // alert('设置已保存');
+    // 强制执行一次虚拟化更新，使新的低细节/虚拟化状态立即应用并清理样式
+    try {
+        runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: true });
+    } catch (_) {}
+
+    if (closeAfterSave) closeCanvasPerfSettingsModal();
 }
 
 function createCanvasPerfSettingsModal() {
@@ -41535,6 +41934,40 @@ function createCanvasPerfSettingsModal() {
             input:checked + .slider:before {
                 transform: translateX(16px);
             }
+            .perf-tri-state {
+                display: inline-flex;
+                align-items: center;
+                background: var(--bg-tertiary, #2a2a2e);
+                border-radius: 8px;
+                padding: 2px;
+                gap: 2px;
+                border: 1px solid var(--border-color, #3a3a3e);
+            }
+            .perf-tri-state button {
+                border: none;
+                background: transparent;
+                color: var(--text-secondary, #888);
+                font-size: 12px;
+                font-weight: 500;
+                padding: 3px 10px;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+                line-height: 1.4;
+                white-space: nowrap;
+            }
+            .perf-tri-state button:hover {
+                color: var(--text-primary, #fff);
+                background: var(--bg-secondary, #333);
+            }
+            .perf-tri-state button.active {
+                background: var(--accent-primary, #1877f2);
+                color: #fff;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+            }
+            .perf-tri-state button.active[data-value="off"] {
+                background: var(--text-secondary, #666);
+            }
             .perf-disabled-section {
                 opacity: 0.45;
                 pointer-events: none;
@@ -41563,41 +41996,15 @@ function createCanvasPerfSettingsModal() {
                     </div>
                     <div class="perf-stats-card" style="flex: 1; display: flex; flex-direction: column; align-items: center; padding: 12px; background: var(--bg-tertiary); border-radius: 10px; border: 1px solid var(--border-color);">
                         <div class="perf-stat-value" id="perfStatVisBm" style="font-size: 24px; font-weight: 700; line-height: 1.2; margin-bottom: 2px;">0</div>
-                        <div class="perf-stat-label" style="font-size: 12px; color: var(--text-secondary);">${isEn ? 'Bookmarks (V/T)' : '可视/总书签'}</div>
+                        <div class="perf-stat-label" style="font-size: 12px; color: var(--text-secondary);">${isEn ? 'Bookmarks (V/L)' : '可视/已加载书签'}</div>
                     </div>
                     <div class="perf-stats-card" style="flex: 1; display: flex; flex-direction: column; align-items: center; padding: 12px; background: var(--bg-tertiary); border-radius: 10px; border: 1px solid var(--border-color);">
                         <div class="perf-stat-value" id="perfStatAvg" style="font-size: 24px; font-weight: 700; line-height: 1.2; margin-bottom: 2px;">0</div>
-                        <div class="perf-stat-label" style="font-size: 12px; color: var(--text-secondary);">${isEn ? 'Folders (V/T)' : '可视/总文件夹'}</div>
+                        <div class="perf-stat-label" style="font-size: 12px; color: var(--text-secondary);">${isEn ? 'Folders (V/L)' : '可视/已加载文件夹'}</div>
                     </div>
                 </div>
                 
-                <!-- Group 2: 画布卡片按需回收与加载 -->
-                <div class="perf-group-title" style="font-size: 13px; font-weight: 700; margin-bottom: 12px; margin-top: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); color: var(--accent-primary); display: flex; align-items: center; gap: 8px;">
-                    <i class="fas fa-layer-group"></i>
-                    <span>${isEn ? 'Card Virtualization (On-Demand Loading)' : '卡片按需回收与加载（虚拟化）'}</span>
-                </div>
 
-                <!-- 画布虚拟化按需加载 -->
-                <div class="perf-settings-section">
-                    <div class="perf-settings-section-title" style="margin-bottom: 12px;">
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Canvas Card Virtualization' : '启用虚拟化优化'}</span>
-                            <button class="perf-help-btn" id="perfVirtualizationHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="toggle-wrapper">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="perfToggleVirtualization">
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="perf-input-group">
-                        <label>${isEn ? 'Min Column Cards for Virtualization' : '启用虚拟化的最小栏目数'}</label>
-                        <input type="number" id="perfInputVirtualizationMinCols" min="1" step="1">
-                    </div>
-                </div>
 
                 <!-- Group 1: 低细节色块视觉模式 -->
                 <div class="perf-group-title" style="font-size: 13px; font-weight: 700; margin-bottom: 12px; margin-top: 20px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); color: var(--accent-primary); display: flex; align-items: center; gap: 8px;">
@@ -41607,29 +42014,14 @@ function createCanvasPerfSettingsModal() {
 
                 <!-- 低细节显示控制 -->
                 <div class="perf-settings-section">
-                    <div class="perf-settings-section-title">
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Basic Settings' : '1. 基础缩放控制'}</span>
-                        </div>
-                    </div>
+                    <input type="checkbox" id="perfToggleLowDetail" checked style="display: none;">
                     
-                    <!-- 启用低细节模式 -->
-                    <div class="perf-input-group" style="margin-bottom: 14px;">
-                        <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Enable Low-Detail Mode' : '开启低细节模式'}</label>
-                        <div class="toggle-wrapper">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="perfToggleLowDetail">
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- 触发的缩放比例 与 安全区 (包裹在子容器中) -->
+                    <!-- 触发的缩放比例 (包裹在子容器中) -->
                     <div id="perfLowDetailSubContainer">
                         <!-- 缩放降级阈值 -->
-                        <div class="perf-input-group" style="margin-bottom: 14px;">
+                        <div class="perf-input-group" style="margin-top: 10px; margin-bottom: 4px;">
                             <div style="display: flex; align-items: center; gap: 4px;">
-                                <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Zoom Trigger Percentage' : '触发的缩放比例'}</label>
+                                <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Auto-triggered Zoom Percentage' : '自动触发的缩放比例'}</label>
                                 <button class="perf-help-btn" id="perfZoomHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                     <i class="fas fa-question-circle"></i>
                                 </button>
@@ -41643,90 +42035,73 @@ function createCanvasPerfSettingsModal() {
                                 <span style="color: var(--text-secondary); font-size: 12px;">%</span>
                             </div>
                         </div>
+                    </div>
+                </div>
 
-                        <!-- 安全区 -->
-                        <div class="perf-input-group">
-                            <div style="display: flex; align-items: center; gap: 4px;">
-                                <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Safe Zone' : '安全区'}</label>
-                                <button class="perf-help-btn" id="perfSafeZoneHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                    <i class="fas fa-question-circle"></i>
-                                </button>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <input type="number" id="perfInputSafeZone" min="1" max="100" step="5">
-                                <span style="color: var(--text-secondary); font-size: 12px;">%</span>
-                            </div>
+                <!-- Group 2: 视野以外的操作 -->
+                <div class="perf-group-title" style="font-size: 13px; font-weight: 700; margin-bottom: 12px; margin-top: 20px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); color: var(--accent-primary); display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-arrows-alt"></i>
+                    <span>${isEn ? 'Operations Outside Viewport' : '视野以外的操作'}</span>
+                </div>
+
+                <!-- 视野外低细节模式 -->
+                <div class="perf-settings-section" style="margin-bottom: 16px;">
+                    <div class="perf-settings-section-title" style="margin-bottom: 8px;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Outside Viewport -- Low-Detail Mode' : '视野以外--低细节模式'}</span>
+                            <button class="perf-help-btn" id="perfViewportLowDetailHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="perf-tri-state" id="perfTriStateViewportLowDetail" data-target="viewportLowDetail">
+                            <button type="button" data-value="on">${isEn ? 'On' : '开'}</button>
+                            <button type="button" data-value="off">${isEn ? 'Off' : '关'}</button>
+                            <button type="button" data-value="auto" class="active">${isEn ? 'Auto' : '自动'}</button>
+                        </div>
+                    </div>
+                    <div class="perf-input-group" id="perfViewportLowDetailDelayGroup" style="margin-top: 6px;">
+                        <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Delay before Entering Low-Detail' : '进入低细节的离屏延迟时间'}</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="perfInputViewportLowDetailDelay" min="0" step="0.5">
+                            <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? 'seconds' : '秒'}</span>
+                        </div>
+                    </div>
+                    <div class="perf-input-group" id="perfViewportLowDetailMinNodesGroup" style="margin-top: 6px;">
+                        <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Auto-trigger Min Loaded Nodes (Bookmarks+Folders)' : '自动触发的最小已加载数（书签+文件夹）'}</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="perfInputViewportLowDetailMinLoadedNodes" min="1" step="10">
+                            <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? 'nodes' : '个'}</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- 性能超载（数据密集）触发条件 -->
-                <div class="perf-settings-section" id="perfSection2Container">
-                    <div class="perf-settings-section-title" style="margin-bottom: 14px;">
-                        <span id="perfSection2Title" style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Performance Overload Triggers' : '2. 性能超载自适应优化范围'}</span>
-                    </div>
-
-                    <!-- 触发条件：当前视野超载触发 -->
-                    <div style="border-bottom: 1px dashed var(--border-color); padding-bottom: 12px; margin-bottom: 12px;">
-                        <div class="perf-input-group" style="margin-bottom: 10px;">
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${isEn ? 'Viewport Overload Trigger' : '当前视野（视口）超载触发'}</span>
-                                <span id="perfStatusBadge" class="perf-status-badge inactive" style="margin-left: 4px;">${isEn ? 'Inactive' : '未激活'}</span>
-                                <button class="perf-help-btn" id="perfTriggerHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                    <i class="fas fa-question-circle"></i>
-                                </button>
-                            </div>
-                            <div class="toggle-wrapper">
-                                <button class="perf-restore-btn" id="perfRestoreDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}" style="width: 22px; height: 22px; line-height: 20px;">
-                                    <i class="fas fa-undo"></i>
-                                </button>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="perfToggleDataIntensive">
-                                    <span class="slider round"></span>
-                                </label>
-                            </div>
+                <!-- 画布虚拟化按需加载 -->
+                <div class="perf-settings-section">
+                    <div class="perf-settings-section-title" style="margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-weight: 600; color: var(--text-primary);">${isEn ? 'Outside Viewport -- Lazy Loading (Virtualization)' : '视野以外--懒惰加载'}</span>
+                            <button class="perf-help-btn" id="perfVirtualizationHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
                         </div>
-                        <div class="perf-input-group" style="padding-left: 12px; margin-bottom: 8px;">
-                            <label style="font-size: 12px;">${isEn ? 'Visible Columns Threshold' : '可视栏目数阈值（主触发）'}</label>
-                            <input type="number" id="perfInputVisSec" min="1" step="1">
-                        </div>
-                        <div class="perf-input-group" style="padding-left: 12px; margin-bottom: 8px;">
-                            <label style="font-size: 12px;">${isEn ? 'Visible Bookmarks Warning Threshold' : '可视书签预警阈值'}</label>
-                            <input type="number" id="perfInputVisBm" min="10" step="10">
-                        </div>
-                        <div class="perf-input-group" style="padding-left: 12px;">
-                            <label style="font-size: 12px;">${isEn ? 'Visible Folders Warning Threshold' : '可视文件夹预警阈值'}</label>
-                            <input type="number" id="perfInputAvg" min="1" step="1">
+                        <div class="perf-tri-state" id="perfTriStateVirtualization" data-target="virtualization">
+                            <button type="button" data-value="on">${isEn ? 'On' : '开'}</button>
+                            <button type="button" data-value="off">${isEn ? 'Off' : '关'}</button>
+                            <button type="button" data-value="auto" class="active">${isEn ? 'Auto' : '自动'}</button>
                         </div>
                     </div>
-
-                    <!-- 触发条件：全局总量超标触发 -->
-                    <div>
-                        <div class="perf-input-group" style="margin-bottom: 10px;">
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${isEn ? 'Global Totals Overload Trigger' : '全局数据总量超标触发'}</span>
-                                <span id="perfTotalAlwaysStatusBadge" class="perf-status-badge inactive" style="margin-left: 4px;">${isEn ? 'Inactive' : '未激活'}</span>
-                                <button class="perf-help-btn" id="perfTotalAlwaysHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                    <i class="fas fa-question-circle"></i>
-                                </button>
-                            </div>
-                            <div class="toggle-wrapper">
-                                <button class="perf-restore-btn" id="perfRestoreTotalAlwaysDefaultsBtn" title="${isEn ? 'Restore defaults' : '恢复默认值'}" style="width: 22px; height: 22px; line-height: 20px;">
-                                    <i class="fas fa-undo"></i>
-                                </button>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="perfToggleTotalAlways">
-                                    <span class="slider round"></span>
-                                </label>
-                            </div>
+                    <div class="perf-input-group" id="perfVirtualizationUnloadDelayGroup" style="margin-bottom: 8px;">
+                        <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Delay before Lazy Loading' : '进入懒惰加载的离屏延迟时间'}</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="perfInputVirtualizationUnloadDelay" min="0" step="0.5">
+                            <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? 'seconds' : '秒'}</span>
                         </div>
-                        <div class="perf-input-group" style="padding-left: 12px; margin-bottom: 8px;">
-                            <label style="font-size: 12px;">${isEn ? 'Total Bookmarks Threshold' : '总书签数阈值'}</label>
-                            <input type="number" id="perfInputTotalAlwaysBm" min="1" step="500">
-                        </div>
-                        <div class="perf-input-group" style="padding-left: 12px;">
-                            <label style="font-size: 12px;">${isEn ? 'Total Folders Threshold' : '总文件夹数阈值'}</label>
-                            <input type="number" id="perfInputTotalAlwaysFolder" min="1" step="200">
+                    </div>
+                    <div class="perf-input-group" id="perfVirtualizationMinColsGroup" style="margin-top: 6px; margin-bottom: 8px;">
+                        <label>${isEn ? 'Auto-trigger Min Total Columns' : '自动触发的最小总栏目数'}</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="perfInputVirtualizationMinCols" min="1" step="1">
+                            <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? 'columns' : '个'}</span>
                         </div>
                     </div>
                 </div>
@@ -41735,39 +42110,21 @@ function createCanvasPerfSettingsModal() {
         </div>
         </div>
         
-        <!-- 安全区帮助弹层 -->
-        <div class="perf-help-popover" id="perfSafeZoneHelpPopover">
-            <div class="perf-help-popover-content">
-                ${isEn
-            ? '<b>Visual Safe Zone</b>: When zoomed in above this threshold (default 70%), low-detail mode is <b>absolutely disabled</b> to ensure clear reading and editing.'
-            : '<b>视觉安全区</b>：为了方便编辑与阅读，当画布放大到此比例以上时，<b>绝对不</b>进入低细节模式，无论当前数据量有多大。'}
-            </div>
-        </div>
-        
-        <!-- 触发阈值帮助弹层 -->
-        <div class="perf-help-popover" id="perfTriggerHelpPopover">
-            <div class="perf-help-popover-content">
-                ${isEn
-            ? '<b>Viewport Overload Trigger</b>: When enabled and visible columns exceed the threshold, the canvas enters a "Data Intensive State". It strictly limits DOM loading budgets to prevent lag, and allows Ctrl-zoom overrides (Note: entering low-detail color block mode below 50% is a baseline feature and is not governed by this toggle).'
-            : '<b>当前视野（视口）超载触发</b>：开启后，当视野内可见的栏目数超过阈值时，自动判定为<b>性能超载（数据密集）状态</b>，此时会严格限制 DOM 的虚拟化加载预算以防止卡顿，并允许通过 Ctrl 键缩放快速切换为色块（注：低于 50% 缩放比例时自动切换为色块属于常规基础功能，不受此开关限制）。'}
-            </div>
-        </div>
-        
-        <!-- 缩放阈值帮助弹层 -->
+        <!-- 自动触发的缩放比例帮助弹层 -->
         <div class="perf-help-popover" id="perfZoomHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Low-Detail Display Switch</b>: When enabled, cards automatically collapse into color blocks with large titles below this zoom level, reducing zoom/pan overhead.'
-            : '<b>低细节显示切换</b>：开启后，当画布缩放到此比例以下时，卡片内的书签列表会自动收起，简化为居中标题的大字色块，大幅减少缩放与平移时的渲染开销。'}
+            ? '<b>Auto-triggered Zoom Percentage</b>: When the zoom level drops below this threshold, cards automatically collapse into simple color blocks with centered titles, greatly reducing layout and painting overhead. You can use the link icon next to it to adjust the zoom magnet吸附 behaviors.'
+            : '<b>自动触发的缩放比例</b>：当缩放比例低于此设定值时，卡片会自动简化为居中标题的大字色块，以减少平移和缩放时的渲染开销。你可以点击旁边的链接图标跳转微调缩放磁矩（吸附）设置。'}
             </div>
         </div>
 
-        <!-- 总量触发帮助弹层 -->
-        <div class="perf-help-popover" id="perfTotalAlwaysHelpPopover">
+        <!-- 视野外低细节帮助弹层 -->
+        <div class="perf-help-popover" id="perfViewportLowDetailHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Global Totals Overload Trigger</b>: When enabled and total canvas data exceeds limits, automatically holds low-detail mode active below the zoom threshold to protect ultra-large canvas stability (Note: entering low-detail color block mode below 50% is a baseline feature and is not governed by this toggle).'
-            : '<b>全局数据总量超标触发</b>：开启后，当画布的总数据量超过设定值时，若缩放比例低于降级阈值则自动保持在色块降级状态，保护超大型画布的流畅与稳定（注：低于 50% 缩放比例时自动切换为色块属于常规基础功能，不受此开关限制）。'}
+            ? '<b>Outside Viewport -- Low-Detail Mode</b>: When enabled, columns outside the current viewport automatically stay in low-detail mode, reducing off-screen DOM overhead.'
+            : '<b>视野以外--低细节模式</b>：开启后，当前视口之外的栏目卡片会自动处于低细节（色块）状态，以减少视口外的 DOM 渲染开销，优化整体性能。'}
             </div>
         </div>
 
@@ -41775,8 +42132,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfVirtualizationHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Card Virtualization</b>: Dynamically loads visible/nearby column cards and unloads off-screen columns, drastically reducing DOM element count and memory footprint.'
-            : '<b>卡片虚拟化按需加载</b>：启用后，系统仅渲染视口中可见及附近的栏目，视口外较远的栏目将被动态卸载（回收其 DOM 元素），能成倍降低大型画布的内存占用与渲染耗时。'}
+            ? '<b>Outside Viewport -- Lazy Loading (Virtualization)</b>: Dynamically loads visible/nearby column cards and unloads off-screen columns, drastically reducing DOM element count and memory footprint.'
+            : '<b>视野以外--懒惰加载（虚拟化）</b>：启用后，系统仅渲染视口内可见及临近的栏目卡片，视口外较远（不可见）的栏目将被动态卸载（回收其树形 DOM 元素进行懒惰加载），能成倍降低大型画布的内存占用与重排耗时。'}
             </div>
         </div>
     `;
@@ -41795,36 +42152,11 @@ function createCanvasPerfSettingsModal() {
         };
     })();
 
-    const restoreBtn = modal.querySelector('#perfRestoreDefaultsBtn');
-    if (restoreBtn) restoreBtn.addEventListener('click', () => {
-        document.getElementById('perfInputVisSec').value = 12;
-        document.getElementById('perfInputVisBm').value = 150;
-        document.getElementById('perfInputAvg').value = 100;
-        schedulePerfSave();
-        try { updateCanvasPerfSettingsUI(); } catch (_) {}
-    });
-
-    const restoreTotalBtn = modal.querySelector('#perfRestoreTotalAlwaysDefaultsBtn');
-    if (restoreTotalBtn) restoreTotalBtn.addEventListener('click', () => {
-        const totalBm = document.getElementById('perfInputTotalAlwaysBm');
-        const totalFo = document.getElementById('perfInputTotalAlwaysFolder');
-        if (totalBm) totalBm.value = typeof CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT !== 'undefined' ? CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT : 3000;
-        if (totalFo) totalFo.value = typeof CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT !== 'undefined' ? CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT : 1000;
-        schedulePerfSave();
-        try { updateCanvasPerfSettingsUI(); } catch (_) {}
-    });
-
-
-
     // 帮助按钮弹层逻辑
-    const safeZoneHelpBtn = modal.querySelector('#perfSafeZoneHelpBtn');
-    const safeZoneHelpPopover = modal.querySelector('#perfSafeZoneHelpPopover');
-    const triggerHelpBtn = modal.querySelector('#perfTriggerHelpBtn');
-    const triggerHelpPopover = modal.querySelector('#perfTriggerHelpPopover');
+    const viewportLowDetailHelpBtn = modal.querySelector('#perfViewportLowDetailHelpBtn');
+    const viewportLowDetailHelpPopover = modal.querySelector('#perfViewportLowDetailHelpPopover');
     const zoomHelpBtn = modal.querySelector('#perfZoomHelpBtn');
     const zoomHelpPopover = modal.querySelector('#perfZoomHelpPopover');
-    const totalAlwaysHelpBtn = modal.querySelector('#perfTotalAlwaysHelpBtn');
-    const totalAlwaysHelpPopover = modal.querySelector('#perfTotalAlwaysHelpPopover');
     const sourceLowBtn = modal.querySelector('#perfSourceLowDetailBtn');
 
     const openOtherFromPerf = () => {
@@ -41878,10 +42210,8 @@ function createCanvasPerfSettingsModal() {
     const virtualizationHelpBtn = modal.querySelector('#perfVirtualizationHelpBtn');
     const virtualizationHelpPopover = modal.querySelector('#perfVirtualizationHelpPopover');
 
-    bindPerfHelpPopover(safeZoneHelpBtn, safeZoneHelpPopover);
-    bindPerfHelpPopover(triggerHelpBtn, triggerHelpPopover);
+    bindPerfHelpPopover(viewportLowDetailHelpBtn, viewportLowDetailHelpPopover);
     bindPerfHelpPopover(zoomHelpBtn, zoomHelpPopover);
-    bindPerfHelpPopover(totalAlwaysHelpBtn, totalAlwaysHelpPopover);
     bindPerfHelpPopover(virtualizationHelpBtn, virtualizationHelpPopover);
 
     if (sourceLowBtn) {
@@ -41898,25 +42228,20 @@ function createCanvasPerfSettingsModal() {
         }
     });
 
-
-
     const perfInputs = [
-        '#perfInputSafeZone',
-        '#perfInputVisSec',
-        '#perfInputVisBm',
-        '#perfInputAvg',
         '#perfInputExitLowDetail',
         '#perfInputEnterLowDetail',
-        '#perfInputTotalAlwaysBm',
-        '#perfInputTotalAlwaysFolder',
-        '#perfInputVirtualizationMinCols'
+        '#perfInputVirtualizationMinCols',
+        '#perfInputViewportLowDetailDelay',
+        '#perfInputViewportLowDetailMinLoadedNodes',
+        '#perfInputVirtualizationUnloadDelay'
     ];
     perfInputs.forEach(selector => {
         const el = modal.querySelector(selector);
         if (!el) return;
         el.addEventListener('input', schedulePerfSave);
         el.addEventListener('change', schedulePerfSave);
-        if (selector === '#perfInputEnterLowDetail' || selector === '#perfInputSafeZone') {
+        if (selector === '#perfInputEnterLowDetail') {
             el.addEventListener('input', () => {
                 updateCanvasPerfSettingsUI();
             });
@@ -41924,11 +42249,7 @@ function createCanvasPerfSettingsModal() {
     });
 
     const perfToggles = [
-        '#perfToggleSafeZone',
-        '#perfToggleDataIntensive',
-        '#perfToggleLowDetail',
-        '#perfToggleTotalAlways',
-        '#perfToggleVirtualization'
+        '#perfToggleLowDetail'
     ];
     perfToggles.forEach(selector => {
         const el = modal.querySelector(selector);
@@ -41939,52 +42260,57 @@ function createCanvasPerfSettingsModal() {
                 updateCanvasPerfSettingsUI();
             });
         }
-        if (selector === '#perfToggleVirtualization') {
-            el.addEventListener('change', () => {
-                if (el.checked) {
-                    try {
-                        const totals = __getCanvasTotalDataStatsSync();
-                        const currentTotalCols = (totals && typeof totals.totalColumnCount === 'number') ? totals.totalColumnCount : 0;
-                        const minColsInput = document.getElementById('perfInputVirtualizationMinCols');
-                        if (minColsInput) {
-                            const val = parseInt(minColsInput.value, 10);
-                            if (Number.isFinite(val) && currentTotalCols < val) {
-                                // 自动将最小栏目数下调到当前总栏目数（最少为 1）
-                                minColsInput.value = Math.max(1, currentTotalCols);
-                                CanvasState.virtualizationMinColumns = Math.max(1, currentTotalCols);
+    });
+
+    // 三态控件事件绑定
+    const triStateContainers = [
+        '#perfTriStateViewportLowDetail',
+        '#perfTriStateVirtualization'
+    ];
+    triStateContainers.forEach(selector => {
+        const container = modal.querySelector(selector);
+        if (!container) return;
+        container.querySelectorAll('button[data-value]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                __setTriStateValue(container, btn.getAttribute('data-value'));
+                schedulePerfSave();
+
+                if (selector === '#perfTriStateVirtualization') {
+                    const val = __getTriStateValue(container);
+                    if (val !== 'off') {
+                        try {
+                            const totals = __getCanvasTotalDataStatsSync();
+                            const currentTotalCols = (totals && typeof totals.totalColumnCount === 'number') ? totals.totalColumnCount : 0;
+                            const minColsInput = document.getElementById('perfInputVirtualizationMinCols');
+                            if (minColsInput) {
+                                const v = parseInt(minColsInput.value, 10);
+                                if (Number.isFinite(v) && currentTotalCols < v) {
+                                    minColsInput.value = Math.max(1, currentTotalCols);
+                                    CanvasState.virtualizationMinColumns = Math.max(1, currentTotalCols);
+                                }
                             }
-                        }
-                    } catch (_) {}
+                        } catch (_) {}
+                    }
                 }
+
                 updateCanvasPerfSettingsUI();
             });
-        }
+        });
     });
 }
 
 function restoreDefaultPerfSettings() {
-    restoreDefaultSafeZoneSettings();
-    restoreDefaultTriggerSettings();
     restoreDefaultZoomSettings();
     restoreDefaultZoomMagnetSettings();
+    restoreDefaultVirtualizationSettings();
 }
 
 function restoreDefaultSafeZoneSettings() {
-    // 默认安全区阈值：70%
-    const input = document.getElementById('perfInputSafeZone');
-    if (input) input.value = 70;
+    // Deprecated
 }
 
 function restoreDefaultTriggerSettings() {
-    document.getElementById('perfInputVisSec').value = 12;
-    // 默认可视书签阈值 150
-    document.getElementById('perfInputVisBm').value = 150;
-    // 默认可视文件夹阈值 100
-    document.getElementById('perfInputAvg').value = 100;
-    const totalBm = document.getElementById('perfInputTotalAlwaysBm');
-    const totalFo = document.getElementById('perfInputTotalAlwaysFolder');
-    if (totalBm) totalBm.value = CANVAS_TOTAL_ALWAYS_BOOKMARKS_DEFAULT;
-    if (totalFo) totalFo.value = CANVAS_TOTAL_ALWAYS_FOLDERS_DEFAULT;
+    // Deprecated
 }
 
 function restoreDefaultZoomSettings() {
@@ -41993,11 +42319,21 @@ function restoreDefaultZoomSettings() {
     const exitInput = document.getElementById('perfInputExitLowDetail');
     if (enterInput) enterInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.enterLowDetail);
     if (exitInput) exitInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.exitLowDetail);
+    const viewportDelay = document.getElementById('perfInputViewportLowDetailDelay');
+    if (viewportDelay) viewportDelay.value = 5.0;
+    // 三态控件恢复默认 'auto'
+    const triViewportLow = document.getElementById('perfTriStateViewportLowDetail');
+    if (triViewportLow && typeof __setTriStateValue === 'function') __setTriStateValue(triViewportLow, 'auto');
 }
 
 function restoreDefaultVirtualizationSettings() {
     const minCols = document.getElementById('perfInputVirtualizationMinCols');
     if (minCols) minCols.value = 25;
+    const unloadDelay = document.getElementById('perfInputVirtualizationUnloadDelay');
+    if (unloadDelay) unloadDelay.value = 10.0;
+    // 三态控件恢复默认 'auto'
+    const triVirt = document.getElementById('perfTriStateVirtualization');
+    if (triVirt && typeof __setTriStateValue === 'function') __setTriStateValue(triVirt, 'auto');
 }
 
 function restoreDefaultZoomMagnetSettings() {
