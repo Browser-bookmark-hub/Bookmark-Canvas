@@ -32631,6 +32631,7 @@ function setupTempSectionDropTargets(section, sectionElement, treeContainer, hea
     };
 
     const handleDrop = async (event) => {
+        window.__bookmarkDragDropHandled = true;
         if (!allowDrop()) return;
         event.preventDefault();
         clearHighlight();
@@ -32883,6 +32884,7 @@ function setupTempTreeNodeDropHandlers(treeItem, section, item) {
     });
 
     treeItem.addEventListener('drop', async (event) => {
+        window.__bookmarkDragDropHandled = true;
         if (!allowDrop()) return;
         if (item.type !== 'folder') return;
         event.preventDefault();
@@ -34837,6 +34839,7 @@ function setupPermanentDropTarget() {
         });
 
         permanentSection.addEventListener('drop', async (e) => {
+            window.__bookmarkDragDropHandled = true;
             if (!allowDrop()) return;
             e.preventDefault();
             clearHighlight();

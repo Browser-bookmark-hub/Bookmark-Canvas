@@ -427,6 +427,7 @@ function attachDragEvents(treeContainer) {
             permanentBody.addEventListener('drop', async (e) => {
                 const targetNode = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
                 if (targetNode) return;
+                window.__bookmarkDragDropHandled = true;
                 e.preventDefault();
                 e.stopPropagation();
                 hideDropIndicator();
@@ -470,6 +471,7 @@ function attachDragEvents(treeContainer) {
             tempBody.addEventListener('drop', async (e) => {
                 const targetNode = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
                 if (targetNode) return;
+                window.__bookmarkDragDropHandled = true;
                 e.preventDefault();
                 e.stopPropagation();
                 hideDropIndicator();
@@ -506,6 +508,17 @@ function attachDragEvents(treeContainer) {
 // 拖拽开始
 function handleDragStart(e) {
     if (e && e.defaultPrevented) return;
+    window.__bookmarkDragDropHandled = false;
+    window.__lastDragClientX = e.clientX;
+    window.__lastDragClientY = e.clientY;
+    const updateDragCoords = (ev) => {
+        if (ev.clientX !== 0 || ev.clientY !== 0) {
+            window.__lastDragClientX = ev.clientX;
+            window.__lastDragClientY = ev.clientY;
+        }
+    };
+    window.__updateDragCoords = updateDragCoords;
+    document.addEventListener('dragover', window.__updateDragCoords, { passive: true });
     draggedNode = e.currentTarget;
     draggedNodeId = draggedNode?.dataset?.nodeId;
     draggedNodeTreeType = draggedNode?.dataset?.treeType || 'permanent';
@@ -706,6 +719,7 @@ function handleDragLeave(e) {
 
 // 放下
 async function handleDrop(e) {
+    window.__bookmarkDragDropHandled = true;
     e.preventDefault();
     e.stopPropagation();
 
@@ -750,8 +764,8 @@ async function handleDragEnd(e) {
         draggedNode.classList.remove('dragging');
     }
 
-    const dropX = e.clientX;
-    const dropY = e.clientY;
+    const dropX = (window.__lastDragClientX !== undefined && window.__lastDragClientX !== 0) ? window.__lastDragClientX : e.clientX;
+    const dropY = (window.__lastDragClientY !== undefined && window.__lastDragClientY !== 0) ? window.__lastDragClientY : e.clientY;
 
     const workspace = document.getElementById('canvasWorkspace');
     if (workspace) {
@@ -776,7 +790,20 @@ async function handleDragEnd(e) {
                 });
             } catch (_) { }
 
-            if (!(insidePermanentDom || insidePermanentRect) && !insideTempNodeDom) {
+            let insideTempNodeRect = false;
+            try {
+                const canvasContent = document.getElementById('canvasContent');
+                const scope = canvasContent || document;
+                scope.querySelectorAll('.temp-canvas-node').forEach((sec) => {
+                    if (insideTempNodeRect) return;
+                    const tRect = sec.getBoundingClientRect();
+                    if (dropX >= tRect.left && dropX <= tRect.right && dropY >= tRect.top && dropY <= tRect.bottom) {
+                        insideTempNodeRect = true;
+                    }
+                });
+            } catch (_) { }
+
+            if (!window.__bookmarkDragDropHandled && !(insidePermanentDom || insidePermanentRect) && !(insideTempNodeDom || insideTempNodeRect)) {
                 const isDraggedNodeSelected = isBookmarkTreeBatchDragSelection(draggedNodeId);
                 if (isDraggedNodeSelected && typeof batchToTempSection === 'function') {
                     await batchToTempSection(e);
@@ -841,6 +868,11 @@ async function handleDragEnd(e) {
     draggedNodeNext = null;
     draggedNodeTreeType = 'permanent';
     draggedNodeSectionId = null;
+    window.__bookmarkDragDropHandled = false;
+    if (window.__updateDragCoords) {
+        document.removeEventListener('dragover', window.__updateDragCoords);
+        delete window.__updateDragCoords;
+    }
     if (typeof clearTreeItemDragging === 'function') {
         clearTreeItemDragging();
     }
