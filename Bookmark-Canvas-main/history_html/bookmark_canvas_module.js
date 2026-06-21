@@ -20323,6 +20323,21 @@ function savePermanentSectionPosition(sectionEl) {
             copies.push(payload);
         }
         __writePermanentSectionCopies(copies);
+
+        // Update in-memory layout state as well to prevent reverting/rebounding under low-detail/virtualization updates
+        if (!CanvasState.permanentLayout) {
+            CanvasState.permanentLayout = { main: null, copiesById: {} };
+        }
+        if (!CanvasState.permanentLayout.copiesById) {
+            CanvasState.permanentLayout.copiesById = {};
+        }
+        CanvasState.permanentLayout.copiesById[copyId] = __readPermanentViewCardStateFromDom(copyId);
+    } else {
+        // Main permanent section
+        if (!CanvasState.permanentLayout) {
+            CanvasState.permanentLayout = { main: null, copiesById: {} };
+        }
+        CanvasState.permanentLayout.main = __readPermanentViewCardStateFromDom(null);
     }
     // Canonical layout persistence is bcs:canvas node geometry.
     try {
