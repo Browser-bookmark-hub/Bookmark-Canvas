@@ -10302,7 +10302,7 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
                 let nextEl = treeContainer.querySelector(`.tree-item[data-node-id="${CSS.escape(String(nextId))}"]`);
                 let loadGuard = 0;
                 while (!nextEl && loadGuard < 60) {
-                    const loadMoreBtn = children.querySelector('button.tree-load-more');
+                    const loadMoreBtn = children.querySelector('.tree-load-more');
                     if (!loadMoreBtn) break;
                     const startIndex = parseInt(loadMoreBtn.dataset.startIndex, 10) || 0;
                     if (typeof loadPermanentFolderChildrenLazy === 'function') {

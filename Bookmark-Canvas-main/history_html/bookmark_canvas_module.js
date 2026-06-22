@@ -12378,7 +12378,7 @@ function __ensureTempSectionTreeLoadedInPlace(section) {
     return true;
 }
 
-function __buildTempSectionTreeFragment(section, treeContainer) {
+function __buildTempSectionTreeFragment(section, treeContainer, options = {}) {
     const fragment = document.createDocumentFragment();
     if (!section || !Array.isArray(section.items)) return fragment;
 
@@ -12388,7 +12388,7 @@ function __buildTempSectionTreeFragment(section, treeContainer) {
 
     initialItems.forEach((item) => {
         try {
-            const node = buildTempTreeNode(section, item, 0);
+            const node = buildTempTreeNode(section, item, 0, options);
             if (node) fragment.appendChild(node);
         } catch (_) { }
     });
@@ -12439,8 +12439,9 @@ function refreshTempSectionTreeInPlace(section, options = {}) {
         return true;
     }
 
+    const existingLoadedCounts = scanExpandedFolderCounts(treeContainer);
     try { treeContainer.innerHTML = ''; } catch (_) { }
-    try { treeContainer.appendChild(__buildTempSectionTreeFragment(section, treeContainer)); } catch (_) { }
+    try { treeContainer.appendChild(__buildTempSectionTreeFragment(section, treeContainer, { existingLoadedCounts })); } catch (_) { }
     try { treeContainer.style.display = ''; } catch (_) { }
     try { treeContainer.style.height = ''; } catch (_) { }
     try { treeContainer.dataset.contentHidden = 'false'; } catch (_) { }
@@ -30317,6 +30318,7 @@ function __renderTempNodeImpl(section, options = {}) {
         savedScrollLeft = typeof persisted.left === 'number' ? persisted.left : 0;
     }
 
+    let existingLoadedCounts = {};
     if (!nodeElement) {
         nodeElement = document.createElement('div');
         nodeElement.className = 'temp-canvas-node';
@@ -30332,6 +30334,7 @@ function __renderTempNodeImpl(section, options = {}) {
         nodeElement.style.height = (section.height || baseSize.height) + 'px';
     } else {
         // 更新时清空内容，但保持位置和大小不变
+        existingLoadedCounts = scanExpandedFolderCounts(nodeElement);
         nodeElement.innerHTML = '';
         nodeElement.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
         if (nodeElement.dataset) delete nodeElement.dataset.lowDetailHostGroupId;
@@ -31271,7 +31274,7 @@ function __renderTempNodeImpl(section, options = {}) {
             const initialItems = rootVisible >= total ? section.items : section.items.slice(0, rootVisible);
 
             initialItems.forEach(item => {
-                const node = buildTempTreeNode(section, item, 0);
+                const node = buildTempTreeNode(section, item, 0, { existingLoadedCounts });
                 if (node) treeFragment.appendChild(node);
             });
 
@@ -32156,6 +32159,25 @@ function loadTempExpandState() {
     }
 }
 
+function scanExpandedFolderCounts(container) {
+    const counts = {};
+    if (container) {
+        container.querySelectorAll('.tree-children.expanded').forEach(subContainer => {
+            const parentId = subContainer.dataset.parentItemId;
+            if (parentId) {
+                const count = subContainer.querySelectorAll(':scope > .tree-node').length;
+                const hasLoadMore = !!subContainer.querySelector(':scope > .tree-load-more') ||
+                                    !!subContainer.querySelector(':scope > .tree-lazy-actions-container .tree-load-more');
+                counts[parentId] = {
+                    count: count,
+                    fullyExpanded: !hasLoadMore
+                };
+            }
+        });
+    }
+    return counts;
+}
+
 function buildTempTreeNode(section, item, level, options = {}) {
     if (!item) return null;
 
@@ -32292,30 +32314,31 @@ function buildTempTreeNode(section, item, level, options = {}) {
         childrenContainer.dataset.parentItemId = item.id;
 
         if (hasChildren && isExpanded) {
-            // 渲染子节点，但限制初始渲染数量
-            const childrenToRender = lazyLoad && item.children.length > maxChildren
-                ? item.children.slice(0, maxChildren)
+            // 渲染子节点，优先使用已有展开项数记忆
+            const memory = options.existingLoadedCounts && options.existingLoadedCounts[item.id];
+            const isFullyExpanded = memory && memory.fullyExpanded;
+            const prevCount = memory ? memory.count : 0;
+            const currentLimit = isFullyExpanded
+                ? item.children.length
+                : (prevCount ? Math.max(maxChildren, prevCount) : maxChildren);
+
+            const childrenToRender = lazyLoad && item.children.length > currentLimit
+                ? item.children.slice(0, currentLimit)
                 : item.children;
 
             childrenToRender.forEach(child => {
-                const childNode = buildTempTreeNode(section, child, level + 1, { lazyLoad });
+                const childNode = buildTempTreeNode(section, child, level + 1, {
+                    lazyLoad,
+                    existingLoadedCounts: options.existingLoadedCounts
+                });
                 if (childNode) childrenContainer.appendChild(childNode);
             });
 
-            // 如果有更多子节点未渲染，添加"加载更多"按钮
-            if (lazyLoad && item.children.length > maxChildren) {
-                const loadMoreBtn = document.createElement('div');
-                loadMoreBtn.className = 'tree-load-more';
-                loadMoreBtn.dataset.sectionId = section.id;
-                loadMoreBtn.dataset.parentItemId = item.id;
-                loadMoreBtn.dataset.startIndex = String(maxChildren);
-                const remaining = item.children.length - maxChildren;
-                const willLoad = Math.min(maxChildren, remaining);
-                const { isEn } = __getLang();
-                loadMoreBtn.innerHTML = isEn
-                    ? `<i class="fas fa-ellipsis-h"></i> <span>Load more (+${willLoad}, ${remaining} remaining)</span>`
-                    : `<i class="fas fa-ellipsis-h"></i> <span>加载更多（+${willLoad}，剩余${remaining}）</span>`;
-                childrenContainer.appendChild(loadMoreBtn);
+            if (lazyLoad) {
+                const lazyActions = createTempFolderLazyActions(section, item, currentLimit);
+                if (lazyActions) {
+                    childrenContainer.appendChild(lazyActions);
+                }
             }
         }
 
@@ -32372,19 +32395,9 @@ function loadFolderChildren(section, parentItemId, childrenContainer) {
             }
         }
 
-        if (total > endIndex) {
-            const remaining = total - endIndex;
-            const willLoad = Math.min(maxChildren, remaining);
-            const { isEn } = __getLang();
-            const loadMoreBtn = document.createElement('div');
-            loadMoreBtn.className = 'tree-load-more';
-            loadMoreBtn.dataset.sectionId = section.id;
-            loadMoreBtn.dataset.parentItemId = parentItemId;
-            loadMoreBtn.dataset.startIndex = String(endIndex);
-            loadMoreBtn.innerHTML = isEn
-                ? `<i class="fas fa-ellipsis-h"></i> <span>Load more (+${willLoad}, ${remaining} remaining)</span>`
-                : `<i class="fas fa-ellipsis-h"></i> <span>加载更多（+${willLoad}，剩余${remaining}）</span>`;
-            fragment.appendChild(loadMoreBtn);
+        const lazyActions = createTempFolderLazyActions(section, item, endIndex);
+        if (lazyActions) {
+            fragment.appendChild(lazyActions);
         }
 
         childrenContainer.appendChild(fragment);
@@ -32411,6 +32424,79 @@ function loadFolderChildren(section, parentItemId, childrenContainer) {
     }
 }
 
+// 创建临时栏目的懒加载操作按钮组
+function createTempFolderLazyActions(section, item, currentLimit) {
+    const maxChildren = Math.max(1, getTempTreeMaxInitialChildren());
+    const hasMore = item.children && item.children.length > currentLimit;
+    const canCollapse = currentLimit > maxChildren;
+
+    if (!hasMore && !canCollapse) return null;
+
+    const btnContainer = document.createElement('div');
+    btnContainer.className = 'tree-lazy-actions-container';
+    btnContainer.style.display = 'flex';
+    btnContainer.style.flexWrap = 'wrap';
+    btnContainer.style.gap = '6px';
+    btnContainer.style.margin = '6px 0 6px 20px';
+
+    if (hasMore) {
+        const remaining = item.children.length - currentLimit;
+        const willLoad = Math.min(maxChildren, remaining);
+        const { isEn } = __getLang();
+
+        // 剩余数量标签置于最左边
+        const infoSpan = document.createElement('span');
+        infoSpan.className = 'tree-lazy-remaining-info';
+        infoSpan.style.display = 'inline-flex';
+        infoSpan.style.alignItems = 'center';
+        infoSpan.style.fontSize = '12px';
+        infoSpan.style.color = 'var(--text-secondary, #6b7280)';
+        infoSpan.style.marginRight = '2px';
+        infoSpan.style.userSelect = 'none';
+        infoSpan.textContent = isEn ? `(${remaining} left)` : `(剩 ${remaining})`;
+        btnContainer.appendChild(infoSpan);
+
+        const loadMoreBtn = document.createElement('div');
+        loadMoreBtn.className = 'tree-load-more';
+        loadMoreBtn.style.margin = '0';
+        loadMoreBtn.style.flex = '1 1 auto';
+        loadMoreBtn.dataset.sectionId = section.id;
+        loadMoreBtn.dataset.parentItemId = item.id;
+        loadMoreBtn.dataset.startIndex = String(currentLimit);
+        loadMoreBtn.innerHTML = isEn
+            ? `<i class="fas fa-plus"></i> <span>Load +${willLoad}</span>`
+            : `<i class="fas fa-plus"></i> <span>展开 20 项</span>`;
+        btnContainer.appendChild(loadMoreBtn);
+
+        const loadAllBtn = document.createElement('div');
+        loadAllBtn.className = 'tree-load-all';
+        loadAllBtn.style.margin = '0';
+        loadAllBtn.style.flex = '1 1 auto';
+        loadAllBtn.dataset.sectionId = section.id;
+        loadAllBtn.dataset.parentItemId = item.id;
+        loadAllBtn.innerHTML = isEn
+            ? `<i class="fas fa-expand-arrows-alt"></i> <span>Expand all</span>`
+            : `<i class="fas fa-expand-arrows-alt"></i> <span>全部展开</span>`;
+        btnContainer.appendChild(loadAllBtn);
+    }
+
+    if (canCollapse) {
+        const { isEn } = __getLang();
+        const loadLessBtn = document.createElement('div');
+        loadLessBtn.className = 'tree-load-less';
+        loadLessBtn.style.margin = '0';
+        loadLessBtn.style.flex = '1 1 auto';
+        loadLessBtn.dataset.sectionId = section.id;
+        loadLessBtn.dataset.parentItemId = item.id;
+        loadLessBtn.innerHTML = isEn
+            ? `<i class="fas fa-compress-alt"></i> <span>Collapse</span>`
+            : `<i class="fas fa-compress-alt"></i> <span>收起已加载</span>`;
+        btnContainer.appendChild(loadLessBtn);
+    }
+
+    return btnContainer;
+}
+
 // 加载更多子节点
 function loadMoreChildren(section, parentItemId, startIndex, loadMoreBtn) {
     try {
@@ -32426,7 +32512,7 @@ function loadMoreChildren(section, parentItemId, startIndex, loadMoreBtn) {
         // 低细节/休眠状态下不加载，避免无意义创建 DOM
         if (CanvasState.lowDetailActive || section.dormant) return false;
 
-        const childrenContainer = loadMoreBtn.parentElement;
+        const childrenContainer = loadMoreBtn.closest('.tree-children');
         if (!childrenContainer) {
             return false;
         }
@@ -32434,7 +32520,8 @@ function loadMoreChildren(section, parentItemId, startIndex, loadMoreBtn) {
         const total = itemEntry.item.children.length;
         const safeStart = Number.isFinite(startIndex) ? startIndex : parseInt(loadMoreBtn.dataset.startIndex, 10) || 0;
         if (safeStart >= total) {
-            loadMoreBtn.remove();
+            const container = loadMoreBtn.closest('.tree-lazy-actions-container') || loadMoreBtn;
+            container.remove();
             return true;
         }
 
@@ -32456,18 +32543,18 @@ function loadMoreChildren(section, parentItemId, startIndex, loadMoreBtn) {
             }
         }
 
-        childrenContainer.insertBefore(fragment, loadMoreBtn);
+        // 移除旧的操作按钮容器
+        const oldActions = childrenContainer.querySelector('.tree-lazy-actions-container');
+        if (oldActions) {
+            oldActions.remove();
+        }
 
-        const remaining = total - endIndex;
-        if (remaining <= 0) {
-            loadMoreBtn.remove();
-        } else {
-            loadMoreBtn.dataset.startIndex = String(endIndex);
-            const willLoad = Math.min(maxChildren, remaining);
-            const { isEn } = __getLang();
-            loadMoreBtn.innerHTML = isEn
-                ? `<i class="fas fa-ellipsis-h"></i> <span>Load more (+${willLoad}, ${remaining} remaining)</span>`
-                : `<i class="fas fa-ellipsis-h"></i> <span>加载更多（+${willLoad}，剩余${remaining}）</span>`;
+        childrenContainer.appendChild(fragment);
+
+        // 附加更新后的操作按钮容器
+        const lazyActions = createTempFolderLazyActions(section, itemEntry.item, endIndex);
+        if (lazyActions) {
+            childrenContainer.appendChild(lazyActions);
         }
 
         if (typeof attachDragEvents === 'function') {
@@ -32483,6 +32570,115 @@ function loadMoreChildren(section, parentItemId, startIndex, loadMoreBtn) {
 
         return true;
     } catch (error) {
+        return false;
+    }
+}
+
+// 全部展开子节点
+function loadAllChildren(section, parentItemId, loadAllBtn) {
+    try {
+        if (!section || !parentItemId || !loadAllBtn) return false;
+
+        const itemEntry = findTempItemEntry(section.id, parentItemId);
+        if (!itemEntry || !itemEntry.item || !itemEntry.item.children) return false;
+
+        if (CanvasState.lowDetailActive || section.dormant) return false;
+
+        const childrenContainer = loadAllBtn.closest('.tree-children');
+        if (!childrenContainer) return false;
+
+        const total = itemEntry.item.children.length;
+        const currentCount = childrenContainer.querySelectorAll(':scope > .tree-node').length;
+
+        const fragment = document.createDocumentFragment();
+        const parentTreeItem = childrenContainer.previousElementSibling;
+        const parentLevel = parentTreeItem ? parseInt(parentTreeItem.dataset.level, 10) : NaN;
+        const childLevel = Number.isFinite(parentLevel) ? parentLevel + 1 : 1;
+
+        for (let i = currentCount; i < total; i++) {
+            const child = itemEntry.item.children[i];
+            try {
+                const childNode = buildTempTreeNode(section, child, childLevel, { lazyLoad: true });
+                if (childNode) fragment.appendChild(childNode);
+            } catch (_) { }
+        }
+
+        // 移除旧的操作按钮容器
+        const oldActions = childrenContainer.querySelector('.tree-lazy-actions-container');
+        if (oldActions) {
+            oldActions.remove();
+        }
+
+        childrenContainer.appendChild(fragment);
+
+        // 附加更新后的操作按钮容器（由于全展开，此时只会渲染收起按钮）
+        const lazyActions = createTempFolderLazyActions(section, itemEntry.item, total);
+        if (lazyActions) {
+            childrenContainer.appendChild(lazyActions);
+        }
+
+        if (typeof attachDragEvents === 'function') {
+            try { attachDragEvents(childrenContainer); } catch (_) { }
+        }
+        if (typeof attachPointerDragEvents === 'function') {
+            try { attachPointerDragEvents(childrenContainer); } catch (_) { }
+        }
+
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+// 收起已加载项到初始大小
+function collapseFolderChildren(section, parentItemId, childrenContainer) {
+    try {
+        if (!section || !parentItemId || !childrenContainer) return false;
+
+        const itemEntry = findTempItemEntry(section.id, parentItemId);
+        if (!itemEntry || !itemEntry.item || !itemEntry.item.children) return false;
+
+        const item = itemEntry.item;
+        const total = item.children.length;
+        const maxChildren = Math.max(1, getTempTreeMaxInitialChildren());
+
+        // 清空并重新渲染子节点，恢复到初始 maxChildren 限制
+        childrenContainer.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        const parentTreeItem = childrenContainer.previousElementSibling;
+        const parentLevel = parentTreeItem ? parseInt(parentTreeItem.dataset.level, 10) : NaN;
+        const childLevel = Number.isFinite(parentLevel) ? parentLevel + 1 : 1;
+
+        for (let i = 0; i < Math.min(total, maxChildren); i++) {
+            const child = item.children[i];
+            try {
+                const childNode = buildTempTreeNode(section, child, childLevel, { lazyLoad: true });
+                if (childNode) fragment.appendChild(childNode);
+            } catch (_) { }
+        }
+
+        // 附加初始操作按钮容器
+        const lazyActions = createTempFolderLazyActions(section, item, maxChildren);
+        if (lazyActions) {
+            fragment.appendChild(lazyActions);
+        }
+
+        childrenContainer.appendChild(fragment);
+
+        // 更新父节点状态
+        if (parentTreeItem) {
+            parentTreeItem.dataset.childrenLoaded = 'true';
+        }
+
+        if (typeof attachDragEvents === 'function') {
+            try { attachDragEvents(childrenContainer); } catch (_) { }
+        }
+        if (typeof attachPointerDragEvents === 'function') {
+            try { attachPointerDragEvents(childrenContainer); } catch (_) { }
+        }
+
+        return true;
+    } catch (e) {
         return false;
     }
 }
@@ -32520,6 +32716,89 @@ function setupTempSectionTreeInteractions(treeContainer, section) {
             return;
         }
 
+        // 处理"收起已加载"按钮点击
+        const loadLessBtn = e.target.closest('.tree-load-less');
+        if (loadLessBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const parentItemId = loadLessBtn.dataset.parentItemId;
+            const childrenContainer = loadLessBtn.closest('.tree-children');
+            if (childrenContainer) {
+                // Lock height to prevent layout collapse and scroll shift
+                const oldHeight = childrenContainer.offsetHeight;
+                childrenContainer.style.height = oldHeight + 'px';
+
+                collapseFolderChildren(section, parentItemId, childrenContainer);
+
+                const lazyActions = childrenContainer.querySelector('.tree-lazy-actions-container');
+                if (lazyActions) {
+                    try {
+                        const container = lazyActions.closest('.permanent-section-body, .temp-node-body');
+                        if (container) {
+                            const containerRect = container.getBoundingClientRect();
+                            const targetRect = lazyActions.getBoundingClientRect();
+                            const targetCenterInViewport = (targetRect.top + targetRect.bottom) / 2 - containerRect.top;
+                            const containerCenter = containerRect.height / 2;
+                            const zoom = (CanvasState && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+                            const dScroll = (targetCenterInViewport - containerCenter) / zoom;
+                            const targetScrollTop = container.scrollTop + dScroll;
+
+                            // Unlock height
+                            childrenContainer.style.height = '';
+
+                            const maxScrollTop = container.scrollHeight - container.clientHeight;
+                            const clampedScrollTop = Math.max(0, Math.min(targetScrollTop, maxScrollTop));
+                            container.scrollTop = clampedScrollTop;
+                        } else {
+                            childrenContainer.style.height = '';
+                        }
+                    } catch (_) {
+                        childrenContainer.style.height = '';
+                    }
+                } else {
+                    const parentTreeItem = childrenContainer.previousElementSibling;
+                    if (parentTreeItem) {
+                        try {
+                            const container = childrenContainer.closest('.permanent-section-body, .temp-node-body');
+                            if (container) {
+                                const containerRect = container.getBoundingClientRect();
+                                const targetRect = parentTreeItem.getBoundingClientRect();
+                                const zoom = (CanvasState && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+                                const dScroll = (targetRect.top - containerRect.top - 10) / zoom;
+                                const targetScrollTop = container.scrollTop + dScroll;
+
+                                // Unlock height
+                                childrenContainer.style.height = '';
+
+                                const maxScrollTop = container.scrollHeight - container.clientHeight;
+                                const clampedScrollTop = Math.max(0, Math.min(targetScrollTop, maxScrollTop));
+                                container.scrollTop = clampedScrollTop;
+                            } else {
+                                childrenContainer.style.height = '';
+                                parentTreeItem.scrollIntoView({ block: 'start', behavior: 'auto' });
+                            }
+                        } catch (_) {
+                            childrenContainer.style.height = '';
+                            try { parentTreeItem.scrollIntoView({ block: 'start', behavior: 'auto' }); } catch (_) {}
+                        }
+                    } else {
+                        childrenContainer.style.height = '';
+                    }
+                }
+            }
+            return;
+        }
+
+        // 处理"全部展开"按钮点击
+        const loadAllBtn = e.target.closest('.tree-load-all');
+        if (loadAllBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const parentItemId = loadAllBtn.dataset.parentItemId;
+            loadAllChildren(section, parentItemId, loadAllBtn);
+            return;
+        }
+
         // 处理文件夹展开/折叠
         const treeItem = e.target.closest('.tree-item');
         if (!treeItem) return;
@@ -32552,19 +32831,36 @@ function setupTempSectionTreeInteractions(treeContainer, section) {
             LAZY_LOAD_THRESHOLD.collapsedFolders.add(folderId);
             saveTempExpandState();
 
-            // 15秒防抖延迟卸载子 DOM，防止误触或高频折叠展开带来的重绘开销
-            if (childrenContainer.__unloadTimer__) {
-                clearTimeout(childrenContainer.__unloadTimer__);
-            }
-            childrenContainer.__unloadTimer__ = setTimeout(() => {
-                childrenContainer.__unloadTimer__ = null;
-                // 确保确实处于折叠状态且该容器仍在 DOM 中（未被整卡刷新销毁）
-                if (!childrenContainer.classList.contains('expanded') && document.body.contains(childrenContainer)) {
-                    childrenContainer.innerHTML = '';
-                    treeItem.dataset.childrenLoaded = 'false';
-                    ;
+            // 如果当前渲染的数量大于 maxChildren，立刻卸载以重置状态并释放内存
+            const maxChildren = Math.max(1, getTempTreeMaxInitialChildren());
+            const childCount = childrenContainer.querySelectorAll(':scope > .tree-node').length;
+            if (childCount > maxChildren) {
+                if (childrenContainer.__unloadTimer__) {
+                    clearTimeout(childrenContainer.__unloadTimer__);
+                    childrenContainer.__unloadTimer__ = null;
                 }
-            }, 15000);
+                childrenContainer.innerHTML = '';
+                treeItem.dataset.childrenLoaded = 'false';
+            } else {
+                // 15秒防抖延迟卸载子 DOM，防止误触或高频折叠展开带来的重绘开销
+                if (childrenContainer.__unloadTimer__) {
+                    clearTimeout(childrenContainer.__unloadTimer__);
+                }
+                childrenContainer.__unloadTimer__ = setTimeout(() => {
+                    childrenContainer.__unloadTimer__ = null;
+                    // 确保确实处于折叠状态且该容器仍在 DOM 中（未被整卡刷新销毁）
+                    if (!childrenContainer.classList.contains('expanded') && document.body.contains(childrenContainer)) {
+                        childrenContainer.innerHTML = '';
+                        treeItem.dataset.childrenLoaded = 'false';
+                    }
+                }, 15000);
+            }
+            // 【滚动定位】折叠文件夹后，将滚动条定位到该文件夹头部
+            if (treeItem) {
+                try {
+                    treeItem.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                } catch (_) {}
+            }
         } else {
             // 展开
             // 如果存在等待中的卸载定时器，立刻取消，直接复用已有 DOM
