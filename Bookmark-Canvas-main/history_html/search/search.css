@@ -1484,8 +1484,8 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 
 /* ==================== 画布元素高亮样式 ==================== */
 .canvas-search-highlight {
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.6),
-        0 0 20px rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 0 2.5px var(--search-highlight-color, rgba(59, 130, 246, 0.85)),
+        0 0 10px var(--search-highlight-color, rgba(59, 130, 246, 0.3)) !important;
     z-index: 1000 !important;
     position: relative;
 }
@@ -1569,25 +1569,22 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 
 /* ==================== 栏目/卡片高亮动画 ==================== */
 .canvas-search-highlight {
-    /* [Modified] Dynamic Box Shadow */
-    box-shadow: 0 0 0 4px var(--search-highlight-color, rgba(59, 130, 246, 0.5)),
-        0 0 20px var(--search-highlight-color, rgba(59, 130, 246, 0.3)) !important;
-    animation: canvas-node-pulse 2s ease-in-out 3;
-    z-index: 999;
+    box-shadow: 0 0 0 3px var(--search-highlight-color, rgba(59, 130, 246, 0.85)),
+        0 0 12px var(--search-highlight-color, rgba(59, 130, 246, 0.4)) !important;
+    animation: canvas-node-pulse 1s ease-in-out 2;
+    z-index: 1000 !important;
 }
 
 @keyframes canvas-node-pulse {
-
     0%,
     100% {
-        transform: scale(1);
-        box-shadow: 0 0 0 4px var(--search-highlight-color, rgba(59, 130, 246, 0.5));
+        box-shadow: 0 0 0 3px var(--search-highlight-color, rgba(59, 130, 246, 0.85)),
+            0 0 12px var(--search-highlight-color, rgba(59, 130, 246, 0.4)) !important;
     }
 
     50% {
-        transform: scale(1.02);
-        box-shadow: 0 0 0 8px var(--search-highlight-color, rgba(59, 130, 246, 0.8)),
-            0 0 30px var(--search-highlight-color, rgba(59, 130, 246, 0.5));
+        box-shadow: 0 0 0 4.5px var(--search-highlight-color, rgba(59, 130, 246, 0.95)),
+            0 0 18px var(--search-highlight-color, rgba(59, 130, 246, 0.55)) !important;
     }
 }
 

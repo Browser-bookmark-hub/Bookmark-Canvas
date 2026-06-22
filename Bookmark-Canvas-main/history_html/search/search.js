@@ -1257,7 +1257,7 @@ function handleSearchResultsPanelClick(e) {
 
         // Default options
         const opts = {
-            color: item.color || '#3b82f6',
+            color: item.color || '#2563eb',
             expandTargetFolder: shouldExpandSearchLocateTargetFolder(item)
         };
 
@@ -6107,7 +6107,7 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
             let locationName = '';
 
             // Calculate Location Badge (Reuse Card Logic)
-            let color = item.color || '#3b82f6'; // Default
+            let color = item.color || '#2563eb'; // Default
 
             if (isPerm) {
                 // Permanent
@@ -8023,7 +8023,7 @@ function renderCanvasSearchResults(results, options = {}) {
         return '#?';
     };
     const renderBookmarkLocationInlineChip = (contentHtml, color, titleText = '') => {
-        const rawColor = String(color || '#3b82f6').trim() || '#3b82f6';
+        const rawColor = String(color || '#2563eb').trim() || '#2563eb';
         const safeColor = escapeHtml(rawColor);
         const safeTitle = String(titleText || contentHtml || '')
             .replace(/<[^>]*>/g, ' ')
@@ -8594,7 +8594,7 @@ function renderCanvasSearchResults(results, options = {}) {
                         const tempLabel = `<span class="canvas-bookmark-location-label">${isZh ? '临时栏目' : 'Temporary'}:</span>`;
 
                         const tempBadges = temps.map(loc => {
-                            const color = loc.color || '#3b82f6';
+                            const color = loc.color || '#2563eb';
                             const seq = loc.label ? String(loc.label).trim() : '';
                             const rawTitle = String(loc.title || '').trim();
                             const htmlTitle = escapeHtml(rawTitle);
@@ -8723,7 +8723,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 if (!disableLocationJumpBadges && item.source === 'temporary' && item.sectionId && !item.domainChild) {
                     const sectionName = item.sectionLabel || item.sectionTitle || (isZh ? '临时' : 'Temp');
                     // Style: mimic permanent interactive badge but allow colored border
-                    const sectionColor = item.color || '#3b82f6';
+                    const sectionColor = item.color || '#2563eb';
                     // Utilize the same robust style
                     const chipCursor = disableLocationJumpBadges ? 'default' : 'pointer';
                     const chipClass = disableLocationJumpBadges
@@ -9715,7 +9715,7 @@ function clearSearchTreeItemOutline() {
     } catch (_) { }
 }
 
-function highlightSearchTreeItemOutline(treeItem, color = '#3b82f6', doClear = true) {
+function highlightSearchTreeItemOutline(treeItem, color = '#2563eb', doClear = true) {
     if (!treeItem) return;
     try {
         if (doClear) clearSearchTreeItemOutline();
@@ -10131,7 +10131,7 @@ async function ensureCanvasSearchResultTargetFullscreen(item) {
     if (!target) {
         try {
             await locateCanvasElement(item.id, item.type, {
-                color: item.color || '#3b82f6',
+                color: item.color || '#2563eb',
                 disableAnimation: true
             });
         } catch (_) { }
@@ -10337,11 +10337,11 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     };
     const settledPermanentTarget = await finalizeTreeItemCentering(treeContainer, resolvePermanentTarget, locateToken);
     if (shouldOutlineTarget) {
-        highlightSearchTreeItemOutline(settledPermanentTarget || target, options.color || '#3b82f6');
+        highlightSearchTreeItemOutline(settledPermanentTarget || target, options.color || '#2563eb');
     }
 
     if (shouldOutlineTarget) {
-        const permanentHighlightColor = options.color || '#3b82f6';
+        const permanentHighlightColor = options.color || '#2563eb';
         setTimeout(() => {
             if (locateToken !== searchTreeItemLocateCenterToken) return;
             const freshTarget = resolvePermanentTarget();
@@ -10364,7 +10364,7 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
     try {
         if (typeof currentView !== 'undefined' && currentView === 'canvas') {
             if (!isMaximizedTempSectionActive(sid)) {
-                await locateCanvasElement(sid, 'temp-section', { color: options.color || '#3b82f6' });
+                await locateCanvasElement(sid, 'temp-section', { color: options.color || '#2563eb' });
                 await waitForSearchLocateAnimationFrames(2);
             }
         }
@@ -10496,13 +10496,13 @@ async function locateBookmarkItemInTempTree(sectionId, itemId, options = {}) {
     };
     const settledTempTarget = await finalizeTreeItemCentering(treeContainer, resolveTempTarget, locateToken);
     if (shouldOutlineTarget) {
-        highlightSearchTreeItemOutline(settledTempTarget || target, options.color || '#3b82f6');
+        highlightSearchTreeItemOutline(settledTempTarget || target, options.color || '#2563eb');
     }
 
     if (shouldOutlineTarget) {
         // [Fix] Retry highlight to combat potential re-renders (anti-flash)
         // Re-query the container to ensure we are highlighting the FRESH DOM element
-        const highlightColor = options.color || '#3b82f6';
+        const highlightColor = options.color || '#2563eb';
         const retry = (delay) => {
             setTimeout(() => {
                 if (locateToken !== searchTreeItemLocateCenterToken) return;
@@ -10532,7 +10532,7 @@ async function locateCanvasBookmarkItem(item) {
     const expandTargetFolder = shouldExpandSearchLocateTargetFolder(item);
     if (item.source === 'temporary' && item.sectionId) {
         return locateBookmarkItemInTempTree(item.sectionId, item.id, {
-            color: item.color || '#3b82f6',
+            color: item.color || '#2563eb',
             expandTargetFolder
         });
     }
@@ -10541,7 +10541,7 @@ async function locateCanvasBookmarkItem(item) {
         ? String(fullscreenScope.copyId || '').trim()
         : '';
     return locateBookmarkItemInPermanentTree(item.id, {
-        color: item.color || '#3b82f6',
+        color: item.color || '#2563eb',
         copyId: item.copyId || activePermanentCopyId || null,
         expandTargetFolder
     });
@@ -10550,7 +10550,7 @@ async function locateCanvasBookmarkItem(item) {
 async function locateCanvasBookmarkTreeItem(target) {
     if (!target || typeof target !== 'object') return false;
     const source = String(target.source || '').trim();
-    const color = target.color || '#3b82f6';
+    const color = target.color || '#2563eb';
     const expandTargetFolder = target.expandTargetFolder !== false;
     const suppressOutline = target.suppressOutline === true;
 
@@ -10583,7 +10583,7 @@ async function locateCanvasElement(elementId, type, options = {}) {
     let highlightSelector = null; // 用于查找 DOM 元素的高亮选择器
 
     // [New] Dynamic Highlight Color
-    const highlightColor = options.color || '#3b82f6';
+    const highlightColor = options.color || '#2563eb';
     const disableAnimation = options.disableAnimation === true;
 
     // Helper: 获取节点/栏目矩形 (从 Storage)
@@ -10902,7 +10902,7 @@ function highlightCanvasElement(element, type) {
     element.classList.add('canvas-search-highlight');
     element.classList.add('canvas-search-highlight-pulse');
 
-    // 动画结束后移除所有高亮类 (1.6s 动画 + buffer)
+    // 动画结束后移除所有高亮类 (2s 动画 + buffer)
     setTimeout(() => {
         try {
             element.classList.remove('canvas-search-highlight-pulse');
@@ -10913,7 +10913,7 @@ function highlightCanvasElement(element, type) {
                 canvasSearchHighlightState.highlightedIds.splice(idx, 1);
             }
         } catch (_) { }
-    }, 1800);
+    }, 2200);
 }
 
 /**
@@ -11007,7 +11007,7 @@ async function activateCanvasSearchResultAtIndex(index) {
 
             const loc = pickBestBookmarkLocationByScope(locations, getCanvasFullscreenSearchScope()) || locations[0];
             const opts = {
-                color: loc.color || item.color || '#3b82f6',
+                color: loc.color || item.color || '#2563eb',
                 expandTargetFolder: shouldExpandSearchLocateTargetFolder(loc || item)
             };
             if (loc.copyId) opts.copyId = loc.copyId;
