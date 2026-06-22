@@ -6028,11 +6028,11 @@ function getTempPasteTarget(context, pasteBelow = false) {
     } else {
         // 如果是书签，或者是选择粘贴到文件夹下方，粘贴到该节点的下面
         const entry = manager.findItem(sectionId, context.nodeId);
-        if (entry && entry.parent) {
-            parentId = entry.parent.id || null;
+        if (entry) {
+            parentId = entry.parent ? (entry.parent.id || null) : null;
             index = entry.index + 1; // 插入到当前节点的下一个位置
         } else {
-            // 如果找不到父节点，粘贴到根目录
+            // 如果找不到节点，粘贴到根目录
             parentId = null;
             index = null;
         }
@@ -9783,9 +9783,15 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
         } else {
             // 如果目标是书签，或者粘贴到该文件夹下方，获取其父文件夹ID及索引
             const nodes = await chrome.bookmarks.get(targetNodeId);
-            if (nodes && nodes[0] && nodes[0].parentId) {
-                targetFolderId = nodes[0].parentId;
-                insertIndex = typeof nodes[0].index === 'number' ? nodes[0].index + 1 : undefined;
+            if (nodes && nodes[0]) {
+                if (nodes[0].parentId && nodes[0].parentId !== '0') {
+                    targetFolderId = nodes[0].parentId;
+                    insertIndex = typeof nodes[0].index === 'number' ? nodes[0].index + 1 : undefined;
+                } else {
+                    // 如果父文件夹为 '0'，表示目标是根文件夹（如书签栏本身），无法在其下方粘贴，降级为粘贴到其内部
+                    targetFolderId = targetNodeId;
+                    insertIndex = undefined;
+                }
             } else {
                 throw new Error('无法找到父文件夹');
             }
