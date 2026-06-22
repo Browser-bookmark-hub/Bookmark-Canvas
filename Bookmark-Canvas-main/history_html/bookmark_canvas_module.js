@@ -9623,6 +9623,14 @@ function applyCanvasContentTransform(content, panX, panY, scale) {
             refreshMaximizedNodes();
         }
     } catch (_) { }
+
+    // 解决在拖拽临时组（框选元素）时进行滚轮滚动，导致元素与鼠标吸附不稳定的问题
+    if (window.__BCSLassoTempGroup && 
+        typeof window.__BCSLassoTempGroup.isDragging === 'function' && 
+        window.__BCSLassoTempGroup.isDragging() && 
+        typeof window.__BCSLassoTempGroup.updateDragPositionForScroll === 'function') {
+        window.__BCSLassoTempGroup.updateDragPositionForScroll();
+    }
 }
 
 function __forceCanvasViewportVisualSync(options = {}) {
