@@ -5073,8 +5073,9 @@ async function resolveBookmarkNode(data, options = {}) {
         throw new Error('拖拽数据缺少ID');
     }
 
-    if (browserAPI && browserAPI.bookmarks && browserAPI.bookmarks.getSubTree) {
-        const nodes = await browserAPI.bookmarks.getSubTree(targetId);
+    const api = (typeof browserAPI !== 'undefined' && browserAPI) ? browserAPI : (typeof chrome !== 'undefined' ? chrome : (typeof browser !== 'undefined' ? browser : null));
+    if (api && api.bookmarks && api.bookmarks.getSubTree) {
+        const nodes = await api.bookmarks.getSubTree(targetId);
         if (nodes && nodes.length > 0) {
             return cloneBookmarkNode(nodes[0]);
         }
@@ -6437,7 +6438,8 @@ async function handleBrowserBookmarkDrop(e) {
  * 获取书签的完整路径字符串（从根到父文件夹）
  */
 async function getBookmarkPathString(folderId) {
-    if (!browserAPI || !browserAPI.bookmarks || !folderId) return '';
+    const api = (typeof browserAPI !== 'undefined' && browserAPI) ? browserAPI : (typeof chrome !== 'undefined' ? chrome : (typeof browser !== 'undefined' ? browser : null));
+    if (!api || !api.bookmarks || !folderId) return '';
 
     try {
         const pathParts = [];
@@ -6445,7 +6447,7 @@ async function getBookmarkPathString(folderId) {
 
         // 向上遍历获取路径
         while (currentId && currentId !== '0') {
-            const nodes = await browserAPI.bookmarks.get(currentId);
+            const nodes = await api.bookmarks.get(currentId);
             if (!nodes || !nodes[0]) break;
 
             const node = nodes[0];
@@ -6477,9 +6479,10 @@ async function createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, folder
     for (const url of urls) {
         let title = url;
         // 尝试从书签库获取真实标题和路径
-        if (browserAPI && browserAPI.bookmarks) {
+        const api = (typeof browserAPI !== 'undefined' && browserAPI) ? browserAPI : (typeof chrome !== 'undefined' ? chrome : (typeof browser !== 'undefined' ? browser : null));
+        if (api && api.bookmarks) {
             try {
-                const results = await browserAPI.bookmarks.search({ url: url });
+                const results = await api.bookmarks.search({ url: url });
                 if (results && results.length > 0) {
                     title = results[0].title || url;
                     if (!sourcePath && results[0].parentId) {
@@ -6596,9 +6599,10 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         let title = url;
         let bookmarkPath = '';
         // 尝试从书签库获取真实标题和路径
-        if (browserAPI && browserAPI.bookmarks) {
+        const api = (typeof browserAPI !== 'undefined' && browserAPI) ? browserAPI : (typeof chrome !== 'undefined' ? chrome : (typeof browser !== 'undefined' ? browser : null));
+        if (api && api.bookmarks) {
             try {
-                const results = await browserAPI.bookmarks.search({ url: url });
+                const results = await api.bookmarks.search({ url: url });
                 if (results && results.length > 0) {
                     title = results[0].title || url;
                     // 获取第一个书签的完整路径
@@ -35272,10 +35276,11 @@ function setupPermanentDropTarget() {
 async function addToPermanentBookmarks(payload, parentIdOverride = null) {
     const items = Array.isArray(payload) ? payload : [payload];
     if (!items.length) return;
-    if (!browserAPI || !browserAPI.bookmarks || typeof browserAPI.bookmarks.create !== 'function') {
+    const api = (typeof browserAPI !== 'undefined' && browserAPI) ? browserAPI : (typeof chrome !== 'undefined' ? chrome : (typeof browser !== 'undefined' ? browser : null));
+    if (!api || !api.bookmarks || typeof api.bookmarks.create !== 'function') {
         throw new Error('当前环境不支持书签操作');
     }
-    const tree = await browserAPI.bookmarks.getTree();
+    const tree = await api.bookmarks.getTree();
     const bookmarkBar = tree[0].children.find(child => child.title === '书签栏' || child.id === '1');
     if (!bookmarkBar) {
         throw new Error('找不到书签栏');

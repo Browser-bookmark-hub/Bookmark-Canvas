@@ -3387,7 +3387,7 @@ function __shouldHydratePermanentFolderChildren(item, children) {
     // 某些实时更新/重渲染/清理路径下，DOM 可能出现“标记已加载，但子容器实际为空”。
     // 这时必须允许重新 hydrate，否则就会出现“展开了但没有内容”的假空状态。
     try {
-        return !children.querySelector(':scope > .tree-node, :scope > .tree-load-more');
+        return !children.querySelector(':scope > .tree-node, :scope > .tree-load-more, :scope > .tree-lazy-actions-container');
     } catch (_) {
         return !(children.childElementCount > 0);
     }
