@@ -17644,39 +17644,88 @@ html[data-theme="dark"] .github-confirm-message code {
 }
 
 /* ==================== Canvas Page Fullscreen Layout Adaptation ==================== */
-html.canvas-page-fullscreen-active header,
-html.canvas-page-fullscreen-active aside.sidebar,
-html.canvas-page-fullscreen-active .sidebar-toggle,
-html.canvas-page-fullscreen-active .sidebar-resize-handle,
-html:fullscreen header,
-html:fullscreen aside.sidebar,
-html:fullscreen .sidebar-toggle,
-html:fullscreen .sidebar-resize-handle {
+
+/* Fullscreen header button customization: only show settings, hide add, sidebar, etc. */
+html.canvas-page-fullscreen-active #titleQuickAddToggleBtn,
+html.canvas-page-fullscreen-active #titleLastFullscreenBtn,
+html.canvas-page-fullscreen-active #titleSidePanelToggleBtn,
+html.canvas-page-fullscreen-active #quickAddToggle,
+html.canvas-page-fullscreen-active #sideLastFullscreenBtn,
+html.canvas-page-fullscreen-active #openCanvasPageBtn,
+html:fullscreen #titleQuickAddToggleBtn,
+html:fullscreen #titleLastFullscreenBtn,
+html:fullscreen #titleSidePanelToggleBtn,
+html:fullscreen #quickAddToggle,
+html:fullscreen #sideLastFullscreenBtn,
+html:fullscreen #openCanvasPageBtn {
     display: none !important;
 }
 
-html.canvas-page-fullscreen-active .main-container,
-html:fullscreen .main-container {
+/* When header is expanded in fullscreen */
+body:not(.header-compact).canvas-page-fullscreen-active .main-container,
+body:not(.header-compact):fullscreen .main-container,
+html.canvas-page-fullscreen-active body:not(.header-compact) .main-container,
+html:fullscreen body:not(.header-compact) .main-container {
+    height: calc(100vh - var(--header-height)) !important;
+    width: 100vw !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+body:not(.header-compact).canvas-page-fullscreen-active .content-area,
+body:not(.header-compact):fullscreen .content-area,
+html.canvas-page-fullscreen-active body:not(.header-compact) .content-area,
+html:fullscreen body:not(.header-compact) .content-area {
+    height: calc(100vh - var(--header-height)) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    flex: 1 !important;
+    width: auto !important;
+}
+
+body:not(.header-compact).canvas-page-fullscreen-active .canvas-main-container,
+body:not(.header-compact):fullscreen .canvas-main-container,
+html.canvas-page-fullscreen-active body:not(.header-compact) .canvas-main-container,
+html:fullscreen body:not(.header-compact) .canvas-main-container {
+    height: calc(100vh - var(--header-height)) !important;
+    width: 100% !important;
+    max-height: calc(100vh - var(--header-height)) !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+/* When header is compact/collapsed in fullscreen */
+body.header-compact.canvas-page-fullscreen-active .main-container,
+body.header-compact:fullscreen .main-container,
+html.canvas-page-fullscreen-active body.header-compact .main-container,
+html:fullscreen body.header-compact .main-container {
     height: 100vh !important;
     width: 100vw !important;
     margin: 0 !important;
     padding: 0 !important;
 }
 
-html.canvas-page-fullscreen-active .content-area,
-html:fullscreen .content-area {
+body.header-compact.canvas-page-fullscreen-active .content-area,
+body.header-compact:fullscreen .content-area,
+html.canvas-page-fullscreen-active body.header-compact .content-area,
+html:fullscreen body.header-compact .content-area {
     height: 100vh !important;
-    width: 100vw !important;
     margin: 0 !important;
     padding: 0 !important;
+    flex: 1 !important;
+    width: auto !important;
 }
 
-html.canvas-page-fullscreen-active .canvas-main-container,
-html:fullscreen .canvas-main-container {
+body.header-compact.canvas-page-fullscreen-active .canvas-main-container,
+body.header-compact:fullscreen .canvas-main-container,
+html.canvas-page-fullscreen-active body.header-compact .canvas-main-container,
+html:fullscreen body.header-compact .canvas-main-container {
     height: 100vh !important;
-    width: 100vw !important;
+    width: 100% !important;
     max-height: 100vh !important;
-    max-width: 100vw !important;
+    max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     box-sizing: border-box !important;
