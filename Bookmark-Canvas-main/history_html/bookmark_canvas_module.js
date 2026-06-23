@@ -25603,6 +25603,11 @@ function __renderMdNodeImpl(node, options = {}) {
 
     const openMdNodeObjectContextMenu = (event) => {
         if (!event) return false;
+        if (isSectionCtrlModeEvent(event)) {
+            event.preventDefault();
+            event.stopPropagation();
+            return false;
+        }
         const target = (event.target && event.target.nodeType === Node.ELEMENT_NODE)
             ? event.target
             : (event.target && event.target.parentElement ? event.target.parentElement : null);
@@ -25700,6 +25705,9 @@ function __renderMdNodeImpl(node, options = {}) {
         if (e.button === 2) {
             justSelectedOnClick = false;
             suppressNextClickForDrag = true;
+            if (isSectionCtrlModeEvent(e)) {
+                return;
+            }
             e.stopPropagation();
             return;
         }
