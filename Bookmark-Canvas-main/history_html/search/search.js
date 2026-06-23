@@ -2249,7 +2249,7 @@ function isItemInAreaSearchScope(item, scope) {
     return false;
 }
 
-function triggerAreaSearch(scope) {
+function triggerAreaSearch(scope, options = {}) {
     if (!scope) return;
     
     searchUiState.areaSearchScope = {
@@ -2262,10 +2262,13 @@ function triggerAreaSearch(scope) {
     
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-        if (typeof setSidePanelSearchExpanded === 'function') {
-            setSidePanelSearchExpanded(true);
+        const opts = options && typeof options === 'object' ? options : {};
+        if (!opts.silent) {
+            if (typeof setSidePanelSearchExpanded === 'function') {
+                setSidePanelSearchExpanded(true);
+            }
+            searchInput.focus();
         }
-        searchInput.focus();
         
         const q = (searchInput.value || '').trim();
         if (typeof searchCanvasAndRender === 'function') {
@@ -5729,32 +5732,31 @@ function scoreCanvasSearchItem(item, query, options = {}) {
         let totalScore = 0;
 
         for (const t of tokens) {
-            const isSingleToken = t.length === 1;
             let tokenScore = 0;
             if (item.type === 'temp-section') {
-                if (item.__description && !isSingleToken && item.__description.includes(t)) {
+                if (item.__description && item.__description.includes(t)) {
                     tokenScore = Math.max(tokenScore, 80);
                 }
             } else if (item.type === 'permanent-section') {
-                if (item.__description && !isSingleToken && item.__description.includes(t)) {
+                if (item.__description && item.__description.includes(t)) {
                     tokenScore = Math.max(tokenScore, 70);
                 }
             } else if (item.type === 'md-node') {
                 if (item.__title) {
-                    if (isSingleToken && item.__title.startsWith(t)) {
+                    if (item.__title.startsWith(t)) {
                         tokenScore = Math.max(tokenScore, 150);
-                    } else if (!isSingleToken && item.__title.includes(t)) {
+                    } else if (item.__title.includes(t)) {
                         tokenScore = Math.max(tokenScore, 120);
                     }
                 }
-                if (item.__text && !isSingleToken && item.__text.includes(t)) {
+                if (item.__text && item.__text.includes(t)) {
                     tokenScore = Math.max(tokenScore, 90);
                 }
             } else if (item.type === 'edge') {
                 if (item.__label) {
-                    if (isSingleToken && item.__label.startsWith(t)) {
+                    if (item.__label.startsWith(t)) {
                         tokenScore = Math.max(tokenScore, 140);
-                    } else if (!isSingleToken && item.__label.includes(t)) {
+                    } else if (item.__label.includes(t)) {
                         tokenScore = Math.max(tokenScore, 110);
                     }
                 }
@@ -7361,21 +7363,27 @@ function isDomainSearchItemMatched(domain, item, query, detailInput = null) {
 function resolveDomainSearchScope(scopeInput = null) {
     const scope = scopeInput && typeof scopeInput === 'object'
         ? scopeInput
-        : getCanvasFullscreenSearchScope();
+        : (searchUiState && searchUiState.areaSearchScope
+            ? searchUiState.areaSearchScope
+            : getCanvasFullscreenSearchScope());
     if (!scope || typeof scope !== 'object') return null;
     const kind = String(scope.kind || '').trim();
     if (kind === 'temp') {
         const id = String(scope.id || '').trim();
         if (!id) return null;
-        return { kind: 'temp', id, key: `temp:${id}` };
+        return { kind: 'temp', id, key: `temp:${id}`, memberIds: scope.memberIds };
     }
     if (kind === 'permanent') {
         const copyId = String(scope.copyId || '').trim();
-        return { kind: 'permanent', copyId: copyId || null, key: copyId ? `permanent:${copyId}` : 'permanent:main' };
+        return { kind: 'permanent', copyId: copyId || null, key: copyId ? `permanent:${copyId}` : 'permanent:main', memberIds: scope.memberIds };
     }
     if (kind === 'blank') {
         const id = String(scope.id || '').trim();
-        return { kind: 'blank', id: id || '', key: id ? `blank:${id}` : 'blank' };
+        return { kind: 'blank', id: id || '', key: id ? `blank:${id}` : 'blank', memberIds: scope.memberIds };
+    }
+    if (kind === 'group') {
+        const id = String(scope.id || '').trim();
+        return { kind: 'group', id, key: `group:${id}`, memberIds: scope.memberIds };
     }
     return null;
 }
@@ -7405,12 +7413,29 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
     for (const item of items) {
         if (!item || item.nodeType !== 'bookmark') continue;
 
-        if (scope && scope.kind === 'temp') {
-            if (!(item.source === 'temporary' && String(item.sectionId || '') === scope.id)) continue;
-        } else if (scope && scope.kind === 'permanent') {
-            if (item.source !== 'permanent') continue;
-        } else if (scope && scope.kind === 'blank') {
-            continue;
+        if (scope) {
+            if (Array.isArray(scope.memberIds)) {
+                const memberIds = scope.memberIds;
+                if (item.source === 'temporary') {
+                    if (!memberIds.includes(item.sectionId)) continue;
+                } else if (item.source === 'permanent') {
+                    if (!memberIds.some(id => 
+                        id === 'permanentSection' || 
+                        id.startsWith('permanent-section') || 
+                        id.startsWith('permanentSection')
+                    )) continue;
+                } else {
+                    continue;
+                }
+            } else {
+                if (scope.kind === 'temp') {
+                    if (!(item.source === 'temporary' && String(item.sectionId || '') === scope.id)) continue;
+                } else if (scope.kind === 'permanent') {
+                    if (item.source !== 'permanent') continue;
+                } else if (scope.kind === 'blank') {
+                    continue;
+                }
+            }
         } else {
             if (item.source !== 'permanent' && item.source !== 'temporary') continue;
         }
@@ -8404,8 +8429,15 @@ function renderCanvasSearchResults(results, options = {}) {
                     : (isZh
                         ? (isMatchedStats ? `${count} 个匹配书签` : `${count} 个书签`)
                         : (isMatchedStats ? `${count} matched bookmarks` : `${count} bookmarks`));
-                indexLabel = `<div class="search-domain-group-icon">
-                    <i class="fas fa-globe" style="color:#0ea5e9; font-size:16px;"></i>
+                const domainUrl = 'https://' + (item.domain || item.title || '');
+                const faviconSrc = (typeof getFaviconUrl === 'function') ? getFaviconUrl(domainUrl) : null;
+                const hasRealFavicon = faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
+
+                indexLabel = `<div class="search-domain-group-icon" style="position:relative; display:inline-flex; align-items:center; justify-content:flex-start; width:18px; height:20px; flex-shrink:0;">
+                    <span class="search-result-icon-box-inline" style="display:${hasRealFavicon ? 'none' : 'inline-flex'}; align-items:center; justify-content:center; width:16px; height:16px;">
+                        <i class="fas fa-globe" style="color:#0ea5e9; font-size:16px;"></i>
+                    </span>
+                    <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(domainUrl)}" style="display:${hasRealFavicon ? '' : 'none'}; width:16px; height:16px; object-fit:contain; border-radius:3px;" alt="">
                 </div>`;
                 title = `<div class="search-result-domain-title-text">${domainText}</div>`;
                 descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:11px;">${escapeHtml(countLabel)}</div>`;
@@ -8638,9 +8670,37 @@ function renderCanvasSearchResults(results, options = {}) {
             case 'bookmark-item': {
                 // Child item under a bookmark-group
                 if (item.isChild) {
-                    const icon = item.nodeType === 'folder' ? 'fa-folder' : 'fa-bookmark';
                     const childDotClass = item.domainChild ? 'search-child-dot search-domain-child-dot' : 'search-child-dot';
-                    indexLabel = `<span class="${childDotClass}"><i class="fas ${icon}"></i></span>`;
+                    if (item.nodeType === 'folder') {
+                        indexLabel = `<span class="${childDotClass}"><i class="fas fa-folder" style="color:#2563eb;"></i></span>`;
+                    } else if (item.url) {
+                        const iconColor = '#f59e0b';
+                        if (typeof getFaviconUrl === 'function') {
+                            const faviconSrc = getFaviconUrl(item.url);
+                            const hasRealFavicon = faviconSrc && !faviconSrc.startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
+                            
+                            const spanWidth = item.domainChild ? '18px' : '16px';
+                            const spanHeight = item.domainChild ? '20px' : '16px';
+                            const spanJustify = item.domainChild ? 'flex-start' : 'center';
+                            const imgLeft = '0';
+                            const imgTop = item.domainChild ? '2px' : '0';
+                            
+                            if (hasRealFavicon) {
+                                indexLabel = `<span class="${childDotClass}" style="position:relative; display:inline-flex; align-items:center; justify-content:${spanJustify}; width:${spanWidth}; height:${spanHeight};">
+                                    <img class="search-result-favicon" src="${faviconSrc}" data-bookmark-url="${escapeHtml(item.url)}" style="width:16px; height:16px; object-fit:contain; border-radius:3px;" alt="">
+                                </span>`;
+                            } else {
+                                indexLabel = `<span class="${childDotClass}" style="position:relative; display:inline-flex; align-items:center; justify-content:${spanJustify}; width:${spanWidth}; height:${spanHeight};">
+                                    <i class="fas fa-bookmark search-result-icon-box-inline" style="color:${iconColor}; font-size:14px; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px;"></i>
+                                    <img class="search-result-favicon" src="${faviconSrc || ''}" data-bookmark-url="${escapeHtml(item.url)}" style="display:none; width:16px; height:16px; object-fit:contain; border-radius:3px; position:absolute; left:${imgLeft}; top:${imgTop};" alt="">
+                                </span>`;
+                            }
+                        } else {
+                            indexLabel = `<span class="${childDotClass}"><i class="fas fa-bookmark" style="color:${iconColor};"></i></span>`;
+                        }
+                    } else {
+                        indexLabel = `<span class="${childDotClass}"><i class="fas fa-bookmark" style="color:#f59e0b;"></i></span>`;
+                    }
                 }
 
                 title = `<span class="search-result-bookmark-title-text">${markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'))}</span>`;
@@ -10567,6 +10627,123 @@ async function locateCanvasBookmarkTreeItem(target) {
 }
 
 /**
+ * 文本高亮并滚动到可见区域 (滚动条自动定位)
+ */
+function highlightAndScrollToText(container, queryText) {
+    if (!container || !queryText) return;
+    const terms = queryText.split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return;
+
+    function findTextNodes(node, nodesList = []) {
+        if (node.nodeType === 3) {
+            nodesList.push(node);
+        } else if (node.nodeType === 1) {
+            if (node.classList.contains('temp-node-action-btn') || 
+                node.classList.contains('permanent-section-actions') ||
+                node.classList.contains('temp-node-description-controls') ||
+                node.classList.contains('permanent-section-tip-controls') ||
+                node.tagName === 'SCRIPT' || 
+                node.tagName === 'STYLE') {
+                return nodesList;
+            }
+            for (let child = node.firstChild; child; child = child.nextSibling) {
+                findTextNodes(child, nodesList);
+            }
+        }
+        return nodesList;
+    }
+
+    let contentElement = container;
+    if (container.classList.contains('md-canvas-node')) {
+        contentElement = container.querySelector('.md-canvas-editor, .md-canvas-text') || container;
+    } else if (container.classList.contains('permanent-bookmark-section')) {
+        const tipContainer = container.querySelector('.permanent-section-tip-container');
+        if (tipContainer) {
+            document.querySelectorAll('.temp-node-description-container.desc-selected, .permanent-section-tip-container.desc-selected')
+                .forEach(el => el.classList.remove('desc-selected'));
+            tipContainer.classList.add('desc-selected');
+        }
+        contentElement = container.querySelector('.permanent-section-tip') || container;
+    } else if (container.classList.contains('temp-canvas-node')) {
+        const descContainer = container.querySelector('.temp-node-description-container');
+        if (descContainer) {
+            document.querySelectorAll('.temp-node-description-container.desc-selected, .permanent-section-tip-container.desc-selected')
+                .forEach(el => el.classList.remove('desc-selected'));
+            descContainer.classList.add('desc-selected');
+        }
+        contentElement = container.querySelector('.temp-node-description') || container;
+    }
+
+    if (contentElement.querySelector('.canvas-text-search-highlight-match')) {
+        return;
+    }
+
+    const originalHTML = contentElement.innerHTML;
+    const textNodes = findTextNodes(contentElement);
+    const marks = [];
+
+    textNodes.forEach(node => {
+        let text = node.data;
+        let lowerText = text.toLowerCase();
+        
+        for (const term of terms) {
+            const index = lowerText.indexOf(term.toLowerCase());
+            if (index >= 0) {
+                const matchedText = text.substring(index, index + term.length);
+                const remainingText = text.substring(index + term.length);
+                
+                node.data = text.substring(0, index);
+                
+                const mark = document.createElement('mark');
+                mark.className = 'canvas-text-search-highlight-match';
+                mark.style.backgroundColor = '#fbbf24';
+                mark.style.color = '#000000';
+                mark.style.borderRadius = '3px';
+                mark.style.padding = '0 2px';
+                mark.style.boxShadow = '0 0 5px rgba(251, 191, 36, 0.7)';
+                mark.style.fontWeight = 'bold';
+                mark.textContent = matchedText;
+                
+                node.parentNode.insertBefore(mark, node.nextSibling);
+                if (remainingText) {
+                    const newTextNode = document.createTextNode(remainingText);
+                    mark.parentNode.insertBefore(newTextNode, mark.nextSibling);
+                }
+                marks.push(mark);
+                break;
+            }
+        }
+    });
+
+    if (marks.length > 0) {
+        setTimeout(() => {
+            try {
+                marks[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (_) {}
+        }, 100);
+    }
+
+    const clearHighlights = () => {
+        try {
+            if (contentElement.querySelector('.canvas-text-search-highlight-match')) {
+                contentElement.innerHTML = originalHTML;
+            }
+        } catch (_) {}
+        cleanupEvents();
+    };
+
+    const cleanupEvents = () => {
+        contentElement.removeEventListener('focusin', clearHighlights);
+        contentElement.removeEventListener('click', clearHighlights);
+    };
+
+    contentElement.addEventListener('focusin', clearHighlights);
+    contentElement.addEventListener('click', clearHighlights);
+
+    setTimeout(clearHighlights, 3000);
+}
+
+/**
  * 定位画布元素 (Storage-First Approach)
  * 优先使用 CanvasState/LocalStorage 中的坐标数据进行定位，
  * 从而支持在 DOM 元素被剔除（Low Detail Mode）时仍能准确定位。
@@ -10879,6 +11056,35 @@ async function locateCanvasElement(elementId, type, options = {}) {
         };
         setTimeout(retryEdge, 100);
         setTimeout(retryEdge, 300);
+    }
+
+    // 3. 说明搜索文本高亮与垂直滚动定位
+    const queryText = (searchUiState && searchUiState.query) || '';
+    if (queryText) {
+        if (type === 'edge') {
+            const tryEdgeLabelHighlight = () => {
+                const labelDom = document.querySelector(`.canvas-edge-label[data-edge-id="${elementId}"]`);
+                if (labelDom) {
+                    labelDom.style.fill = '#f59e0b';
+                    labelDom.style.fontWeight = 'bold';
+                    setTimeout(() => {
+                        labelDom.style.fill = '';
+                        labelDom.style.fontWeight = '';
+                    }, 2500);
+                }
+            };
+            setTimeout(tryEdgeLabelHighlight, 100);
+            setTimeout(tryEdgeLabelHighlight, 350);
+        } else {
+            const tryTextHighlight = () => {
+                const el = document.querySelector(highlightSelector || `[id="${elementId}"]`);
+                if (el) {
+                    highlightAndScrollToText(el, queryText);
+                }
+            };
+            setTimeout(tryTextHighlight, 100);
+            setTimeout(tryTextHighlight, 350);
+        }
     }
 
     return foundLocation;

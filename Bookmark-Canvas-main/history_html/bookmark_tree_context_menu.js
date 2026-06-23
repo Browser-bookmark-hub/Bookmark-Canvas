@@ -14654,7 +14654,8 @@ function __getCanvasObjectMenuLabels() {
         delete: lang === 'zh_CN' ? '删除' : 'Delete',
         copySource: lang === 'zh_CN' ? '复制文字源码' : 'Copy text source',
         exportJson: lang === 'zh_CN' ? '导出当前 JSON' : 'Export current JSON',
-        exportHtml: lang === 'zh_CN' ? '导出当前 HTML' : 'Export current HTML'
+        exportHtml: lang === 'zh_CN' ? '导出当前 HTML' : 'Export current HTML',
+        searchScope: lang === 'zh_CN' ? '当前范围的搜索' : 'Search in current scope'
     };
 }
 
@@ -15023,6 +15024,49 @@ function __handleBookmarkTreeObjectMenuAction(action, target, options = {}) {
     if (action === 'edge-delete' && canvas.removeEdge) return canvas.removeEdge(target.edgeId);
     if (action === 'export-json') return __exportBookmarkTreeObject(target, 'json');
     if (action === 'export-html') return __exportBookmarkTreeObject(target, 'html');
+    if (action === 'search-scope') {
+        const type = target && target.type;
+        if (type === 'permanent' || type === 'permanent-copy') {
+            if (typeof window.setSearchMode === 'function') {
+                window.setSearchMode('bookmark', { source: 'user' });
+            }
+            const copyId = target.copyId;
+            const memberIds = ['permanentSection', 'permanent-section'];
+            if (copyId) {
+                memberIds.push(copyId, `permanent-section-copy-${copyId}`);
+            }
+            if (typeof window.triggerAreaSearch === 'function') {
+                window.triggerAreaSearch({
+                    kind: 'permanent',
+                    id: copyId || 'permanentSection',
+                    memberIds: memberIds
+                });
+            }
+        } else if (type === 'temporary') {
+            if (typeof window.setSearchMode === 'function') {
+                window.setSearchMode('bookmark', { source: 'user' });
+            }
+            if (typeof window.triggerAreaSearch === 'function') {
+                window.triggerAreaSearch({
+                    kind: 'temp',
+                    id: target.sectionId,
+                    memberIds: [target.sectionId]
+                });
+            }
+        } else if (type === 'md-node') {
+            if (typeof window.setSearchMode === 'function') {
+                window.setSearchMode('description', { source: 'user' });
+            }
+            if (typeof window.triggerAreaSearch === 'function') {
+                window.triggerAreaSearch({
+                    kind: 'blank',
+                    id: target.nodeId,
+                    memberIds: [target.nodeId]
+                });
+            }
+        }
+        return Promise.resolve();
+    }
 }
 
 function showBookmarkTreeObjectContextMenu(e, target) {
@@ -15040,7 +15084,33 @@ function showBookmarkTreeObjectContextMenu(e, target) {
     if (type === 'md-node') {
         items.push({ action: 'color', label: labels.color, icon: 'palette' });
     }
-    items.push({ action: 'pin', label: labels.pin, icon: 'thumbtack' });
+
+    const lang = currentLang || 'zh_CN';
+    const isCurrentlyPinned = (() => {
+        if (type === 'temporary') {
+            const section = typeof getTempSection === 'function' ? getTempSection(target.sectionId) : null;
+            return section ? !!section.pinned : false;
+        }
+        if (type === 'md-node') {
+            const isPinnedFromData = target.nodeData ? !!target.nodeData.pinned : false;
+            if (isPinnedFromData) return true;
+            const el = target.sectionElement || document.getElementById(target.nodeId);
+            const pinBtn = el ? el.querySelector('[data-action="md-pin"]') : null;
+            return pinBtn ? pinBtn.classList.contains('pinned') : false;
+        }
+        if (type === 'permanent' || type === 'permanent-copy') {
+            const el = target.sectionElement || document.getElementById('permanentSection');
+            const pinBtn = el ? el.querySelector('.permanent-section-pin-btn') : null;
+            return pinBtn ? pinBtn.classList.contains('pinned') : false;
+        }
+        return false;
+    })();
+
+    const pinLabel = isCurrentlyPinned
+        ? (lang === 'zh_CN' ? '取消置顶' : 'Unpin')
+        : (lang === 'zh_CN' ? '置顶' : 'Pin');
+
+    items.push({ action: 'pin', label: pinLabel, icon: 'thumbtack' });
     if (type === 'permanent' || type === 'permanent-copy') {
         items.push({ action: 'duplicate', label: labels.duplicate, icon: 'copy' });
     }
@@ -15054,10 +15124,11 @@ function showBookmarkTreeObjectContextMenu(e, target) {
         items.push({ action: 'copy-source', label: labels.copySource, icon: 'code' });
     } else {
         items.push(
-            { action: 'export-json', label: labels.exportJson, icon: 'file-alt' },
-            { action: 'export-html', label: labels.exportHtml, icon: 'file-code' }
+            { action: 'export-html', label: labels.exportHtml, icon: 'file-code' },
+            { action: 'export-json', label: labels.exportJson, icon: 'file-alt' }
         );
     }
+    items.push({ action: 'search-scope', label: labels.searchScope, icon: 'search' });
 
     const menu = document.getElementById('bookmark-context-menu');
     if (!menu) return;

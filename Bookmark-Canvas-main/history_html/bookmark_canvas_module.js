@@ -17304,6 +17304,65 @@ function maximizeCanvasNode(element, options = {}) {
     element.dataset.maxPrevTransform = element.style.transform || '';
     element.dataset.maxPrevZ = element.style.zIndex || '';
 
+    // Save current search state before entering fullscreen
+    try {
+        const globalState = (typeof window !== 'undefined' && window.searchUiState) ? window.searchUiState : null;
+        element._preFullscreenSearchState = {
+            activeMode: globalState ? globalState.activeMode : null,
+            areaSearchScope: (globalState && globalState.areaSearchScope) 
+                ? JSON.parse(JSON.stringify(globalState.areaSearchScope)) 
+                : null
+        };
+    } catch (_) { }
+
+    // Dynamically set search scope to the fullscreen card
+    try {
+        let searchMode = null;
+        let scopeData = null;
+        if (element.classList.contains('permanent-bookmark-section')) {
+            searchMode = 'bookmark';
+            const copyId = element.dataset.permanentSectionCopyId || element.getAttribute('data-permanent-section-copy-id');
+            const memberIds = ['permanentSection', 'permanent-section'];
+            if (copyId) {
+                memberIds.push(copyId, `permanent-section-copy-${copyId}`);
+            }
+            scopeData = {
+                kind: 'permanent',
+                id: copyId || 'permanentSection',
+                memberIds: memberIds
+            };
+        } else if (element.classList.contains('temp-canvas-node')) {
+            searchMode = 'bookmark';
+            const sectionId = element.dataset.sectionId;
+            if (sectionId) {
+                scopeData = {
+                    kind: 'temp',
+                    id: sectionId,
+                    memberIds: [sectionId]
+                };
+            }
+        } else if (element.classList.contains('md-canvas-node')) {
+            searchMode = 'description';
+            const nodeId = element.id;
+            if (nodeId) {
+                scopeData = {
+                    kind: 'blank',
+                    id: nodeId,
+                    memberIds: [nodeId]
+                };
+            }
+        }
+
+        if (searchMode && scopeData) {
+            if (typeof window.setSearchMode === 'function') {
+                window.setSearchMode(searchMode, { source: 'auto' });
+            }
+            if (typeof window.triggerAreaSearch === 'function') {
+                window.triggerAreaSearch(scopeData, { silent: true });
+            }
+        }
+    } catch (_) { }
+
     element.classList.add('canvas-node-maximized');
     __setFullscreenPreloadReady(element, !suppressReadyNotify);
     __setFullscreenBodyReady(element, !suppressReadyNotify);
@@ -17360,6 +17419,27 @@ function restoreCanvasNodeLayout(element, options = {}) {
             locateToElement(element, CanvasState.zoom);
         } catch (_) { }
     }
+
+    // Restore pre-fullscreen search state if available
+    try {
+        if (element._preFullscreenSearchState) {
+            const preState = element._preFullscreenSearchState;
+            delete element._preFullscreenSearchState;
+
+            if (preState.activeMode && typeof window.setSearchMode === 'function') {
+                window.setSearchMode(preState.activeMode, { source: 'auto' });
+            }
+            if (preState.areaSearchScope) {
+                if (typeof window.triggerAreaSearch === 'function') {
+                    window.triggerAreaSearch(preState.areaSearchScope, { silent: true });
+                }
+            } else {
+                if (typeof window.exitAreaSearch === 'function') {
+                    window.exitAreaSearch();
+                }
+            }
+        }
+    } catch (_) { }
 }
 
 function toggleElementFullscreen(element) {
@@ -19862,6 +19942,31 @@ function __ensurePermanentSectionCopyControlsBound() {
             return;
         }
 
+        const searchBtn = e && e.target && e.target.closest ? e.target.closest('.permanent-section-search-btn') : null;
+        if (searchBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const sectionEl = searchBtn.closest('.permanent-bookmark-section') || document.getElementById('permanentSection');
+            if (sectionEl) {
+                if (typeof window.setSearchMode === 'function') {
+                    window.setSearchMode('bookmark', { source: 'user' });
+                }
+                const copyId = sectionEl.dataset.permanentSectionCopyId || sectionEl.getAttribute('data-permanent-section-copy-id');
+                const memberIds = ['permanentSection', 'permanent-section'];
+                if (copyId) {
+                    memberIds.push(copyId, `permanent-section-copy-${copyId}`);
+                }
+                if (typeof window.triggerAreaSearch === 'function') {
+                    window.triggerAreaSearch({
+                        kind: 'permanent',
+                        id: copyId || 'permanentSection',
+                        memberIds: memberIds
+                    });
+                }
+            }
+            return;
+        }
+
         const fullscreenBtn = e && e.target && e.target.closest ? e.target.closest('.permanent-section-fullscreen-btn') : null;
         if (fullscreenBtn) {
             e.preventDefault();
@@ -21986,6 +22091,7 @@ function __renderMdNodeImpl(node, options = {}) {
     const deleteTitle = lang === 'en' ? 'Delete' : '删除';
     const colorTitle = lang === 'en' ? 'Color' : '颜色';
     const focusTitle = lang === 'en' ? 'Locate and zoom' : '定位并放大';
+    const searchScopeTitle = lang === 'en' ? 'Search in current scope' : '搜索当前的范围';
     const formatTitle = lang === 'en' ? 'Format toolbar' : '格式工具栏';
     const pinTitle = lang === 'en' ? 'Pin' : '置顶';
     const unpinTitle = lang === 'en' ? 'Unpin' : '取消置顶';
@@ -22014,6 +22120,7 @@ function __renderMdNodeImpl(node, options = {}) {
     toolbar.innerHTML = `
         ${layoutZoomControlsHtml}
         <button class="md-node-toolbar-btn" data-action="md-format-toggle" data-tooltip="${formatTitle}"><i class="fas fa-font"></i></button>
+        <button class="md-node-toolbar-btn" data-action="md-search-scope" data-tooltip="${searchScopeTitle}" title="${searchScopeTitle}"><i class="fas fa-search"></i></button>
         <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}"><i class="fas fa-search-plus"></i></button>
         <button class="md-node-toolbar-btn" data-action="md-color-toggle" data-tooltip="${colorTitle}"><i class="fas fa-palette"></i></button>
         <button class="md-node-toolbar-btn${node.pinned ? ' pinned' : ''}" data-action="md-pin" data-tooltip="${mdPinBtnTitle}">${mdPinBtnIcon}</button>
@@ -25884,6 +25991,17 @@ function __renderMdNodeImpl(node, options = {}) {
                 saveTempNodes();
                 requestSidebarMenuColorSyncRefresh();
                 closeMdColorPopover(toolbar);
+            }
+        } else if (action === 'md-search-scope') {
+            if (typeof window.setSearchMode === 'function') {
+                window.setSearchMode('description', { source: 'user' });
+            }
+            if (typeof window.triggerAreaSearch === 'function') {
+                window.triggerAreaSearch({
+                    kind: 'blank',
+                    id: node.id,
+                    memberIds: [node.id]
+                });
             }
         } else if (action === 'md-focus') {
             selectMdNode(node.id);
@@ -30758,6 +30876,7 @@ function __renderTempNodeImpl(section, options = {}) {
     const pinBtn = document.createElement('button');
     pinBtn.type = 'button';
     pinBtn.className = 'temp-node-action-btn temp-node-pin-btn';
+    pinBtn.style.display = 'none';
     const pinLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Pin section' : '置顶栏目';
     const unpinLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Unpin section' : '取消置顶';
     const isPinned = section.pinned || false;
@@ -30779,6 +30898,29 @@ function __renderTempNodeImpl(section, options = {}) {
         saveTempNodes();
     });
 
+    // 搜索当前的范围按钮
+    const searchScopeBtn = document.createElement('button');
+    searchScopeBtn.type = 'button';
+    searchScopeBtn.className = 'temp-node-action-btn temp-node-search-scope-btn';
+    const searchScopeLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Search in current scope' : '搜索当前的范围';
+    searchScopeBtn.title = searchScopeLabel;
+    searchScopeBtn.setAttribute('aria-label', searchScopeLabel);
+    searchScopeBtn.innerHTML = '<i class="fas fa-search"></i>';
+    searchScopeBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof window.setSearchMode === 'function') {
+            window.setSearchMode('bookmark', { source: 'user' });
+        }
+        if (typeof window.triggerAreaSearch === 'function') {
+            window.triggerAreaSearch({
+                kind: 'temp',
+                id: section.id,
+                memberIds: [section.id]
+            });
+        }
+    });
+
     const fullscreenBtn = document.createElement('button');
     fullscreenBtn.type = 'button';
     fullscreenBtn.className = 'temp-node-action-btn temp-node-fullscreen-btn canvas-node-fullscreen-btn';
@@ -30794,6 +30936,7 @@ function __renderTempNodeImpl(section, options = {}) {
 
     actions.appendChild(renameBtn);
     actions.appendChild(pinBtn);
+    actions.appendChild(searchScopeBtn);
     actions.appendChild(colorWrap);
     actions.appendChild(closeBtn);
     actions.appendChild(fullscreenBtn);

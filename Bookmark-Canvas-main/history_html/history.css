@@ -17730,3 +17730,8 @@ html:fullscreen body.header-compact .canvas-main-container {
     padding: 0 !important;
     box-sizing: border-box !important;
 }
+
+/* Hide the temporary section pin button from the UI, replacing it with the search button */
+.temp-node-pin-btn {
+    display: none !important;
+}
