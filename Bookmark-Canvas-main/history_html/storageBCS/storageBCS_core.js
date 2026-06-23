@@ -3076,7 +3076,7 @@ function __htmlToMarkdown(html, options = {}) {
     if (!html || typeof html !== 'string') return '';
     const {
         trimResult = true,
-        compactNewlines = true,
+        compactNewlines = false,
         paragraphBreaks = false,
         hardLineBreaks = false
     } = options;

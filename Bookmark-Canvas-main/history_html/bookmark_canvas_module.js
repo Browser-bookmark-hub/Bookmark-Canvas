@@ -22883,7 +22883,7 @@ function __renderMdNodeImpl(node, options = {}) {
     if (rawMarkdownSource) {
         try {
             editor.innerHTML = __renderMarkdownToCanvasRichHtml(rawMarkdownSource, {
-                forceLinePreserve: isCanvasNativeText
+                forceLinePreserve: true
             });
         } catch { editor.textContent = rawMarkdownSource; }
     } else if (node.html) {
@@ -24897,7 +24897,7 @@ function __renderMdNodeImpl(node, options = {}) {
             );
             if (String(canonicalSource || '').trim()) {
                 editor.innerHTML = __renderMarkdownToCanvasRichHtml(canonicalSource, {
-                    forceLinePreserve: isCanvasNativeText
+                    forceLinePreserve: true
                 });
                 try { __applyHeadingCollapse(editor); } catch (_) { }
             }
@@ -27956,7 +27956,7 @@ function __normalizeCanvasPluginMarkdownNodeFields(node, options = {}) {
 
     if (shouldRefreshCaches) {
         node.html = markdownSource
-            ? __renderMarkdownSourceToCanvasHtml(markdownSource)
+            ? __renderMarkdownSourceToCanvasHtml(markdownSource, { forceLinePreserve: true })
             : '';
     } else if (typeof node.html === 'string') {
         node.html = __normalizeCanvasRichHtml(node.html) || '';
@@ -28018,7 +28018,7 @@ function __syncMdNodeFromEditor(node, editor) {
         node.markdownSource || node.text,
         {
             sourceMode: 'markdown-node',
-            renderOptions: isCanvasNativeText ? { forceLinePreserve: true } : null,
+            renderOptions: { forceLinePreserve: true },
             conversionOptions: {
                 trimResult: false,
                 compactNewlines: false,
