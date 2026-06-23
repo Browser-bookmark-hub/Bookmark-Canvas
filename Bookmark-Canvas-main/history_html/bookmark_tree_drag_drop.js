@@ -952,11 +952,14 @@ function showDropIndicator(targetNode, e) {
     const treeNode = targetNode.closest('.tree-node');
     const isFirstInLevel = treeNode && !treeNode.previousElementSibling;
 
-    // 检查文件夹是否展开
+    // 检查文件夹是否展开 (空文件夹由于视觉上没有展开内容，从落位角度应视为非展开，以便支持在其下方/上方放置)
     let isFolderExpanded = false;
     if (targetIsFolder && treeNode) {
-        const childrenContainer = treeNode.querySelector(':scope > .tree-children');
-        isFolderExpanded = childrenContainer && childrenContainer.classList.contains('expanded');
+        const hasChildren = targetNode.dataset.hasChildren === 'true' || targetNode.getAttribute('data-has-children') === 'true';
+        if (hasChildren) {
+            const childrenContainer = treeNode.querySelector(':scope > .tree-children');
+            isFolderExpanded = childrenContainer && childrenContainer.classList.contains('expanded');
+        }
     }
 
     let position;
