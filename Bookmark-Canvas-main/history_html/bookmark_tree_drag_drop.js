@@ -806,12 +806,34 @@ async function handleDragEnd(e) {
             if (!window.__bookmarkDragDropHandled && !(insidePermanentDom || insidePermanentRect) && !(insideTempNodeDom || insideTempNodeRect)) {
                 const isDraggedNodeSelected = isBookmarkTreeBatchDragSelection(draggedNodeId);
                 if (isDraggedNodeSelected && typeof batchToTempSection === 'function') {
-                    await batchToTempSection(e);
+                    // 批量拖动到画布空白：加兜底保护
+                    const __batchSourceSectionId = draggedNodeSectionId;
+                    const __batchSourceTreeType = draggedNodeTreeType;
+                    try {
+                        await batchToTempSection(e);
+                    } catch (batchError) {
+                        console.error('[拖拽] 批量拖动到画布失败:', batchError);
+                        // 兜底：刷新源临时栏目的树，确保项目仍可见
+                        try {
+                            if (__batchSourceTreeType === 'temporary' && __batchSourceSectionId &&
+                                window.CanvasModule && window.CanvasModule.temp &&
+                                typeof window.CanvasModule.temp.getSection === 'function') {
+                                const section = window.CanvasModule.temp.getSection(__batchSourceSectionId);
+                                if (section && typeof window.refreshTempSectionTreeInPlace === 'function') {
+                                    console.warn('[拖拽兜底] 批量拖出失败，刷新源临时栏目树确保项目可见');
+                                    window.refreshTempSectionTreeInPlace(section);
+                                }
+                            }
+                        } catch (_) { }
+                    }
                 } else {
-                    // Fallback to single temporary node to temp section
+                    // 单个临时节点拖到画布空白 → 创建新临时栏目
+                    let __singleDragSuccess = false;
+                    const __singleSourceSectionId = draggedNodeSectionId;
+                    const __singleSourceTreeType = draggedNodeTreeType;
                     if (window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.extractPayload === 'function') {
                         try {
-                            const payload = window.CanvasModule.temp.extractPayload(draggedNodeSectionId, [draggedNodeId]);
+                            const payload = window.CanvasModule.temp.extractPayload(__singleSourceSectionId, [draggedNodeId]);
                             if (payload && payload.length) {
                                 const state = window.CanvasState || {};
                                 const zoom = state.zoom || 1;
@@ -827,12 +849,28 @@ async function handleDragEnd(e) {
                                 }, x, y);
                                 if (newSecId) {
                                     window.CanvasModule.temp.insertFromPayload(newSecId, null, payload, null, { defaultCollapseFolders: true });
-                                    window.CanvasModule.temp.removeItems(draggedNodeSectionId, [draggedNodeId]);
+                                    window.CanvasModule.temp.removeItems(__singleSourceSectionId, [draggedNodeId]);
+                                    __singleDragSuccess = true;
                                 }
                             }
                         } catch (error) {
                             console.error('[拖拽] 单个临时节点拖动到画布失败:', error);
                         }
+                    }
+                    // 兜底：拖动失败时（extractPayload 空、createTempNode 失败、异常等），
+                    // 项目仍在 CanvasState 中但 DOM 可能不一致（尤其懒惰加载后 CRUD 导致树重建的场景），
+                    // 刷新源临时栏目的树，让项目重新出现在根目录。
+                    if (!__singleDragSuccess && __singleSourceTreeType === 'temporary' && __singleSourceSectionId) {
+                        try {
+                            const tempApi = window.CanvasModule && window.CanvasModule.temp;
+                            const section = (tempApi && typeof tempApi.getSection === 'function')
+                                ? tempApi.getSection(__singleSourceSectionId)
+                                : null;
+                            if (section && typeof window.refreshTempSectionTreeInPlace === 'function') {
+                                console.warn('[拖拽兜底] 临时栏目拖出失败，刷新源栏目树确保项目可见');
+                                window.refreshTempSectionTreeInPlace(section);
+                            }
+                        } catch (_) { }
                     }
                 }
             }

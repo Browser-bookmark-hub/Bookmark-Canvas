@@ -21293,20 +21293,35 @@ async function createTempNode(data, x, y) {
     }
 
     if (isTempSplit && parentSection) {
-        try {
-            const fallbackId = data.id || null;
-            let ids = [];
-            if (typeof collectTemporarySelectionIds === 'function') {
-                ids = collectTemporarySelectionIds(parentSection.id, fallbackId);
+        // 兜底：仅在新栏目确实包含项目时才删除源栏目中的原节点，
+        // 防止 extractTempItemsPayload 返回空（如懒惰加载 CRUD 后状态不同步）导致数据丢失。
+        if (section.items.length === 0) {
+            console.warn('[Canvas] 分裂临时栏目时 payload 为空，跳过删除原节点以防数据丢失');
+            // 清理已创建的空栏目（L21285 push + L21287 render 已执行，需要撤销）
+            try {
+                const ghostIdx = CanvasState.tempSections.indexOf(section);
+                if (ghostIdx !== -1) CanvasState.tempSections.splice(ghostIdx, 1);
+                const ghostEl = document.getElementById(section.id);
+                if (ghostEl) ghostEl.remove();
+            } catch (_) { }
+            // 刷新源栏目树确保项目仍可见
+            try { refreshTempSectionTreeInPlace(parentSection); } catch (_) { }
+        } else {
+            try {
+                const fallbackId = data.id || null;
+                let ids = [];
+                if (typeof collectTemporarySelectionIds === 'function') {
+                    ids = collectTemporarySelectionIds(parentSection.id, fallbackId);
+                }
+                if (!Array.isArray(ids) || !ids.length) {
+                    if (fallbackId) ids = [fallbackId];
+                }
+                if (ids.length) {
+                    removeTempItemsById(parentSection.id, ids);
+                }
+            } catch (removeErr) {
+                console.error('[Canvas] 分裂临时节点后删除原节点失败:', removeErr);
             }
-            if (!Array.isArray(ids) || !ids.length) {
-                if (fallbackId) ids = [fallbackId];
-            }
-            if (ids.length) {
-                removeTempItemsById(parentSection.id, ids);
-            }
-        } catch (removeErr) {
-            console.error('[Canvas] 分裂临时节点后删除原节点失败:', removeErr);
         }
     }
 

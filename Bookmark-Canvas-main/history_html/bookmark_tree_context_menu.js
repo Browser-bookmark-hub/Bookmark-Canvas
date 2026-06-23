@@ -11418,7 +11418,10 @@ async function batchToTempSection(triggerEvent) {
             if (!bySection.has(n.sectionId)) bySection.set(n.sectionId, []);
             bySection.get(n.sectionId).push(n.id);
         });
+        // 记录需要兜底刷新的栏目
+        const __sectionsToRefresh = new Set();
         bySection.forEach((ids, sectionId) => {
+            let moved = false;
             try {
                 const payload = canvas.temp.extractPayload(sectionId, ids);
                 if (payload && payload.length) {
@@ -11426,11 +11429,30 @@ async function batchToTempSection(triggerEvent) {
                     if (canvas.temp && typeof canvas.temp.removeItems === 'function') {
                         canvas.temp.removeItems(sectionId, ids);
                     }
+                    moved = true;
                 }
             } catch (error) {
                 console.warn('[批量->临时栏目] 复制临时节点失败:', error);
             }
+            // 兜底：extractPayload 返回空或异常时，刷新源栏目树确保项目仍可见
+            if (!moved) {
+                __sectionsToRefresh.add(sectionId);
+            }
         });
+        // 统一刷新需要兜底的源栏目
+        if (__sectionsToRefresh.size > 0) {
+            __sectionsToRefresh.forEach((sectionId) => {
+                try {
+                    const section = (typeof canvas.temp.getSection === 'function')
+                        ? canvas.temp.getSection(sectionId)
+                        : null;
+                    if (section && typeof window.refreshTempSectionTreeInPlace === 'function') {
+                        console.warn('[批量兜底] extractPayload 为空或异常，刷新源栏目:', sectionId);
+                        window.refreshTempSectionTreeInPlace(section);
+                    }
+                } catch (_) { }
+            });
+        }
     }
 
 
