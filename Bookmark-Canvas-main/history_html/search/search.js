@@ -64,6 +64,8 @@ const searchUiState = {
     // Tag browser: when query is "#" / "{#}", first-level shows color+tag navigator.
     // Click one entry to enter second-level bookmark result view.
     tagBrowseDetail: null,
+    tagBrowseBucketsLimit: 5,
+    tagBrowseBucketLimits: {},
 
     // Localized area search range
     areaSearchScope: null
@@ -945,6 +947,47 @@ function handleSearchResultsPanelClick(e) {
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') return;
 
+    const tagBucketLoadMore = e.target.closest('.canvas-tag-bucket-load-more-btn');
+    if (tagBucketLoadMore) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        const bucketKey = tagBucketLoadMore.getAttribute('data-bucket');
+        if (bucketKey) {
+            if (!searchUiState.tagBrowseBucketLimits) {
+                searchUiState.tagBrowseBucketLimits = {};
+            }
+            const currentLimit = searchUiState.tagBrowseBucketLimits[bucketKey] || 5;
+            searchUiState.tagBrowseBucketLimits[bucketKey] = currentLimit + 5;
+            const db = buildCanvasSearchDb();
+            const sourceIndex = db.bookmarkIndex || [];
+            const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
+            renderCanvasTagBrowseRootPanel(rootModel, { query: searchUiState.query });
+        }
+        return;
+    }
+
+    const tagBucketCollapse = e.target.closest('.canvas-tag-bucket-collapse-btn');
+    if (tagBucketCollapse) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        const bucketKey = tagBucketCollapse.getAttribute('data-bucket');
+        if (bucketKey) {
+            if (!searchUiState.tagBrowseBucketLimits) {
+                searchUiState.tagBrowseBucketLimits = {};
+            }
+            searchUiState.tagBrowseBucketLimits[bucketKey] = 5;
+            const db = buildCanvasSearchDb();
+            const sourceIndex = db.bookmarkIndex || [];
+            const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
+            renderCanvasTagBrowseRootPanel(rootModel, { query: searchUiState.query });
+        }
+        return;
+    }
+
     const descriptionOthersBtn = e.target.closest('.canvas-description-others-btn');
     if (descriptionOthersBtn) {
         try {
@@ -958,12 +1001,34 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
+    const tagBrowseCollectionBtn = e.target.closest('.canvas-tag-browse-collection-btn');
+    if (tagBrowseCollectionBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        if (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.kind === 'color') {
+            searchUiState.tagBrowseDetail.showBookmarks = true;
+            const query = String(searchUiState.query || '').trim() || '#';
+            searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
+        }
+        return;
+    }
+
     const tagBrowseBackBtn = e.target.closest('.canvas-tag-browse-back-btn');
     if (tagBrowseBackBtn) {
         try {
             e.preventDefault();
             e.stopPropagation();
         } catch (_) { }
+        
+        if (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.kind === 'color' && searchUiState.tagBrowseDetail.showBookmarks === true) {
+            searchUiState.tagBrowseDetail.showBookmarks = false;
+            const query = String(searchUiState.query || '').trim();
+            searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
+            return;
+        }
+
         searchUiState.tagBrowseDetail = null;
         const query = String(searchUiState.query || '').trim();
         if (isTagBrowseRootQuery(query)) {
@@ -1320,7 +1385,8 @@ function handleSearchResultsPanelClick(e) {
             kind: itemType === 'tag-browser-color' ? 'color' : 'tag',
             color: normalizeTagBrowseColor(tagItem.color),
             text: String(tagItem.text || '').trim(),
-            textLower: String(tagItem.textLower || '').trim().toLowerCase()
+            textLower: String(tagItem.textLower || '').trim().toLowerCase(),
+            showBookmarks: false
         };
         const query = String(searchUiState.query || '').trim() || '#';
         searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
@@ -2030,6 +2096,45 @@ function initSearchEvents() {
         searchResultsPanel.setAttribute('data-search-wheel-bound', 'true');
     }
 
+    // Global delegation listener for tag helper link
+    if (!document.documentElement.hasAttribute('data-search-helper-link-bound')) {
+        document.addEventListener('mousedown', (e) => {
+            const link = e.target.closest('.search-helper-tag-link');
+            if (link) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Set search mode to bookmark
+                if (typeof setSearchMode === 'function') {
+                    try { setSearchMode('bookmark', { source: 'user' }); } catch (_) {}
+                }
+                
+                // Clear input and insert #
+                const input = document.getElementById('searchInput');
+                if (input) {
+                    input.value = '#';
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.focus();
+                }
+                
+                // Close mode menu if open
+                if (typeof toggleSearchModeMenu === 'function') {
+                    try { toggleSearchModeMenu(false); } catch (_) {}
+                }
+            }
+        }, true); // Capture phase
+        
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest('.search-helper-tag-link');
+            if (link) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }, true);
+        
+        document.documentElement.setAttribute('data-search-helper-link-bound', 'true');
+    }
+
     // Outside click: use the same capture+guard strategy as history.js
     if (!document.documentElement.hasAttribute('data-search-outside-bound')) {
         document.addEventListener('click', handleSearchOutsideClick, true);
@@ -2101,8 +2206,8 @@ const SEARCH_MODES = [
         labelEn: 'Bookmark',
         icon: 'fa-bookmark',
         color: 'mode-color-blue',
-        desc: '书签标题、URL、文件夹名称、#标签（如 #/红/#/红色/#/工作）',
-        descEn: 'Title, URL, Folders, #Tags (e.g. #/Blue/#/blue/#/BLUE/#/work)'
+        desc: '标题、URL、文件夹、<span class="search-helper-tag-link" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</span> (如 #/红/#红/#工作)',
+        descEn: 'Title, URL, Folders, <span class="search-helper-tag-link" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</span> (e.g. #/Blue/#Blue/#work)'
     },
     {
         key: 'structure',
@@ -2111,8 +2216,8 @@ const SEARCH_MODES = [
         icon: 'fa-layer-group',
         color: 'mode-color-orange',
         // Include date-range example for card mode (e.g. 0107-0120)
-        desc: '序号(#A/A-1), 群组(A-), 卡片组名字, 时间(今天/2024/0107-0120)',
-        descEn: 'Index(#A/A-1), Group(A-), Card group name, Time(Today/2024/0107-0120)'
+        desc: '序号 (#A / A-1), 群组 (A-), 卡片组名字, 时间 (今天 / 2024 / 0107-0120)',
+        descEn: 'Index (#A / A-1), Group (A-), Card group name, Time (Today / 2024 / 0107-0120)'
     },
     {
         key: 'description',
@@ -2519,7 +2624,8 @@ async function setSearchMode(modeKey, options = {}) {
         const isZh = getCurrentLangSafe() === 'zh_CN';
         // Use the description as placeholder
         if (getCurrentViewSafe() === 'canvas') {
-            input.placeholder = isZh ? mode.desc : mode.descEn;
+            const rawDesc = isZh ? mode.desc : mode.descEn;
+            input.placeholder = rawDesc.replace(/<[^>]*>/g, '');
         }
 
         // If the Canvas empty-query suggestions panel is currently shown, keep it shown
@@ -6499,8 +6605,39 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
     const isZh = currentLang === 'zh_CN';
     const colorEntries = Array.isArray(model && model.colorEntries) ? model.colorEntries : [];
     const tagEntries = Array.isArray(model && model.tagEntries) ? model.tagEntries : [];
+    
+    // Check if color filter is active
+    const activeColorDetail = (searchUiState && searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.active && searchUiState.tagBrowseDetail.kind === 'color')
+        ? searchUiState.tagBrowseDetail
+        : null;
+    const selectedColor = activeColorDetail ? activeColorDetail.color : null;
+    
     const colorTitle = isZh ? '颜色' : 'Colors';
-    const tagTitle = isZh ? '全部标签（0-9 / A-Z）' : 'All Tags (0-9 / A-Z)';
+    
+    let tagTitle = isZh ? '全部标签（0-9 / A-Z）' : 'All Tags (0-9 / A-Z)';
+    let titleHtml = `<div class="canvas-tag-browse-section-title">${escapeHtml(tagTitle)}</div>`;
+    
+    const filteredTagEntries = selectedColor
+        ? tagEntries.filter(entry => normalizeTagBrowseColor(entry.color) === selectedColor)
+        : tagEntries;
+        
+    if (selectedColor) {
+        const colorLabel = getTagBrowseColorLabel(selectedColor, isZh);
+        const displayTagTitle = isZh ? `${colorLabel}标签` : `${colorLabel} Tags`;
+        
+        const backLabel = isZh ? '返回' : 'Back';
+        const collectionLabel = isZh ? '集合' : 'Collection';
+        
+        titleHtml = `
+            <div class="canvas-tag-browse-section-header">
+                <div class="canvas-tag-browse-section-title">${escapeHtml(displayTagTitle)}</div>
+                <div class="canvas-tag-browse-section-header-right">
+                    <button type="button" class="canvas-tag-browse-collection-btn">${escapeHtml(collectionLabel)}</button>
+                    <button type="button" class="canvas-tag-browse-back-btn">${escapeHtml(backLabel)}</button>
+                </div>
+            </div>
+        `;
+    }
 
     const resultItems = [];
     const registerResultItem = (entry) => {
@@ -6528,12 +6665,12 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
         const list = Array.isArray(entries) ? entries : [];
         return list.map((entry) => {
             const { item, index } = registerResultItem(entry);
+            const isSelectedClass = normalizeTagBrowseColor(entry.color) === selectedColor ? ' is-selected' : '';
             return `
-                <div class="search-result-item canvas-tag-browse-item is-color-card" data-index="${index}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
+                <div class="search-result-item canvas-tag-browse-item is-color-card${isSelectedClass}" data-index="${index}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
                     <div class="search-result-content">
                         <div class="search-result-title">
                             <span class="canvas-tag-browse-dot-wrap"><span class="tag-dot tag-dot-${escapeHtml(item.color)}"></span></span>
-                            <span class="canvas-tag-browse-label">${escapeHtml(item.label)}</span>
                         </div>
                     </div>
                     <span class="canvas-tag-browse-count">${escapeHtml(String(item.count))}</span>
@@ -6579,7 +6716,7 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
     const bucketOrder = ['0-9'].concat(TAG_BROWSER_ALPHA_KEYS);
     const bucketMap = new Map(bucketOrder.map((key) => [key, []]));
     const others = [];
-    tagEntries.forEach((entry) => {
+    filteredTagEntries.forEach((entry) => {
         const bucket = getTagBrowseBucketKey(entry && entry.label, collator);
         if (bucketMap.has(bucket)) {
             bucketMap.get(bucket).push(entry);
@@ -6593,18 +6730,72 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
     const renderBucketSection = (key, entries) => {
         const list = Array.isArray(entries) ? entries : [];
         if (!list.length) return '';
+
+        if (!searchUiState.tagBrowseBucketLimits) {
+            searchUiState.tagBrowseBucketLimits = {};
+        }
+        const tagLimit = searchUiState.tagBrowseBucketLimits[key] || 5;
+        searchUiState.tagBrowseBucketLimits[key] = tagLimit;
+
+        const visibleTags = list.slice(0, tagLimit);
+
+        const hasMore = list.length > visibleTags.length;
+        const canCollapse = tagLimit > 5;
+
+        let bucketActionsHtml = '';
+        if (hasMore || canCollapse) {
+            const remaining = list.length - visibleTags.length;
+            const willLoad = Math.min(5, remaining);
+
+            const loadMoreBtnHtml = hasMore
+                ? `<button type="button" class="canvas-tag-bucket-load-more-btn" data-bucket="${escapeHtml(key)}" style="border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-secondary); padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px; flex:1; justify-content:center;">
+                    <i class="fas fa-chevron-down" style="font-size:9px;"></i>
+                    <span>${isZh ? `展开 ${willLoad} 项` : `Load ${willLoad} more`}</span>
+                   </button>`
+                : '';
+
+            const collapseBtnHtml = canCollapse
+                ? `<button type="button" class="canvas-tag-bucket-collapse-btn" data-bucket="${escapeHtml(key)}" style="border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-secondary); padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px; flex:1; justify-content:center;">
+                    <i class="fas fa-chevron-up" style="font-size:9px;"></i>
+                    <span>${isZh ? '收起已加载' : 'Collapse'}</span>
+                   </button>`
+                : '';
+
+            bucketActionsHtml = `<div class="canvas-tag-bucket-actions-row" style="padding:4px 12px; display:flex; justify-content:center; gap:8px;">
+                ${loadMoreBtnHtml}
+                ${collapseBtnHtml}
+            </div>`;
+        }
+
         return `<div class="canvas-tag-browse-bucket">
             <div class="canvas-tag-browse-bucket-title">${escapeHtml(key)}</div>
-            <div class="canvas-tag-browse-bucket-list">${renderTagRows(list)}</div>
+            <div class="canvas-tag-browse-bucket-list">${renderTagRows(visibleTags)}</div>
+            ${bucketActionsHtml}
         </div>`;
     };
 
-    const numericBlock = renderBucketSection('0-9', bucketMap.get('0-9'));
-    const alphaBlocks = TAG_BROWSER_ALPHA_KEYS.map((letter) => renderBucketSection(letter, bucketMap.get(letter))).join('');
-    const otherBlocks = others.length ? renderBucketSection('#', others) : '';
-    const dividerHtml = numericBlock && (alphaBlocks || otherBlocks)
-        ? `<div class="canvas-tag-browse-major-divider"></div>`
-        : '';
+    // Collect active non-empty buckets
+    const activeBuckets = [];
+    if (bucketMap.get('0-9').length) {
+        activeBuckets.push({ key: '0-9', entries: bucketMap.get('0-9') });
+    }
+    TAG_BROWSER_ALPHA_KEYS.forEach((letter) => {
+        const entries = bucketMap.get(letter);
+        if (entries && entries.length) {
+            activeBuckets.push({ key: letter, entries });
+        }
+    });
+    if (others.length) {
+        activeBuckets.push({ key: '#', entries: others });
+    }
+
+    let bucketsHtml = '';
+    activeBuckets.forEach((b, idx) => {
+        bucketsHtml += renderBucketSection(b.key, b.entries);
+        if (b.key === '0-9' && idx < activeBuckets.length - 1) {
+            bucketsHtml += `<div class="canvas-tag-browse-major-divider"></div>`;
+        }
+    });
 
     panel.innerHTML = `
         <div class="canvas-tag-browse-section">
@@ -6614,12 +6805,9 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
             </div>
         </div>
         <div class="canvas-tag-browse-section">
-            <div class="canvas-tag-browse-section-title">${escapeHtml(tagTitle)}</div>
+            ${titleHtml}
             <div class="canvas-tag-browse-buckets">
-                ${numericBlock}
-                ${dividerHtml}
-                ${alphaBlocks}
-                ${otherBlocks}
+                ${bucketsHtml}
             </div>
         </div>
     `;
@@ -6667,6 +6855,8 @@ function searchCanvasAndRender(query, options = {}) {
     const trimmedQuery = String(query).trim();
     if (!trimmedQuery) {
         searchUiState.tagBrowseDetail = null;
+        searchUiState.tagBrowseBucketsLimit = 5;
+        searchUiState.tagBrowseBucketLimits = {};
         hideSearchResultsPanel();
         return;
     }
@@ -6677,6 +6867,8 @@ function searchCanvasAndRender(query, options = {}) {
     }
     if (!isTagBrowseRootQuery(trimmedQuery)) {
         searchUiState.tagBrowseDetail = null;
+        searchUiState.tagBrowseBucketsLimit = 5;
+        searchUiState.tagBrowseBucketLimits = {};
     }
     const previousCanvasQuery = String(searchUiState.query || '').trim().toLowerCase();
     const nextCanvasQuery = trimmedQuery.toLowerCase();
@@ -6709,7 +6901,7 @@ function searchCanvasAndRender(query, options = {}) {
 
     if (mode === 'bookmark' && isTagBrowseRootQuery(trimmedQuery)) {
         const detail = searchUiState && searchUiState.tagBrowseDetail ? searchUiState.tagBrowseDetail : null;
-        if (!detail || detail.active !== true) {
+        if (!detail || detail.active !== true || (detail.kind === 'color' && !detail.showBookmarks)) {
             const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
             renderCanvasTagBrowseRootPanel(rootModel, { query: trimmedQuery });
             return;
@@ -7068,7 +7260,7 @@ function renderCanvasSearchSuggestions() {
                 <div class="mode-icon"><i class="fas ${escapeHtml(mode.icon)} ${escapeHtml(mode.color)}"></i></div>
                 <div class="mode-info">
                     <div class="mode-name">${escapeHtml(title)}</div>
-                    <div class="mode-desc">${escapeHtml(desc)}</div>
+                    <div class="mode-desc">${desc}</div>
                 </div>
             </div>
         `;
@@ -7839,15 +8031,13 @@ function renderCanvasSearchResults(results, options = {}) {
                 ? getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh)
                 : (String(activeTagBrowseDetail.text || '').trim() || getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh));
             const backLabel = isZh ? '返回' : 'Back';
-            const detailDesc = isZh ? '标签二级筛选' : 'Tag detail';
             panel.innerHTML = `
                 <div class="canvas-tag-browse-detail-header canvas-tag-browse-detail-header-empty">
-                    <button type="button" class="canvas-tag-browse-back-btn">${escapeHtml(backLabel)}</button>
                     <span class="canvas-tag-browse-detail-pill">
                         <span class="tag-dot tag-dot-${escapeHtml(detailColor)}"></span>
                         <span class="canvas-tag-browse-detail-pill-text">${escapeHtml(detailLabel)}</span>
                     </span>
-                    <span class="canvas-tag-browse-detail-hint">${escapeHtml(detailDesc)}</span>
+                    <button type="button" class="canvas-tag-browse-back-btn" style="margin-left: auto;">${escapeHtml(backLabel)}</button>
                 </div>
                 <div class="search-result-empty">${msg}</div>
             `;
@@ -8203,16 +8393,12 @@ function renderCanvasSearchResults(results, options = {}) {
                     ? getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh)
                     : (String(activeTagBrowseDetail.text || '').trim() || getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh));
                 const backLabel = isZh ? '返回' : 'Back';
-                const detailDesc = activeTagBrowseDetail.kind === 'color'
-                    ? (isZh ? '颜色筛选' : 'Color filter')
-                    : (isZh ? '标签筛选' : 'Tag filter');
                 html += `<div class="canvas-tag-browse-detail-header">
-                    <button type="button" class="canvas-tag-browse-back-btn">${escapeHtml(backLabel)}</button>
                     <span class="canvas-tag-browse-detail-pill">
                         <span class="tag-dot tag-dot-${escapeHtml(detailColor)}"></span>
                         <span class="canvas-tag-browse-detail-pill-text">${escapeHtml(detailLabel)}</span>
                     </span>
-                    <span class="canvas-tag-browse-detail-hint">${escapeHtml(detailDesc)}</span>
+                    <button type="button" class="canvas-tag-browse-back-btn" style="margin-left: auto;">${escapeHtml(backLabel)}</button>
                 </div>`;
             }
             const makeBtn = ({ type, icon, color, count, isActiveOverride = null }) => {

@@ -37,8 +37,7 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
 
 /* [User Request] Fix scrollbar corner transition by adding track margin */
 .search-results-panel::-webkit-scrollbar {
-    width: 10px;
-    /* Match global */
+    width: 8px;
 }
 
 .search-results-panel::-webkit-scrollbar-track {
@@ -165,7 +164,8 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     position: static;
 }
 
-.canvas-tag-browse-back-btn {
+.canvas-tag-browse-back-btn,
+.canvas-tag-browse-collection-btn {
     appearance: none;
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
@@ -175,9 +175,11 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
+    transition: all 0.12s ease;
 }
 
-.canvas-tag-browse-back-btn:hover {
+.canvas-tag-browse-back-btn:hover,
+.canvas-tag-browse-collection-btn:hover {
     border-color: var(--border-hover, var(--border-color));
     color: var(--text-primary);
     background: var(--bg-tertiary);
@@ -220,6 +222,29 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     margin-top: 2px;
 }
 
+.canvas-tag-browse-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 6px 5px;
+}
+
+.canvas-tag-browse-section-header .canvas-tag-browse-section-title {
+    padding: 0;
+}
+
+.canvas-tag-browse-section-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.canvas-tag-browse-color-stats {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-weight: normal;
+}
+
 .canvas-tag-browse-section-title {
     padding: 2px 6px 5px;
     color: var(--text-tertiary);
@@ -235,34 +260,60 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 }
 
 .canvas-tag-browse-color-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: flex;
+    flex-direction: row;
     gap: 6px;
-    padding: 0 2px 6px;
+    padding: 2px 2px 8px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+    /* Firefox */
+}
+
+.canvas-tag-browse-color-grid::-webkit-scrollbar {
+    display: none;
+    /* Safari and Chrome */
 }
 
 @media (max-width: 560px) {
     .canvas-tag-browse-color-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        /* No columns needed as it's flex row */
     }
 }
 
 .canvas-tag-browse-color-grid .search-result-item.canvas-tag-browse-item {
     border: 1px solid var(--border-color) !important;
     border-bottom: 1px solid var(--border-color) !important;
-    border-radius: 10px;
+    border-radius: 12px;
     margin: 0;
-    padding: 8px 6px;
+    padding: 4px 8px;
     min-width: 0;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.canvas-tag-browse-color-grid .search-result-item.canvas-tag-browse-item.is-selected {
+    border-color: var(--accent-blue, #0a84ff) !important;
+    background: var(--bg-hover-strong, rgba(10, 132, 255, 0.12)) !important;
+    box-shadow: 0 0 0 1px var(--accent-blue, #0a84ff);
 }
 
 .canvas-tag-browse-color-grid .search-result-item.canvas-tag-browse-item .search-result-content {
     min-width: 0;
+    display: inline-flex;
+    align-items: center;
 }
 
 .canvas-tag-browse-color-grid .search-result-item.canvas-tag-browse-item .search-result-title {
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 0;
     font-size: 11px;
 }
 
@@ -276,6 +327,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     border-radius: 0;
     font-size: 10px;
     color: var(--text-tertiary);
+    line-height: 1;
 }
 
 .canvas-tag-browse-buckets {
@@ -412,7 +464,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 }
 
 .search-result-item:hover,
-.search-result-item.selected {
+.search-result-item.selected:not(.is-color-card):not(.is-tag-row) {
     background: var(--bg-tertiary);
     border-color: var(--border-color);
 }
@@ -681,13 +733,13 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     padding: 8px 10px 10px;
 }
 
-.search-result-item.bookmark-group[data-expanded="true"] > .search-result-content {
+.search-result-item.bookmark-group[data-expanded="true"]>.search-result-content {
     width: 100%;
     min-width: 0;
     overflow: visible;
 }
 
-.search-result-item.bookmark-group[data-expanded="true"] > .search-result-content > .search-result-title {
+.search-result-item.bookmark-group[data-expanded="true"]>.search-result-content>.search-result-title {
     padding-bottom: 6px;
     border-bottom: 1px dashed var(--border-color);
 }
@@ -780,6 +832,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     background: var(--bg-tertiary);
     color: var(--text-primary);
 }
+
 .canvas-bookmark-location-chip-row-break[hidden],
 .canvas-bookmark-location-chip[hidden],
 .canvas-bookmark-location-more[hidden],
@@ -1517,6 +1570,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 }
 
 @keyframes tree-locate-group-outline-pulse {
+
     0%,
     100% {
         transform: scale(1);
@@ -1576,6 +1630,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 }
 
 @keyframes canvas-node-pulse {
+
     0%,
     100% {
         box-shadow: 0 0 0 3px var(--search-highlight-color, rgba(59, 130, 246, 0.85)),

@@ -5355,15 +5355,12 @@ function renderTagSubmenu(context) {
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
             </button>
         </div>
-        <div class="tag-popover-palette" data-role="palette" style="padding: 4px 12px 6px; display: flex; align-items: center; justify-content: space-between;">
+        <div class="tag-popover-palette" data-role="palette" style="padding: 4px 12px 6px; display: flex; align-items: center;">
             <div class="tag-popover-palette-colors" data-role="palette-colors" style="display: flex; gap: 4px; align-items: center;">
                 ${TAG_PALETTE.map((c) =>
                     `<button class="tag-palette-btn" data-color="${c}" type="button" aria-label="${c}"><span class="tag-dot tag-dot-${c}"></span></button>`
                 ).join('')}
             </div>
-            <button class="tag-popover-delete" data-role="delete-existing" type="button" title="${t('removeAriaLabel')}" style="width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center;" hidden>
-                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
-            </button>
         </div>
         <div class="tag-popover-divider" style="height: 1px; background: var(--border-color); opacity: 0.5; margin: 4px 0;"></div>
         <div class="tag-popover-preview" data-role="preview" style="padding: 4px 12px 6px; display: flex; align-items: center; min-height: 20px;">
@@ -5384,7 +5381,6 @@ function renderTagSubmenu(context) {
     const inputEl = contextSubmenu.querySelector('[data-role="input"]');
     const confirmBtn = contextSubmenu.querySelector('[data-role="confirm"]');
     const closeBtn = contextSubmenu.querySelector('[data-role="close-popover"]');
-    const deleteBtn = contextSubmenu.querySelector('[data-role="delete-existing"]');
     const recentHeader = contextSubmenu.querySelector('[data-role="recent-header"]');
     const recentEl = contextSubmenu.querySelector('[data-role="recent"]');
     const recentMore = contextSubmenu.querySelector('[data-role="recent-more"]');
@@ -5395,9 +5391,6 @@ function renderTagSubmenu(context) {
 
     function updatePreview() {
         const color = tagSubmenuCtx.selectedColor;
-        if (deleteBtn) {
-            deleteBtn.hidden = !tagSubmenuCtx.editingTag;
-        }
         if (!color) {
             previewCard.hidden = true;
             previewPlaceholder.hidden = false;
@@ -5499,15 +5492,6 @@ function renderTagSubmenu(context) {
         }
     }
 
-    async function deleteEditingTag() {
-        if (!tagSubmenuCtx.editingTag) return;
-        await toggleTagOnAllTargets(tagSubmenuCtx.editingTag, { mode: 'remove' });
-        inputEl.value = '';
-        tagSubmenuCtx.selectedColor = null;
-        tagSubmenuCtx.editingTag = null;
-        updatePreview();
-        await renderList();
-    }
 
     async function renderList() {
         if (!window.TagSystem || !window.TagSystem.getTagsForTarget) return;
@@ -5636,10 +5620,6 @@ function renderTagSubmenu(context) {
         hideContextMenu();
     });
 
-    deleteBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await deleteEditingTag();
-    });
 
     recentMore.addEventListener('click', async (e) => {
         e.stopPropagation();

@@ -41,10 +41,14 @@
         confirmAriaLabel: { 'zh_CN': '确认添加', 'en': 'Confirm add' },
         removeAriaLabel:  { 'zh_CN': '移除', 'en': 'Remove' },
         previewEmpty:     { 'zh_CN': '选一个颜色…', 'en': 'Pick a color…' },
-        recentHeader:     { 'zh_CN': '已用 tag（全局）', 'en': 'Recent tags (all)' },
+        appliedHeader:    { 'zh_CN': '当前标签', 'en': 'Current tags' },
+        globalHeader:     { 'zh_CN': '全局使用标签', 'en': 'Global tags' },
+        clearAllTags:     { 'zh_CN': '清除全部', 'en': 'Clear all' },
+        noAppliedTags:    { 'zh_CN': '暂无应用 tag', 'en': 'No applied tags' },
         noTagsYet:        { 'zh_CN': '暂无已用 tag', 'en': 'No tags yet' },
         moreEllipsis:     { 'zh_CN': '…还有 {n} 个', 'en': '…{n} more' },
-        tagAriaLabel:     { 'zh_CN': '标签', 'en': 'Tags' }
+        tagAriaLabel:     { 'zh_CN': '标签', 'en': 'Tags' },
+        collapseTags:     { 'zh_CN': '收起已加载', 'en': 'Collapse' }
     };
 
     function __lang() {
@@ -68,6 +72,32 @@
     function __colorName(color) {
         const map = TAG_COLOR_NAMES[color];
         return map ? __t(map) : (color || '');
+    }
+
+    function __getBucketKey(text) {
+        if (typeof getTagBrowseBucketKey === 'function') {
+            try {
+                return getTagBrowseBucketKey(text);
+            } catch (_) {}
+        }
+        const safeText = String(text || '').trim();
+        if (!safeText) return '#';
+        const first = safeText.charAt(0).toUpperCase();
+        if (/^[0-9]$/.test(first)) return '0-9';
+        if (/^[A-Z]$/.test(first)) return first;
+        return '#';
+    }
+
+    function __normalizeColor(color) {
+        if (typeof normalizeTagBrowseColor === 'function') {
+            try {
+                return normalizeTagBrowseColor(color);
+            } catch (_) {}
+        }
+        const raw = String(color || '').trim().toLowerCase();
+        const colorOrder = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+        if (colorOrder.includes(raw)) return raw;
+        return '';
     }
 
     function __bridge() {
@@ -153,13 +183,175 @@
     // -------------------------------------------------------------------------
 
     let __popoverEl = null;
+    let __popoverSubEl = null;
     let __popoverCtx = null;
     // __popoverCtx shape: { targets, anchor, selectedColor }
     let __outsideClickHandler = null;
     let __escKeyHandler = null;
-    const RECENT_INITIAL_VISIBLE = 3;
-    const RECENT_LOAD_STEP = 3;
-    const RECENT_MAX_VISIBLE = 10;
+    
+    const APPLIED_INITIAL_VISIBLE = 5;
+    const APPLIED_LOAD_STEP = 5;
+
+    function __positionSubPanel() {
+        if (!__popoverEl || !__popoverSubEl || !__popoverCtx) return;
+        if (__popoverCtx.globalCollapsed) {
+            __popoverSubEl.hidden = true;
+            return;
+        }
+        
+        const pop = __popoverEl;
+        const sub = __popoverSubEl;
+        const isAlreadyVisible = !sub.hidden && sub.style.visibility !== 'hidden';
+        if (!isAlreadyVisible) {
+            sub.style.visibility = 'hidden';
+        }
+        sub.hidden = false;
+        
+        const scale = __getCurrentPopoverScale();
+        sub.style.transform = `scale(${scale})`;
+        sub.style.transformOrigin = 'top left';
+        
+        const popRect = pop.getBoundingClientRect();
+        const subRect = sub.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        
+        // Check spaces in different directions
+        const spaceRight = vw - popRect.right - 8;
+        const spaceLeft = popRect.left - 8;
+        const spaceBottom = vh - popRect.bottom - 8;
+        const spaceTop = popRect.top - 8;
+
+        let left = 0;
+        let top = 0;
+
+        // Determine layout mode: horizontal (left/right) or vertical (above/below)
+        if (spaceRight >= subRect.width) {
+            // Put on the right
+            left = popRect.right + 6;
+            top = popRect.top;
+            if (top + subRect.height > vh - 8) {
+                top = Math.max(8, vh - subRect.height - 8);
+            }
+        } else if (spaceLeft >= subRect.width) {
+            // Put on the left
+            left = popRect.left - subRect.width - 6;
+            top = popRect.top;
+            if (top + subRect.height > vh - 8) {
+                top = Math.max(8, vh - subRect.height - 8);
+            }
+        } else {
+            // Vertical fallback: place below or above the main popover
+            // Align horizontally and constrain within viewport bounds
+            left = Math.max(8, Math.min(popRect.left, vw - subRect.width - 8));
+            
+            // Prefer placing below by default
+            if (spaceBottom >= subRect.height) {
+                top = popRect.bottom + 6;
+            } else if (spaceTop >= subRect.height) {
+                top = popRect.top - subRect.height - 6;
+            } else {
+                // If neither fits vertically, place where there is more vertical space
+                if (spaceBottom >= spaceTop) {
+                    top = popRect.bottom + 6;
+                } else {
+                    top = popRect.top - subRect.height - 6;
+                }
+            }
+        }
+        
+        // Constrain final coordinates to be within viewport bounds (just in case)
+        left = Math.max(8, Math.min(left, vw - subRect.width - 8));
+        top = Math.max(8, Math.min(top, vh - subRect.height - 8));
+
+        const parentRect = sub.parentElement.getBoundingClientRect();
+        sub.style.left = `${Math.round(left - parentRect.left)}px`;
+        sub.style.top = `${Math.round(top - parentRect.top)}px`;
+        if (!isAlreadyVisible) {
+            sub.style.visibility = '';
+        }
+    }
+
+    function __onPopoverSubClick(ev) {
+        const target = ev.target;
+        
+        const backBtn = target.closest('.canvas-tag-browse-back-btn');
+        if (backBtn) {
+            __popoverCtx.selectedColor = null;
+            __popoverCtx.dontFilterSubPanel = false;
+            __updatePreview();
+            if (__popoverEl) {
+                __popoverEl.querySelectorAll('.tag-palette-btn').forEach((b) => {
+                    b.classList.remove('is-selected');
+                });
+            }
+            __renderPopover();
+            ev.stopPropagation();
+            return;
+        }
+
+        const subColorCard = target.closest('[data-action="filter-sub-color"]');
+        if (subColorCard) {
+            const color = subColorCard.dataset.color;
+            __popoverCtx.selectedColor = (__popoverCtx.selectedColor === color) ? null : color;
+            __popoverCtx.dontFilterSubPanel = false;
+            __updatePreview();
+            if (__popoverEl) {
+                __popoverEl.querySelectorAll('.tag-palette-btn').forEach((b) => {
+                    b.classList.toggle('is-selected', b.dataset.color === __popoverCtx.selectedColor);
+                });
+            }
+            __renderPopover();
+            ev.stopPropagation();
+            return;
+        }
+
+        const closeBtn = target.closest('[data-action="close-sub-panel"]');
+        if (closeBtn) {
+            __popoverCtx.globalCollapsed = true;
+            __renderPopover();
+            ev.stopPropagation();
+            return;
+        }
+
+
+        const bucketLoadMore = target.closest('[data-action="load-more-bucket"]');
+        if (bucketLoadMore) {
+            const bucketKey = bucketLoadMore.dataset.bucket;
+            if (bucketKey && __popoverCtx) {
+                __popoverCtx.bucketLimits = __popoverCtx.bucketLimits || {};
+                const prev = __popoverCtx.bucketLimits[bucketKey] || 5;
+                __popoverCtx.bucketLimits[bucketKey] = prev + 5;
+                __renderPopover();
+            }
+            ev.stopPropagation();
+            return;
+        }
+
+        const bucketCollapse = target.closest('[data-action="collapse-bucket"]');
+        if (bucketCollapse) {
+            const bucketKey = bucketCollapse.dataset.bucket;
+            if (bucketKey && __popoverCtx) {
+                __popoverCtx.bucketLimits = __popoverCtx.bucketLimits || {};
+                __popoverCtx.bucketLimits[bucketKey] = 5;
+                __renderPopover();
+            }
+            ev.stopPropagation();
+            return;
+        }
+        
+        const recentRow = target.closest('.tag-applied-row');
+        if (recentRow) {
+            const tag = { color: recentRow.dataset.color, text: recentRow.dataset.text };
+            if (recentRow.classList.contains('is-active') || recentRow.classList.contains('is-mixed')) {
+                __toggleTagOnAllTargets(tag, { mode: 'remove' });
+            } else {
+                __toggleTagOnAllTargets(tag);
+            }
+            ev.stopPropagation();
+            return;
+        }
+    }
 
     function __ensurePopoverDom() {
         if (__popoverEl) return __popoverEl;
@@ -185,9 +377,6 @@
                         `<button class="tag-palette-btn" data-color="${c}" type="button" aria-label="${c}"><span class="tag-dot tag-dot-${c}"></span></button>`
                     ).join('')}
                 </div>
-                <button class="tag-popover-delete" data-role="delete-existing" type="button" aria-label="${__t(TAG_PANEL_I18N.removeAriaLabel)}" hidden>
-                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
-                </button>
             </div>
             <div class="tag-popover-divider"></div>
             <div class="tag-popover-preview" data-role="preview">
@@ -198,28 +387,95 @@
                 </span>
             </div>
             <div class="tag-popover-applied-section">
-                <div class="tag-popover-applied-header" data-role="recent-header"></div>
-                <div class="tag-popover-applied" data-role="recent"></div>
-                <button class="tag-popover-more" data-role="recent-more" type="button" hidden></button>
+                <div class="tag-popover-section-header">
+                    <div class="tag-popover-applied-header" data-role="applied-header"></div>
+                </div>
+                <div class="tag-popover-applied" data-role="applied-list"></div>
+                <div class="tag-popover-more-container" data-role="applied-actions" style="display: flex; gap: 4px; align-items: center; justify-content: center; margin-top: 4px;">
+                    <button class="tag-popover-more" data-role="applied-more" type="button" style="margin: 0; flex: 1;" hidden></button>
+                    <button class="tag-popover-more" data-role="applied-collapse" type="button" style="margin: 0; flex: 1;" hidden></button>
+                </div>
+
+                <div class="tag-popover-applied-divider"></div>
+
+                <div class="tag-popover-section-header collapsible" data-action="toggle-global-collapse">
+                    <div class="tag-popover-applied-header" data-role="global-header"></div>
+                    <svg class="tag-collapse-chevron" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/></svg>
+                </div>
             </div>
         `;
+
+        const subEl = document.createElement('div');
+        subEl.className = 'tag-popover-sub-panel';
+        subEl.setAttribute('role', 'dialog');
+        subEl.hidden = true;
+        subEl.innerHTML = `
+            <div class="tag-popover-sub-header">
+                <span class="tag-popover-sub-title" data-role="sub-title"></span>
+                <button class="tag-popover-sub-close" data-action="close-sub-panel" type="button" aria-label="${currentLang === 'en' ? 'Close' : '关闭'}">
+                    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
+                </button>
+            </div>
+            <div class="tag-popover-sub-content">
+                <div class="tag-popover-sub-colors" data-role="sub-colors"></div>
+                <div class="tag-popover-applied-divider"></div>
+                <div class="tag-popover-section-header" data-role="sub-global-header"></div>
+                <div class="tag-popover-applied" data-role="sub-global-list"></div>
+            </div>
+        `;
+
         getOverlayContainer().appendChild(el);
+        getOverlayContainer().appendChild(subEl);
         __popoverEl = el;
+        __popoverSubEl = subEl;
 
         el.addEventListener('click', __onPopoverClick);
+        subEl.addEventListener('click', __onPopoverSubClick);
+
         const input = el.querySelector('[data-role="input"]');
         input.addEventListener('input', __onPopoverInput);
         input.addEventListener('keydown', __onPopoverInputKeydown);
-        const recent = el.querySelector('[data-role="recent"]');
-        recent.addEventListener('scroll', __onRecentListScroll);
+        
+        const appliedList = el.querySelector('[data-role="applied-list"]');
+        appliedList.addEventListener('scroll', __onAppliedListScroll);
         return el;
     }
+
+    function __onAppliedListScroll(ev) {
+        const el = ev.currentTarget;
+        if (!el || !__popoverCtx) return;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 12) {
+            __loadMoreAppliedTags();
+        }
+    }
+
+
+
+    function __loadMoreAppliedTags() {
+        if (!__popoverCtx) return;
+        const prev = Number(__popoverCtx.appliedLimit) || APPLIED_INITIAL_VISIBLE;
+        __popoverCtx.appliedLimit = prev + APPLIED_LOAD_STEP;
+        __renderPopover();
+    }
+
+    function __collapseAppliedTags() {
+        if (!__popoverCtx) return;
+        __popoverCtx.appliedLimit = APPLIED_INITIAL_VISIBLE;
+        __renderPopover();
+    }
+
+
 
     function __closePopover() {
         if (__popoverEl) {
             __popoverEl.hidden = true;
             __popoverEl.style.removeProperty('transform');
             __popoverEl.style.removeProperty('transform-origin');
+        }
+        if (__popoverSubEl) {
+            __popoverSubEl.hidden = true;
+            __popoverSubEl.style.removeProperty('transform');
+            __popoverSubEl.style.removeProperty('transform-origin');
         }
         __popoverCtx = null;
         if (__outsideClickHandler) {
@@ -276,6 +532,10 @@
         const anchorRect = __getAnchorRect(anchor);
         if (!anchorRect) return;
         const pop = __popoverEl;
+        const isAlreadyVisible = !pop.hidden && pop.style.visibility !== 'hidden';
+        if (!isAlreadyVisible) {
+            pop.style.visibility = 'hidden';
+        }
         pop.hidden = false;
         const scale = __getCurrentPopoverScale();
         pop.style.transform = `scale(${scale})`;
@@ -311,6 +571,13 @@
         const parentRect = pop.parentElement.getBoundingClientRect();
         pop.style.left = `${Math.round(left - parentRect.left)}px`;
         pop.style.top = `${Math.round(top - parentRect.top)}px`;
+        if (!isAlreadyVisible) {
+            pop.style.visibility = '';
+        }
+
+        if (!__popoverCtx.globalCollapsed) {
+            __positionSubPanel();
+        }
     }
 
     function __updatePreview() {
@@ -321,11 +588,7 @@
         const txt = __popoverEl.querySelector('[data-role="preview-text"]');
         const input = __popoverEl.querySelector('[data-role="input"]');
         const confirmBtn = __popoverEl.querySelector('[data-role="confirm"]');
-        const deleteBtn = __popoverEl.querySelector('[data-role="delete-existing"]');
         const color = __popoverCtx.selectedColor;
-        if (deleteBtn) {
-            deleteBtn.hidden = !__popoverCtx.editingTag;
-        }
         if (!color) {
             card.hidden = true;
             placeholder.hidden = false;
@@ -385,77 +648,347 @@
             btn.classList.toggle('is-mixed', presentCount > 0 && presentCount < targets.length);
         });
 
-        // Recent (global) tag list — fetched from collectAllUsedTags (Phase A).
-        // Per the new spec, this list is GLOBAL: shows tags ever used on any bookmark/folder,
-        // so the user can quickly re-apply existing tags. The per-row status (✓/–/+) reflects
-        // whether the current target(s) have that tag applied.
-        let globalTags = [];
-        try {
-            if (bridge && bridge.collectAllUsedTags) globalTags = await bridge.collectAllUsedTags();
-        } catch (_) {}
+        // 1. Applied tags list
+        const appliedTags = Array.from(aggregate.values()).map(e => e.tag);
+        appliedTags.sort((a, b) => {
+            const entryA = aggregate.get(keyOf(a.color, a.text));
+            const entryB = aggregate.get(keyOf(b.color, b.text));
+            if (entryB.present !== entryA.present) {
+                return entryB.present - entryA.present;
+            }
+            const textA = a.text || '';
+            const textB = b.text || '';
+            return textA.localeCompare(textB, undefined, { numeric: true, sensitivity: 'base' });
+        });
 
-        const recentEl = el.querySelector('[data-role="recent"]');
-        const recentHeader = el.querySelector('[data-role="recent-header"]');
-        const recentMore = el.querySelector('[data-role="recent-more"]');
+        const appliedListEl = el.querySelector('[data-role="applied-list"]');
+        const appliedHeaderEl = el.querySelector('[data-role="applied-header"]');
+        const appliedMoreEl = el.querySelector('[data-role="applied-more"]');
+        const appliedCollapseEl = el.querySelector('[data-role="applied-collapse"]');
 
-        recentHeader.textContent = __t(TAG_PANEL_I18N.recentHeader);
-        recentEl.innerHTML = '';
+        appliedHeaderEl.textContent = __t(TAG_PANEL_I18N.appliedHeader);
+        appliedListEl.innerHTML = '';
+        appliedListEl.classList.remove('is-scrollable');
 
-        recentEl.classList.remove('is-scrollable');
-
-        if (!globalTags.length) {
+        if (!appliedTags.length) {
             const empty = document.createElement('div');
             empty.className = 'tag-recent-empty';
-            empty.textContent = __t(TAG_PANEL_I18N.noTagsYet);
-            recentEl.appendChild(empty);
-            recentMore.hidden = true;
+            empty.textContent = __t(TAG_PANEL_I18N.noAppliedTags);
+            appliedListEl.appendChild(empty);
+            appliedMoreEl.hidden = true;
+            if (appliedCollapseEl) appliedCollapseEl.hidden = true;
         } else {
-            const recentLimit = Math.min(
-                RECENT_MAX_VISIBLE,
-                Math.max(RECENT_INITIAL_VISIBLE, Number(__popoverCtx.recentLimit) || RECENT_INITIAL_VISIBLE)
-            );
-            __popoverCtx.recentLimit = recentLimit;
-            const visible = globalTags.slice(0, recentLimit);
-            recentEl.classList.toggle('is-scrollable', visible.length > RECENT_INITIAL_VISIBLE);
-            visible.forEach((t) => {
+            const appliedLimit = Math.max(APPLIED_INITIAL_VISIBLE, Number(__popoverCtx.appliedLimit) || APPLIED_INITIAL_VISIBLE);
+            __popoverCtx.appliedLimit = appliedLimit;
+            const visibleApplied = appliedTags.slice(0, appliedLimit);
+            appliedListEl.classList.toggle('is-scrollable', visibleApplied.length > APPLIED_INITIAL_VISIBLE);
+            
+            visibleApplied.forEach((t) => {
                 const k = keyOf(t.color, t.text);
                 const entry = aggregate.get(k);
                 const row = document.createElement('div');
                 row.className = 'tag-applied-row';
                 row.dataset.color = t.color;
                 row.dataset.text = t.text;
-                let statusMark = '+';
                 if (entry) {
                     if (entry.present === targets.length) {
                         row.classList.add('is-active');
-                        statusMark = '✓';
                     } else {
                         row.classList.add('is-mixed');
-                        statusMark = '–';
                     }
                 }
                 row.innerHTML = `
                     <span class="tag-dot tag-dot-${t.color}"></span>
                     <span class="tag-applied-text"></span>
-                    <span class="tag-applied-status">${statusMark}</span>
+                    <button class="tag-row-delete-btn" type="button" aria-label="${__t(TAG_PANEL_I18N.removeAriaLabel)}">
+                        <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
+                    </button>
                 `;
                 row.querySelector('.tag-applied-text').textContent = t.text || __colorName(t.color);
-                recentEl.appendChild(row);
+                appliedListEl.appendChild(row);
             });
 
-            const hidden = Math.max(0, Math.min(globalTags.length, RECENT_MAX_VISIBLE) - visible.length);
-            if (hidden > 0) {
-                recentMore.hidden = false;
-                recentMore.dataset.action = 'load-more-tags';
-                recentMore.textContent = __t(TAG_PANEL_I18N.moreEllipsis, { n: hidden });
+            const hiddenCount = Math.max(0, appliedTags.length - visibleApplied.length);
+            if (hiddenCount > 0) {
+                appliedMoreEl.hidden = false;
+                appliedMoreEl.dataset.action = 'load-more-applied';
+                appliedMoreEl.textContent = __t(TAG_PANEL_I18N.moreEllipsis, { n: hiddenCount });
             } else {
-                recentMore.hidden = true;
-                delete recentMore.dataset.action;
+                appliedMoreEl.hidden = true;
+                delete appliedMoreEl.dataset.action;
+            }
+
+            const canCollapse = appliedLimit > APPLIED_INITIAL_VISIBLE;
+            if (appliedCollapseEl) {
+                if (canCollapse) {
+                    appliedCollapseEl.hidden = false;
+                    appliedCollapseEl.dataset.action = 'collapse-applied';
+                    appliedCollapseEl.textContent = __t(TAG_PANEL_I18N.collapseTags);
+                } else {
+                    appliedCollapseEl.hidden = true;
+                    delete appliedCollapseEl.dataset.action;
+                }
+            }
+        }
+
+        // 2. Global tags list
+        const globalHeaderWrapper = el.querySelector('[data-action="toggle-global-collapse"]');
+        const globalHeaderEl = el.querySelector('[data-role="global-header"]');
+
+        globalHeaderEl.textContent = __t(TAG_PANEL_I18N.globalHeader);
+
+        const collapsed = !!__popoverCtx.globalCollapsed;
+        globalHeaderWrapper.classList.toggle('is-expanded', !collapsed);
+
+        if (collapsed) {
+            if (__popoverSubEl) __popoverSubEl.hidden = true;
+        } else {
+            if (__popoverSubEl) {
+                if (__popoverSubEl.hidden) {
+                    __popoverSubEl.style.visibility = 'hidden';
+                }
+                __popoverSubEl.hidden = false;
+                
+                const subTitleEl = __popoverSubEl.querySelector('[data-role="sub-title"]');
+                const isZh = __lang() === 'zh_CN';
+                subTitleEl.textContent = __t(TAG_PANEL_I18N.globalHeader);
+                
+                let globalTags = [];
+                try {
+                    if (bridge && bridge.collectAllUsedTags) globalTags = await bridge.collectAllUsedTags();
+                } catch (_) {}
+
+                // Render sub-panel colors grid
+                const subColorsEl = __popoverSubEl.querySelector('[data-role="sub-colors"]');
+                if (subColorsEl) {
+                    const colorCounts = new Map();
+                    globalTags.forEach(t => {
+                        const c = __normalizeColor(t.color) || 'gray';
+                        colorCounts.set(c, (colorCounts.get(c) || 0) + (t.count || 0));
+                    });
+                    
+                    const subColorEntries = TAG_PALETTE.map((color) => {
+                        const label = TAG_COLOR_NAMES[color] ? (isZh ? TAG_COLOR_NAMES[color].zh_CN : TAG_COLOR_NAMES[color].en) : color;
+                        return {
+                            color,
+                            label,
+                            count: colorCounts.get(color) || 0
+                        };
+                    });
+                    
+                    const colorHtml = subColorEntries
+                        .filter((entry) => entry.count > 0)
+                        .map((entry) => {
+                             const isSelected = !__popoverCtx.dontFilterSubPanel && (__normalizeColor(entry.color) === __normalizeColor(__popoverCtx.selectedColor));
+                             const isSelectedClass = isSelected ? ' is-selected' : '';
+                            return `
+                                <button class="tag-palette-btn${isSelectedClass}" data-color="${escapeHtml(entry.color)}" data-action="filter-sub-color" type="button" aria-label="${escapeHtml(entry.label)}" style="position: relative;">
+                                    <span class="tag-dot tag-dot-${escapeHtml(entry.color)}" style="width: 20px; height: 20px; border: 1px solid rgba(0, 0, 0, 0.15); display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 10px; font-weight: bold; text-shadow: 0 0 2px rgba(0,0,0,0.65);">${escapeHtml(String(entry.count))}</span>
+                                </button>
+                            `;
+                        }).join('');
+                    subColorsEl.innerHTML = `<div class="tag-popover-palette-colors" style="display: flex; justify-content: center; align-items: center; gap: 6px; padding: 0 2px 2px;">${colorHtml}</div>`;
+                }
+
+                // Render sub-panel global section header
+                const subGlobalHeaderEl = __popoverSubEl.querySelector('[data-role="sub-global-header"]');
+                if (subGlobalHeaderEl) {
+                    if (__popoverCtx.selectedColor && !__popoverCtx.dontFilterSubPanel) {
+                        const colorLabel = TAG_COLOR_NAMES[__popoverCtx.selectedColor] ? (isZh ? TAG_COLOR_NAMES[__popoverCtx.selectedColor].zh_CN : TAG_COLOR_NAMES[__popoverCtx.selectedColor].en) : __popoverCtx.selectedColor;
+                        const displayTagTitle = isZh ? `${colorLabel}标签` : `${colorLabel} Tags`;
+                        const backLabel = isZh ? '返回' : 'Back';
+                        subGlobalHeaderEl.innerHTML = `
+                            <div class="canvas-tag-browse-section-header" style="padding: 2px 0 5px; width: 100%;">
+                                <div class="canvas-tag-browse-section-title" style="padding: 0; font-size: 11px;">${escapeHtml(displayTagTitle)}</div>
+                                <div class="canvas-tag-browse-section-header-right">
+                                    <button type="button" class="canvas-tag-browse-back-btn">${escapeHtml(backLabel)}</button>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        const displayTagTitle = isZh ? '全部标签' : 'All Tags';
+                        subGlobalHeaderEl.innerHTML = `
+                            <div class="canvas-tag-browse-section-header" style="padding: 2px 0 5px; width: 100%;">
+                                <div class="canvas-tag-browse-section-title" style="padding: 0; font-size: 11px;">${escapeHtml(displayTagTitle)}</div>
+                            </div>
+                        `;
+                    }
+                }
+
+                const subGlobalListEl = __popoverSubEl.querySelector('[data-role="sub-global-list"]');
+                subGlobalListEl.innerHTML = '';
+                subGlobalListEl.classList.remove('is-scrollable');
+
+                // Filter by color
+                let filteredGlobalTags = globalTags;
+                if (__popoverCtx.selectedColor && !__popoverCtx.dontFilterSubPanel) {
+                    filteredGlobalTags = globalTags.filter(t => __normalizeColor(t.color) === __normalizeColor(__popoverCtx.selectedColor));
+                }
+
+                if (!filteredGlobalTags.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'tag-recent-empty';
+                    empty.textContent = __t(TAG_PANEL_I18N.noTagsYet);
+                    subGlobalListEl.appendChild(empty);
+                } else {
+                    // Group global tags by bucket
+                    const bucketsMap = new Map();
+                    filteredGlobalTags.forEach((t) => {
+                        const text = t.text || __colorName(t.color);
+                        const bKey = __getBucketKey(text);
+                        if (!bucketsMap.has(bKey)) {
+                            bucketsMap.set(bKey, []);
+                        }
+                        bucketsMap.get(bKey).push(t);
+                    });
+
+                    const alphaKeys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+                    const bucketOrder = ['0-9'].concat(alphaKeys).concat(['#']);
+                    
+                    // Get sorted list of active buckets
+                    const activeBucketKeys = bucketOrder.filter(key => bucketsMap.has(key) && bucketsMap.get(key).length > 0);
+                    bucketsMap.forEach((_, key) => {
+                        if (!activeBucketKeys.includes(key)) {
+                            activeBucketKeys.push(key);
+                        }
+                    });
+
+                    // Sort tags within each bucket
+                    let collator = null;
+                    if (typeof getTagBrowseSortCollator === 'function') {
+                        try {
+                            collator = getTagBrowseSortCollator(isZh);
+                        } catch (_) {}
+                    }
+                    const compareTags = (a, b) => {
+                        const labelA = a.text || __colorName(a.color);
+                        const labelB = b.text || __colorName(b.color);
+                        if (collator) {
+                            try {
+                                const delta = collator.compare(labelA, labelB);
+                                if (delta !== 0) return delta;
+                            } catch (_) {}
+                        }
+                        const delta = labelA.localeCompare(labelB, isZh ? 'zh-CN' : 'en', { sensitivity: 'base', numeric: true });
+                        if (delta !== 0) return delta;
+                        
+                        const colorOrder = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+                        return colorOrder.indexOf(a.color) - colorOrder.indexOf(b.color);
+                    };
+
+                    activeBucketKeys.forEach((key) => {
+                        bucketsMap.get(key).sort(compareTags);
+                    });
+
+                    if (!__popoverCtx.bucketLimits) {
+                        __popoverCtx.bucketLimits = {};
+                    }
+
+                    // It is scrollable if active buckets count is larger than 3
+                    subGlobalListEl.classList.toggle('is-scrollable', activeBucketKeys.length > 3);
+                    
+                    activeBucketKeys.forEach((bucketKey) => {
+                        const bucketTags = bucketsMap.get(bucketKey);
+                        const bucketDiv = document.createElement('div');
+                        bucketDiv.className = 'tag-global-bucket';
+                        
+                        const titleEl = document.createElement('div');
+                        titleEl.className = 'tag-global-bucket-title';
+                        titleEl.textContent = bucketKey;
+                        bucketDiv.appendChild(titleEl);
+                        
+                        const listEl = document.createElement('div');
+                        listEl.className = 'tag-global-bucket-list';
+                        
+                        const tagLimit = __popoverCtx.bucketLimits[bucketKey] || 5;
+                        __popoverCtx.bucketLimits[bucketKey] = tagLimit;
+                        
+                        const visibleTags = bucketTags.slice(0, tagLimit);
+                        
+                        visibleTags.forEach((t) => {
+                            const k = keyOf(t.color, t.text);
+                            const entry = aggregate.get(k);
+                            const row = document.createElement('div');
+                            row.className = 'tag-applied-row';
+                            row.dataset.color = t.color;
+                            row.dataset.text = t.text;
+                            let statusMark = '+';
+                            if (entry) {
+                                if (entry.present === targets.length) {
+                                    row.classList.add('is-active');
+                                    statusMark = '✓';
+                                } else {
+                                    row.classList.add('is-mixed');
+                                    statusMark = '–';
+                                }
+                            }
+                            row.innerHTML = `
+                                <span class="tag-dot tag-dot-${t.color}"></span>
+                                <span class="tag-applied-text"></span>
+                                <span class="tag-applied-status">${statusMark}</span>
+                            `;
+                            row.querySelector('.tag-applied-text').textContent = t.text || __colorName(t.color);
+                            listEl.appendChild(row);
+                        });
+                        
+                        bucketDiv.appendChild(listEl);
+                        
+                        // Render bucket specific pagination buttons
+                        const hasMore = bucketTags.length > visibleTags.length;
+                        const canCollapse = tagLimit > 5;
+                        
+                        if (hasMore || canCollapse) {
+                            const remaining = bucketTags.length - visibleTags.length;
+                            const willLoad = Math.min(5, remaining);
+                            
+                            const btnContainer = document.createElement('div');
+                            btnContainer.className = 'tag-popover-more-container';
+                            btnContainer.style.display = 'flex';
+                            btnContainer.style.gap = '4px';
+                            btnContainer.style.alignItems = 'center';
+                            btnContainer.style.padding = '2px 6px';
+                            
+                            if (hasMore) {
+                                const loadMoreBtn = document.createElement('button');
+                                loadMoreBtn.className = 'tag-popover-more';
+                                loadMoreBtn.type = 'button';
+                                loadMoreBtn.style.margin = '0';
+                                loadMoreBtn.style.flex = '1';
+                                loadMoreBtn.dataset.action = 'load-more-bucket';
+                                loadMoreBtn.dataset.bucket = bucketKey;
+                                loadMoreBtn.textContent = isZh ? `展开 ${willLoad} 项` : `Load +${willLoad}`;
+                                btnContainer.appendChild(loadMoreBtn);
+                            }
+                            
+                            if (canCollapse) {
+                                const collapseBtn = document.createElement('button');
+                                collapseBtn.className = 'tag-popover-more';
+                                collapseBtn.type = 'button';
+                                collapseBtn.style.margin = '0';
+                                collapseBtn.style.flex = '1';
+                                collapseBtn.dataset.action = 'collapse-bucket';
+                                collapseBtn.dataset.bucket = bucketKey;
+                                collapseBtn.textContent = __t(TAG_PANEL_I18N.collapseTags);
+                                btnContainer.appendChild(collapseBtn);
+                            }
+                            bucketDiv.appendChild(btnContainer);
+                        }
+                        
+                        subGlobalListEl.appendChild(bucketDiv);
+                    });
+
+                }
             }
         }
 
         // Input placeholder
         el.querySelector('[data-role="input"]').setAttribute('placeholder', __t(TAG_PANEL_I18N.inputPlaceholder));
+
+        if (!__popoverCtx.globalCollapsed) {
+            __positionSubPanel();
+        } else if (__popoverSubEl) {
+            __popoverSubEl.hidden = true;
+        }
 
         __updatePreview();
     }
@@ -497,27 +1030,54 @@
         __notifyTagSearchChanged(targets, { updatedTags: latestSingleTargetTags });
     }
 
-    async function __deleteEditingTag() {
-        if (!__popoverCtx || !__popoverCtx.editingTag) return;
-        const tag = __popoverCtx.editingTag;
-        await __toggleTagOnAllTargets(tag, { mode: 'remove' });
-        __closePopover();
-    }
 
-    function __loadMoreRecentTags() {
+    async function __clearAllTagsOnTargets() {
         if (!__popoverCtx) return;
-        const prev = Number(__popoverCtx.recentLimit) || RECENT_INITIAL_VISIBLE;
-        const next = Math.min(RECENT_MAX_VISIBLE, prev + RECENT_LOAD_STEP);
-        if (next === prev) return;
-        __popoverCtx.recentLimit = next;
-        __renderPopover();
-    }
+        const { targets } = __popoverCtx;
+        const bridge = __bridge();
+        
+        const lang = __lang();
+        const confirmMsg = lang === 'en'
+            ? 'Are you sure you want to clear all tags from the selected item(s)?'
+            : '确定要清除当前选择项的所有标签吗？';
+        if (!confirm(confirmMsg)) return;
 
-    function __showAllRecentTags() {
-        if (!__popoverCtx) return;
-        if (Number(__popoverCtx.recentLimit) >= RECENT_MAX_VISIBLE) return;
-        __popoverCtx.recentLimit = RECENT_MAX_VISIBLE;
-        __renderPopover();
+        const permanentUpdates = [];
+        for (const target of targets) {
+            if (target.kind === 'permanent') {
+                permanentUpdates.push({ chromeId: target.chromeId, tags: [] });
+            } else if (target.kind === 'temporary') {
+                if (typeof setTempItemTags === 'function') {
+                    setTempItemTags(target.sectionId, target.itemId, [], { skipRender: true, skipSave: true });
+                }
+            }
+        }
+
+        if (permanentUpdates.length > 0 && bridge) {
+            if (typeof bridge.writePermanentNodeTagsBulk === 'function') {
+                await bridge.writePermanentNodeTagsBulk(permanentUpdates);
+            } else if (typeof bridge.writePermanentNodeTags === 'function') {
+                for (const upd of permanentUpdates) {
+                    await bridge.writePermanentNodeTags(upd.chromeId, upd.tags);
+                }
+            }
+        }
+
+        const hasTemp = targets.some(t => t.kind === 'temporary');
+        if (hasTemp && typeof saveTempNodes === 'function') {
+            saveTempNodes();
+        }
+        if (hasTemp && typeof refreshTempSectionTreeInPlace === 'function') {
+            const sectionIds = new Set(targets.filter(t => t.kind === 'temporary').map(t => t.sectionId));
+            sectionIds.forEach(sid => {
+                const sec = typeof getTempSection === 'function' ? getTempSection(sid) : null;
+                if (sec) refreshTempSectionTreeInPlace(sec);
+            });
+        }
+
+        await __renderPopover();
+        __refreshTargetTagDots(targets);
+        __notifyTagSearchChanged(targets, { updatedTags: [] });
     }
 
     async function __confirmCurrentSelection() {
@@ -558,6 +1118,7 @@
         if (input) input.value = '';
         __popoverCtx.selectedColor = null;
         __popoverCtx.editingTag = null;
+        __popoverCtx.dontFilterSubPanel = false;
         await __renderPopover();
         __refreshTargetTagDots(targets);
         __notifyTagSearchChanged(targets, { updatedTags: latestSingleTargetTags });
@@ -565,16 +1126,42 @@
 
     function __onPopoverClick(ev) {
         const target = ev.target;
+        
+        // Single row delete button
+        const rowDeleteBtn = target.closest('.tag-row-delete-btn');
+        if (rowDeleteBtn) {
+            const row = rowDeleteBtn.closest('.tag-applied-row');
+            if (row) {
+                const tag = { color: row.dataset.color, text: row.dataset.text };
+                __toggleTagOnAllTargets(tag, { mode: 'remove' });
+            }
+            ev.stopPropagation();
+            return;
+        }
+
+        // Collapsible header toggle
+        const toggleGlobalHeader = target.closest('[data-action="toggle-global-collapse"]');
+        if (toggleGlobalHeader) {
+            __popoverCtx.globalCollapsed = !__popoverCtx.globalCollapsed;
+            __renderPopover();
+            ev.stopPropagation();
+            return;
+        }
+
+
+
         const paletteBtn = target.closest('.tag-palette-btn');
         if (paletteBtn) {
             const color = paletteBtn.dataset.color;
             // Toggle off if user clicks the already-selected color.
             __popoverCtx.selectedColor = (__popoverCtx.selectedColor === color) ? null : color;
+            __popoverCtx.dontFilterSubPanel = false;
             __updatePreview();
             // Update palette is-selected highlights
             __popoverEl.querySelectorAll('.tag-palette-btn').forEach((b) => {
                 b.classList.toggle('is-selected', b.dataset.color === __popoverCtx.selectedColor);
             });
+            __renderPopover();
             ev.stopPropagation();
             return;
         }
@@ -590,24 +1177,36 @@
             ev.stopPropagation();
             return;
         }
-        const deleteBtn = target.closest('[data-role="delete-existing"]');
-        if (deleteBtn) {
-            __deleteEditingTag();
+
+        
+        const appliedMore = target.closest('[data-role="applied-more"]');
+        if (appliedMore && appliedMore.dataset.action === 'load-more-applied') {
+            __loadMoreAppliedTags();
             ev.stopPropagation();
             return;
         }
-        const recentMore = target.closest('[data-role="recent-more"]');
-        if (recentMore && recentMore.dataset.action === 'load-more-tags') {
-            __showAllRecentTags();
+        const appliedCollapse = target.closest('[data-role="applied-collapse"]');
+        if (appliedCollapse && appliedCollapse.dataset.action === 'collapse-applied') {
+            __collapseAppliedTags();
             ev.stopPropagation();
             return;
         }
+
+
         const recentRow = target.closest('.tag-applied-row');
         if (recentRow) {
             const tag = { color: recentRow.dataset.color, text: recentRow.dataset.text };
             if (recentRow.classList.contains('is-active') || recentRow.classList.contains('is-mixed')) {
+                const isAlreadyEditing = __popoverCtx && __popoverCtx.editingTag && 
+                    __popoverCtx.editingTag.color === tag.color && 
+                    __popoverCtx.editingTag.text === tag.text;
+                if (isAlreadyEditing) {
+                    ev.stopPropagation();
+                    return;
+                }
                 __popoverCtx.editingTag = tag;
                 __popoverCtx.selectedColor = tag.color;
+                __popoverCtx.dontFilterSubPanel = true;
                 const input = __popoverEl.querySelector('[data-role="input"]');
                 if (input) input.value = tag.text || __colorName(tag.color);
                 __updatePreview();
@@ -1102,12 +1701,17 @@
             anchor,
             selectedColor: initialTag ? initialTag.color : null,
             editingTag: initialTag,
-            recentLimit: RECENT_INITIAL_VISIBLE
+            appliedLimit: APPLIED_INITIAL_VISIBLE,
+            globalCollapsed: true,
+            bucketLimits: {}
         };
         const pop = __ensurePopoverDom();
         const targetParent = getOverlayContainer();
         if (pop.parentElement !== targetParent) {
             targetParent.appendChild(pop);
+        }
+        if (__popoverSubEl && __popoverSubEl.parentElement !== targetParent) {
+            targetParent.appendChild(__popoverSubEl);
         }
         const inputEl = __popoverEl.querySelector('[data-role="input"]');
         if (inputEl) inputEl.value = initialTag ? (initialTag.text || __colorName(initialTag.color)) : '';
@@ -1117,6 +1721,7 @@
         __outsideClickHandler = (ev) => {
             if (!__popoverEl) return;
             if (__popoverEl.contains(ev.target)) return;
+            if (__popoverSubEl && __popoverSubEl.contains(ev.target)) return;
             if (anchor && anchor.contains && anchor.contains(ev.target)) return;
             __closePopover();
         };

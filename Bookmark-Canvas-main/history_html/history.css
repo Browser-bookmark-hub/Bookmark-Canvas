@@ -1503,6 +1503,8 @@ body.header-dock-bottom:not(.header-compact) .search-mode-menu {
     font-size: 11px;
     color: var(--text-tertiary);
     margin-top: 2px;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 /* Remove legacy chip styles */
