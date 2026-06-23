@@ -284,14 +284,25 @@ function handlePointerMove(e) {
         pointerDragState.dragOverlay.style.top = e.clientY + 10 + 'px';
     }
 
-    // 查找当前鼠标下的目标节点（暂时隐藏覆盖层以避免干扰）
+    // 查找当前鼠标下的目标节点（暂时隐藏覆盖层和放置指示器以避免干扰）
     let target = null;
+    const dropIndicator = document.querySelector('.drop-indicator');
+    let originalPointerEvents = '';
+    if (dropIndicator) {
+        originalPointerEvents = dropIndicator.style.pointerEvents;
+        dropIndicator.style.pointerEvents = 'none';
+    }
+
     if (pointerDragState.dragOverlay) {
         pointerDragState.dragOverlay.style.display = 'none';
         target = document.elementFromPoint(e.clientX, e.clientY);
         pointerDragState.dragOverlay.style.display = 'block';
     } else {
         target = document.elementFromPoint(e.clientX, e.clientY);
+    }
+
+    if (dropIndicator) {
+        dropIndicator.style.pointerEvents = originalPointerEvents;
     }
 
     let targetTreeItem = target?.closest('.tree-item[data-node-id]');
@@ -367,11 +378,23 @@ async function handlePointerUp(e) {
             pointerDragState.dragOverlay.style.display = 'none';
         }
 
+        // 临时禁用放置指示器的 pointer-events，防止其遮挡真正的落点元素
+        const dropIndicator = document.querySelector('.drop-indicator');
+        let originalPointerEvents = '';
+        if (dropIndicator) {
+            originalPointerEvents = dropIndicator.style.pointerEvents;
+            dropIndicator.style.pointerEvents = 'none';
+        }
+
         // 重新检测落点位置（确保最准确）
         const target = document.elementFromPoint(e.clientX, e.clientY);
         let targetTreeItem = target?.closest('.tree-item[data-node-id]');
         const permanentSection = target?.closest('.permanent-bookmark-section');
         const tempSection = target?.closest('.temp-canvas-node');
+
+        if (dropIndicator) {
+            dropIndicator.style.pointerEvents = originalPointerEvents;
+        }
 
         // 恢复覆盖层显示（准备清理）
         if (pointerDragState.dragOverlay) {

@@ -564,18 +564,19 @@ function handleDragStart(e) {
     } catch (_) {}
 
     // 设置 Canvas 全局拖拽状态
-    if (typeof CanvasState !== 'undefined' && CanvasState.dragState) {
-        CanvasState.dragState.isDragging = true;
-        CanvasState.dragState.draggedData = {
+    const activeCanvasState = window.CanvasModule?.CanvasState || window.CanvasState;
+    if (activeCanvasState && activeCanvasState.dragState) {
+        activeCanvasState.dragState.isDragging = true;
+        activeCanvasState.dragState.draggedData = {
             id: draggedNodeId,
             title: draggedNode?.dataset?.nodeTitle || '',
             url: draggedNode?.dataset?.nodeUrl || '',
             type: draggedNode?.dataset?.nodeType === 'folder' ? 'folder' : 'bookmark',
-            source: 'temporary',
+            source: draggedNodeTreeType,
             sectionId: draggedNodeSectionId
         };
-        CanvasState.dragState.dragSource = 'temporary';
-        CanvasState.dragState.wheelScrollEnabled = true;
+        activeCanvasState.dragState.dragSource = draggedNodeTreeType;
+        activeCanvasState.dragState.wheelScrollEnabled = true;
     }
 
     // 设置多选拖拽数量预览
@@ -773,7 +774,19 @@ async function handleDragEnd(e) {
         if (dropX >= rect.left && dropX <= rect.right &&
             dropY >= rect.top && dropY <= rect.bottom) {
 
+            // 临时将放置指示器的 pointer-events 设置为 none，防止遮挡 elementFromPoint 的检测
+            let originalPointerEvents = '';
+            if (dropIndicator) {
+                originalPointerEvents = dropIndicator.style.pointerEvents;
+                dropIndicator.style.pointerEvents = 'none';
+            }
+
             const elementAtPoint = document.elementFromPoint(dropX, dropY);
+            
+            if (dropIndicator) {
+                dropIndicator.style.pointerEvents = originalPointerEvents;
+            }
+
             const insidePermanentDom = !!(elementAtPoint && elementAtPoint.closest && elementAtPoint.closest('.permanent-bookmark-section'));
             const insideTempNodeDom = !!(elementAtPoint && elementAtPoint.closest && (elementAtPoint.closest('.temp-canvas-node') || elementAtPoint.closest('.temp-bookmark-tree')));
 
@@ -835,7 +848,7 @@ async function handleDragEnd(e) {
                         try {
                             const payload = window.CanvasModule.temp.extractPayload(__singleSourceSectionId, [draggedNodeId]);
                             if (payload && payload.length) {
-                                const state = window.CanvasState || {};
+                                const state = window.CanvasModule?.CanvasState || window.CanvasState || {};
                                 const zoom = state.zoom || 1;
                                 const panX = state.panOffsetX || 0;
                                 const panY = state.panOffsetY || 0;
@@ -892,11 +905,12 @@ async function handleDragEnd(e) {
     // 停止自动滚动
     stopAutoScroll();
 
-    if (typeof CanvasState !== 'undefined' && CanvasState.dragState) {
-        CanvasState.dragState.isDragging = false;
-        CanvasState.dragState.draggedData = null;
-        CanvasState.dragState.dragSource = null;
-        CanvasState.dragState.wheelScrollEnabled = false;
+    const activeCanvasState = window.CanvasModule?.CanvasState || window.CanvasState;
+    if (activeCanvasState && activeCanvasState.dragState) {
+        activeCanvasState.dragState.isDragging = false;
+        activeCanvasState.dragState.draggedData = null;
+        activeCanvasState.dragState.dragSource = null;
+        activeCanvasState.dragState.wheelScrollEnabled = false;
     }
 
     draggedNode = null;
@@ -1604,7 +1618,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
         ;
 
     } catch (error) {
-        if (error && error.message && error.message.includes('move parent is missing')) {
+        if (error && error.message && (error.message.includes('move parent is missing') || error.message.includes('root bookmark folders'))) {
             return;
         }
         console.error('[拖拽] 移动操作失败:', error);
