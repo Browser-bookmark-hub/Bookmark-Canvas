@@ -2279,8 +2279,10 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     directoryAutoCollapseWidth: 600, // 自动折叠阈值（px）
     sidepanelDirectoryCollapseMode: 'auto', // 侧边栏目录栏折叠模式：auto / manual
     sidepanelDirectoryAutoCollapseWidth: 600, // 侧边栏目录栏自动折叠阈值（px）
-    tempColorFollow: false, // 临时栏目颜色跟随
+    tempColorFollow: true, // 临时栏目颜色跟随
     tempColorUnlockSync: false, // 解锁后立即继承父色
+    tempColorAutoLockAfterSplit: true, // 分裂继承颜色后自动上锁
+    defaultEdgeDirection: 'forward', // 连接线默认方向: none / forward / both
     bookmarkTreeTagPosition: 'auto', // 书签树标签位置：left / right / auto
     bookmarkTreeTagPositionThreshold: 420, // 自动切换阈值 (px)
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
@@ -2590,6 +2592,13 @@ function normalizeCanvasOtherSettings(input) {
     out.menuColorSync = !!out.menuLocatableColorSync;
     if (typeof input.tempColorFollow === 'boolean') out.tempColorFollow = input.tempColorFollow;
     if (typeof input.tempColorUnlockSync === 'boolean') out.tempColorUnlockSync = input.tempColorUnlockSync;
+    if (typeof input.tempColorAutoLockAfterSplit === 'boolean') out.tempColorAutoLockAfterSplit = input.tempColorAutoLockAfterSplit;
+    if (typeof input.defaultEdgeDirection === 'string') {
+        const dir = input.defaultEdgeDirection.toLowerCase();
+        if (dir === 'none' || dir === 'forward' || dir === 'both') {
+            out.defaultEdgeDirection = dir;
+        }
+    }
     if (typeof input.bookmarkTreeTagPosition === 'string') {
         const pos = input.bookmarkTreeTagPosition.toLowerCase();
         if (pos === 'left' || pos === 'right' || pos === 'auto') {
@@ -2724,6 +2733,16 @@ function isTempColorFollowEnabled(settingsOverride = null) {
     return !!(settings && settings.tempColorFollow);
 }
 
+function isTempColorAutoLockAfterSplitEnabled(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return !!(settings && settings.tempColorAutoLockAfterSplit);
+}
+
+function getDefaultEdgeDirectionSetting(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return (settings && settings.defaultEdgeDirection) || 'forward';
+}
+
 function shouldTempColorUnlockSync(settingsOverride = null) {
     const settings = settingsOverride || getCanvasOtherSettings();
     return !(settings && settings.tempColorUnlockSync === false);
@@ -2801,6 +2820,9 @@ function __isTempSectionManuallyLocked(section) {
 }
 
 function __getDefaultTempColorLockedState() {
+    if (isTempColorAutoLockAfterSplitEnabled()) {
+        return true;
+    }
     return !isTempColorFollowEnabled();
 }
 
@@ -21247,9 +21269,7 @@ async function createTempNode(data, x, y) {
             if (inheritedLabel && parentTitle && parentLabel && parentTitle === parentLabel) {
                 inheritedTitle = inheritedLabel;
             }
-            if (!__isTempSectionColorLocked(parentSection)) {
-                inheritedColor = parentSection.color || getTempSectionDefaultColor(parentSection);
-            }
+            inheritedColor = parentSection.color || getTempSectionDefaultColor(parentSection);
             try {
                 const fallbackId = data.id || null;
                 let ids = [];
@@ -37707,7 +37727,7 @@ function addEdge(fromNode, fromSide, toNode, toSide) {
         fromSide,
         toNode,
         toSide,
-        direction: 'forward', // 'none' | 'forward' | 'both'
+        direction: getDefaultEdgeDirectionSetting(), // 'none' | 'forward' | 'both'
         color: null, // 预设颜色编号 (1-6) 或 null
         colorHex: defaultColor || null, // 自定义十六进制颜色
         label: defaultLabel || '' // 连接线文字标签
@@ -40140,6 +40160,8 @@ function openCanvasAppearanceSettingsModal() {
     const otherMenuLocatableColorSync = modal.querySelector('#otherMenuLocatableColorSync');
     const otherColorFollow = modal.querySelector('#otherTempColorFollow');
     const otherUnlockSync = modal.querySelector('#otherTempColorUnlockSync');
+    const otherColorAutoLock = modal.querySelector('#otherTempColorAutoLockAfterSplit');
+    const otherDefaultEdgeDirection = modal.querySelector('#otherDefaultEdgeDirection');
     const otherSidebarAutoWidth = modal.querySelector('#otherSidebarAutoCollapseWidth');
     const otherCollapsePrefs = getCanvasDirectoryCollapsePrefs(otherSettings, {
         forSidePanel: __isCanvasInSidePanelMode()
@@ -40153,6 +40175,10 @@ function openCanvasAppearanceSettingsModal() {
     }
     if (otherColorFollow) otherColorFollow.checked = !!(otherSettings && otherSettings.tempColorFollow);
     if (otherUnlockSync) otherUnlockSync.checked = !(otherSettings.tempColorUnlockSync === false);
+    if (otherColorAutoLock) otherColorAutoLock.checked = !!(otherSettings && otherSettings.tempColorAutoLockAfterSplit);
+    if (otherDefaultEdgeDirection) {
+        otherDefaultEdgeDirection.value = otherSettings.defaultEdgeDirection || 'forward';
+    }
     __setAppearanceRadioGroup(modal, 'other-sidebar-collapse-mode', otherCollapsePrefs.mode || 'auto');
     if (otherSidebarAutoWidth) {
         otherSidebarAutoWidth.value = __clampNumber(otherCollapsePrefs.width, 320, 2000, 600);
@@ -40578,17 +40604,19 @@ function createCanvasAppearanceSettingsModal() {
                     </div>
                     <div class="appearance-row other-sub-row">
                         <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Reset all temp colors' : '全部还原默认色'}</span>
-                            <button class="perf-help-btn" id="otherTempColorResetHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                            <span>${isEn ? 'Auto-lock after inheriting color during split' : '分裂继承颜色后自动上锁'}</span>
+                            <button class="perf-help-btn" id="otherTempColorAutoLockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
                         </div>
                         <div class="appearance-row-content">
-                            <button class="perf-btn secondary other-mini-btn" id="otherTempColorResetBtn">
-                                ${isEn ? 'Reset to default' : '还原'}
-                            </button>
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherTempColorAutoLockAfterSplit">
+                                <span class="other-toggle-slider"></span>
+                            </label>
                         </div>
                     </div>
+
                     <div class="appearance-row">
                         <div class="appearance-row-label">${isEn ? 'Auto connect with edges after temp split' : '临时栏目分裂后使用「连接线」自动连接'}</div>
                         <div class="appearance-row-content">
@@ -40596,6 +40624,17 @@ function createCanvasAppearanceSettingsModal() {
                                 <input type="checkbox" id="otherAutoLinkSplit">
                                 <span class="other-toggle-slider"></span>
                             </label>
+                        </div>
+                    </div>
+                    <div style="height: 1px; background: var(--border-color); margin: 12px 0; opacity: 0.5;"></div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Default edge direction' : '连接线默认方向'}</div>
+                        <div class="appearance-row-content">
+                            <select id="otherDefaultEdgeDirection" class="appearance-name-select">
+                                <option value="none">${isEn ? 'No direction' : '无方向'}</option>
+                                <option value="forward">${isEn ? 'Single direction' : '单向'}</option>
+                                <option value="both">${isEn ? 'Bidirectional' : '双向'}</option>
+                            </select>
                         </div>
                     </div>
         </div>
@@ -40609,8 +40648,15 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="otherTempColorHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Global switch</b>: one-tap unify all temp section locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: if the parent is locked, new splits use the default color.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br>Positive: A-1 unlocked → new A-1-1 follows A-1 color.<br>Negative: A-1 locked → new A-1-1 uses default.<br><b>Special temp sections</b> (Drop / Search / Batch / Add / Import / Custom) now use their own default color in Appearance.'
-            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：父级锁住时，新分裂使用默认色。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br>正例：A-1 解锁 → 新分裂 A-1-1 跟随 A-1 颜色。<br>反例：A-1 锁住 → 新分裂 A-1-1 使用默认色。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加 / 导入 / 任意）现在使用外观中的独立默认颜色。'}
+            ? '<b>Global switch</b>: one-tap unify all temp section locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: new splits always inherit the parent\'s current color at the moment of creation (regardless of whether the parent is locked). Subsequent color following is determined by the "Auto-lock after inheriting color during split" setting.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br><b>Special temp sections</b> (Drop / Search / Batch / Add / Import / Custom) now use their own default color in Appearance.'
+            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：新分裂的临时栏目总是继承产生时的父级当前颜色（无论父级是否被锁定）。后续颜色跟随取决于「分裂继承颜色后自动上锁」设置。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加 / 导入 / 任意）现在使用外观中的独立默认颜色。'}
+            </div>
+        </div>
+        <div class="perf-help-popover" id="otherTempColorAutoLockHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Auto-lock after inheriting color during split</b>: When a temporary section is newly created, it automatically locks so that its color will not follow further color changes of the parent bookmark, keeping the initial color.'
+            : '<b>分裂继承颜色后自动上锁</b>：当新建临时栏目时，自动将其锁住。这样该栏目只会继承产生时的初始颜色，后续父级书签颜色变化时，该栏目不会再跟随变化。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherMenuDefaultColorSyncHelpPopover">
@@ -40641,13 +40687,7 @@ function createCanvasAppearanceSettingsModal() {
             : '开启时，解锁会立即同步父栏目颜色。当前栏目下的子栏目只有在解锁状态才会跟随；中间层若有锁住，会被阻断。'}
             </div>
         </div>
-        <div class="perf-help-popover" id="otherTempColorResetHelpPopover">
-            <div class="perf-help-popover-content">
-                ${isEn
-            ? 'Reset button: resets colors only, without changing lock state.'
-            : '还原按钮：仅还原颜色，不改变锁状态。'}
-            </div>
-        </div>
+
     `;
 
     getOverlayContainer().appendChild(modal);
@@ -40714,7 +40754,6 @@ function createCanvasAppearanceSettingsModal() {
     const otherSidebarAutoWidthInput = modal.querySelector('#otherSidebarAutoCollapseWidth');
     const otherColorFollowToggle = modal.querySelector('#otherTempColorFollow');
     const otherUnlockSyncToggle = modal.querySelector('#otherTempColorUnlockSync');
-    const otherResetBtn = modal.querySelector('#otherTempColorResetBtn');
     const otherTempHelpBtn = modal.querySelector('#otherTempColorHelpBtn');
     const otherTempHelpPopover = modal.querySelector('#otherTempColorHelpPopover');
     const otherMenuDefaultColorSyncHelpBtn = modal.querySelector('#otherMenuDefaultColorSyncHelpBtn');
@@ -40725,14 +40764,14 @@ function createCanvasAppearanceSettingsModal() {
     const otherSidebarCollapseModeHelpPopover = modal.querySelector('#otherSidebarCollapseModeHelpPopover');
     const otherTempUnlockHelpBtn = modal.querySelector('#otherTempColorUnlockHelpBtn');
     const otherTempUnlockHelpPopover = modal.querySelector('#otherTempColorUnlockHelpPopover');
-    const otherTempResetHelpBtn = modal.querySelector('#otherTempColorResetHelpBtn');
-    const otherTempResetHelpPopover = modal.querySelector('#otherTempColorResetHelpPopover');
+    const otherTempAutoLockHelpBtn = modal.querySelector('#otherTempColorAutoLockHelpBtn');
+    const otherTempAutoLockHelpPopover = modal.querySelector('#otherTempColorAutoLockHelpPopover');
     bindClickHelpPopover(otherTempHelpBtn, otherTempHelpPopover);
     bindClickHelpPopover(otherMenuDefaultColorSyncHelpBtn, otherMenuDefaultColorSyncHelpPopover);
     bindClickHelpPopover(otherMenuLocatableColorSyncHelpBtn, otherMenuLocatableColorSyncHelpPopover);
     bindClickHelpPopover(otherSidebarCollapseModeHelpBtn, otherSidebarCollapseModeHelpPopover);
     bindClickHelpPopover(otherTempUnlockHelpBtn, otherTempUnlockHelpPopover);
-    bindClickHelpPopover(otherTempResetHelpBtn, otherTempResetHelpPopover);
+    bindClickHelpPopover(otherTempAutoLockHelpBtn, otherTempAutoLockHelpPopover);
 
     if (otherAutoLinkToggle) {
         otherAutoLinkToggle.addEventListener('change', () => {
@@ -40804,13 +40843,19 @@ function createCanvasAppearanceSettingsModal() {
             scheduleOtherSave();
         });
     }
-    if (otherResetBtn) {
-        otherResetBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            __resetAllTempSectionColorsToDefault();
+    const otherTempColorAutoLockToggle = modal.querySelector('#otherTempColorAutoLockAfterSplit');
+    if (otherTempColorAutoLockToggle) {
+        otherTempColorAutoLockToggle.addEventListener('change', () => {
+            scheduleOtherSave();
         });
     }
+    const otherDefaultEdgeDirToggle = modal.querySelector('#otherDefaultEdgeDirection');
+    if (otherDefaultEdgeDirToggle) {
+        otherDefaultEdgeDirToggle.addEventListener('change', () => {
+            scheduleOtherSave();
+        });
+    }
+
 
     const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
     if (tempNameSelect) tempNameSelect.addEventListener('change', () => {
@@ -40902,12 +40947,14 @@ function openCanvasOtherSettingsModal() {
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
     const colorFollow = modal.querySelector('#otherTempColorFollow');
     const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
+    const colorAutoLock = modal.querySelector('#otherTempColorAutoLockAfterSplit');
     const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
     const useDefaultCurve = !(settings && settings.useDefaultZoomCurve === false);
     const defaultCurveToggle = modal.querySelector('#otherUseDefaultZoomCurve');
     if (autoLink) autoLink.checked = !!settings.autoLinkSplit;
     if (colorFollow) colorFollow.checked = !!(settings && settings.tempColorFollow);
     if (unlockSync) unlockSync.checked = !(settings.tempColorUnlockSync === false);
+    if (colorAutoLock) colorAutoLock.checked = !!(settings && settings.tempColorAutoLockAfterSplit);
     if (trackpadZoomRateInput) {
         const trackpadPercent = Math.round(getCanvasTrackpadZoomRate(settings) * 100);
         trackpadZoomRateInput.value = String(trackpadPercent);
@@ -40981,6 +41028,8 @@ function saveCanvasOtherSettings(options = {}) {
     }
     const colorFollow = modal.querySelector('#otherTempColorFollow');
     const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
+    const colorAutoLock = modal.querySelector('#otherTempColorAutoLockAfterSplit');
+    const defaultEdgeDirInput = modal.querySelector('#otherDefaultEdgeDirection');
     const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
     const useDefault = (modal && typeof modal._useDefaultZoomCurve === 'boolean') ? modal._useDefaultZoomCurve : !(prevSettings && prevSettings.useDefaultZoomCurve === false);
     const defaultCurve = __cloneDefaultOtherSettings().zoomCurve;
@@ -41027,6 +41076,8 @@ function saveCanvasOtherSettings(options = {}) {
         sidepanelDirectoryAutoCollapseWidth: prevSettings.sidepanelDirectoryAutoCollapseWidth,
         tempColorFollow: colorFollow ? !!colorFollow.checked : !!(prevSettings && prevSettings.tempColorFollow),
         tempColorUnlockSync: unlockSync ? !!unlockSync.checked : !(prevSettings.tempColorUnlockSync === false),
+        tempColorAutoLockAfterSplit: colorAutoLock ? !!colorAutoLock.checked : !!(prevSettings && prevSettings.tempColorAutoLockAfterSplit),
+        defaultEdgeDirection: defaultEdgeDirInput ? defaultEdgeDirInput.value : prevSettings.defaultEdgeDirection,
         bookmarkTreeTagPosition: bookmarkTagPosition,
         bookmarkTreeTagPositionThreshold: bookmarkTagThreshold,
         useDefaultZoomCurve: useDefault,
@@ -41871,13 +41922,10 @@ function createCanvasOtherSettingsModal() {
     const colorFollowToggle = modal.querySelector('#otherTempColorFollow');
     const unlockSyncToggle = modal.querySelector('#otherTempColorUnlockSync');
     const autoLinkToggle = modal.querySelector('#otherAutoLinkSplit');
-    const resetColorsBtn = modal.querySelector('#otherTempColorResetBtn');
     const tempHelpBtn = modal.querySelector('#otherTempColorHelpBtn');
     const tempHelpPopover = modal.querySelector('#otherTempColorHelpPopover');
     const tempUnlockHelpBtn = modal.querySelector('#otherTempColorUnlockHelpBtn');
     const tempUnlockHelpPopover = modal.querySelector('#otherTempColorUnlockHelpPopover');
-    const tempResetHelpBtn = modal.querySelector('#otherTempColorResetHelpBtn');
-    const tempResetHelpPopover = modal.querySelector('#otherTempColorResetHelpPopover');
 
     const safeToggle = modal.querySelector('#otherMagnetSafeToggle');
     const midToggle = modal.querySelector('#otherMagnetMidToggle');
@@ -41922,11 +41970,10 @@ function createCanvasOtherSettingsModal() {
             scheduleOtherSave();
         });
     }
-    if (resetColorsBtn) {
-        resetColorsBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            __resetAllTempSectionColorsToDefault();
+    const tempColorAutoLockToggle = modal.querySelector('#otherTempColorAutoLockAfterSplit');
+    if (tempColorAutoLockToggle) {
+        tempColorAutoLockToggle.addEventListener('change', () => {
+            scheduleOtherSave();
         });
     }
     const zoomMagnetHelpBtn = modal.querySelector('#otherZoomMagnetHelpBtn');
@@ -42047,7 +42094,6 @@ function createCanvasOtherSettingsModal() {
     }
     bindOtherHelpPopover(tempHelpBtn, tempHelpPopover);
     bindOtherHelpPopover(tempUnlockHelpBtn, tempUnlockHelpPopover);
-    bindOtherHelpPopover(tempResetHelpBtn, tempResetHelpPopover);
     modal.addEventListener('click', (e) => {
         if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
             modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));

@@ -2738,7 +2738,7 @@ function initContextMenu() {
         // 如果点击的不是菜单和子菜单内部，并且不是快捷图标本身，关闭菜单
         const clickInMenu = contextMenu && contextMenu.contains(e.target);
         const clickInSubmenu = contextSubmenu && contextSubmenu.contains(e.target);
-        const clickInShortcut = e.target.closest('.tree-trace-icon, .tree-delete-icon');
+        const clickInShortcut = (e.target && typeof e.target.closest === 'function') ? e.target.closest('.tree-trace-icon, .tree-delete-icon') : null;
         if (!clickInMenu && !clickInSubmenu && !clickInShortcut) {
             hideContextMenu();
         }
@@ -2769,7 +2769,7 @@ function initContextMenu() {
     // 也监听右键事件，关闭已打开的菜单
     document.addEventListener('contextmenu', (e) => {
         // 检查是否是超链接
-        const linkElement = e.target.closest('a[href]');
+        const linkElement = (e.target && typeof e.target.closest === 'function') ? e.target.closest('a[href]') : null;
         if (linkElement) {
             const inPermanentTip = linkElement.closest('.permanent-section-tip, .permanent-section-tip-editor');
             const inTempDescription = linkElement.closest('.temp-node-description, .temp-node-description-editor');
@@ -2782,7 +2782,7 @@ function initContextMenu() {
         }
 
         // 如果不是在树节点上右键，关闭菜单
-        if (!e.target.closest('.tree-item[data-node-id]')) {
+        if (!e.target || typeof e.target.closest !== 'function' || !e.target.closest('.tree-item[data-node-id]')) {
             hideContextMenu();
         }
     }, true);
@@ -5746,7 +5746,7 @@ document.addEventListener('click', (e) => {
 // 捕获阶段全局拦截除 click 外的各类鼠标/指针/拖拽/右键/双击事件，避免快捷按钮触发树节点的选中、高亮、折叠/展开、拖拽等行为
 ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'dblclick', 'contextmenu', 'dragstart'].forEach(eventType => {
     document.addEventListener(eventType, (e) => {
-        if (e.target.closest('.tree-item-hover-actions')) {
+        if (e.target && typeof e.target.closest === 'function' && e.target.closest('.tree-item-hover-actions')) {
             e.stopImmediatePropagation();
             e.preventDefault();
         }
@@ -5755,7 +5755,7 @@ document.addEventListener('click', (e) => {
 
 // 捕获阶段全局拦截对快捷按钮背景/间隔的点击，防止误触发文件夹的展开或折叠
 document.addEventListener('click', (e) => {
-    if (e.target.closest('.tree-item-hover-actions')) {
+    if (e.target && typeof e.target.closest === 'function' && e.target.closest('.tree-item-hover-actions')) {
         const button = e.target.closest('.tree-trace-icon, .tree-delete-icon, .tree-tip-icon');
         if (!button) {
             e.stopImmediatePropagation();
