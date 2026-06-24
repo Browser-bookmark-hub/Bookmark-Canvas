@@ -4893,8 +4893,16 @@ const i18n = {
 </ul>`
     },
     canvasHelpBatchSelectTitle: {
-        'zh_CN': '批量选择',
-        'en': 'Batch Selection'
+        'zh_CN': 'Shift键操作',
+        'en': 'Shift Key Actions'
+    },
+    canvasHelpShiftWheelTitle: {
+        'zh_CN': '滚轮',
+        'en': 'Wheel'
+    },
+    canvasHelpShiftWheelDesc: {
+        'zh_CN': '横向滚动',
+        'en': 'Horizontal Scrolling'
     },
     canvasHelpBatchSelectClick: {
         'zh_CN': '左键（单击）',
@@ -4905,8 +4913,8 @@ const i18n = {
         'en': 'Batch/single selection of bookmarks (left click also selects under batch mode)'
     },
     canvasHelpBatchSelectTooltip: {
-        'zh_CN': '进入批量模式的时候鼠标左键单击也可以选中',
-        'en': 'Clicking the left mouse button in batch mode can also select elements'
+        'zh_CN': '1. shift+滚轮的横向滚动 可以 无视 永久栏目/临时栏目的垂直滚动捕获,用于多卡片区域的快速摆脱捕获, 比如shift + 滚轮横向滚动后松开 shift 转为垂直滚动画布\n2. 进入批量模式的时候鼠标左键单击也可以选中',
+        'en': '1. Shift+Wheel horizontal scrolling can bypass the vertical scroll capture of permanent/temporary columns, allowing fast exit from multi-card zones. E.g., release Shift after scrolling horizontally to resume vertical scrolling.\n2. Clicking the left mouse button in batch mode can also select elements'
     },
     canvasHelpLeftClickSelectTitle: {
         'zh_CN': '左键框选',
@@ -5691,6 +5699,17 @@ function applyLanguage() {
     if (canvasHelpBatchSelectTitle) canvasHelpBatchSelectTitle.textContent = i18n.canvasHelpBatchSelectTitle[currentLang];
     const canvasHelpBatchSelectTitleHelp = document.getElementById('canvasHelpBatchSelectTitleHelp');
     if (canvasHelpBatchSelectTitleHelp) canvasHelpBatchSelectTitleHelp.textContent = i18n.canvasHelpBatchSelectTitle[currentLang];
+
+    const canvasHelpShiftWheelText1 = document.getElementById('canvasHelpShiftWheelText1');
+    if (canvasHelpShiftWheelText1) canvasHelpShiftWheelText1.textContent = i18n.canvasHelpShiftWheelTitle[currentLang];
+    const canvasHelpShiftWheelText2 = document.getElementById('canvasHelpShiftWheelText2');
+    if (canvasHelpShiftWheelText2) canvasHelpShiftWheelText2.textContent = i18n.canvasHelpShiftWheelTitle[currentLang];
+
+    const canvasHelpShiftWheelDescText1 = document.getElementById('canvasHelpShiftWheelDescText1');
+    if (canvasHelpShiftWheelDescText1) canvasHelpShiftWheelDescText1.textContent = i18n.canvasHelpShiftWheelDesc[currentLang];
+    const canvasHelpShiftWheelDescText2 = document.getElementById('canvasHelpShiftWheelDescText2');
+    if (canvasHelpShiftWheelDescText2) canvasHelpShiftWheelDescText2.textContent = i18n.canvasHelpShiftWheelDesc[currentLang];
+
 
     const canvasHelpBatchSelectModifier1 = document.getElementById('canvasHelpBatchSelectModifier1');
     if (canvasHelpBatchSelectModifier1) canvasHelpBatchSelectModifier1.textContent = batchModifier;

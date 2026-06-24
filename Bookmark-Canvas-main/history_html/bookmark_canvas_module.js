@@ -3497,6 +3497,13 @@ _Tip: This card can be freely edited or deleted_
 
 ---
 
+### Shift键操作
+
+- **\`Shift + 滚轮\`**：横向滚动（无视永久栏目/临时栏目的垂直滚动捕获，用于多卡片区域的快速摆脱捕获，松开 Shift 转为垂直滚动画布）
+- **\`Shift | Option/Alt + 左键\`**：批量/单个选中书签（进入批量模式后左键单击也可以选中）
+
+---
+
 ### 空格键操作
 
 - **\`空格 + 左键\`（按住）**：拖动全局画布
@@ -3508,12 +3515,6 @@ _Tip: This card can be freely edited or deleted_
 - **\`双指捏合\`**：缩放画布
 - **\`Ctrl + 双指滑动\`**：缩放（兼容侧边栏）
 - **\`双指滑动\`**：拖动画布
-
----
-
-### 批量选择
-
-- **\`Shift | Option/Alt + 左键\`**：批量/单个选中书签（进入批量模式后左键单击也可以选中）
 
 ---
 
@@ -3562,8 +3563,9 @@ _快捷键可在左上角「管理」中自定义_
 
 ---
 
-### Batch Selection
+### Shift Key Actions
 
+- **\`Shift + Scroll\`**: Horizontal scrolling (ignores vertical scroll capture in permanent/temporary columns, helps quickly escape multi-card zones; release Shift to resume vertical canvas scrolling)
 - **\`Shift | Option/Alt + Left Click\`**: Batch/single selection of bookmarks (left click also selects under batch mode)
 
 ---
@@ -3687,6 +3689,13 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 </ul>
 
 <hr>
+<h3>Shift键操作</h3>
+<ul>
+<li><strong><code>Shift + 滚轮</code></strong>：横向滚动（无视永久栏目/临时栏目的垂直滚动捕获，用于多卡片区域的快速摆脱捕获，松开 Shift 转为垂直滚动画布）</li>
+<li><strong><code>Shift | Option/Alt + 左键</code></strong>：批量/单个选中书签（进入批量模式后左键单击也可以选中）</li>
+</ul>
+
+<hr>
 <h3>空格键操作</h3>
 <ul>
 <li><strong><code>空格 + 左键</code>（按住）</strong>：拖动全局画布</li>
@@ -3698,12 +3707,6 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong><code>双指捏合</code></strong>：缩放画布</li>
 <li><strong><code>Ctrl + 双指滑动</code></strong>：缩放（兼容侧边栏）</li>
 <li><strong><code>双指滑动</code></strong>：拖动画布</li>
-</ul>
-
-<hr>
-<h3>批量选择</h3>
-<ul>
-<li><strong><code>Shift | Option/Alt + 左键</code></strong>：批量/单个选中书签（进入批量模式后左键单击也可以选中）</li>
 </ul>
 
 <hr>
@@ -3751,8 +3754,9 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 </ul>
 
 <hr>
-<h3>Batch Selection</h3>
+<h3>Shift Key Actions</h3>
 <ul>
+<li><strong><code>Shift + Scroll</code></strong>: Horizontal scrolling (ignores vertical scroll capture in permanent/temporary columns, helps quickly escape multi-card zones; release Shift to resume vertical canvas scrolling)</li>
 <li><strong><code>Shift | Option/Alt + Left Click</code></strong>: Batch/single selection of bookmarks (left click also selects under batch mode)</li>
 </ul>
 
@@ -17595,9 +17599,14 @@ function shouldHandleCustomScroll(event) {
         }
     }
 
-    // 在栏目内部：如果正在画布级滚动，则拦截处理
+    // 在栏目内部：如果正在画布级滚动，或者按下了 Shift 键进行横向滚动，则拦截处理并交给画布
     const sectionBody = event.target.closest('.permanent-section-body') || event.target.closest('.temp-node-body');
     if (sectionBody) {
+        // Shift + 滚轮进行横向滚动的时候，无视栏目内部的滚动，拦截并交给画布处理
+        if (event.shiftKey) {
+            return true;
+        }
+
         // 检测是否为触控板双指滑动
         const isTouchpad = __isCanvasTouchpadLikeScrollInput(event);
 
