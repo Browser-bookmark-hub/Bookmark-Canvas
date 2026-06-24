@@ -6201,7 +6201,7 @@ function setupCanvasDropFeedback() {
     };
 
     workspace.addEventListener('dragenter', (e) => {
-        if (CanvasState.dragState.dragSource === 'permanent') {
+        if (CanvasState.dragState.dragSource === 'permanent' || CanvasState.dragState.dragSource === 'temporary') {
             workspace.classList.add('canvas-drop-active');
         } else if (isBrowserBookmarkDrag(e)) {
             // 浏览器书签侧边栏拖入
@@ -6218,7 +6218,7 @@ function setupCanvasDropFeedback() {
     });
 
     workspace.addEventListener('dragover', (e) => {
-        if (CanvasState.dragState.dragSource === 'permanent') {
+        if (CanvasState.dragState.dragSource === 'permanent' || CanvasState.dragState.dragSource === 'temporary') {
             e.preventDefault();
             try { if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; } catch (_) { }
             workspace.classList.add('canvas-drop-active');

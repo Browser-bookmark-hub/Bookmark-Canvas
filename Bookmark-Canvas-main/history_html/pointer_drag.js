@@ -417,6 +417,9 @@ async function handlePointerUp(e) {
         if (targetTreeItem && targetTreeItem !== pointerDragState.draggedElement && treeContainer) {
             // 在树内放置
             performDrop(pointerDragState.draggedElement, targetTreeItem, e);
+        } else if (targetTreeItem && targetTreeItem === pointerDragState.draggedElement) {
+            // 拖到自己身上，视为取消/无效操作，直接清理，不创建新临时栏目
+            return;
         } else if (!targetTreeItem && permanentSection) {
             const draggedElement = pointerDragState.draggedElement;
             const dragNodeId = draggedElement?.dataset?.nodeId || '';
@@ -472,8 +475,22 @@ async function handlePointerUp(e) {
                     e.clientY >= permanentRect.top &&
                     e.clientY <= permanentRect.bottom;
 
+                let inTempSection = false;
+                try {
+                    const canvasContent = document.getElementById('canvasContent');
+                    const scope = canvasContent || document;
+                    scope.querySelectorAll('.temp-canvas-node').forEach((sec) => {
+                        if (inTempSection) return;
+                        const tRect = sec.getBoundingClientRect();
+                        if (e.clientX >= tRect.left && e.clientX <= tRect.right &&
+                            e.clientY >= tRect.top && e.clientY <= tRect.bottom) {
+                            inTempSection = true;
+                        }
+                    });
+                } catch (_) {}
+
                 // 如果在Canvas工作区但不在任何已有栏目（永久/临时）内，创建临时栏目
-                if (inWorkspace && !inPermanent) {
+                if (inWorkspace && !inPermanent && !inTempSection) {
                     const draggedElement = pointerDragState.draggedElement;
                     const dragNodeId = draggedElement?.dataset?.nodeId;
                     const isDraggedNodeSelected = dragNodeId && typeof selectedNodes !== 'undefined' && selectedNodes && selectedNodes.has(dragNodeId);

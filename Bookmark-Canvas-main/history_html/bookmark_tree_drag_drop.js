@@ -406,6 +406,9 @@ function attachDragEvents(treeContainer) {
         const scrollContainer = treeContainer.closest('.permanent-section-body') || treeContainer.closest('.temp-node-body');
         if (scrollContainer && !scrollContainer.__autoScrollHooked) {
             scrollContainer.addEventListener('dragover', (e) => {
+                if (typeof window.__updateDragCoords === 'function') {
+                    window.__updateDragCoords(e);
+                }
                 e.preventDefault();
                 e.stopPropagation();
                 updateAutoScroll(e);
@@ -417,6 +420,9 @@ function attachDragEvents(treeContainer) {
         const permanentBody = treeContainer.closest('.permanent-section-body');
         if (permanentBody && !permanentBody.__blankDropHooked) {
             permanentBody.addEventListener('dragover', (e) => {
+                if (typeof window.__updateDragCoords === 'function') {
+                    window.__updateDragCoords(e);
+                }
                 const targetNode = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
                 if (targetNode) return;
                 e.preventDefault();
@@ -461,6 +467,9 @@ function attachDragEvents(treeContainer) {
         const tempBody = treeContainer.closest('.temp-node-body');
         if (tempBody && !tempBody.__blankDropHooked) {
             tempBody.addEventListener('dragover', (e) => {
+                if (typeof window.__updateDragCoords === 'function') {
+                    window.__updateDragCoords(e);
+                }
                 const targetNode = e && e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
                 if (targetNode) return;
                 e.preventDefault();
@@ -653,6 +662,9 @@ function handleDragStart(e) {
 
 // 拖拽经过
 function handleDragOver(e) {
+    if (typeof window.__updateDragCoords === 'function') {
+        window.__updateDragCoords(e);
+    }
     e.preventDefault();
     e.stopPropagation();
 
