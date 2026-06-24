@@ -128,10 +128,6 @@ function __cardGroupAttachPillDrag(pill, element, node) {
         if (e.button !== 0) return;
         if (!node || node.locked) return;
 
-        try {
-            if (typeof selectMdNode === 'function') selectMdNode(node.id);
-        } catch (_) { }
-
         e.preventDefault();
         e.stopPropagation();
 
@@ -158,6 +154,11 @@ function __cardGroupAttachPillDrag(pill, element, node) {
         };
 
         const onUp = () => {
+            if (dragPending) {
+                try {
+                    if (typeof selectMdNode === 'function') selectMdNode(node.id);
+                } catch (_) { }
+            }
             dragPending = false;
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
@@ -183,10 +184,6 @@ function __cardGroupAttachMaskDrag(mask, element, node) {
         if (e.button !== 0) return;
         if (!node || node.locked) return;
 
-        try {
-            if (typeof selectMdNode === 'function') selectMdNode(node.id);
-        } catch (_) { }
-
         e.preventDefault();
         e.stopPropagation();
 
@@ -213,6 +210,11 @@ function __cardGroupAttachMaskDrag(mask, element, node) {
         };
 
         const onUp = () => {
+            if (dragPending) {
+                try {
+                    if (typeof selectMdNode === 'function') selectMdNode(node.id);
+                } catch (_) { }
+            }
             dragPending = false;
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
@@ -282,9 +284,11 @@ function __cardGroupStartRenamePill(pill, node) {
     pill.appendChild(input);
     try {
         input.focus();
-        const len = String(input.value || '').length;
-        if (typeof input.setSelectionRange === 'function') {
-            input.setSelectionRange(len, len);
+        if (typeof input.select === 'function') {
+            input.select();
+        } else if (typeof input.setSelectionRange === 'function') {
+            const len = String(input.value || '').length;
+            input.setSelectionRange(0, len);
         }
     } catch (_) { }
 
@@ -341,25 +345,29 @@ function __cardGroupUpdateHeaderPillScaleCap(element) {
     if (!pill) return;
     const cardWidth = element.offsetWidth || parseFloat(element.style.width) || 0;
     if (!Number.isFinite(cardWidth) || cardWidth <= 0) {
+        try { element.style.removeProperty('--card-group-pill-scale-max'); } catch (_) { }
         try { pill.style.removeProperty('--card-group-pill-scale-max'); } catch (_) { }
         return;
     }
 
     // At scale=1, visual pill width equals offsetWidth.
-    // To keep visual width <= 50% of card width: scale <= (cardWidth * 0.5) / basePillWidth.
+    // To keep visual width <= 100% of card width: scale <= cardWidth / basePillWidth.
     const basePillWidth = pill.offsetWidth || 0;
     if (!Number.isFinite(basePillWidth) || basePillWidth <= 0) {
+        try { element.style.removeProperty('--card-group-pill-scale-max'); } catch (_) { }
         try { pill.style.removeProperty('--card-group-pill-scale-max'); } catch (_) { }
         return;
     }
 
     const hardMaxRaw = window.getComputedStyle ? window.getComputedStyle(pill).getPropertyValue('--card-group-pill-scale-hard-max') : '';
     const hardMax = parseFloat(hardMaxRaw);
-    const widthCap = (cardWidth * 0.5) / basePillWidth;
+    const widthCap = cardWidth / basePillWidth;
     const cap = Math.min(widthCap, (Number.isFinite(hardMax) && hardMax > 0) ? hardMax : 2);
     if (Number.isFinite(cap) && cap > 0) {
+        element.style.setProperty('--card-group-pill-scale-max', String(cap));
         pill.style.setProperty('--card-group-pill-scale-max', String(cap));
     } else {
+        try { element.style.removeProperty('--card-group-pill-scale-max'); } catch (_) { }
         try { pill.style.removeProperty('--card-group-pill-scale-max'); } catch (_) { }
     }
 }

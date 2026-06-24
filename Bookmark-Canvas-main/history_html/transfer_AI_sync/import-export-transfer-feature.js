@@ -1296,9 +1296,7 @@ async function __performOverwriteImport(payload) {
     });
     const costEval = __countOverwriteDiff(localContent, importTree);
     const goOverwrite = threshold <= 0 || costEval.costIncremental >= threshold;
-    try {
-        console.log('[Overwrite Import] Cost evaluation:', costEval, 'threshold:', threshold, 'goOverwrite:', goOverwrite);
-    } catch (_) {}
+    try {} catch (_) {}
 
     // 4. Open bulk-mute envelope.
     let muteSession = null;

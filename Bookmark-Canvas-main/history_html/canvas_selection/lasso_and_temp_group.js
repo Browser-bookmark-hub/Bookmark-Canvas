@@ -578,12 +578,21 @@ function __attachMaskDrag(maskEl) {
         __tempGroupDrag.edgeMeta = __tempGroupBuildDragEdgeMeta(__tempGroupDrag.snapshot);
 
         __setTempGroupDragActive(__tempGroupDrag.snapshot, true);
-        maskEl.classList.add('dragging');
+        let dragStarted = false;
 
         const onMove = (ev) => {
             if (!__tempGroupDrag.dragging) return;
             __tempGroupDrag.lastClientX = ev.clientX;
             __tempGroupDrag.lastClientY = ev.clientY;
+
+            const dx = ev.clientX - e.clientX;
+            const dy = ev.clientY - e.clientY;
+            if (!dragStarted && Math.hypot(dx, dy) < 3) return;
+
+            if (!dragStarted) {
+                dragStarted = true;
+                maskEl.classList.add('dragging');
+            }
 
             const currentCanvas = __clientToCanvas(ev.clientX, ev.clientY);
             __tempGroupDrag.lastDx = currentCanvas.x - __tempGroupDrag.startCanvas.x;

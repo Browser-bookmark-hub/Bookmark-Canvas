@@ -3081,6 +3081,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     --card-group-corner-radius: 14px;
     --card-group-highlight-color: rgba(9, 105, 218, 0.9);
     --card-group-anchor-color: var(--card-group-border);
+    --card-group-pill-scale-effective: min(var(--canvas-scale-inv, 1), var(--card-group-pill-scale-max, 999));
 
     position: absolute;
     box-sizing: border-box;
@@ -3282,13 +3283,31 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     pointer-events: none !important;
 }
 
+/* 避免卡片组上边缘的连接点、高度调整手势与名字标签（Pill）重叠误触的优化：
+   1. 将上边缘的高度调整手势（resize-handle-n）移入卡片边框内部，缩短高度为 10px。
+   2. 将上边缘的连接点与悬浮感应区（canvas-anchor-zone）向上偏移，使其紧贴在名字标签（Pill）上方。
+*/
+.card-group-canvas-node > .resize-handle-n {
+    top: 0px !important;
+    height: 10px !important;
+}
+
+.card-group-canvas-node > .canvas-anchor-zone.zone-top,
+.card-group-canvas-node > .canvas-node-anchor[data-side="top"] {
+    top: calc(-62px * var(--card-group-pill-scale-effective)) !important;
+    height: calc(34px * var(--card-group-pill-scale-effective)) !important;
+}
+
+.card-group-canvas-node > .canvas-node-anchor[data-side="top"]::before {
+    bottom: calc(-28px * var(--card-group-pill-scale-effective)) !important;
+}
+
 /* 左上角 pill（label 在 bbox 上沿之上） */
 .card-group-header-pill {
-    --card-group-pill-scale-effective: min(var(--canvas-scale-inv, 1), var(--card-group-pill-scale-max, 999));
     position: absolute;
     top: calc(-28px * var(--card-group-pill-scale-effective));
     left: 0;
-    max-width: calc(50% / var(--card-group-pill-scale-effective));
+    max-width: calc(100% / var(--card-group-pill-scale-effective));
     height: 26px;
     padding: 0 12px;
     display: inline-flex;
@@ -3352,7 +3371,13 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     transition: none;
 }
 
+.card-group-canvas-node.dragging .card-group-toolbar,
 .canvas-workspace.connecting .card-group-toolbar {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+.md-canvas-node.dragging .md-node-toolbar {
     opacity: 0 !important;
     pointer-events: none !important;
 }
@@ -3452,7 +3477,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     transition: none;
 }
 
-.canvas-workspace.connecting .temp-group-toolbar {
+.canvas-workspace.connecting .temp-group-toolbar,
+.temp-group-mask.dragging ~ .temp-group-toolbar {
     opacity: 0 !important;
     pointer-events: none !important;
 }

@@ -25788,7 +25788,6 @@ function __renderMdNodeImpl(node, options = {}) {
             // 单击：选中节点（不立刻进入编辑）
             e.preventDefault(); // 阻止编辑器自动聚焦
             e.__mdNodeSelectionDragHandled = true;
-            selectMdNode(node.id);
             justSelectedOnClick = true;
             const startX = e.clientX;
             const startY = e.clientY;
@@ -25816,6 +25815,8 @@ function __renderMdNodeImpl(node, options = {}) {
             const onUp = () => {
                 if (movedToDrag) {
                     e.__mdNodeSelectionDragHandled = true;
+                } else {
+                    selectMdNode(node.id);
                 }
                 cleanup();
             };
@@ -40117,8 +40118,6 @@ function openCanvasAppearanceSettingsModal() {
     const specialTempH = modal.querySelector('#appearanceSpecialTempHeight');
     const blankW = modal.querySelector('#appearanceBlankWidth');
     const blankH = modal.querySelector('#appearanceBlankHeight');
-    const fullScreenSectionZoom = modal.querySelector('#appearanceFullScreenSectionZoom');
-    const fullScreenMdZoom = modal.querySelector('#appearanceFullScreenMdZoom');
 
     if (tempW) tempW.value = sizes.temp.width;
     if (tempH) tempH.value = sizes.temp.height;
@@ -40126,8 +40125,6 @@ function openCanvasAppearanceSettingsModal() {
     if (specialTempH) specialTempH.value = (sizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp).height;
     if (blankW) blankW.value = sizes.mdNode.width;
     if (blankH) blankH.value = sizes.mdNode.height;
-    if (fullScreenSectionZoom) fullScreenSectionZoom.value = fullScreenZoom.section;
-    if (fullScreenMdZoom) fullScreenMdZoom.value = fullScreenZoom.mdNode;
 
     modal.querySelectorAll('.appearance-color-row').forEach(row => {
         const target = row.dataset.colorTarget;
@@ -40238,20 +40235,14 @@ function saveCanvasAppearanceSettings(options = {}) {
             }
         },
         fullScreenZoom: {
-            section: readNumber(
-                'appearanceFullScreenSectionZoom',
-                __normalizeAppearanceFullscreenZoom(
-                    current.fullScreenZoom,
-                    __getDefaultAppearanceFullscreenZoomSettings()
-                ).section
-            ),
-            mdNode: readNumber(
-                'appearanceFullScreenMdZoom',
-                __normalizeAppearanceFullscreenZoom(
-                    current.fullScreenZoom,
-                    __getDefaultAppearanceFullscreenZoomSettings()
-                ).mdNode
-            )
+            section: __normalizeAppearanceFullscreenZoom(
+                current.fullScreenZoom,
+                __getDefaultAppearanceFullscreenZoomSettings()
+            ).section,
+            mdNode: __normalizeAppearanceFullscreenZoom(
+                current.fullScreenZoom,
+                __getDefaultAppearanceFullscreenZoomSettings()
+            ).mdNode
         },
         colors: {
             permanent: (modal.querySelector('#appearanceColorPermanent') || {}).value,
@@ -40379,23 +40370,6 @@ function createCanvasAppearanceSettingsModal() {
                             </div>
                         </div>
                     </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Fullscreen default zoom' : '全屏模式默认缩放比率'}</div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-size-inputs appearance-size-inputs-stacked" id="appearanceFullScreenZoomInputs">
-                                <label class="appearance-inline-input" for="appearanceFullScreenSectionZoom">
-                                    <span>${isEn ? 'Section (Permanent/Temp)' : '栏目卡片（永久/临时）'}</span>
-                                    <input type="number" id="appearanceFullScreenSectionZoom" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5">
-                                    <span class="appearance-inline-suffix">%</span>
-                                </label>
-                                <label class="appearance-inline-input" for="appearanceFullScreenMdZoom">
-                                    <span>${isEn ? 'Blank card' : '空白栏目卡片'}</span>
-                                    <input type="number" id="appearanceFullScreenMdZoom" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5">
-                                    <span class="appearance-inline-suffix">%</span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
                 </div>
                 <div class="detail-section">
                     <div class="detail-section-title">${isEn ? 'Default Colors' : '默认颜色'}</div>
@@ -40482,7 +40456,7 @@ function createCanvasAppearanceSettingsModal() {
                             <select id="appearanceEdgeNameMode" class="appearance-name-select">
                                 <option value="manual">${isEn ? 'Manual' : '手动输入'}</option>
                                 <option value="timestamp">${isEn ? 'Timestamp' : '时间标记'}</option>
-                                <option value="parent">${isEn ? 'Parent name' : '母栏目名字'}</option>
+                                <option value="parent">${isEn ? 'Parent name' : '父栏目名字'}</option>
                                 <option value="child">${isEn ? 'Child name' : '子栏目名字'}</option>
                                 <option value="blank">${isEn ? 'Blank' : '空白'}</option>
                             </select>
@@ -40902,8 +40876,6 @@ function createCanvasAppearanceSettingsModal() {
         '#appearanceSpecialTempHeight',
         '#appearanceBlankWidth',
         '#appearanceBlankHeight',
-        '#appearanceFullScreenSectionZoom',
-        '#appearanceFullScreenMdZoom',
         '#appearanceTempNameManual',
         '#appearanceEdgeNameManual'
     ];
@@ -40966,6 +40938,19 @@ function openCanvasOtherSettingsModal() {
     const maxZoomInput = modal.querySelector('#otherInputMaxZoom');
     if (maxZoomInput) {
         maxZoomInput.value = String(getCanvasMaxZoomLimit());
+    }
+    const appearanceSettings = getCanvasAppearanceSettings();
+    const fullScreenZoom = __normalizeAppearanceFullscreenZoom(
+        appearanceSettings.fullScreenZoom,
+        __getDefaultAppearanceFullscreenZoomSettings()
+    );
+    const fsSectionZoomInput = modal.querySelector('#appearanceFullScreenSectionZoom');
+    if (fsSectionZoomInput) {
+        fsSectionZoomInput.value = String(fullScreenZoom.section);
+    }
+    const fsMdZoomInput = modal.querySelector('#appearanceFullScreenMdZoom');
+    if (fsMdZoomInput) {
+        fsMdZoomInput.value = String(fullScreenZoom.mdNode);
     }
     __updateOtherTempColorFollowLock(modal, colorFollow && colorFollow.checked);
     modal._useDefaultZoomCurve = useDefaultCurve;
@@ -41109,6 +41094,27 @@ function saveCanvasOtherSettings(options = {}) {
         if (Number.isFinite(val) && val >= 100 && val <= 1000) {
             saveSharedState('canvasMaxZoomLimit', val, { asJSON: false });
         }
+    }
+    const fsSectionInput = modal.querySelector('#appearanceFullScreenSectionZoom');
+    const fsMdInput = modal.querySelector('#appearanceFullScreenMdZoom');
+    if (fsSectionInput || fsMdInput) {
+        const currentAppearance = getCanvasAppearanceSettings();
+        const settingsInput = {
+            ...currentAppearance,
+            fullScreenZoom: {
+                section: fsSectionInput 
+                    ? parseInt(fsSectionInput.value, 10) 
+                    : (currentAppearance.fullScreenZoom?.section ?? __getDefaultAppearanceFullscreenZoomSettings().section),
+                mdNode: fsMdInput 
+                    ? parseInt(fsMdInput.value, 10) 
+                    : (currentAppearance.fullScreenZoom?.mdNode ?? __getDefaultAppearanceFullscreenZoomSettings().mdNode)
+            }
+        };
+        const normalizedAppearance = normalizeCanvasAppearanceSettings(settingsInput);
+        CanvasState.appearanceSettings = normalizedAppearance;
+        try {
+            saveSharedState(CANVAS_APPEARANCE_SETTINGS_KEY, normalizedAppearance);
+        } catch (_) {}
     }
     try {
         saveSharedState(CANVAS_OTHER_SETTINGS_KEY, normalized);
@@ -41778,6 +41784,27 @@ function createCanvasOtherSettingsModal() {
                 <button class="perf-modal-close" id="otherModalCloseBtn"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
+                <!-- 全屏模式默认缩放比率 -->
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'Fullscreen Default Zoom' : '全屏模式默认缩放比率'}</div>
+                    <div class="appearance-row" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
+                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Section (Permanent/Temp)' : '栏目卡片（永久/临时）'}</div>
+                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                                <input type="number" id="appearanceFullScreenSectionZoom" class="other-trackpad-speed-input" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5" style="width: 70px; text-align: center;">
+                                <span class="other-trackpad-speed-unit">%</span>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
+                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Blank card' : '空白栏目卡片'}</div>
+                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                                <input type="number" id="appearanceFullScreenMdZoom" class="other-trackpad-speed-input" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5" style="width: 70px; text-align: center;">
+                                <span class="other-trackpad-speed-unit">%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 缩放上下限 -->
                 <div class="detail-section">
                     <div class="detail-section-title">${isEn ? 'Zoom Limits' : '缩放上下限'}</div>
@@ -41940,6 +41967,11 @@ function createCanvasOtherSettingsModal() {
             if (minZoomInput) minZoomInput.value = '10';
             const maxZoomInput = modal.querySelector('#otherInputMaxZoom');
             if (maxZoomInput) maxZoomInput.value = '300';
+            const fsSectionInput = modal.querySelector('#appearanceFullScreenSectionZoom');
+            const fsMdInput = modal.querySelector('#appearanceFullScreenMdZoom');
+            const defaults = __getDefaultAppearanceFullscreenZoomSettings();
+            if (fsSectionInput) fsSectionInput.value = String(defaults.section);
+            if (fsMdInput) fsMdInput.value = String(defaults.mdNode);
             modal._useDefaultZoomCurve = true;
             try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
             scheduleOtherSave();
@@ -42033,6 +42065,64 @@ function createCanvasOtherSettingsModal() {
                 normalizeMaxZoomInput();
                 scheduleOtherSave();
                 maxZoomInput.blur();
+            }
+        });
+    }
+    const fsSectionInput = modal.querySelector('#appearanceFullScreenSectionZoom');
+    if (fsSectionInput) {
+        const normalizeFsSectionInput = () => {
+            const defaults = __getDefaultAppearanceFullscreenZoomSettings();
+            const normalized = __clampNumber(
+                parseInt(fsSectionInput.value, 10),
+                NODE_LAYOUT_ZOOM_MIN,
+                NODE_LAYOUT_ZOOM_MAX,
+                defaults.section
+            );
+            fsSectionInput.value = String(Math.round(normalized));
+        };
+        fsSectionInput.addEventListener('change', () => {
+            normalizeFsSectionInput();
+            scheduleOtherSave();
+        });
+        fsSectionInput.addEventListener('blur', () => {
+            normalizeFsSectionInput();
+        });
+        fsSectionInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                if (event.isComposing) return;
+                event.preventDefault();
+                normalizeFsSectionInput();
+                scheduleOtherSave();
+                fsSectionInput.blur();
+            }
+        });
+    }
+    const fsMdInput = modal.querySelector('#appearanceFullScreenMdZoom');
+    if (fsMdInput) {
+        const normalizeFsMdInput = () => {
+            const defaults = __getDefaultAppearanceFullscreenZoomSettings();
+            const normalized = __clampNumber(
+                parseInt(fsMdInput.value, 10),
+                NODE_LAYOUT_ZOOM_MIN,
+                NODE_LAYOUT_ZOOM_MAX,
+                defaults.mdNode
+            );
+            fsMdInput.value = String(Math.round(normalized));
+        };
+        fsMdInput.addEventListener('change', () => {
+            normalizeFsMdInput();
+            scheduleOtherSave();
+        });
+        fsMdInput.addEventListener('blur', () => {
+            normalizeFsMdInput();
+        });
+        fsMdInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                if (event.isComposing) return;
+                event.preventDefault();
+                normalizeFsMdInput();
+                scheduleOtherSave();
+                fsMdInput.blur();
             }
         });
     }
