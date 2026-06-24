@@ -2298,9 +2298,10 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
         m1: { x: 0.67, y: DEFAULT_ZOOM_MAGNET_POINT_1_SPEED },
         m2: { x: 0.4444444444, y: DEFAULT_ZOOM_MAGNET_POINT_2_SPEED }
     },
-    autoRecordAnchor: true, // 自动记录视口锚点
+    autoRecordAnchor: false, // 自动记录视口锚点
     autoRecordAnchorInterval: 15, // 停留多少秒记录一次锚点
-    autoRecordAnchorLimit: 5 // 自动记录的最大上限
+    autoRecordAnchorLimit: 5, // 自动记录的最大上限
+    manualAnchorLimit: 5 // 固定锚点最大数量
 };
 
 const DEFAULT_PERF_BASELINE = {
@@ -2557,6 +2558,7 @@ function normalizeCanvasOtherSettings(input) {
     if (typeof input.autoRecordAnchor === 'boolean') out.autoRecordAnchor = input.autoRecordAnchor;
     out.autoRecordAnchorInterval = __clampNumber(input.autoRecordAnchorInterval, 1, 60, out.autoRecordAnchorInterval);
     out.autoRecordAnchorLimit = __clampNumber(input.autoRecordAnchorLimit, 1, 50, out.autoRecordAnchorLimit);
+    out.manualAnchorLimit = __clampNumber(input.manualAnchorLimit, 1, 50, out.manualAnchorLimit);
     const legacyMenuSync = (typeof input.menuColorSync === 'boolean') ? input.menuColorSync : null;
     if (typeof input.menuDefaultColorSync === 'boolean') {
         out.menuDefaultColorSync = input.menuDefaultColorSync;
@@ -2627,14 +2629,14 @@ function normalizeCanvasOtherSettings(input) {
 
 function getCanvasAppearanceSettings() {
     if (!CanvasState.appearanceSettings) {
-        CanvasState.appearanceSettings = __cloneDefaultAppearanceSettings();
+        loadCanvasAppearanceSettings();
     }
     return CanvasState.appearanceSettings;
 }
 
 function getCanvasOtherSettings() {
     if (!CanvasState.otherSettings) {
-        CanvasState.otherSettings = __cloneDefaultOtherSettings();
+        loadCanvasOtherSettings();
     }
     return CanvasState.otherSettings;
 }
@@ -2725,7 +2727,17 @@ function loadCanvasOtherSettings() {
     let saved = null;
     try {
         const raw = localStorage.getItem(CANVAS_OTHER_SETTINGS_KEY);
-        if (raw) saved = JSON.parse(raw);
+        if (raw) {
+            saved = JSON.parse(raw);
+        } else {
+            const legacyRaw = localStorage.getItem('canvasOtherSettings');
+            if (legacyRaw) {
+                saved = JSON.parse(legacyRaw);
+                if (saved) {
+                    localStorage.setItem(CANVAS_OTHER_SETTINGS_KEY, JSON.stringify(saved));
+                }
+            }
+        }
     } catch (_) { }
     CanvasState.otherSettings = normalizeCanvasOtherSettings(saved);
 }
@@ -9700,7 +9712,7 @@ function applyCanvasContentTransform(content, panX, panY, scale) {
 let canvasViewportAutoRecordTimer = null;
 function triggerCanvasViewportAutoRecord(x, y, zoom) {
     const settings = getCanvasOtherSettings();
-    if (!settings || settings.autoRecordAnchor === false) {
+    if (!settings || settings.autoRecordAnchor !== true) {
         return;
     }
     if (canvasViewportAutoRecordTimer) {
@@ -40312,7 +40324,7 @@ function openCanvasAppearanceSettingsModal() {
 
     const otherAutoRecord = modal.querySelector('#otherAutoRecordAnchor');
     const otherAutoRecordInterval = modal.querySelector('#otherAutoRecordAnchorInterval');
-    if (otherAutoRecord) otherAutoRecord.checked = !(otherSettings.autoRecordAnchor === false);
+    if (otherAutoRecord) otherAutoRecord.checked = otherSettings.autoRecordAnchor === true;
     if (otherAutoRecordInterval) otherAutoRecordInterval.value = String(otherSettings.autoRecordAnchorInterval || 15);
     const updateAutoRecordIntervalVisibility = () => {
         const intervalRow = modal.querySelector('#otherAutoRecordAnchorIntervalRow');
@@ -41245,7 +41257,7 @@ function saveCanvasOtherSettings(options = {}) {
 
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
-        autoRecordAnchor: autoRecordInput ? !!autoRecordInput.checked : !(prevSettings.autoRecordAnchor === false),
+        autoRecordAnchor: autoRecordInput ? !!autoRecordInput.checked : !!prevSettings.autoRecordAnchor,
         autoRecordAnchorInterval: autoRecordIntervalInput ? parseInt(autoRecordIntervalInput.value, 10) : (prevSettings.autoRecordAnchorInterval || 15),
         autoRecordAnchorLimit: prevSettings.autoRecordAnchorLimit || 5,
         menuDefaultColorSync: menuDefaultColorSync

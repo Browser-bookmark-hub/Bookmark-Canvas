@@ -10202,7 +10202,11 @@ function initSidebarToggle() {
         const nextPrefs = detail && typeof detail === 'object'
             ? getDirectoryCollapsePrefsFromSettings(detail)
             : readSidebarCollapsePrefs();
-        applySidebarCollapsePrefs(nextPrefs, { forceApply: true });
+        const nextMode = normalizeCollapseMode(nextPrefs.mode);
+        const nextWidth = normalizeAutoCollapseWidth(nextPrefs.width);
+        if (nextMode !== sidebarCollapseMode || nextWidth !== autoCollapseWidth) {
+            applySidebarCollapsePrefs(nextPrefs, { forceApply: true });
+        }
     });
 
     // 初次加载后应用一次自动规则（若允许）
@@ -15787,21 +15791,34 @@ function showError(message) {
 
 function showToast(message, options = {}) {
     // 简单的提示功能
-    const position = options && options.position === 'top-right' ? 'top-right' : 'bottom-right';
-    const verticalPos = position === 'top-right' ? 'top: 20px;' : 'bottom: 20px;';
+    const position = options && options.position ? options.position : 'top-left';
+    let positionCss = '';
+    let animIn = 'slideIn';
+    let animOut = 'slideOut';
+    
+    if (position === 'top-left') {
+        positionCss = 'top: 20px; left: 20px;';
+        animIn = 'slideInLeft';
+        animOut = 'slideOutLeft';
+    } else if (position === 'top-right') {
+        positionCss = 'top: 20px; right: 20px;';
+    } else {
+        // bottom-right
+        positionCss = 'bottom: 20px; right: 20px;';
+    }
+    
     const duration = options && typeof options.duration === 'number' ? options.duration : 2000;
     const toast = document.createElement('div');
     toast.style.cssText = `
         position: fixed;
-        ${verticalPos}
-        right: 20px;
+        ${positionCss}
         padding: 12px 20px;
         background: var(--accent-primary);
         color: white;
         border-radius: 8px;
         box-shadow: var(--shadow-lg);
         z-index: 10000;
-        animation: slideIn 0.3s ease;
+        animation: ${animIn} 0.3s ease;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -15823,7 +15840,7 @@ function showToast(message, options = {}) {
 
     if (duration > 0) {
         setTimeout(() => {
-            toast.style.animation = 'slideOut 0.3s ease';
+            toast.style.animation = `${animOut} 0.3s ease`;
             setTimeout(() => toast.remove(), 300);
         }, duration);
     }
@@ -15833,7 +15850,7 @@ function showToast(message, options = {}) {
             textSpan.textContent = msg;
         },
         close: () => {
-            toast.style.animation = 'slideOut 0.3s ease';
+            toast.style.animation = `${animOut} 0.3s ease`;
             setTimeout(() => toast.remove(), 300);
         }
     };
@@ -15857,6 +15874,14 @@ style.textContent = `
     @keyframes slideOut {
         from { transform: translateX(0); opacity: 1; }
         to { transform: translateX(100%); opacity: 0; }
+    }
+    @keyframes slideInLeft {
+        from { transform: translateX(-100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes slideOutLeft {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(-100%); opacity: 0; }
     }
     @keyframes spin {
         100% { transform: rotate(360deg); }

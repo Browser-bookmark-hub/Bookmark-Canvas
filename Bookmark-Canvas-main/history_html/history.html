@@ -390,19 +390,6 @@
                 <button class="sidebar-tab-btn" data-tab="directory" id="sidebarTabDirectory" data-zh="目录" data-en="Directory">目录</button>
                 <button class="sidebar-tab-btn" data-tab="anchor" id="sidebarTabAnchor" data-zh="锚点" data-en="Anchors">锚点</button>
             </div>
-            <script>
-                (function() {
-                    try {
-                        const savedTab = localStorage.getItem('canvasSidebarActiveTab') || 'directory';
-                        const isAnchor = (savedTab === 'anchor' || savedTab === 'history');
-                        if (isAnchor) {
-                            document.getElementById('sidebarTabAnchor').classList.add('active');
-                        } else {
-                            document.getElementById('sidebarTabDirectory').classList.add('active');
-                        }
-                    } catch (_) {}
-                })();
-            </script>
 
             <nav class="nav-tabs">
                 <div class="canvas-directory-tree" id="canvasDirectoryTree" aria-label="Canvas Directory"></div>

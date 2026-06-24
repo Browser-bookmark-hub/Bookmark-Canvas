@@ -2544,6 +2544,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     transition: width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), padding 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.2s ease, background-color 0.2s ease;
     /* Hide native scrollbar to avoid right-side inset mismatch (scroll still works via wheel/trackpad). */
     scrollbar-width: none;
+    container-type: inline-size;
 }
 
 .sidebar.position-right {
@@ -17875,6 +17876,13 @@ html:fullscreen body.header-compact .canvas-main-container {
     flex-direction: column;
     gap: 8px;
     padding-bottom: 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 3.5 3.5 0%;
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(140, 140, 140, 0.25) transparent;
+    scrollbar-gutter: stable;
 }
 
 .history-item-card {
@@ -17943,8 +17951,8 @@ html:fullscreen body.header-compact .canvas-main-container {
 .history-empty-tip {
     text-align: center;
     color: var(--text-muted, #888888);
-    font-size: 13px;
-    margin-top: 40px;
+    font-size: 12px;
+    margin: 12px 0;
     padding: 0 16px;
 }
 
@@ -17956,9 +17964,13 @@ html:fullscreen body.header-compact .canvas-main-container {
     display: flex;
     flex-direction: column;
     height: 100%;
-    padding: 0 4px 20px 4px;
+    padding: 0 0 20px 0;
     gap: 12px;
-    overflow-y: auto;
+    overflow-y: hidden;
+}
+
+.nav-tabs.history-tab-active {
+    overflow-y: hidden !important;
 }
 
 .sidebar-section-header {
@@ -17968,6 +17980,8 @@ html:fullscreen body.header-compact .canvas-main-container {
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 6px;
     margin-bottom: 4px;
+    margin-left: 8px;
+    margin-right: 8px;
 }
 
 .sidebar-section-title {
@@ -18005,7 +18019,19 @@ html:fullscreen body.header-compact .canvas-main-container {
     color: var(--accent-color);
 }
 
-.auto-record-settings-panel {
+.sidebar-action-btn.is-full {
+    color: var(--text-muted, #888888);
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.sidebar-action-btn.is-full:hover {
+    background: transparent;
+    color: var(--text-muted, #888888);
+}
+
+.auto-record-settings-panel,
+.manual-anchor-settings-panel {
     background: var(--bg-secondary, rgba(0, 0, 0, 0.15));
     border: 1px dashed var(--border-color);
     border-radius: 6px;
@@ -18014,6 +18040,8 @@ html:fullscreen body.header-compact .canvas-main-container {
     flex-direction: column;
     gap: 8px;
     margin-bottom: 8px;
+    margin-left: 8px;
+    margin-right: 8px;
     font-size: 12px;
 }
 
@@ -18063,15 +18091,24 @@ html:fullscreen body.header-compact .canvas-main-container {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 6.5 6.5 0%;
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(140, 140, 140, 0.25) transparent;
+    scrollbar-gutter: stable;
 }
 
 .anchor-slot-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 8px;
+    gap: 6px;
+    padding: 10px;
+    margin-left: 8px;
+    margin-right: 4px;
     border-radius: 6px;
-    background: var(--bg-secondary, rgba(0, 0, 0, 0.15));
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.2));
     border: 1px solid var(--border-color);
     transition: all 0.2s;
 }
@@ -18199,6 +18236,20 @@ html:fullscreen body.header-compact .canvas-main-container {
     background: var(--bg-hover, rgba(255, 255, 255, 0.03));
 }
 
+.add-manual-anchor-btn.is-full {
+    border-color: var(--border-color);
+    color: var(--text-muted, #888888);
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: transparent;
+}
+
+.add-manual-anchor-btn.is-full:hover {
+    border-color: var(--border-color);
+    color: var(--text-muted, #888888);
+    background: transparent;
+}
+
 /* Lazy Load Toggle Buttons */
 .lazy-load-btn {
     background: transparent;
@@ -18219,4 +18270,54 @@ html:fullscreen body.header-compact .canvas-main-container {
     background: var(--bg-hover, rgba(255, 255, 255, 0.08));
     color: var(--accent-color);
     border-color: var(--accent-color);
+}
+
+/* Custom scrollbars for independent scrollable lists (Always visible thin gray thumb, transparent track) */
+.anchor-slots-container::-webkit-scrollbar,
+.history-items-container::-webkit-scrollbar {
+    width: 4px;
+}
+.anchor-slots-container::-webkit-scrollbar-track,
+.history-items-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+.anchor-slots-container::-webkit-scrollbar-thumb,
+.history-items-container::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb-color, rgba(140, 140, 140, 0.25));
+    border-radius: 2px;
+}
+
+/* Flash highlight animation for slot rows */
+.slot-highlight-flash {
+    animation: slot-flash-animation 2.2s ease-out;
+}
+
+@keyframes slot-flash-animation {
+    0% {
+        background-color: rgba(255, 193, 7, 0.3);
+        outline: 1.5px solid #ffc107;
+    }
+    100% {
+        background-color: transparent;
+        outline: 1.5px solid transparent;
+    }
+}
+
+/* Responsive adjustments for narrow sidebar layouts (hide action buttons by default, show on hover) */
+@container (max-width: 180px) {
+    .anchor-slot-actions {
+        display: none !important;
+    }
+    .anchor-slot-row:hover .anchor-slot-actions {
+        display: flex !important;
+    }
+}
+
+@media (max-width: 180px) {
+    .anchor-slot-actions {
+        display: none !important;
+    }
+    .anchor-slot-row:hover .anchor-slot-actions {
+        display: flex !important;
+    }
 }
