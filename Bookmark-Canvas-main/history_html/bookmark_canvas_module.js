@@ -2279,8 +2279,10 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     directoryAutoCollapseWidth: 600, // 自动折叠阈值（px）
     sidepanelDirectoryCollapseMode: 'auto', // 侧边栏目录栏折叠模式：auto / manual
     sidepanelDirectoryAutoCollapseWidth: 600, // 侧边栏目录栏自动折叠阈值（px）
-    tempColorFollow: true, // 临时栏目颜色跟随
+    tempColorFollow: false, // 临时栏目颜色跟随
     tempColorUnlockSync: false, // 解锁后立即继承父色
+    bookmarkTreeTagPosition: 'auto', // 书签树标签位置：left / right / auto
+    bookmarkTreeTagPositionThreshold: 420, // 自动切换阈值 (px)
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
         p0: { x: 0, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR) },
@@ -2588,6 +2590,18 @@ function normalizeCanvasOtherSettings(input) {
     out.menuColorSync = !!out.menuLocatableColorSync;
     if (typeof input.tempColorFollow === 'boolean') out.tempColorFollow = input.tempColorFollow;
     if (typeof input.tempColorUnlockSync === 'boolean') out.tempColorUnlockSync = input.tempColorUnlockSync;
+    if (typeof input.bookmarkTreeTagPosition === 'string') {
+        const pos = input.bookmarkTreeTagPosition.toLowerCase();
+        if (pos === 'left' || pos === 'right' || pos === 'auto') {
+            out.bookmarkTreeTagPosition = pos;
+        }
+    }
+    out.bookmarkTreeTagPositionThreshold = __clampNumber(
+        input.bookmarkTreeTagPositionThreshold,
+        100,
+        2000,
+        out.bookmarkTreeTagPositionThreshold
+    );
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
     out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
     out.trackpadZoomRate = __clampNumber(input.trackpadZoomRate, TRACKPAD_ZOOM_RATE_MIN, TRACKPAD_ZOOM_RATE_MAX, out.trackpadZoomRate);
@@ -2707,7 +2721,7 @@ function shouldAutoLinkTempSplit() {
 
 function isTempColorFollowEnabled(settingsOverride = null) {
     const settings = settingsOverride || getCanvasOtherSettings();
-    return !(settings && settings.tempColorFollow === false);
+    return !!(settings && settings.tempColorFollow);
 }
 
 function shouldTempColorUnlockSync(settingsOverride = null) {
@@ -2858,6 +2872,16 @@ function __updateOtherSidebarCollapseMode(modal) {
     const inputs = modal.querySelector('#otherSidebarAutoCollapseInputs');
     if (!inputs) return;
     const mode = __getAppearanceRadioValue(modal, 'other-sidebar-collapse-mode', 'auto');
+    const useAuto = mode === 'auto';
+    inputs.classList.toggle('is-disabled', !useAuto);
+    inputs.classList.toggle('is-hidden', !useAuto);
+}
+
+function __updateOtherBookmarkTagPositionMode(modal) {
+    if (!modal) return;
+    const inputs = modal.querySelector('#otherBookmarkTagPositionInputs');
+    if (!inputs) return;
+    const mode = __getAppearanceRadioValue(modal, 'other-bookmark-tag-position', 'auto');
     const useAuto = mode === 'auto';
     inputs.classList.toggle('is-disabled', !useAuto);
     inputs.classList.toggle('is-hidden', !useAuto);
@@ -40127,7 +40151,7 @@ function openCanvasAppearanceSettingsModal() {
     if (otherMenuLocatableColorSync) {
         otherMenuLocatableColorSync.checked = isSidebarMenuLocatableColorSyncEnabled(otherSettings);
     }
-    if (otherColorFollow) otherColorFollow.checked = !(otherSettings.tempColorFollow === false);
+    if (otherColorFollow) otherColorFollow.checked = !!(otherSettings && otherSettings.tempColorFollow);
     if (otherUnlockSync) otherUnlockSync.checked = !(otherSettings.tempColorUnlockSync === false);
     __setAppearanceRadioGroup(modal, 'other-sidebar-collapse-mode', otherCollapsePrefs.mode || 'auto');
     if (otherSidebarAutoWidth) {
@@ -40135,6 +40159,15 @@ function openCanvasAppearanceSettingsModal() {
     }
     __updateOtherSidebarCollapseMode(modal);
     __updateOtherTempColorFollowLock(modal, otherColorFollow && otherColorFollow.checked);
+
+    const otherBookmarkTagPosition = otherSettings.bookmarkTreeTagPosition || 'auto';
+    const otherBookmarkTagThreshold = otherSettings.bookmarkTreeTagPositionThreshold !== undefined ? otherSettings.bookmarkTreeTagPositionThreshold : 420;
+    __setAppearanceRadioGroup(modal, 'other-bookmark-tag-position', otherBookmarkTagPosition);
+    const otherTagThresholdInput = modal.querySelector('#otherBookmarkTagPositionThreshold');
+    if (otherTagThresholdInput) {
+        otherTagThresholdInput.value = __clampNumber(otherBookmarkTagThreshold, 100, 2000, 420);
+    }
+    __updateOtherBookmarkTagPositionMode(modal);
 
     modal.style.display = 'flex';
 }
@@ -40487,6 +40520,33 @@ function createCanvasAppearanceSettingsModal() {
                             </div>
                         </div>
                     </div>
+                    <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Bookmark tree tag position' : '书签树标签位置'}</span>
+                        </div>
+                        <div class="appearance-row-content appearance-row-content-inline">
+                            <div class="appearance-mode-toggle">
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-bookmark-tag-position" value="left">
+                                    <span>${isEn ? 'Left' : '左边'}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-bookmark-tag-position" value="right">
+                                    <span>${isEn ? 'Right' : '右边'}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-bookmark-tag-position" value="auto">
+                                    <span>${isEn ? 'Auto' : '自动切换'}</span>
+                                </label>
+                            </div>
+                            <div class="appearance-size-inputs" id="otherBookmarkTagPositionInputs">
+                                <input type="number" id="otherBookmarkTagPositionThreshold" min="100" max="2000" step="10">
+                                <span>px</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
                     <div class="appearance-row">
                         <div class="appearance-row-label appearance-row-label-inline">
                             <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
@@ -40696,16 +40756,34 @@ function createCanvasAppearanceSettingsModal() {
         }));
     }
     if (otherSidebarAutoWidthInput) {
-        const scheduleSidebarWidthSave = () => {
-            const n = parseInt(otherSidebarAutoWidthInput.value, 10);
-            if (Number.isFinite(n)) {
-                otherSidebarAutoWidthInput.value = String(__clampNumber(n, 320, 2000, 600));
-            }
+        otherSidebarAutoWidthInput.addEventListener('input', () => {
             scheduleOtherSave();
-        };
-        otherSidebarAutoWidthInput.addEventListener('input', scheduleSidebarWidthSave);
-        otherSidebarAutoWidthInput.addEventListener('change', scheduleSidebarWidthSave);
+        });
+        otherSidebarAutoWidthInput.addEventListener('change', () => {
+            const n = parseInt(otherSidebarAutoWidthInput.value, 10);
+            otherSidebarAutoWidthInput.value = String(__clampNumber(n, 320, 2000, 600));
+            scheduleOtherSave();
+        });
     }
+    const otherBookmarkTagPositionRadios = modal.querySelectorAll('input[name="other-bookmark-tag-position"]');
+    if (otherBookmarkTagPositionRadios && otherBookmarkTagPositionRadios.length) {
+        otherBookmarkTagPositionRadios.forEach(radio => radio.addEventListener('change', () => {
+            __updateOtherBookmarkTagPositionMode(modal);
+            scheduleOtherSave();
+        }));
+    }
+    const otherBookmarkTagThresholdInput = modal.querySelector('#otherBookmarkTagPositionThreshold');
+    if (otherBookmarkTagThresholdInput) {
+        otherBookmarkTagThresholdInput.addEventListener('input', () => {
+            scheduleOtherSave();
+        });
+        otherBookmarkTagThresholdInput.addEventListener('change', () => {
+            const n = parseInt(otherBookmarkTagThresholdInput.value, 10);
+            otherBookmarkTagThresholdInput.value = String(__clampNumber(n, 100, 2000, 420));
+            scheduleOtherSave();
+        });
+    }
+
     if (otherColorFollowToggle) {
         const applyGlobalToggle = (enabled) => {
             __updateOtherTempColorFollowLock(modal, enabled);
@@ -40828,7 +40906,7 @@ function openCanvasOtherSettingsModal() {
     const useDefaultCurve = !(settings && settings.useDefaultZoomCurve === false);
     const defaultCurveToggle = modal.querySelector('#otherUseDefaultZoomCurve');
     if (autoLink) autoLink.checked = !!settings.autoLinkSplit;
-    if (colorFollow) colorFollow.checked = !(settings.tempColorFollow === false);
+    if (colorFollow) colorFollow.checked = !!(settings && settings.tempColorFollow);
     if (unlockSync) unlockSync.checked = !(settings.tempColorUnlockSync === false);
     if (trackpadZoomRateInput) {
         const trackpadPercent = Math.round(getCanvasTrackpadZoomRate(settings) * 100);
@@ -40898,7 +40976,7 @@ function saveCanvasOtherSettings(options = {}) {
         2000,
         prevCollapsePrefs.width
     );
-    if (sidebarAutoCollapseWidthInput) {
+    if (sidebarAutoCollapseWidthInput && document.activeElement !== sidebarAutoCollapseWidthInput) {
         sidebarAutoCollapseWidthInput.value = String(sidebarAutoCollapseWidth);
     }
     const colorFollow = modal.querySelector('#otherTempColorFollow');
@@ -40916,9 +40994,25 @@ function saveCanvasOtherSettings(options = {}) {
         TRACKPAD_ZOOM_RATE_MAX * 100,
         getCanvasTrackpadZoomRate(prevSettings) * 100
     );
-    if (trackpadZoomRateInput) {
+    if (trackpadZoomRateInput && document.activeElement !== trackpadZoomRateInput) {
         trackpadZoomRateInput.value = String(Math.round(trackpadRatePercent));
     }
+
+    const bookmarkTagPosition = __getAppearanceRadioValue(modal, 'other-bookmark-tag-position', prevSettings.bookmarkTreeTagPosition || 'auto');
+    const bookmarkTagThresholdInput = modal.querySelector('#otherBookmarkTagPositionThreshold');
+    const bookmarkTagThresholdRaw = bookmarkTagThresholdInput
+        ? parseInt(bookmarkTagThresholdInput.value, 10)
+        : prevSettings.bookmarkTreeTagPositionThreshold;
+    const bookmarkTagThreshold = __clampNumber(
+        bookmarkTagThresholdRaw,
+        100,
+        2000,
+        prevSettings.bookmarkTreeTagPositionThreshold || 420
+    );
+    if (bookmarkTagThresholdInput && document.activeElement !== bookmarkTagThresholdInput) {
+        bookmarkTagThresholdInput.value = String(bookmarkTagThreshold);
+    }
+
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
         menuDefaultColorSync: menuDefaultColorSync
@@ -40931,8 +41025,10 @@ function saveCanvasOtherSettings(options = {}) {
         directoryAutoCollapseWidth: prevSettings.directoryAutoCollapseWidth,
         sidepanelDirectoryCollapseMode: prevSettings.sidepanelDirectoryCollapseMode,
         sidepanelDirectoryAutoCollapseWidth: prevSettings.sidepanelDirectoryAutoCollapseWidth,
-        tempColorFollow: colorFollow ? !!colorFollow.checked : !(prevSettings.tempColorFollow === false),
+        tempColorFollow: colorFollow ? !!colorFollow.checked : !!(prevSettings && prevSettings.tempColorFollow),
         tempColorUnlockSync: unlockSync ? !!unlockSync.checked : !(prevSettings.tempColorUnlockSync === false),
+        bookmarkTreeTagPosition: bookmarkTagPosition,
+        bookmarkTreeTagPositionThreshold: bookmarkTagThreshold,
         useDefaultZoomCurve: useDefault,
         zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || prevSettings.zoomCurve || getCanvasZoomCurveSettings()),
         trackpadZoomRate: trackpadRatePercent / 100,

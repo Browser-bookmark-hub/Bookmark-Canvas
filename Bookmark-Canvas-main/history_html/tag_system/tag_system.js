@@ -1347,12 +1347,33 @@
         return [];
     }
 
+    function __getBookmarkTreeTagSettings() {
+        if (window.CanvasModule && typeof window.CanvasModule.getCanvasOtherSettings === 'function') {
+            const settings = window.CanvasModule.getCanvasOtherSettings();
+            if (settings) {
+                return {
+                    position: settings.bookmarkTreeTagPosition || 'auto',
+                    threshold: settings.bookmarkTreeTagPositionThreshold !== undefined ? settings.bookmarkTreeTagPositionThreshold : 420
+                };
+            }
+        }
+        return { position: 'auto', threshold: 420 };
+    }
+
     function __isWideRowContext(treeItem) {
         if (!treeItem) return false;
         // Fullscreen / global search panel → always wide.
         if (treeItem.closest('.canvas-fullscreen-active, .canvas-fullscreen-node, .search-results-panel')) return true;
-        const layoutWidth = treeItem.offsetWidth || treeItem.clientWidth || treeItem.scrollWidth || 0;
-        return layoutWidth >= WIDE_ROW_THRESHOLD;
+        
+        const settings = __getBookmarkTreeTagSettings();
+        if (settings.position === 'left') {
+            return false;
+        } else if (settings.position === 'right') {
+            return true;
+        } else {
+            const layoutWidth = treeItem.offsetWidth || treeItem.clientWidth || treeItem.scrollWidth || 0;
+            return layoutWidth >= settings.threshold;
+        }
     }
 
     function __buildDotsElement(tags, treeItem) {
@@ -1619,6 +1640,12 @@
     window.addEventListener('resize', () => {
         __queueTreeItemScanForTagDots(document);
     }, { passive: true });
+
+    window.addEventListener('canvas-other-settings-updated', () => {
+        if (typeof window.__refreshAllTagDots === 'function') {
+            window.__refreshAllTagDots();
+        }
+    });
 
     const tagSyncChannel = new BroadcastChannel('bookmark-canvas-tag-sync');
     tagSyncChannel.onmessage = (event) => {
