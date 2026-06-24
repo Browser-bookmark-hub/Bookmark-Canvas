@@ -3377,6 +3377,540 @@
     });
   }
 
+  function formatRelativeTime(timestamp) {
+    const isEn = isEnglish();
+    const diffMs = Date.now() - timestamp;
+    const diffS = Math.floor(diffMs / 1000);
+    if (diffS < 5) return isEn ? 'Just now' : '刚刚';
+    if (diffS < 60) return isEn ? `${diffS}s ago` : `${diffS}秒前`;
+    const diffM = Math.floor(diffS / 60);
+    if (diffM < 60) return isEn ? `${diffM}m ago` : `${diffM}分钟前`;
+    const diffH = Math.floor(diffM / 60);
+    if (diffH < 24) return isEn ? `${diffH}h ago` : `${diffH}小时前`;
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function getCanvasOtherSettingsSafe() {
+    if (global.CanvasModule && typeof global.CanvasModule.getCanvasOtherSettings === 'function') {
+      return global.CanvasModule.getCanvasOtherSettings();
+    }
+    try {
+      const raw = localStorage.getItem('canvasOtherSettings');
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+    return { autoRecordAnchor: true, autoRecordAnchorInterval: 15 };
+  }
+
+  function saveCanvasOtherSettingsInline(settings) {
+    if (global.saveSharedState) {
+      global.saveSharedState('canvasOtherSettings', settings);
+    } else {
+      localStorage.setItem('canvasOtherSettings', JSON.stringify(settings));
+    }
+    window.dispatchEvent(new CustomEvent('canvas-other-settings-updated', { detail: settings }));
+    window.dispatchEvent(new CustomEvent('shared-state-updated', { detail: { key: 'canvasOtherSettings', value: settings } }));
+  }
+
+  function loadAnchorSlots() {
+    let slots = [];
+    try {
+      const raw = localStorage.getItem('canvasManualAnchorSlots');
+      if (raw) slots = JSON.parse(raw);
+    } catch (_) {}
+    if (!Array.isArray(slots) || slots.length === 0) {
+      slots = [];
+    }
+    while (slots.length < 5) {
+      slots.push(null);
+    }
+    slots = slots.slice(0, 5);
+    return slots;
+  }
+
+  function saveAnchorSlots(slots) {
+    try {
+      localStorage.setItem('canvasManualAnchorSlots', JSON.stringify(slots));
+    } catch (e) {
+      console.error('Failed to save manual anchor slots:', e);
+    }
+    window.dispatchEvent(new CustomEvent('storage', { key: 'canvasManualAnchorSlots' }));
+  }
+
+  function handleSlotAction(action, index) {
+    const slots = loadAnchorSlots();
+    const isEn = isEnglish();
+    
+    if (action === 'save') {
+      const state = global.CanvasModule && global.CanvasModule.CanvasState;
+      if (!state) return;
+      
+      const existingName = slots[index] ? slots[index].name : null;
+      const defaultName = existingName || (isEn ? `Slot ${index + 1}` : `槽位 ${index + 1}`);
+      
+      slots[index] = {
+        name: defaultName,
+        x: state.panOffsetX,
+        y: state.panOffsetY,
+        zoom: state.zoom,
+        timestamp: Date.now()
+      };
+      saveAnchorSlots(slots);
+      renderHistoryPanel();
+      if (typeof global.showToast === 'function') {
+        global.showToast(isEn ? 'Viewport saved to slot' : '视口已保存至槽位');
+      }
+    } 
+    else if (action === 'locate') {
+      const slot = slots[index];
+      if (!slot) return;
+      if (global.CanvasModule && typeof global.CanvasModule.navigateToViewport === 'function') {
+        global.CanvasModule.navigateToViewport(slot);
+        setTimeout(renderHistoryPanel, 50);
+      }
+    } 
+    else if (action === 'rename') {
+      const slot = slots[index];
+      if (!slot) return;
+      const newName = prompt(isEn ? 'Enter a new name for the slot:' : '请输入新的槽位名称：', slot.name || '');
+      if (newName === null) return;
+      const trimmed = newName.trim();
+      if (trimmed) {
+        slot.name = trimmed;
+        saveAnchorSlots(slots);
+        renderHistoryPanel();
+      }
+    } 
+    else if (action === 'delete') {
+      slots[index] = null;
+      saveAnchorSlots(slots);
+      renderHistoryPanel();
+    }
+  }
+
+  let autoRecordSettingsOpen = false;
+  let autoRecordVisibleLimit = 5;
+
+  function renderHistoryPanel() {
+    const panel = document.getElementById('canvasHistoryPanel');
+    if (!panel || panel.style.display === 'none') return;
+
+    const isEn = isEnglish();
+    const slots = loadAnchorSlots();
+    
+    let historyList = [];
+    try {
+      const raw = localStorage.getItem('canvasNavigationHistory');
+      if (raw) historyList = JSON.parse(raw);
+    } catch (_) {}
+    if (!Array.isArray(historyList)) historyList = [];
+    
+    const otherSettings = getCanvasOtherSettingsSafe();
+    const isAutoRecordEnabled = otherSettings.autoRecordAnchor !== false;
+    const autoRecordInterval = otherSettings.autoRecordAnchorInterval || 15;
+    
+    const savedSlots = slots
+      .map((slot, idx) => slot ? { ...slot, originalIndex: idx } : null)
+      .filter(s => s !== null);
+      
+    let html = `
+      <div class="sidebar-anchor-container">
+        <!-- Section 1: Pinned Anchors -->
+        <div class="sidebar-section-header">
+          <span class="sidebar-section-title">${isEn ? 'Pinned Anchors' : '固定锚点'}</span>
+        </div>
+        <div class="anchor-slots-container">
+    `;
+    
+    if (savedSlots.length === 0) {
+      html += `
+        <div class="history-empty-tip" style="margin-top: 10px; margin-bottom: 10px; padding: 0 8px; text-align: left; font-size: 12px;">
+          ${isEn ? 'No pinned anchors yet.' : '暂无固定锚点'}
+        </div>
+      `;
+    } else {
+      savedSlots.forEach((slot) => {
+        const index = slot.originalIndex;
+        const slotNum = index + 1;
+        const displayName = slot.name || (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
+        const zoomPercent = Math.round(slot.zoom * 100);
+        const relativeTimeStr = slot.timestamp ? formatRelativeTime(slot.timestamp) : '';
+        
+        html += `
+          <div class="anchor-slot-row">
+            <div class="anchor-slot-header">
+              <span class="anchor-slot-name" title="${displayName}">${displayName}</span>
+              <div class="anchor-slot-actions">
+                <button class="anchor-slot-btn rename-btn" data-index="${index}" title="${isEn ? 'Rename slot' : '重命名槽位'}">
+                  <i class="fas fa-edit"></i>
+                </button>
+                <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isEn ? 'Clear slot' : '清除槽位'}">
+                  <i class="fas fa-trash-alt"></i>
+                </button>
+                <button class="anchor-slot-btn save-btn" data-index="${index}" title="${isEn ? 'Overwrite with current viewport' : '用当前视口覆盖'}">
+                  <i class="fas fa-anchor"></i>
+                </button>
+                <button class="anchor-slot-btn locate-btn" data-index="${index}" title="${isEn ? 'Locate viewport' : '定位到此视口'}">
+                  <i class="fas fa-crosshairs"></i>
+                </button>
+              </div>
+            </div>
+            <div class="anchor-slot-info">
+              X: ${Math.round(slot.x)} | Y: ${Math.round(slot.y)} | ${zoomPercent}%
+              ${relativeTimeStr ? `<span style="float: right; font-style: italic; color: var(--text-muted, #888888); font-size: 10px;">${relativeTimeStr}</span>` : ''}
+            </div>
+          </div>
+        `;
+      });
+    }
+    
+    html += `</div>`;
+    
+    if (savedSlots.length < 5) {
+      html += `
+        <div class="add-anchor-btn-container" style="margin-top: 8px;">
+          <button class="add-manual-anchor-btn" id="addManualAnchorBtn">
+            <i class="fas fa-anchor"></i> ${isEn ? 'Add Anchor' : '添加锚点'}
+          </button>
+        </div>
+      `;
+    }
+    
+    html += `
+        <!-- Section 2: Auto-Saved History -->
+        <div class="sidebar-section-header auto-record-header" style="margin-top: 20px;">
+          <span class="sidebar-section-title">${isEn ? 'Auto-Recorded' : '自动记录'}</span>
+          <div class="sidebar-header-actions">
+            <button class="sidebar-action-btn" id="historyClearBtn" title="${isEn ? 'Clear All' : '清空历史'}">
+              <i class="fas fa-trash-alt"></i>
+            </button>
+            <button class="sidebar-action-btn" id="autoRecordSettingsBtn" title="${isEn ? 'Auto-save Settings' : '自动保存设置'}">
+              <i class="fas fa-cog"></i>
+            </button>
+          </div>
+        </div>
+        
+        <!-- Inline Settings Panel -->
+        <div class="auto-record-settings-panel" id="autoRecordInlineSettings" style="${autoRecordSettingsOpen ? '' : 'display: none;'}">
+          <div class="settings-inline-row" style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="settings-inline-span">${isEn ? 'Enable Auto-save' : '开启自动保存'}</span>
+            <label class="other-toggle-switch" style="margin: 0;">
+              <input type="checkbox" id="inlineAutoRecordCheck" ${isAutoRecordEnabled ? 'checked' : ''} />
+              <span class="other-toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-inline-row" id="inlineIntervalRow" style="${isAutoRecordEnabled ? '' : 'display: none;'}">
+            <span class="settings-inline-span">${isEn ? 'Interval (s):' : '间隔 (秒)：'}</span>
+            <input type="number" id="inlineAutoRecordIntervalInput" min="1" max="60" value="${autoRecordInterval}" />
+          </div>
+          <div class="settings-inline-row" id="inlineLimitRow" style="${isAutoRecordEnabled ? '' : 'display: none;'}">
+            <span class="settings-inline-span">${isEn ? 'Max capacity:' : '最大记录数量：'}</span>
+            <input type="number" id="inlineAutoRecordLimitInput" min="1" max="50" value="${otherSettings.autoRecordAnchorLimit || 5}" />
+          </div>
+        </div>
+        
+        <div class="history-items-container">
+    `;
+    
+    const limit = otherSettings.autoRecordAnchorLimit || 5;
+    const currentHistoryList = historyList.slice(0, limit);
+    const visibleHistoryList = currentHistoryList.slice(0, autoRecordVisibleLimit);
+    
+    if (currentHistoryList.length === 0) {
+      html += `
+        <div class="history-empty-tip">
+          ${isEn ? 'No auto-saved viewports yet' : '暂无自动记录的视口'}
+        </div>
+      `;
+    } else {
+      visibleHistoryList.forEach((item, index) => {
+        const dateObj = new Date(item.timestamp);
+        const timeShortStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const dateShortStr = dateObj.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+        const defaultName = `${dateShortStr} ${timeShortStr}`;
+        const displayName = item.name || defaultName;
+        const zoomPercent = Math.round(item.zoom * 100);
+        const relativeTimeStr = formatRelativeTime(item.timestamp);
+        
+        html += `
+          <div class="anchor-slot-row history-item-card" data-index="${index}">
+            <div class="anchor-slot-header">
+              <span class="anchor-slot-name" title="${displayName}">${displayName}</span>
+              <div class="anchor-slot-actions">
+                <button class="anchor-slot-btn rename-btn" data-index="${index}" title="${isEn ? 'Rename viewport' : '重命名视口'}">
+                  <i class="fas fa-edit"></i>
+                </button>
+                <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isEn ? 'Delete record' : '删除记录'}">
+                  <i class="fas fa-trash-alt"></i>
+                </button>
+                <button class="anchor-slot-btn locate-btn" data-index="${index}" title="${isEn ? 'Locate viewport' : '定位到此视口'}">
+                  <i class="fas fa-crosshairs"></i>
+                </button>
+              </div>
+            </div>
+            <div class="anchor-slot-info">
+              X: ${Math.round(item.x)} | Y: ${Math.round(item.y)} | ${zoomPercent}%
+              <span style="float: right; font-style: italic; color: var(--text-muted, #888888); font-size: 10px;">${relativeTimeStr}</span>
+            </div>
+          </div>
+        `;
+      });
+    }
+    
+    html += `
+        </div>
+    `;
+    
+    const hasMore = currentHistoryList.length > visibleHistoryList.length;
+    const canCollapse = autoRecordVisibleLimit > 5;
+    if (hasMore || canCollapse) {
+      const remaining = currentHistoryList.length - visibleHistoryList.length;
+      const willLoad = Math.min(5, remaining);
+      
+      html += `
+        <div class="lazy-load-container" style="display: flex; gap: 8px; margin-top: 8px; margin-bottom: 4px; justify-content: center; padding: 0 4px;">
+      `;
+      if (hasMore) {
+        html += `
+          <button class="lazy-load-btn load-more-btn" id="autoRecordLoadMoreBtn" style="flex: 1;">
+            <i class="fas fa-chevron-down"></i> ${isEn ? `Show More (+${willLoad})` : `展开更多 (+${willLoad})`}
+          </button>
+        `;
+      }
+      if (canCollapse) {
+        html += `
+          <button class="lazy-load-btn collapse-btn" id="autoRecordCollapseBtn" style="flex: 1;">
+            <i class="fas fa-chevron-up"></i> ${isEn ? 'Collapse' : '收起'}
+          </button>
+        `;
+      }
+      html += `</div>`;
+    }
+    
+    html += `
+      </div>
+    `;
+    
+    panel.innerHTML = html;
+    
+    const addBtn = panel.querySelector('#addManualAnchorBtn');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        const emptyIndex = slots.indexOf(null);
+        if (emptyIndex !== -1) {
+          handleSlotAction('save', emptyIndex);
+        }
+      });
+    }
+
+    const loadMoreBtn = panel.querySelector('#autoRecordLoadMoreBtn');
+    if (loadMoreBtn) {
+      loadMoreBtn.addEventListener('click', () => {
+        autoRecordVisibleLimit += 5;
+        renderHistoryPanel();
+      });
+    }
+
+    const collapseBtn = panel.querySelector('#autoRecordCollapseBtn');
+    if (collapseBtn) {
+      collapseBtn.addEventListener('click', () => {
+        autoRecordVisibleLimit = 5;
+        renderHistoryPanel();
+      });
+    }
+
+    panel.querySelectorAll('.anchor-slots-container .anchor-slot-btn').forEach(btn => {
+      const index = parseInt(btn.dataset.index, 10);
+      const action = btn.classList.contains('locate-btn') ? 'locate' :
+                     btn.classList.contains('save-btn') ? 'save' :
+                     btn.classList.contains('rename-btn') ? 'rename' :
+                     btn.classList.contains('delete-btn') ? 'delete' : null;
+      
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleSlotAction(action, index);
+      });
+    });
+    
+    const settingsBtn = panel.querySelector('#autoRecordSettingsBtn');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        autoRecordSettingsOpen = !autoRecordSettingsOpen;
+        const inlinePanel = panel.querySelector('#autoRecordInlineSettings');
+        if (inlinePanel) {
+          inlinePanel.style.display = autoRecordSettingsOpen ? '' : 'none';
+        }
+      });
+    }
+    
+    const inlineCheck = panel.querySelector('#inlineAutoRecordCheck');
+    const intervalRow = panel.querySelector('#inlineIntervalRow');
+    const limitRow = panel.querySelector('#inlineLimitRow');
+    const intervalInput = panel.querySelector('#inlineAutoRecordIntervalInput');
+    const limitInput = panel.querySelector('#inlineAutoRecordLimitInput');
+    
+    if (inlineCheck) {
+      inlineCheck.addEventListener('change', () => {
+        const checked = inlineCheck.checked;
+        if (intervalRow) intervalRow.style.display = checked ? '' : 'none';
+        if (limitRow) limitRow.style.display = checked ? '' : 'none';
+        
+        const currentSettings = getCanvasOtherSettingsSafe();
+        currentSettings.autoRecordAnchor = checked;
+        saveCanvasOtherSettingsInline(currentSettings);
+      });
+    }
+    
+    if (intervalInput) {
+      intervalInput.addEventListener('change', () => {
+        let val = parseInt(intervalInput.value, 10);
+        if (isNaN(val) || val < 1) val = 1;
+        if (val > 60) val = 60;
+        intervalInput.value = val;
+        
+        const currentSettings = getCanvasOtherSettingsSafe();
+        currentSettings.autoRecordAnchorInterval = val;
+        saveCanvasOtherSettingsInline(currentSettings);
+      });
+    }
+    
+    if (limitInput) {
+      limitInput.addEventListener('change', () => {
+        let val = parseInt(limitInput.value, 10);
+        if (isNaN(val) || val < 1) val = 1;
+        if (val > 50) val = 50;
+        limitInput.value = val;
+        
+        const currentSettings = getCanvasOtherSettingsSafe();
+        currentSettings.autoRecordAnchorLimit = val;
+        saveCanvasOtherSettingsInline(currentSettings);
+        
+        let currentHistoryList = [];
+        try {
+          const raw = localStorage.getItem('canvasNavigationHistory');
+          if (raw) currentHistoryList = JSON.parse(raw);
+        } catch (_) {}
+        if (Array.isArray(currentHistoryList) && currentHistoryList.length > val) {
+          currentHistoryList = currentHistoryList.slice(0, val);
+          localStorage.setItem('canvasNavigationHistory', JSON.stringify(currentHistoryList));
+        }
+        renderHistoryPanel();
+      });
+    }
+    
+    const clearBtn = panel.querySelector('#historyClearBtn');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        localStorage.removeItem('canvasNavigationHistory');
+        renderHistoryPanel();
+      });
+    }
+    
+    const historyCards = panel.querySelectorAll('.history-items-container .history-item-card');
+    historyCards.forEach(card => {
+      const index = parseInt(card.dataset.index, 10);
+      const item = historyList[index];
+      if (!item) return;
+      
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.anchor-slot-btn')) return;
+        
+        if (global.CanvasModule && typeof global.CanvasModule.navigateToViewport === 'function') {
+          global.CanvasModule.navigateToViewport(item);
+          setTimeout(renderHistoryPanel, 50);
+        }
+      });
+      
+      const locateBtn = card.querySelector('.locate-btn');
+      if (locateBtn) {
+        locateBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (global.CanvasModule && typeof global.CanvasModule.navigateToViewport === 'function') {
+            global.CanvasModule.navigateToViewport(item);
+            setTimeout(renderHistoryPanel, 50);
+          }
+        });
+      }
+      
+      const renameBtn = card.querySelector('.rename-btn');
+      if (renameBtn) {
+        renameBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const dateObj = new Date(item.timestamp);
+          const timeShortStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const dateShortStr = dateObj.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+          const defaultName = `${dateShortStr} ${timeShortStr}`;
+          const currentName = item.name || defaultName;
+          const newName = prompt(isEn ? 'Enter a new name for the viewport:' : '请输入视口名称：', currentName);
+          if (newName === null) return;
+          const trimmed = newName.trim();
+          if (trimmed) {
+            item.name = trimmed;
+            localStorage.setItem('canvasNavigationHistory', JSON.stringify(historyList));
+            renderHistoryPanel();
+          }
+        });
+      }
+      
+      const deleteBtn = card.querySelector('.delete-btn');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          historyList.splice(index, 1);
+          localStorage.setItem('canvasNavigationHistory', JSON.stringify(historyList));
+          renderHistoryPanel();
+        });
+      }
+    });
+  }
+
+  function setupSidebarTabs() {
+    const tabDir = document.getElementById('sidebarTabDirectory');
+    const tabHist = document.getElementById('sidebarTabAnchor');
+    const panelDir = document.getElementById('canvasDirectoryTree');
+    const panelHist = document.getElementById('canvasHistoryPanel');
+    
+    if (!tabDir || !tabHist || !panelDir || !panelHist) return;
+    
+    const isEn = isEnglish();
+    tabDir.innerText = isEn ? 'Directory' : '目录';
+    tabHist.innerText = isEn ? 'Anchors' : '锚点';
+    
+    tabDir.addEventListener('click', () => {
+      tabDir.classList.add('active');
+      tabHist.classList.remove('active');
+      panelDir.style.display = '';
+      panelHist.style.display = 'none';
+      localStorage.setItem('canvasSidebarActiveTab', 'directory');
+    });
+    
+    tabHist.addEventListener('click', () => {
+      tabHist.classList.add('active');
+      tabDir.classList.remove('active');
+      panelDir.style.display = 'none';
+      panelHist.style.display = '';
+      localStorage.setItem('canvasSidebarActiveTab', 'anchor');
+      renderHistoryPanel();
+    });
+    
+    const savedTab = localStorage.getItem('canvasSidebarActiveTab') || 'directory';
+    const isAnchor = (savedTab === 'anchor' || savedTab === 'history');
+    if (isAnchor) {
+      tabHist.classList.add('active');
+      tabDir.classList.remove('active');
+      panelDir.style.display = 'none';
+      panelHist.style.display = '';
+      renderHistoryPanel();
+    } else {
+      tabDir.classList.add('active');
+      tabHist.classList.remove('active');
+      panelDir.style.display = '';
+      panelHist.style.display = 'none';
+    }
+  }
+
   function init() {
     if (initialized) {
       queueRefresh({ force: true });
@@ -3388,6 +3922,8 @@
     queueRefresh({ force: true });
     global.addEventListener('pointerdown', handleGlobalPointerDown, true);
 
+    try { setupSidebarTabs(); } catch (_) {}
+
     refreshTimer = global.setInterval(() => {
       ensureCanvasObserver();
       queueRefresh();
@@ -3395,6 +3931,11 @@
 
     global.addEventListener('storage', () => {
       queueRefresh({ force: true });
+      try { renderHistoryPanel(); } catch (_) {}
+    });
+
+    global.addEventListener('canvas-navigation-history-updated', () => {
+      try { renderHistoryPanel(); } catch (_) {}
     });
   }
 

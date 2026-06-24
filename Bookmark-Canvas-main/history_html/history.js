@@ -4388,6 +4388,42 @@ const i18n = {
         'zh_CN': '未找到上次全屏卡片',
         'en': 'No previous fullscreen card found'
     },
+    titleAnchorTooltip: {
+        'zh_CN': '视口锚点',
+        'en': 'Viewport Anchors'
+    },
+    anchorMenuTitle: {
+        'zh_CN': '视口保存槽位',
+        'en': 'Viewport Slots'
+    },
+    anchorSlotEmpty: {
+        'zh_CN': '槽位 %n (未保存)',
+        'en': 'Slot %n (Empty)'
+    },
+    anchorSlotSave: {
+        'zh_CN': '保存当前视口',
+        'en': 'Save Current Viewport'
+    },
+    anchorSlotLocate: {
+        'zh_CN': '定位到此视口',
+        'en': 'Locate Viewport'
+    },
+    anchorSlotRename: {
+        'zh_CN': '重命名',
+        'en': 'Rename'
+    },
+    anchorSlotDelete: {
+        'zh_CN': '删除',
+        'en': 'Delete'
+    },
+    anchorRenamePrompt: {
+        'zh_CN': '请输入新的槽位名称：',
+        'en': 'Enter a new name for the slot:'
+    },
+    anchorDeleteConfirm: {
+        'zh_CN': '确定要清除该槽位的视口吗？',
+        'en': 'Are you sure you want to clear this slot?'
+    },
     quickAddCurrentTitle: {
         'zh_CN': '当前页 | 选中标签页',
         'en': 'Current | Selected Tabs'
@@ -5971,6 +6007,17 @@ function applyLanguage() {
     if (sideLastFullscreenTooltip) sideLastFullscreenTooltip.textContent = i18n.titleLastFullscreenTooltip[currentLang];
     const sideLastFullscreenBtn = document.getElementById('sideLastFullscreenBtn');
     if (sideLastFullscreenBtn) sideLastFullscreenBtn.setAttribute('aria-label', i18n.titleLastFullscreenTooltip[currentLang]);
+
+    const titleAnchorTooltip = document.getElementById('titleAnchorTooltip');
+    if (titleAnchorTooltip) titleAnchorTooltip.textContent = i18n.titleAnchorTooltip[currentLang];
+    const titleAnchorBtn = document.getElementById('titleAnchorBtn');
+    if (titleAnchorBtn) titleAnchorBtn.setAttribute('aria-label', i18n.titleAnchorTooltip[currentLang]);
+    const sideAnchorTooltip = document.getElementById('sideAnchorTooltip');
+    if (sideAnchorTooltip) sideAnchorTooltip.textContent = i18n.titleAnchorTooltip[currentLang];
+    const sideAnchorBtn = document.getElementById('sideAnchorBtn');
+    if (sideAnchorBtn) sideAnchorBtn.setAttribute('aria-label', i18n.titleAnchorTooltip[currentLang]);
+    const anchorMenuTitleEl = document.getElementById('anchorMenuTitle');
+    if (anchorMenuTitleEl) anchorMenuTitleEl.textContent = i18n.anchorMenuTitle[currentLang];
     const openCanvasPageTooltip = document.getElementById('openCanvasPageTooltip');
     if (openCanvasPageTooltip) openCanvasPageTooltip.textContent = i18n.openCanvasPageTooltip[currentLang];
     const openCanvasPageBtn = document.getElementById('openCanvasPageBtn');
@@ -6951,6 +6998,8 @@ async function handleOpenLastFullscreenCard() {
     const msg = i18n.titleLastFullscreenNoCardToast[currentLang];
     try { showToast(msg); } catch (_) { }
 }
+
+
 
 function setupSideLastFullscreenButton() {
     if (!isSidePanelMode) return;
