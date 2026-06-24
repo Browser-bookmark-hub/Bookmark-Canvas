@@ -75,6 +75,7 @@ const CanvasState = {
     previousZoom: null,
     previousPanOffsetX: null,
     previousPanOffsetY: null,
+    lastAutoRecordAnchor: null,
     tempStateTimestamp: 0,
     tempSections: [],
     tempSectionCounter: 0,
@@ -2296,7 +2297,10 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     magnetPoints: {
         m1: { x: 0.67, y: DEFAULT_ZOOM_MAGNET_POINT_1_SPEED },
         m2: { x: 0.4444444444, y: DEFAULT_ZOOM_MAGNET_POINT_2_SPEED }
-    }
+    },
+    autoRecordAnchor: true, // 自动记录视口锚点
+    autoRecordAnchorInterval: 15, // 停留多少秒记录一次锚点
+    autoRecordAnchorLimit: 5 // 自动记录的最大上限
 };
 
 const DEFAULT_PERF_BASELINE = {
@@ -2550,6 +2554,9 @@ function normalizeCanvasOtherSettings(input) {
     const out = __cloneDefaultOtherSettings();
     if (!input || typeof input !== 'object') return out;
     if (typeof input.autoLinkSplit === 'boolean') out.autoLinkSplit = input.autoLinkSplit;
+    if (typeof input.autoRecordAnchor === 'boolean') out.autoRecordAnchor = input.autoRecordAnchor;
+    out.autoRecordAnchorInterval = __clampNumber(input.autoRecordAnchorInterval, 1, 60, out.autoRecordAnchorInterval);
+    out.autoRecordAnchorLimit = __clampNumber(input.autoRecordAnchorLimit, 1, 50, out.autoRecordAnchorLimit);
     const legacyMenuSync = (typeof input.menuColorSync === 'boolean') ? input.menuColorSync : null;
     if (typeof input.menuDefaultColorSync === 'boolean') {
         out.menuDefaultColorSync = input.menuDefaultColorSync;
@@ -9686,6 +9693,77 @@ function applyCanvasContentTransform(content, panX, panY, scale) {
         window.__BCSLassoTempGroup.isDragging() && 
         typeof window.__BCSLassoTempGroup.updateDragPositionForScroll === 'function') {
         window.__BCSLassoTempGroup.updateDragPositionForScroll();
+    }
+    try { triggerCanvasViewportAutoRecord(x, y, s); } catch (_) { }
+}
+
+let canvasViewportAutoRecordTimer = null;
+function triggerCanvasViewportAutoRecord(x, y, zoom) {
+    const settings = getCanvasOtherSettings();
+    if (!settings || settings.autoRecordAnchor === false) {
+        return;
+    }
+    if (canvasViewportAutoRecordTimer) {
+        clearTimeout(canvasViewportAutoRecordTimer);
+    }
+    const intervalS = settings.autoRecordAnchorInterval || 15;
+    canvasViewportAutoRecordTimer = setTimeout(() => {
+        try {
+            checkAndRecordCanvasViewport(x, y, zoom);
+        } catch (_) {}
+    }, intervalS * 1000);
+}
+
+function checkAndRecordCanvasViewport(x, y, zoom) {
+    const last = CanvasState.lastAutoRecordAnchor;
+    if (last) {
+        const dx = Math.abs(x - last.x);
+        const dy = Math.abs(y - last.y);
+        const dz = Math.abs(zoom - last.zoom);
+        if (dx <= 1.0 && dy <= 1.0 && dz <= 0.001) {
+            return;
+        }
+    }
+    
+    const anchor = {
+        x: x,
+        y: y,
+        zoom: zoom,
+        timestamp: Date.now()
+    };
+    
+    CanvasState.lastAutoRecordAnchor = anchor;
+    saveSharedState('canvasAutoRecordedAnchor', anchor);
+    
+    try {
+        let historyList = [];
+        const rawHistory = localStorage.getItem('canvasNavigationHistory');
+        if (rawHistory) {
+            historyList = JSON.parse(rawHistory);
+        }
+        if (!Array.isArray(historyList)) {
+            historyList = [];
+        }
+        
+        historyList = historyList.filter(item => {
+            if (!item) return false;
+            const dx = Math.abs(item.x - x);
+            const dy = Math.abs(item.y - y);
+            const dz = Math.abs(item.zoom - zoom);
+            return !(dx <= 1.0 && dy <= 1.0 && dz <= 0.001);
+        });
+        
+        historyList.unshift(anchor);
+        const settings = getCanvasOtherSettings();
+        const limit = settings ? (settings.autoRecordAnchorLimit || 5) : 5;
+        if (historyList.length > limit) {
+            historyList = historyList.slice(0, limit);
+        }
+        
+        localStorage.setItem('canvasNavigationHistory', JSON.stringify(historyList));
+        window.dispatchEvent(new CustomEvent('canvas-navigation-history-updated', { detail: { list: historyList, newAnchor: anchor } }));
+    } catch (e) {
+        console.error('Failed to save navigation history:', e);
     }
 }
 
@@ -18552,6 +18630,15 @@ function locateToPermanentSection(targetZoom = null) {
         refreshMaximizedNodes();
     }
     savePanOffsetThrottled();
+    CanvasState.lastAutoRecordAnchor = {
+        x: CanvasState.panOffsetX,
+        y: CanvasState.panOffsetY,
+        zoom: CanvasState.zoom,
+        timestamp: Date.now()
+    };
+    if (canvasViewportAutoRecordTimer) {
+        clearTimeout(canvasViewportAutoRecordTimer);
+    }
 
     ;
 }
@@ -18607,11 +18694,50 @@ function locateToIntroCardsCenter() {
     updateCanvasScrollBounds({ initial: false, recomputeBounds: true });
     updateScrollbarThumbs();
     savePanOffsetThrottled();
-
+    CanvasState.lastAutoRecordAnchor = {
+        x: CanvasState.panOffsetX,
+        y: CanvasState.panOffsetY,
+        zoom: CanvasState.zoom,
+        timestamp: Date.now()
+    };
+    if (canvasViewportAutoRecordTimer) {
+        clearTimeout(canvasViewportAutoRecordTimer);
+    }
     return true;
 }
 
-// 通用：定位到任意 Canvas 节点（按绝对定位的 left/top + 尺寸）
+// 定位到指定的视口锚点（zoom, x, y）
+function navigateToViewport(anchor) {
+    if (!anchor) return false;
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return false;
+
+    const zoom = clampCanvasZoom(anchor.zoom || 1.0);
+    const rect = workspace.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    setCanvasZoom(zoom, cx, cy, { recomputeBounds: true });
+
+    CanvasState.panOffsetX = Number(anchor.x) || 0;
+    CanvasState.panOffsetY = Number(anchor.y) || 0;
+
+    applyPanOffset();
+    updateCanvasScrollBounds({ initial: false, recomputeBounds: true });
+    updateScrollbarThumbs();
+    savePanOffsetThrottled();
+    CanvasState.lastAutoRecordAnchor = {
+        x: CanvasState.panOffsetX,
+        y: CanvasState.panOffsetY,
+        zoom: CanvasState.zoom,
+        timestamp: Date.now()
+    };
+    if (canvasViewportAutoRecordTimer) {
+        clearTimeout(canvasViewportAutoRecordTimer);
+    }
+    return true;
+}
+
+// 通用：定位到任意 Canvas 节点（按绝对定位 of left/top + 尺寸）
 function locateToElement(el, targetZoom = null) {
     if (!el) return;
     const workspace = document.getElementById('canvasWorkspace');
@@ -18649,6 +18775,15 @@ function locateToElement(el, targetZoom = null) {
         refreshMaximizedNodes();
     }
     savePanOffsetThrottled();
+    CanvasState.lastAutoRecordAnchor = {
+        x: CanvasState.panOffsetX,
+        y: CanvasState.panOffsetY,
+        zoom: CanvasState.zoom,
+        timestamp: Date.now()
+    };
+    if (canvasViewportAutoRecordTimer) {
+        clearTimeout(canvasViewportAutoRecordTimer);
+    }
 }
 
 // 定位到临时栏目（通过 sectionId）
@@ -39983,6 +40118,7 @@ window.CanvasModule = {
     locatePermanent: locateToPermanentSection,
     locateSection: locateToTempSection,
     locateElement: locateToElement,
+    navigateToViewport: navigateToViewport,
     toggleElementFullscreen,
     togglePermanentSectionPin,
     toggleTempSectionPin,
@@ -40173,6 +40309,21 @@ function openCanvasAppearanceSettingsModal() {
         forSidePanel: __isCanvasInSidePanelMode()
     });
     if (otherAutoLink) otherAutoLink.checked = !!otherSettings.autoLinkSplit;
+
+    const otherAutoRecord = modal.querySelector('#otherAutoRecordAnchor');
+    const otherAutoRecordInterval = modal.querySelector('#otherAutoRecordAnchorInterval');
+    if (otherAutoRecord) otherAutoRecord.checked = !(otherSettings.autoRecordAnchor === false);
+    if (otherAutoRecordInterval) otherAutoRecordInterval.value = String(otherSettings.autoRecordAnchorInterval || 15);
+    const updateAutoRecordIntervalVisibility = () => {
+        const intervalRow = modal.querySelector('#otherAutoRecordAnchorIntervalRow');
+        if (intervalRow) {
+            intervalRow.style.display = (otherAutoRecord && otherAutoRecord.checked) ? 'flex' : 'none';
+        }
+    };
+    if (otherAutoRecord) {
+        updateAutoRecordIntervalVisibility();
+        otherAutoRecord.addEventListener('change', updateAutoRecordIntervalVisibility);
+    }
     if (otherMenuDefaultColorSync) {
         otherMenuDefaultColorSync.checked = isSidebarMenuDefaultColorSyncEnabled(otherSettings);
     }
@@ -40611,6 +40762,28 @@ function createCanvasAppearanceSettingsModal() {
                     </div>
                     <div style="height: 1px; background: var(--border-color); margin: 12px 0; opacity: 0.5;"></div>
                     <div class="appearance-row">
+                        <div class="appearance-row-label">${isEn ? 'Auto-record viewport anchor' : '自动记录视口锚点'}</div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherAutoRecordAnchor">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row" id="otherAutoRecordAnchorIntervalRow">
+                        <div class="appearance-row-label">${isEn ? 'Stay duration (seconds)' : '停留判定时间（秒）'}</div>
+                        <div class="appearance-row-content">
+                            <select id="otherAutoRecordAnchorInterval" class="appearance-name-select">
+                                <option value="3">3</option>
+                                <option value="5">5</option>
+                                <option value="7">7</option>
+                                <option value="10">10</option>
+                                <option value="15">15</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="height: 1px; background: var(--border-color); margin: 12px 0; opacity: 0.5;"></div>
+                    <div class="appearance-row">
                         <div class="appearance-row-label">${isEn ? 'Default edge direction' : '连接线默认方向'}</div>
                         <div class="appearance-row-content">
                             <select id="otherDefaultEdgeDirection" class="appearance-name-select">
@@ -40758,6 +40931,18 @@ function createCanvasAppearanceSettingsModal() {
 
     if (otherAutoLinkToggle) {
         otherAutoLinkToggle.addEventListener('change', () => {
+            scheduleOtherSave();
+        });
+    }
+    const otherAutoRecordToggle = modal.querySelector('#otherAutoRecordAnchor');
+    const otherAutoRecordIntervalSelect = modal.querySelector('#otherAutoRecordAnchorInterval');
+    if (otherAutoRecordToggle) {
+        otherAutoRecordToggle.addEventListener('change', () => {
+            scheduleOtherSave();
+        });
+    }
+    if (otherAutoRecordIntervalSelect) {
+        otherAutoRecordIntervalSelect.addEventListener('change', () => {
             scheduleOtherSave();
         });
     }
@@ -41004,6 +41189,8 @@ function saveCanvasOtherSettings(options = {}) {
     });
     const prevFollow = isTempColorFollowEnabled(prevSettings);
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
+    const autoRecordInput = modal.querySelector('#otherAutoRecordAnchor');
+    const autoRecordIntervalInput = modal.querySelector('#otherAutoRecordAnchorInterval');
     const menuDefaultColorSync = modal.querySelector('#otherMenuDefaultColorSync');
     const menuLocatableColorSync = modal.querySelector('#otherMenuLocatableColorSync');
     const sidebarCollapseMode = __getAppearanceRadioValue(modal, 'other-sidebar-collapse-mode', prevCollapsePrefs.mode || 'auto');
@@ -41058,6 +41245,9 @@ function saveCanvasOtherSettings(options = {}) {
 
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
+        autoRecordAnchor: autoRecordInput ? !!autoRecordInput.checked : !(prevSettings.autoRecordAnchor === false),
+        autoRecordAnchorInterval: autoRecordIntervalInput ? parseInt(autoRecordIntervalInput.value, 10) : (prevSettings.autoRecordAnchorInterval || 15),
+        autoRecordAnchorLimit: prevSettings.autoRecordAnchorLimit || 5,
         menuDefaultColorSync: menuDefaultColorSync
             ? !!menuDefaultColorSync.checked
             : isSidebarMenuDefaultColorSyncEnabled(prevSettings),

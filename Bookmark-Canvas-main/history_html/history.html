@@ -131,11 +131,6 @@
                     <i class="fas fa-plus"></i>
                     <span class="btn-tooltip" id="quickAddTooltip"></span>
                 </button>
-                <button id="sideLastFullscreenBtn" class="tool-btn last-fullscreen-btn"
-                    aria-label="Last Fullscreen Card" hidden>
-                    <i class="fas fa-history"></i>
-                    <span class="btn-tooltip" id="sideLastFullscreenTooltip"></span>
-                </button>
                 <!-- 侧边栏模式：统一设置按钮 -->
                 <button id="settingsToggle" class="tool-btn settings-btn" aria-label="Settings">
                     <i class="fas fa-cog"></i>
@@ -150,11 +145,6 @@
                 <button id="titleQuickAddToggleBtn" class="tool-btn title-row-tool-btn" aria-label="Add" type="button">
                     <i class="fas fa-plus"></i>
                     <span class="btn-tooltip" id="titleQuickAddTooltip"></span>
-                </button>
-                <button id="titleLastFullscreenBtn" class="tool-btn title-row-tool-btn"
-                    aria-label="Last Fullscreen Card" type="button" hidden>
-                    <i class="fas fa-history"></i>
-                    <span class="btn-tooltip" id="titleLastFullscreenTooltip"></span>
                 </button>
                 <button id="titleSettingsToggleBtn" class="tool-btn title-row-tool-btn" aria-label="Settings"
                     type="button">
@@ -395,8 +385,28 @@
             </button>
             <div class="sidebar-resize-handle" id="sidebarResizeHandle" aria-hidden="true"></div>
 
+            <!-- Tab Headers -->
+            <div class="sidebar-tabs-header">
+                <button class="sidebar-tab-btn" data-tab="directory" id="sidebarTabDirectory" data-zh="目录" data-en="Directory">目录</button>
+                <button class="sidebar-tab-btn" data-tab="anchor" id="sidebarTabAnchor" data-zh="锚点" data-en="Anchors">锚点</button>
+            </div>
+            <script>
+                (function() {
+                    try {
+                        const savedTab = localStorage.getItem('canvasSidebarActiveTab') || 'directory';
+                        const isAnchor = (savedTab === 'anchor' || savedTab === 'history');
+                        if (isAnchor) {
+                            document.getElementById('sidebarTabAnchor').classList.add('active');
+                        } else {
+                            document.getElementById('sidebarTabDirectory').classList.add('active');
+                        }
+                    } catch (_) {}
+                })();
+            </script>
+
             <nav class="nav-tabs">
                 <div class="canvas-directory-tree" id="canvasDirectoryTree" aria-label="Canvas Directory"></div>
+                <div class="canvas-history-panel" id="canvasHistoryPanel" style="display: none;" aria-label="Navigation History"></div>
             </nav>
         </aside>
 

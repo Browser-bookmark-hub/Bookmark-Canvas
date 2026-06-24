@@ -979,7 +979,7 @@ html:not(.side-panel-mode) .tool-buttons #langToggle,
 html:not(.side-panel-mode) .tool-buttons #helpToggle,
 html:not(.side-panel-mode) .tool-buttons #settingsToggle,
 html:not(.side-panel-mode) .tool-buttons #quickAddToggle,
-html:not(.side-panel-mode) .tool-buttons #sideLastFullscreenBtn,
+html:not(.side-panel-mode) .tool-buttons #sideAnchorBtn,
 html:not(.side-panel-mode) .tool-buttons #openCanvasPageBtn {
     display: none;
 }
@@ -988,7 +988,7 @@ html:not(.side-panel-mode) .sidepanel-settings-only {
     display: none !important;
 }
 
-html.side-panel-mode .tool-buttons .last-fullscreen-btn {
+html.side-panel-mode .tool-buttons .anchor-btn {
     display: inline-flex;
     order: 98;
 }
@@ -1573,12 +1573,12 @@ body.header-dock-bottom:not(.header-compact) .search-mode-menu {
     display: none;
 }
 
-.last-fullscreen-btn {
+.anchor-btn {
     display: none;
 }
 
-#titleLastFullscreenBtn[hidden],
-#sideLastFullscreenBtn[hidden] {
+#titleAnchorBtn[hidden],
+#sideAnchorBtn[hidden] {
     display: none !important;
 }
 
@@ -2533,7 +2533,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     width: var(--sidebar-width, 260px);
     background: var(--bg-secondary);
     border-right: none;
-    padding: 16px;
+    padding: 0 16px 16px 16px;
     overflow: visible;
     /* 避免在 macOS overlay scrollbar 下预留“空白条”，导致右侧看起来不贴边 */
     scrollbar-gutter: auto;
@@ -10043,8 +10043,8 @@ body.canvas-node-maximized-active .canvas-zoom-indicator {
     display: none !important;
 }
 
-body.canvas-node-maximized-active #titleLastFullscreenBtn,
-body.canvas-node-maximized-active #sideLastFullscreenBtn {
+body.canvas-node-maximized-active #titleAnchorBtn,
+body.canvas-node-maximized-active #sideAnchorBtn {
     display: none !important;
 }
 
@@ -17672,16 +17672,16 @@ html[data-theme="dark"] .github-confirm-message code {
 
 /* Fullscreen header button customization: only show settings, hide add, sidebar, etc. */
 html.canvas-page-fullscreen-active #titleQuickAddToggleBtn,
-html.canvas-page-fullscreen-active #titleLastFullscreenBtn,
+html.canvas-page-fullscreen-active #titleAnchorBtn,
 html.canvas-page-fullscreen-active #titleSidePanelToggleBtn,
 html.canvas-page-fullscreen-active #quickAddToggle,
-html.canvas-page-fullscreen-active #sideLastFullscreenBtn,
+html.canvas-page-fullscreen-active #sideAnchorBtn,
 html.canvas-page-fullscreen-active #openCanvasPageBtn,
 html:fullscreen #titleQuickAddToggleBtn,
-html:fullscreen #titleLastFullscreenBtn,
+html:fullscreen #titleAnchorBtn,
 html:fullscreen #titleSidePanelToggleBtn,
 html:fullscreen #quickAddToggle,
-html:fullscreen #sideLastFullscreenBtn,
+html:fullscreen #sideAnchorBtn,
 html:fullscreen #openCanvasPageBtn {
     display: none !important;
 }
@@ -17780,9 +17780,443 @@ html:fullscreen body.header-compact .canvas-main-container {
         align-items: flex-start !important;
         gap: 6px;
     }
+
     .canvas-help-desc {
         text-align: left !important;
         max-width: 100% !important;
         padding-left: 8px;
     }
+}
+
+/* =============================================================================
+   Sidebar Tabs & Viewport Navigation History Panel
+   ============================================================================= */
+
+.sidebar-tabs-header {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 10px;
+    padding: 0 4px;
+    gap: 4px;
+}
+
+.sidebar-tab-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 8px 4px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s ease;
+}
+
+.sidebar-tab-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+.sidebar-tab-btn.active {
+    color: var(--accent-color);
+    border-bottom-color: var(--accent-color);
+    font-weight: 600;
+}
+
+.sidebar.compact .sidebar-tabs-header {
+    opacity: 0;
+    pointer-events: none;
+    display: none;
+}
+
+.canvas-history-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    color: var(--text-primary);
+}
+
+.history-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 0 4px;
+}
+
+.history-list-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.history-clear-btn {
+    background: transparent;
+    border: none;
+    color: var(--accent-color);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.history-clear-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+    color: var(--accent-color-hover, var(--accent-color));
+}
+
+.history-items-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 20px;
+}
+
+.history-item-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    border-radius: 6px;
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.2));
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    position: relative;
+    transition: border-color 0.2s, background-color 0.2s, transform 0.15s;
+}
+
+.history-item-card:hover {
+    border-color: var(--accent-color);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+.history-item-card.active {
+    border-color: var(--accent-color);
+    background: var(--bg-active, rgba(255, 255, 255, 0.08));
+    box-shadow: 0 0 0 1px var(--accent-color);
+}
+
+.history-item-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.history-item-time {
+    font-size: 11px;
+    color: var(--text-muted, #888888);
+}
+
+.history-item-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #888888);
+    cursor: pointer;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    font-size: 11px;
+    opacity: 0.6;
+    transition: opacity 0.2s, background-color 0.2s, color 0.2s;
+}
+
+.history-item-delete:hover {
+    opacity: 1;
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger, #ff4d4f);
+}
+
+.history-item-coords {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.history-empty-tip {
+    text-align: center;
+    color: var(--text-muted, #888888);
+    font-size: 13px;
+    margin-top: 40px;
+    padding: 0 16px;
+}
+
+/* =============================================================================
+   Sidebar Anchor Tab Layout (Manual & Auto-Saved Slots)
+   ============================================================================= */
+
+.sidebar-anchor-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 0 4px 20px 4px;
+    gap: 12px;
+    overflow-y: auto;
+}
+
+.sidebar-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+}
+
+.sidebar-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sidebar-header-actions {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    margin-right: 7.8px;
+}
+
+.sidebar-action-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+}
+
+.sidebar-action-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    color: var(--accent-color);
+}
+
+.auto-record-settings-panel {
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.15));
+    border: 1px dashed var(--border-color);
+    border-radius: 6px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.settings-inline-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.settings-inline-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.settings-inline-label input[type="checkbox"] {
+    cursor: pointer;
+    margin: 0;
+}
+
+.settings-inline-span {
+    color: var(--text-secondary);
+}
+
+.settings-inline-row input[type="number"] {
+    width: 50px;
+    background: var(--bg-elevated, #202020);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    padding: 2px 4px;
+    font-size: 11px;
+    text-align: center;
+    -moz-appearance: textfield;
+}
+
+.settings-inline-row input[type="number"]::-webkit-outer-spin-button,
+.settings-inline-row input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.anchor-slots-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.anchor-slot-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px;
+    border-radius: 6px;
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.15));
+    border: 1px solid var(--border-color);
+    transition: all 0.2s;
+}
+
+.anchor-slot-row:hover {
+    border-color: var(--accent-color);
+}
+
+.anchor-slot-row.active {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 1px var(--accent-color);
+}
+
+.anchor-slot-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.anchor-slot-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.anchor-slot-name.empty-slot-name {
+    color: var(--text-muted, #888888);
+    font-style: italic;
+}
+
+.anchor-slot-rename-input {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-elevated, #202020);
+    border: 1px solid var(--accent-color);
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin: 0;
+    outline: none;
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+
+.anchor-slot-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.anchor-slot-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 11px;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+}
+
+.anchor-slot-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    color: var(--accent-color);
+}
+
+.anchor-slot-btn.save-btn:hover {
+    color: var(--accent-color);
+}
+
+.anchor-slot-btn.locate-btn {
+    color: var(--accent-color, #2b85e4);
+}
+
+.anchor-slot-btn.locate-btn:hover {
+    color: var(--accent-color, #2b85e4);
+}
+
+.anchor-slot-btn.rename-btn:hover {
+    color: #e9973f;
+}
+
+.anchor-slot-btn.delete-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger, #ff4d4f);
+}
+
+.anchor-slot-info {
+    font-size: 11px;
+    color: var(--text-muted, #888888);
+    font-family: monospace;
+}
+
+/* Add Manual Anchor Button */
+.add-manual-anchor-btn {
+    width: 100%;
+    height: 32px;
+    background: transparent;
+    border: 1px dashed var(--border-color);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.add-manual-anchor-btn:hover {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.03));
+}
+
+/* Lazy Load Toggle Buttons */
+.lazy-load-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: all 0.2s ease;
+}
+
+.lazy-load-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    color: var(--accent-color);
+    border-color: var(--accent-color);
 }
