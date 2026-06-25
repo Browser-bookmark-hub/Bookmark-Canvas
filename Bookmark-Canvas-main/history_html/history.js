@@ -12488,7 +12488,7 @@ function createPermanentFolderLazyActions(parentId, totalChildren, currentRender
         loadMoreBtn.dataset.startIndex = String(currentRendered);
         loadMoreBtn.innerHTML = isEn
             ? `<i class="fas fa-plus"></i> <span>Load +${willLoad}</span>`
-            : `<i class="fas fa-plus"></i> <span>展开 ${willLoad} 项</span>`;
+            : `<i class="fas fa-plus"></i> <span>展开一次</span>`;
         btnContainer.appendChild(loadMoreBtn);
 
         // 全部展开按钮

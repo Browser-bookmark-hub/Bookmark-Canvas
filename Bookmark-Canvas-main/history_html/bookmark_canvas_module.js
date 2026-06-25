@@ -32850,7 +32850,7 @@ function createTempFolderLazyActions(section, item, currentLimit) {
         loadMoreBtn.dataset.startIndex = String(currentLimit);
         loadMoreBtn.innerHTML = isEn
             ? `<i class="fas fa-plus"></i> <span>Load +${willLoad}</span>`
-            : `<i class="fas fa-plus"></i> <span>展开 20 项</span>`;
+            : `<i class="fas fa-plus"></i> <span>展开一次</span>`;
         btnContainer.appendChild(loadMoreBtn);
 
         const loadAllBtn = document.createElement('div');
