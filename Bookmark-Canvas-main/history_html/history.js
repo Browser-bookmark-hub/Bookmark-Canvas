@@ -4509,8 +4509,8 @@ const i18n = {
         'en': 'Click to Clear'
     },
     clearAllText: {
-        'zh_CN': '清除全部（永久栏目除外）',
-        'en': 'Clear All (Except Permanent)'
+        'zh_CN': '清除全部',
+        'en': 'Clear All'
     },
     canvasFullscreenEnter: {
         'zh_CN': '全屏',
@@ -5705,6 +5705,8 @@ function applyLanguage() {
     if (clearTempNodesOtherText) clearTempNodesOtherText.textContent = i18n.clearTempNodesText[currentLang];
     const clearAllOtherText = document.getElementById('clearAllOtherText');
     if (clearAllOtherText) clearAllOtherText.textContent = i18n.clearAllText[currentLang];
+    const clearAllOtherSettingsText = document.getElementById('clearAllOtherSettingsText');
+    if (clearAllOtherSettingsText) clearAllOtherSettingsText.textContent = i18n.clearAllText[currentLang];
 
     const canvasHelpModalTitle = document.getElementById('canvasHelpModalTitle');
     if (canvasHelpModalTitle) canvasHelpModalTitle.textContent = i18n.canvasHelpModalTitle[currentLang];

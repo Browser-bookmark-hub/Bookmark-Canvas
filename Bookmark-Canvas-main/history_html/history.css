@@ -13409,6 +13409,8 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     border-radius: 8px;
     cursor: pointer;
     font-size: 13px;
+    font-family: var(--font-sans);
+    font-weight: 500;
     color: var(--text-primary);
     transition: all 0.15s ease;
 }
@@ -13629,6 +13631,8 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     border-radius: 6px;
     cursor: pointer;
     font-size: 13px;
+    font-family: var(--font-sans);
+    font-weight: 500;
     color: var(--text-primary);
     transition: all 0.15s ease;
     text-align: left;
@@ -13651,15 +13655,15 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
 }
 
 /* 危险操作样式 */
-.clear-dropdown-item.clear-all-danger {
+.clear-dropdown-item.danger {
     color: var(--error);
 }
 
-.clear-dropdown-item.clear-all-danger i {
+.clear-dropdown-item.danger i {
     color: var(--error);
 }
 
-.clear-dropdown-item.clear-all-danger:hover {
+.clear-dropdown-item.danger:hover {
     background: var(--error-light);
 }
 
