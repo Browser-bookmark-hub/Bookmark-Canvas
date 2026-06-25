@@ -145,7 +145,6 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     z-index: 8;
     background: var(--bg-elevated);
     border-bottom: 1px solid var(--border-color);
-    backdrop-filter: saturate(1.05) blur(4px);
 }
 
 .canvas-tag-browse-detail-header {

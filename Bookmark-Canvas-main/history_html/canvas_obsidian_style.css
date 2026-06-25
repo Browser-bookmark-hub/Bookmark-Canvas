@@ -3112,9 +3112,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .card-group-canvas-node.selected {
     z-index: 240 !important;
     border-color: var(--card-group-highlight-color);
-    box-shadow:
-        0 0 0 1.5px color-mix(in srgb, var(--card-group-highlight-color) 45%, transparent),
-        0 0 6px 1px color-mix(in srgb, var(--card-group-highlight-color) 35%, transparent);
+    outline: 2px solid color-mix(in srgb, var(--card-group-highlight-color) 45%, transparent);
+    outline-offset: 1px;
 }
 
 .card-group-canvas-node.pinned.selected {

@@ -1360,7 +1360,7 @@
         return { position: 'auto', threshold: 420 };
     }
 
-    function __isWideRowContext(treeItem, currentModeIsWide) {
+    function __isWideRowContext(treeItem, currentModeIsWide, cardWidthCache) {
         if (!treeItem) return false;
         // Fullscreen / global search panel → always wide.
         if (treeItem.closest('.canvas-fullscreen-active, .canvas-fullscreen-node, .search-results-panel')) return true;
@@ -1371,7 +1371,21 @@
         } else if (settings.position === 'right') {
             return true;
         } else {
-            const layoutWidth = treeItem.offsetWidth || treeItem.clientWidth || treeItem.scrollWidth || 0;
+            let layoutWidth = 0;
+            const cardEl = treeItem.closest ? treeItem.closest('.temp-canvas-node, .permanent-bookmark-section, .md-canvas-node') : null;
+            if (cardEl) {
+                if (cardWidthCache && cardWidthCache.has(cardEl)) {
+                    layoutWidth = cardWidthCache.get(cardEl);
+                } else {
+                    layoutWidth = cardEl.offsetWidth || cardEl.clientWidth || 0;
+                    if (cardWidthCache) {
+                        cardWidthCache.set(cardEl, layoutWidth);
+                    }
+                }
+            } else {
+                layoutWidth = treeItem.offsetWidth || treeItem.clientWidth || treeItem.scrollWidth || 0;
+            }
+            
             const threshold = settings.threshold;
             
             // Implement hysteresis to prevent layout oscillation (flashing) near the threshold
@@ -1578,6 +1592,7 @@
             }
 
             // --- BATCHED READ PHASE ---
+            const cardWidthCache = new Map();
             const updates = [];
             items.forEach((treeItem) => {
                 if (!document.contains(treeItem)) return;
@@ -1596,7 +1611,7 @@
                 const currentModeIsWide = existing
                     ? existing.classList.contains('dots-trailing')
                     : null;
-                const wide = __isWideRowContext(treeItem, currentModeIsWide);
+                const wide = __isWideRowContext(treeItem, currentModeIsWide, cardWidthCache);
                 const nextMode = wide ? 'dots-trailing' : 'dots-leading';
                 const currentMode = existing
                     ? (existing.classList.contains('dots-trailing') ? 'dots-trailing' : 'dots-leading')

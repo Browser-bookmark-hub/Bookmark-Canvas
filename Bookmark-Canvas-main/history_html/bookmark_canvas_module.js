@@ -38456,6 +38456,8 @@ function __syncEdgeLabelTextDom(text, edge, geometry) {
     text.classList.toggle('click-to-clear-selected', !!(clickToClearModeActive && clickToClearSelectedIds.has(edge.id)));
 }
 
+const __edgeLabelMeasureCache = new Map();
+
 function __syncEdgeLabelDom(svg, edge, geometry, record, bgColor) {
     if (record.editorFo) {
         try { record.editorFo.remove(); } catch (_) { }
@@ -38490,13 +38492,22 @@ function __syncEdgeLabelDom(svg, edge, geometry, record, bgColor) {
     }
 
     let textWidth = 0;
-    try { textWidth = record.label.getComputedTextLength ? record.label.getComputedTextLength() : 0; } catch (_) { }
-
     let textHeight = 16;
-    try {
-        const bb = record.label.getBBox ? record.label.getBBox() : null;
-        if (bb && bb.height) textHeight = Math.ceil(bb.height);
-    } catch (_) { }
+    const cacheKey = edge.label;
+    if (__edgeLabelMeasureCache.has(cacheKey)) {
+        const cached = __edgeLabelMeasureCache.get(cacheKey);
+        textWidth = cached.width;
+        textHeight = cached.height;
+    } else {
+        try { textWidth = record.label.getComputedTextLength ? record.label.getComputedTextLength() : 0; } catch (_) { }
+        try {
+            const bb = record.label.getBBox ? record.label.getBBox() : null;
+            if (bb && bb.height) textHeight = Math.ceil(bb.height);
+        } catch (_) { }
+        if (textWidth > 0) {
+            __edgeLabelMeasureCache.set(cacheKey, { width: textWidth, height: textHeight });
+        }
+    }
 
     const padX = 6;
     const padY = 2;
@@ -38516,11 +38527,18 @@ function __syncEdgeLabelDom(svg, edge, geometry, record, bgColor) {
     record.labelBg.style.pointerEvents = 'none';
 }
 
-function __appendEdgeDomInRenderOrder(svg, record) {
-    if (record.hitArea) svg.appendChild(record.hitArea);
-    if (record.path) svg.appendChild(record.path);
-    if (record.labelBg) svg.appendChild(record.labelBg);
-    if (record.label) svg.appendChild(record.label);
+function __appendEdgeDomInRenderOrder(svg, record, forceAppend = false) {
+    const isHitAppended = record.hitArea && record.hitArea.parentNode === svg;
+    const isPathAppended = record.path && record.path.parentNode === svg;
+    const isBgAppended = !record.labelBg || record.labelBg.parentNode === svg;
+    const isLabelAppended = !record.label || record.label.parentNode === svg;
+
+    if (!isHitAppended || !isPathAppended || !isBgAppended || !isLabelAppended || forceAppend) {
+        if (record.hitArea) svg.appendChild(record.hitArea);
+        if (record.path) svg.appendChild(record.path);
+        if (record.labelBg) svg.appendChild(record.labelBg);
+        if (record.label) svg.appendChild(record.label);
+    }
 }
 
 function renderEdges() {
@@ -38561,37 +38579,38 @@ function renderEdges() {
         const edgeId = normalizeEdgeId(edge && edge.id);
         if (!edgeId) return;
 
+        // Perform fast bounds pruning using JS memory states before calling getEdgeRenderGeometry
+        if (bounds) {
+            const sourceBounds = __getNodeBoundsFromState(edge.fromNode || edge.from);
+            const targetBounds = __getNodeBoundsFromState(edge.toNode || edge.to);
+            if (sourceBounds && targetBounds) {
+                const minX = Math.min(sourceBounds.x, targetBounds.x);
+                const maxX = Math.max(sourceBounds.x + sourceBounds.width, targetBounds.x + targetBounds.width);
+                const minY = Math.min(sourceBounds.y, targetBounds.y);
+                const maxY = Math.max(sourceBounds.y + sourceBounds.height, targetBounds.y + targetBounds.height);
+
+                if (
+                    typeof bounds.left === 'number' &&
+                    typeof bounds.right === 'number' &&
+                    typeof bounds.top === 'number' &&
+                    typeof bounds.bottom === 'number'
+                ) {
+                    if (
+                        maxX < bounds.left ||
+                        minX > bounds.right ||
+                        maxY < bounds.top ||
+                        minY > bounds.bottom
+                    ) {
+                        return; // Outside viewport bounds, skip rendering to prune from DOM
+                    }
+                }
+            }
+        }
+
         const geometry = getEdgeRenderGeometry(edge);
         if (!geometry) {
             needsRetry = true;
             return;
-        }
-
-        if (bounds) {
-            const sx = Number(geometry.sourceX) || 0;
-            const sy = Number(geometry.sourceY) || 0;
-            const tx = Number(geometry.targetX) || 0;
-            const ty = Number(geometry.targetY) || 0;
-            const minX = Math.min(sx, tx);
-            const maxX = Math.max(sx, tx);
-            const minY = Math.min(sy, ty);
-            const maxY = Math.max(sy, ty);
-
-            if (
-                typeof bounds.left === 'number' &&
-                typeof bounds.right === 'number' &&
-                typeof bounds.top === 'number' &&
-                typeof bounds.bottom === 'number'
-            ) {
-                if (
-                    maxX < bounds.left ||
-                    minX > bounds.right ||
-                    maxY < bounds.top ||
-                    minY > bounds.bottom
-                ) {
-                    return; // Outside viewport bounds, skip rendering to prune from DOM
-                }
-            }
         }
 
         staleEdgeIds.delete(edgeId);
@@ -38605,7 +38624,8 @@ function renderEdges() {
         __syncEdgeHitAreaDom(record.hitArea, edge, geometry);
         __syncEdgePathDom(record.path, edge, geometry);
         __syncEdgeLabelDom(svg, edge, geometry, record, labelBgColor);
-        __appendEdgeDomInRenderOrder(svg, record);
+        const isSelected = selectedId && isSameEdgeId(edge.id, selectedId);
+        __appendEdgeDomInRenderOrder(svg, record, isSelected);
     });
 
     staleEdgeIds.forEach((edgeId) => {
@@ -38688,6 +38708,89 @@ function updateEdgePath(edge, pathElement, geometry = null) {
     } else {
         pathElement.setAttribute('d', '');
     }
+}
+
+function __getNodeBoundsFromState(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return null;
+
+    let left = 0;
+    let top = 0;
+    let width = 300;
+    let height = 200;
+
+    if (id === 'permanent-section' || id === 'permanentSection') {
+        const size = getPermanentSectionBaseSize();
+        width = size.width || 600;
+        height = size.height || 600;
+        if (CanvasState.dragState && CanvasState.dragState.isDragging && CanvasState.dragState.dragSource === 'permanent-section') {
+            const deltaX = (CanvasState.dragState.lastClientX - CanvasState.dragState.dragStartX) / (CanvasState.zoom || 1);
+            const deltaY = (CanvasState.dragState.lastClientY - CanvasState.dragState.dragStartY) / (CanvasState.zoom || 1);
+            left += deltaX;
+            top += deltaY;
+        }
+        return { x: left, y: top, width, height };
+    }
+
+    if (id.startsWith('permanent-section-copy-')) {
+        const copyId = id.slice('permanent-section-copy-'.length).trim();
+        const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+            ? CanvasState.permanentLayout.copiesById
+            : {};
+        const cardState = copyStateById[copyId];
+        if (cardState) {
+            left = Number(cardState.left) || 0;
+            top = Number(cardState.top) || 0;
+            const size = getPermanentSectionBaseSize();
+            width = Number(cardState.width) || size.width || 600;
+            height = Number(cardState.height) || size.height || 600;
+            if (CanvasState.dragState && CanvasState.dragState.isDragging && CanvasState.dragState.draggedElement && CanvasState.dragState.draggedElement.id === id) {
+                const deltaX = (CanvasState.dragState.lastClientX - CanvasState.dragState.dragStartX) / (CanvasState.zoom || 1);
+                const deltaY = (CanvasState.dragState.lastClientY - CanvasState.dragState.dragStartY) / (CanvasState.zoom || 1);
+                left += deltaX;
+                top += deltaY;
+            }
+            return { x: left, y: top, width, height };
+        }
+        return null;
+    }
+
+    const section = Array.isArray(CanvasState.tempSections)
+        ? CanvasState.tempSections.find(s => s && s.id === id)
+        : null;
+    if (section) {
+        const baseSize = getTempSectionBaseSize(section);
+        left = Number(section.x) || 0;
+        top = Number(section.y) || 0;
+        width = Number(section.width || baseSize.width) || 300;
+        height = Number(section.height || baseSize.height) || 400;
+        if (CanvasState.dragState && CanvasState.dragState.isDragging && CanvasState.dragState.draggedElement && CanvasState.dragState.draggedElement.id === id) {
+            const deltaX = (CanvasState.dragState.lastClientX - CanvasState.dragState.dragStartX) / (CanvasState.zoom || 1);
+            const deltaY = (CanvasState.dragState.lastClientY - CanvasState.dragState.dragStartY) / (CanvasState.zoom || 1);
+            left = CanvasState.dragState.nodeStartX + deltaX;
+            top = CanvasState.dragState.nodeStartY + deltaY;
+        }
+        return { x: left, y: top, width, height };
+    }
+
+    const node = Array.isArray(CanvasState.mdNodes)
+        ? CanvasState.mdNodes.find(n => n && n.id === id)
+        : null;
+    if (node) {
+        left = Number(node.x) || 0;
+        top = Number(node.y) || 0;
+        width = Number(node.width) || 300;
+        height = Number(node.height) || 200;
+        if (CanvasState.dragState && CanvasState.dragState.isDragging && CanvasState.dragState.draggedElement && CanvasState.dragState.draggedElement.id === id) {
+            const deltaX = (CanvasState.dragState.lastClientX - CanvasState.dragState.dragStartX) / (CanvasState.zoom || 1);
+            const deltaY = (CanvasState.dragState.lastClientY - CanvasState.dragState.dragStartY) / (CanvasState.zoom || 1);
+            left = CanvasState.dragState.nodeStartX + deltaX;
+            top = CanvasState.dragState.nodeStartY + deltaY;
+        }
+        return { x: left, y: top, width, height };
+    }
+
+    return null;
 }
 
 function getAnchorPosition(nodeId, side) {
