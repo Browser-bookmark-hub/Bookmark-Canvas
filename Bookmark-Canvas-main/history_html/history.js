@@ -10829,6 +10829,10 @@ function initHeaderToggle() {
         }
         finishDrag(event, true);
     });
+
+    if (typeof window !== 'undefined') {
+        window.setHeaderState = setHeaderState;
+    }
 }
 
 // =============================================================================

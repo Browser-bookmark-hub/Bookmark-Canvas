@@ -2369,6 +2369,10 @@ function triggerAreaSearch(scope, options = {}) {
     if (searchInput) {
         const opts = options && typeof options === 'object' ? options : {};
         if (!opts.silent) {
+            // 如果标题栏是收缩状态，则自动展开
+            if (document.body.classList.contains('header-compact') && typeof window.setHeaderState === 'function') {
+                window.setHeaderState('expanded');
+            }
             if (typeof setSidePanelSearchExpanded === 'function') {
                 setSidePanelSearchExpanded(true);
             }
