@@ -18190,9 +18190,18 @@ html:fullscreen body.header-compact .canvas-main-container {
 }
 
 .anchor-slot-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     font-size: 11px;
     color: var(--text-muted, #888888);
     font-family: monospace;
+}
+
+.anchor-slot-time {
+    font-style: italic;
+    color: var(--text-muted, #888888);
+    font-size: 10px;
 }
 
 /* Add Manual Anchor Button */
@@ -18286,20 +18295,98 @@ html:fullscreen body.header-compact .canvas-main-container {
 }
 
 /* Responsive adjustments for narrow sidebar layouts (hide action buttons by default, show on hover) */
-@container (max-width: 180px) {
+@container (max-width: 220px) {
+    .anchor-slot-header {
+        flex-wrap: wrap;
+        row-gap: 2px;
+    }
+    .anchor-slot-name, .anchor-slot-rename-input {
+        flex: 1 1 100% !important;
+    }
     .anchor-slot-actions {
         display: none !important;
+        flex: 1 1 100% !important;
+        justify-content: flex-start;
+        margin-top: 2px;
     }
     .anchor-slot-row:hover .anchor-slot-actions {
         display: flex !important;
+    }
+    .anchor-slot-info {
+        flex-wrap: wrap;
+        row-gap: 2px;
+    }
+    .anchor-slot-coords {
+        flex: 1 1 100% !important;
+    }
+    .anchor-slot-time {
+        display: none !important;
+        flex: 1 1 100% !important;
+        text-align: left;
+        margin-top: 2px;
+    }
+    .anchor-slot-row:hover .anchor-slot-time {
+        display: block !important;
     }
 }
 
-@media (max-width: 180px) {
+@media (max-width: 220px) {
+    .anchor-slot-header {
+        flex-wrap: wrap;
+        row-gap: 2px;
+    }
+    .anchor-slot-name, .anchor-slot-rename-input {
+        flex: 1 1 100% !important;
+    }
     .anchor-slot-actions {
         display: none !important;
+        flex: 1 1 100% !important;
+        justify-content: flex-start;
+        margin-top: 2px;
     }
     .anchor-slot-row:hover .anchor-slot-actions {
         display: flex !important;
     }
+    .anchor-slot-info {
+        flex-wrap: wrap;
+        row-gap: 2px;
+    }
+    .anchor-slot-coords {
+        flex: 1 1 100% !important;
+    }
+    .anchor-slot-time {
+        display: none !important;
+        flex: 1 1 100% !important;
+        text-align: left;
+        margin-top: 2px;
+    }
+    .anchor-slot-row:hover .anchor-slot-time {
+        display: block !important;
+    }
+}
+
+/* When renaming input is active, force layout wrapping so buttons don't block the input */
+.anchor-slot-header:has(.anchor-slot-rename-input) {
+    flex-wrap: wrap;
+    row-gap: 2px;
+}
+.anchor-slot-header:has(.anchor-slot-rename-input) .anchor-slot-rename-input {
+    flex: 1 1 100% !important;
+}
+.anchor-slot-header:has(.anchor-slot-rename-input) .anchor-slot-actions {
+    flex: 1 1 100% !important;
+    justify-content: flex-start;
+    margin-top: 2px;
+}
+.anchor-slot-header:has(.anchor-slot-rename-input) ~ .anchor-slot-info {
+    flex-wrap: wrap;
+    row-gap: 2px;
+}
+.anchor-slot-header:has(.anchor-slot-rename-input) ~ .anchor-slot-info .anchor-slot-coords {
+    flex: 1 1 100% !important;
+}
+.anchor-slot-header:has(.anchor-slot-rename-input) ~ .anchor-slot-info .anchor-slot-time {
+    flex: 1 1 100% !important;
+    text-align: left;
+    margin-top: 2px;
 }

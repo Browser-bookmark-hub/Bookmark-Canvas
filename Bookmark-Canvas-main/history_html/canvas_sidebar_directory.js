@@ -3779,8 +3779,8 @@
               </div>
             </div>
             <div class="anchor-slot-info">
-              X: ${Math.round(slot.x)} | Y: ${Math.round(slot.y)} | ${zoomPercent}%
-              ${absoluteTimeStr ? `<span style="float: right; font-style: italic; color: var(--text-muted, #888888); font-size: 10px;">${absoluteTimeStr}</span>` : ''}
+              <span class="anchor-slot-coords">X: ${Math.round(slot.x)} | Y: ${Math.round(slot.y)} | ${zoomPercent}%</span>
+              ${absoluteTimeStr ? `<span class="anchor-slot-time">${absoluteTimeStr}</span>` : ''}
             </div>
           </div>
         `;

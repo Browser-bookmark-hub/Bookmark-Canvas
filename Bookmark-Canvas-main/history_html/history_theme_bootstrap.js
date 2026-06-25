@@ -63,7 +63,7 @@
     const normalizeSidebarWidth = (raw) => {
       const value = Number(raw);
       if (!Number.isFinite(value)) return null;
-      return clamp(Math.round(value), 180, 560);
+      return clamp(Math.round(value), 200, 560);
     };
 
     const normalizeAutoCollapseWidth = (raw) => {

@@ -9181,7 +9181,7 @@ function initSidebarToggle() {
     const SIDEBAR_COLLAPSE_MODE_MANUAL = 'manual';
     const AUTO_RESIZE_DEBOUNCE_MS = 220;
     const SIDEBAR_TRANSITION_MS = 220;
-    const SIDEBAR_MIN_WIDTH = 180;
+    const SIDEBAR_MIN_WIDTH = 200;
     const SIDEBAR_MAX_WIDTH = 560;
     const SIDEBAR_RESIZE_COMPACT_THRESHOLD = 56;
     const TOGGLE_DRAG_ACTIVATE_THRESHOLD = 10;
