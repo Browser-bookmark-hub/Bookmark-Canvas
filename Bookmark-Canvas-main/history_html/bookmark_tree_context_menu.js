@@ -4069,7 +4069,6 @@ function buildMenuItems(context) {
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
             { action: 'paste', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴' : '粘贴到文件夹内') : (contextMenuHorizontal ? 'Paste' : 'Paste into Folder'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
             { action: 'paste-below', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴到下方' : '粘贴到该文件夹下方') : (contextMenuHorizontal ? 'Paste Below' : 'Paste Below Folder'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
-            { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'actions' },
             { separator: true },
 
             // 打开方式（二级菜单）
@@ -4085,7 +4084,9 @@ function buildMenuItems(context) {
             // 结构/设置组（合并第三组）
             { action: 'add-page', label: lang === 'zh_CN' ? '添加网页' : 'Add Page', icon: 'plus-circle', group: 'structure', hidden: true },
             { action: 'add-folder', label: lang === 'zh_CN' ? '添加文件夹' : 'Add Folder', icon: 'folder-plus', group: 'structure', hidden: true },
-            { action: 'toggle-context-menu-layout', label: contextMenuHorizontal ? (lang === 'zh_CN' ? '纵向布局' : 'Vertical') : (lang === 'zh_CN' ? '横向布局' : 'Horizontal'), icon: 'exchange-alt', group: 'structure' }
+            { action: 'toggle-context-menu-layout', label: contextMenuHorizontal ? (lang === 'zh_CN' ? '纵向布局' : 'Vertical') : (lang === 'zh_CN' ? '横向布局' : 'Horizontal'), icon: 'exchange-alt', group: 'structure' },
+            { separator: true },
+            { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'structure' }
         );
     } else {
         // 书签菜单 - 按分组组织
@@ -4124,7 +4125,6 @@ function buildMenuItems(context) {
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
             { action: 'paste', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴' : '粘贴到下方') : (contextMenuHorizontal ? 'Paste' : 'Paste Below'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
-            { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'actions' },
             { separator: true },
 
             // 打开组（二级菜单）
@@ -4138,7 +4138,9 @@ function buildMenuItems(context) {
             { separator: true },
 
             // 设置组
-            { action: 'toggle-context-menu-layout', label: contextMenuHorizontal ? (lang === 'zh_CN' ? '纵向布局' : 'Vertical') : (lang === 'zh_CN' ? '横向布局' : 'Horizontal'), icon: 'exchange-alt', group: 'settings' }
+            { action: 'toggle-context-menu-layout', label: contextMenuHorizontal ? (lang === 'zh_CN' ? '纵向布局' : 'Vertical') : (lang === 'zh_CN' ? '横向布局' : 'Horizontal'), icon: 'exchange-alt', group: 'settings' },
+            { separator: true },
+            { action: 'delete', label: lang === 'zh_CN' ? '删除' : 'Delete', icon: 'trash-alt', group: 'settings' }
         );
     }
 
@@ -15090,25 +15092,25 @@ function showBookmarkTreeObjectContextMenu(e, target) {
         ? (lang === 'zh_CN' ? '取消置顶' : 'Unpin')
         : (lang === 'zh_CN' ? '置顶' : 'Pin');
 
-    items.push({ action: 'pin', label: pinLabel, icon: 'thumbtack' });
+    items.push({ action: 'search-scope', label: labels.searchScope, icon: 'search' });
     if (type === 'permanent' || type === 'permanent-copy') {
         items.push({ action: 'duplicate', label: labels.duplicate, icon: 'copy' });
     }
     if (type === 'temporary') {
         items.push({ action: 'color', label: labels.color, icon: 'palette' });
     }
-    if (type === 'permanent-copy' || type === 'temporary' || type === 'md-node') {
-        items.push({ action: 'delete', label: labels.delete, icon: 'trash-alt', className: 'color-red' });
-    }
+    items.push({ action: 'pin', label: pinLabel, icon: 'thumbtack' });
     if (type === 'md-node') {
         items.push({ action: 'copy-source', label: labels.copySource, icon: 'code' });
     } else {
         items.push(
-            { action: 'export-html', label: labels.exportHtml, icon: 'file-code' },
-            { action: 'export-json', label: labels.exportJson, icon: 'file-alt' }
+            { action: 'export-json', label: labels.exportJson, icon: 'file-alt' },
+            { action: 'export-html', label: labels.exportHtml, icon: 'file-code' }
         );
     }
-    items.push({ action: 'search-scope', label: labels.searchScope, icon: 'search' });
+    if (type === 'permanent-copy' || type === 'temporary' || type === 'md-node') {
+        items.push({ action: 'delete', label: labels.delete, icon: 'trash-alt', className: 'color-red' });
+    }
 
     const menu = document.getElementById('bookmark-context-menu');
     if (!menu) return;
