@@ -1360,7 +1360,7 @@
         return { position: 'auto', threshold: 420 };
     }
 
-    function __isWideRowContext(treeItem) {
+    function __isWideRowContext(treeItem, currentModeIsWide) {
         if (!treeItem) return false;
         // Fullscreen / global search panel → always wide.
         if (treeItem.closest('.canvas-fullscreen-active, .canvas-fullscreen-node, .search-results-panel')) return true;
@@ -1372,15 +1372,35 @@
             return true;
         } else {
             const layoutWidth = treeItem.offsetWidth || treeItem.clientWidth || treeItem.scrollWidth || 0;
-            return layoutWidth >= settings.threshold;
+            const threshold = settings.threshold;
+            
+            // Implement hysteresis to prevent layout oscillation (flashing) near the threshold
+            if (currentModeIsWide === true) {
+                // Currently wide (dots-trailing): stay wide unless width drops below threshold - 40px
+                return layoutWidth >= Math.max(100, threshold - 40);
+            } else if (currentModeIsWide === false) {
+                // Currently narrow (dots-leading): stay narrow unless width exceeds threshold + 10px
+                return layoutWidth >= (threshold + 10);
+            }
+            
+            return layoutWidth >= threshold;
         }
     }
 
-    function __buildDotsElement(tags, treeItem) {
-        const wide = __isWideRowContext(treeItem);
+    function __buildDotsElement(tags, treeItemOrWide, tagsKeyInput) {
+        let wide;
+        if (typeof treeItemOrWide === 'boolean') {
+            wide = treeItemOrWide;
+        } else {
+            const existing = treeItemOrWide ? treeItemOrWide.querySelector(':scope > .tree-item-tag-dots') : null;
+            const currentModeIsWide = existing ? existing.classList.contains('dots-trailing') : null;
+            wide = __isWideRowContext(treeItemOrWide, currentModeIsWide);
+        }
+        const tagsKey = tagsKeyInput !== undefined ? tagsKeyInput : tags.map(t => `${t.color}:${t.text || ''}`).join('|');
         const wrap = document.createElement('span');
         wrap.className = 'tree-item-tag-dots ' + (wide ? 'dots-trailing' : 'dots-leading');
         wrap.dataset.role = 'tag-dots';
+        wrap.dataset.tagsKey = tagsKey;
         const visibleLimit = wide ? TRAILING_DOTS_VISIBLE : LEADING_DOTS_VISIBLE;
         const visible = tags.slice(0, visibleLimit);
         if (wide) {
@@ -1432,15 +1452,17 @@
         next.style.setProperty('--tag-dot-shift-x', `${Math.round(dx)}px`);
         next.style.setProperty('--tag-dot-shift-y', `${Math.round(dy)}px`);
         next.style.opacity = '0.86';
-        next.getBoundingClientRect();
+        
         requestAnimationFrame(() => {
-            next.style.setProperty('--tag-dot-shift-x', '0px');
-            next.style.setProperty('--tag-dot-shift-y', '0px');
-            next.style.opacity = '';
-            window.setTimeout(() => {
-                next.style.removeProperty('--tag-dot-shift-x');
-                next.style.removeProperty('--tag-dot-shift-y');
-            }, 260);
+            requestAnimationFrame(() => {
+                next.style.setProperty('--tag-dot-shift-x', '0px');
+                next.style.setProperty('--tag-dot-shift-y', '0px');
+                next.style.opacity = '';
+                window.setTimeout(() => {
+                    next.style.removeProperty('--tag-dot-shift-x');
+                    next.style.removeProperty('--tag-dot-shift-y');
+                }, 260);
+            });
         });
     }
 
@@ -1452,7 +1474,19 @@
             if (existing) existing.remove();
             return;
         }
-        const next = __buildDotsElement(tags, treeItem);
+        const currentModeIsWide = existing
+            ? existing.classList.contains('dots-trailing')
+            : null;
+        const wide = __isWideRowContext(treeItem, currentModeIsWide);
+        const tagsKey = tags.map(t => `${t.color}:${t.text || ''}`).join('|');
+        const nextMode = wide ? 'dots-trailing' : 'dots-leading';
+        const currentMode = existing
+            ? (existing.classList.contains('dots-trailing') ? 'dots-trailing' : 'dots-leading')
+            : null;
+        if (existing && existing.dataset.tagsKey === tagsKey && currentMode === nextMode) {
+            return;
+        }
+        const next = __buildDotsElement(tags, wide, tagsKey);
         const previousRect = existing ? existing.getBoundingClientRect() : null;
         const previousMode = existing
             ? (existing.classList.contains('dots-trailing') ? 'trailing' : 'leading')
@@ -1542,9 +1576,148 @@
             if (hasPermItems && !__permIdentityIndex) {
                 await __loadPermIdentityIndex();
             }
-            items.forEach((el) => {
-                if (document.contains(el)) __injectDotsIntoTreeItem(el);
+
+            // --- BATCHED READ PHASE ---
+            const updates = [];
+            items.forEach((treeItem) => {
+                if (!document.contains(treeItem)) return;
+
+                const existing = treeItem.querySelector(':scope > .tree-item-tag-dots');
+                const tags = __getTagsForTreeItemSync(treeItem);
+
+                if (!tags.length) {
+                    if (existing) {
+                        updates.push({ treeItem, action: 'remove', existing });
+                    }
+                    return;
+                }
+
+                // Querying layout settings and offsetWidth in batch before writing to the DOM
+                const currentModeIsWide = existing
+                    ? existing.classList.contains('dots-trailing')
+                    : null;
+                const wide = __isWideRowContext(treeItem, currentModeIsWide);
+                const nextMode = wide ? 'dots-trailing' : 'dots-leading';
+                const currentMode = existing
+                    ? (existing.classList.contains('dots-trailing') ? 'dots-trailing' : 'dots-leading')
+                    : null;
+
+                const tagsKey = tags.map(t => `${t.color}:${t.text || ''}`).join('|');
+                const existingTagsKey = existing ? existing.dataset.tagsKey : null;
+
+                // Compare tags and layout mode to skip redundant updates
+                if (existing && existingTagsKey === tagsKey && currentMode === nextMode) {
+                    return;
+                }
+
+                updates.push({
+                    treeItem,
+                    action: existing ? 'replace' : 'insert',
+                    existing,
+                    tags,
+                    wide,
+                    tagsKey
+                });
             });
+
+            // If there are no updates, exit early to avoid any layout invalidations or animations
+            if (updates.length === 0) return;
+
+            // --- BATCHED WRITE PHASE ---
+            // 1. First, measure all previous rects (Reads)
+            const previousModes = [];
+            const previousRects = updates.map((up, idx) => {
+                if (up.action === 'replace') {
+                    previousModes[idx] = up.existing.classList.contains('dots-trailing') ? 'trailing' : 'leading';
+                    return up.existing.getBoundingClientRect();
+                }
+                previousModes[idx] = null;
+                return null;
+            });
+
+            // 2. Perform all DOM mutations (Writes)
+            const elementsToAnimate = [];
+            updates.forEach((up, idx) => {
+                const { treeItem, action, existing, tags, wide, tagsKey } = up;
+
+                if (action === 'remove') {
+                    existing.remove();
+                    return;
+                }
+
+                // Build new dots element passing wide/tagsKey directly
+                const next = __buildDotsElement(tags, wide, tagsKey);
+
+                if (action === 'replace') {
+                    existing.replaceWith(next);
+                    elementsToAnimate.push({
+                        element: next,
+                        previousRect: previousRects[idx],
+                        previousMode: previousModes[idx]
+                    });
+                } else if (action === 'insert') {
+                    if (wide) {
+                        const tip = treeItem.querySelector(':scope > .tree-tip-icon');
+                        if (tip) treeItem.insertBefore(next, tip);
+                        else treeItem.appendChild(next);
+                    } else {
+                        treeItem.insertBefore(next, treeItem.firstChild);
+                    }
+                    elementsToAnimate.push({
+                        element: next,
+                        previousRect: null,
+                        previousMode: null
+                    });
+                }
+            });
+
+            // 3. Batch the animation offset calculations (Reads)
+            const animationData = [];
+            elementsToAnimate.forEach((anim) => {
+                const { element, previousRect, previousMode } = anim;
+                if (!previousRect) return; // Only animate replacements
+
+                const nextMode = element.classList.contains('dots-trailing') ? 'trailing' : 'leading';
+                if (previousMode && previousMode !== nextMode) return;
+
+                const nextRect = element.getBoundingClientRect(); // Read!
+                const dx = previousRect.left - nextRect.left;
+                const dy = previousRect.top - nextRect.top;
+
+                if (Number.isFinite(dx) && Number.isFinite(dy) && (Math.abs(dx) >= 1 || Math.abs(dy) >= 1)) {
+                    animationData.push({
+                        element,
+                        dx,
+                        dy
+                    });
+                }
+            });
+
+            // 4. Batch initial animation style assignments (Writes)
+            animationData.forEach(({ element, dx, dy }) => {
+                element.style.setProperty('--tag-dot-shift-x', `${Math.round(dx)}px`);
+                element.style.setProperty('--tag-dot-shift-y', `${Math.round(dy)}px`);
+                element.style.opacity = '0.86';
+            });
+
+            // 5. Trigger transition in subsequent frames without forcing synchronous layout
+            if (animationData.length > 0) {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        animationData.forEach(({ element }) => {
+                            element.style.setProperty('--tag-dot-shift-x', '0px');
+                            element.style.setProperty('--tag-dot-shift-y', '0px');
+                            element.style.opacity = '';
+                        });
+                        window.setTimeout(() => {
+                            animationData.forEach(({ element }) => {
+                                element.style.removeProperty('--tag-dot-shift-x');
+                                element.style.removeProperty('--tag-dot-shift-y');
+                            });
+                        }, 260);
+                    });
+                });
+            }
         });
     }
 

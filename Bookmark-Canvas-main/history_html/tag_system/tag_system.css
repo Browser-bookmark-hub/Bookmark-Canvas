@@ -107,14 +107,9 @@
     flex-wrap: nowrap;
     justify-content: flex-end;
     max-width: 60%;
-    padding: 2px 4px 2px 10px;
+    padding: 2px 6px;
     border-radius: 12px;
-    background: linear-gradient(90deg,
-            rgba(255, 255, 255, 0),
-            color-mix(in srgb, var(--bg-primary, #fff) 82%, transparent) 28%,
-            color-mix(in srgb, var(--bg-primary, #fff) 94%, transparent));
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    background: color-mix(in srgb, var(--bg-primary, #fff) 70%, transparent);
 }
 .permanent-bookmark-section .tree-item-tag-dots.dots-trailing {
     right: 12px;
