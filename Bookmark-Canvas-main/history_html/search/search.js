@@ -10484,8 +10484,13 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
             // Let's manually find element if it's a copy.
 
                 if (options.copyId) {
-                    const copyEl = resolvePermanentSectionElementForSearch(options.copyId);
-                    if (copyEl) {
+                    let copyEl = resolvePermanentSectionElementForSearch(options.copyId);
+                    if (!copyEl) {
+                        // 如果 DOM 节点不存在，通过存储坐标平移画布，促使虚拟滚动重新创建该 DOM 节点
+                        await locateCanvasElement(options.copyId, 'permanent-section', { color: options.color || '#059669' });
+                        await waitForSearchLocateAnimationFrames(2);
+                        copyEl = resolvePermanentSectionElementForSearch(options.copyId);
+                    } else {
                         locateToElement(copyEl);
                         await waitForSearchLocateAnimationFrames(2);
                     }
@@ -10498,6 +10503,60 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     } catch (_) { }
 
     const permanentSection = resolvePermanentSectionElementForSearch(options.copyId || null);
+
+    // 强行唤醒并加载永久栏目 DOM 和树，以防止因卡片懒加载或虚拟滚动导致树内容为空而无法定位
+    if (permanentSection) {
+        let needWake = false;
+        if (permanentSection.classList.contains('canvas-viewport-lazy-shell') || 
+            (permanentSection.dataset && permanentSection.dataset.viewportLazy === 'true')) {
+            needWake = true;
+            permanentSection.classList.remove('canvas-viewport-lazy-shell');
+            if (permanentSection.dataset) {
+                delete permanentSection.dataset.viewportLazy;
+            }
+        }
+        
+        // 临时退出低细节模式，确保可见
+        if (permanentSection.classList.contains('low-detail-active')) {
+            permanentSection.classList.remove('low-detail-active');
+            const overlay = permanentSection.querySelector('.permanent-node-low-detail-overlay');
+            if (overlay) {
+                try { overlay.remove(); } catch (_) { }
+            }
+        }
+
+        const tree = permanentSection.querySelector('.bookmark-tree') || permanentSection.querySelector('#bookmarkTree');
+        const isUnloaded = tree && (
+            (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
+            (permanentSection.classList && permanentSection.classList.contains('permanent-tree-unloaded'))
+        );
+        if (isUnloaded || needWake) {
+            if (tree) {
+                try { tree.style.display = ''; } catch (_) { }
+                try { tree.dataset.contentHidden = 'false'; } catch (_) { }
+                try { tree.dataset.contentUnloaded = 'false'; } catch (_) { }
+
+                const body = permanentSection.querySelector('.permanent-section-body');
+                if (body && body.dataset) {
+                    try { body.dataset.contentHidden = 'false'; } catch (_) { }
+                    try { body.dataset.contentUnloaded = 'false'; } catch (_) { }
+                }
+
+                try { permanentSection.classList.remove('permanent-tree-unloaded'); } catch (_) { }
+                
+                const key = (permanentSection.id === 'permanentSection') 
+                    ? 'permanentSection' 
+                    : (permanentSection.dataset && permanentSection.dataset.permanentSectionCopyId);
+                if (key && window.CanvasState && window.CanvasState.unloadedPermanentSectionTrees) {
+                    try { window.CanvasState.unloadedPermanentSectionTrees.delete(key); } catch (_) { }
+                }
+
+                if (typeof window.__renderPermanentTreeIntoTree === 'function') {
+                    window.__renderPermanentTreeIntoTree(tree, { force: true, reason: 'viewport-lazy-load' });
+                }
+            }
+        }
+    }
 
     const treeContainer = (permanentSection && permanentSection.querySelector('.bookmark-tree')) || (permanentSection && permanentSection.querySelector('#bookmarkTree')) || document.getElementById('bookmarkTree');
     if (!treeContainer) return false;
