@@ -40425,20 +40425,7 @@ function openCanvasAppearanceSettingsModal() {
     });
     if (otherAutoLink) otherAutoLink.checked = !!otherSettings.autoLinkSplit;
 
-    const otherAutoRecord = modal.querySelector('#otherAutoRecordAnchor');
-    const otherAutoRecordInterval = modal.querySelector('#otherAutoRecordAnchorInterval');
-    if (otherAutoRecord) otherAutoRecord.checked = otherSettings.autoRecordAnchor === true;
-    if (otherAutoRecordInterval) otherAutoRecordInterval.value = String(otherSettings.autoRecordAnchorInterval || 15);
-    const updateAutoRecordIntervalVisibility = () => {
-        const intervalRow = modal.querySelector('#otherAutoRecordAnchorIntervalRow');
-        if (intervalRow) {
-            intervalRow.style.display = (otherAutoRecord && otherAutoRecord.checked) ? 'flex' : 'none';
-        }
-    };
-    if (otherAutoRecord) {
-        updateAutoRecordIntervalVisibility();
-        otherAutoRecord.addEventListener('change', updateAutoRecordIntervalVisibility);
-    }
+
     if (otherMenuDefaultColorSync) {
         otherMenuDefaultColorSync.checked = isSidebarMenuDefaultColorSyncEnabled(otherSettings);
     }
@@ -40875,28 +40862,7 @@ function createCanvasAppearanceSettingsModal() {
                             </label>
                         </div>
                     </div>
-                    <div style="height: 1px; background: var(--border-color); margin: 12px 0; opacity: 0.5;"></div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Auto-record viewport anchor' : '自动记录视口锚点'}</div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherAutoRecordAnchor">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row" id="otherAutoRecordAnchorIntervalRow">
-                        <div class="appearance-row-label">${isEn ? 'Stay duration (seconds)' : '停留判定时间（秒）'}</div>
-                        <div class="appearance-row-content">
-                            <select id="otherAutoRecordAnchorInterval" class="appearance-name-select">
-                                <option value="3">3</option>
-                                <option value="5">5</option>
-                                <option value="7">7</option>
-                                <option value="10">10</option>
-                                <option value="15">15</option>
-                            </select>
-                        </div>
-                    </div>
+
                     <div style="height: 1px; background: var(--border-color); margin: 12px 0; opacity: 0.5;"></div>
                     <div class="appearance-row">
                         <div class="appearance-row-label">${isEn ? 'Default edge direction' : '连接线默认方向'}</div>
@@ -41049,18 +41015,7 @@ function createCanvasAppearanceSettingsModal() {
             scheduleOtherSave();
         });
     }
-    const otherAutoRecordToggle = modal.querySelector('#otherAutoRecordAnchor');
-    const otherAutoRecordIntervalSelect = modal.querySelector('#otherAutoRecordAnchorInterval');
-    if (otherAutoRecordToggle) {
-        otherAutoRecordToggle.addEventListener('change', () => {
-            scheduleOtherSave();
-        });
-    }
-    if (otherAutoRecordIntervalSelect) {
-        otherAutoRecordIntervalSelect.addEventListener('change', () => {
-            scheduleOtherSave();
-        });
-    }
+
     if (otherMenuDefaultColorSyncToggle) {
         otherMenuDefaultColorSyncToggle.addEventListener('change', () => {
             scheduleOtherSave();
@@ -41304,8 +41259,6 @@ function saveCanvasOtherSettings(options = {}) {
     });
     const prevFollow = isTempColorFollowEnabled(prevSettings);
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
-    const autoRecordInput = modal.querySelector('#otherAutoRecordAnchor');
-    const autoRecordIntervalInput = modal.querySelector('#otherAutoRecordAnchorInterval');
     const menuDefaultColorSync = modal.querySelector('#otherMenuDefaultColorSync');
     const menuLocatableColorSync = modal.querySelector('#otherMenuLocatableColorSync');
     const sidebarCollapseMode = __getAppearanceRadioValue(modal, 'other-sidebar-collapse-mode', prevCollapsePrefs.mode || 'auto');
@@ -41360,8 +41313,8 @@ function saveCanvasOtherSettings(options = {}) {
 
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
-        autoRecordAnchor: autoRecordInput ? !!autoRecordInput.checked : !!prevSettings.autoRecordAnchor,
-        autoRecordAnchorInterval: autoRecordIntervalInput ? parseInt(autoRecordIntervalInput.value, 10) : (prevSettings.autoRecordAnchorInterval || 15),
+        autoRecordAnchor: !!prevSettings.autoRecordAnchor,
+        autoRecordAnchorInterval: prevSettings.autoRecordAnchorInterval || 15,
         autoRecordAnchorLimit: prevSettings.autoRecordAnchorLimit || 5,
         menuDefaultColorSync: menuDefaultColorSync
             ? !!menuDefaultColorSync.checked
