@@ -3504,7 +3504,7 @@ _Tip: This card can be freely edited or deleted_
     // 中文版：快捷操作（Markdown-first）
     const shortcutGuideMarkdown_zh = `## 快捷操作
 - **点击左上角悬浮工具窗的「<span style="color: #66bbff">定位</span>」按钮**：直接定位永久栏目
-- **点击右下角的按钮「<span style="color: #66bbff">HTML 页面</span>」**：打开/定位标签页(\`Option/Alt + Shift + S\`)
+- **点击右下角的按钮「<span style="color: #66bbff">HTML 页面</span>」**：打开/定位标签页(\`Ctrl+Shift+Space (Mac: Command+Shift+Space)\`)
 
 ---
 
@@ -3556,7 +3556,7 @@ _快捷键可在左上角「管理」中自定义_
     // 英文版：快捷操作（Markdown-first）
     const shortcutGuideMarkdown_en = `## Quick Actions
 - **Click the 「<span style="color: #66bbff">Locate</span>」 button in the top-left floating tool window**: Directly locate the permanent column
-- **Click the 「<span style="color: #66bbff">HTML Page</span>」 button at bottom-right**: Open/locate the tab (\`Option/Alt + Shift + S\`)
+- **Click the 「<span style="color: #66bbff">HTML Page</span>」 button at bottom-right**: Open/locate the tab (\`Ctrl+Shift+Space (Mac: Command+Shift+Space)\`)
 
 ---
 
@@ -3696,7 +3696,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
     const shortcutGuideHtml_zh = `<h2>快捷操作</h2>
 <ul>
 <li><strong>点击左上角悬浮工具窗的「<span style="color: #66bbff">定位</span>」按钮</strong>：直接定位永久栏目</li>
-<li><strong>点击右下角的按钮「<span style="color: #66bbff">HTML 页面</span>」</strong>：打开/定位标签页(<code>Option/Alt + Shift + S</code>)</li>
+<li><strong>点击右下角的按钮「<span style="color: #66bbff">HTML 页面</span>」</strong>：打开/定位标签页(<code>Ctrl+Shift+Space (Mac: Command+Shift+Space)</code>)</li>
 </ul>
 
 <hr>
@@ -3747,7 +3747,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
     const shortcutGuideHtml_en = `<h2>Quick Actions</h2>
 <ul>
 <li><strong>Click the 「<span style="color: #66bbff">Locate</span>」 button in the top-left floating tool window</strong>: Directly locate the permanent column</li>
-<li><strong>Click the 「<span style="color: #66bbff">HTML Page</span>」 button at bottom-right</strong>: Open/locate the tab (<code>Option/Alt + Shift + S</code>)</li>
+<li><strong>Click the 「<span style="color: #66bbff">HTML Page</span>」 button at bottom-right</strong>: Open/locate the tab (<code>Ctrl+Shift+Space (Mac: Command+Shift+Space)</code>)</li>
 </ul>
 
 <hr>
