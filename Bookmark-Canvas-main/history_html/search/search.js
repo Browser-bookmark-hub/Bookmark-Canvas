@@ -68,7 +68,10 @@ const searchUiState = {
     tagBrowseBucketLimits: {},
 
     // Localized area search range
-    areaSearchScope: null
+    areaSearchScope: null,
+
+    // In fullscreen card mode, user dismissed the area indicator → search globally while staying fullscreen.
+    fullscreenAreaSearchDismissed: false
 };
 
 const TEMP_SECTION_BUILD_YIELD_EVERY = 180;
@@ -500,6 +503,7 @@ function resetMainSearchUI(options = {}) {
             searchUiState.bookmarkGroupCollapse = new Map();
             searchUiState.domainGroupCollapse = new Map();
             searchUiState.areaSearchScope = null;
+            searchUiState.fullscreenAreaSearchDismissed = false;
             if (typeof updateSearchAreaIndicatorUI === 'function') {
                 updateSearchAreaIndicatorUI();
             }
@@ -2295,6 +2299,129 @@ function getCanvasFullscreenSearchScope() {
     }
 }
 
+function isCanvasFullscreenActive() {
+    return !!getCanvasFullscreenSearchScope();
+}
+
+function isFullscreenGlobalSearchActive() {
+    return isCanvasFullscreenActive() && !!searchUiState.fullscreenAreaSearchDismissed;
+}
+
+function getActiveFullscreenSearchScopeForFiltering() {
+    if (searchUiState.fullscreenAreaSearchDismissed) return null;
+    if (searchUiState.activeMode === 'structure') return null;
+    return getCanvasFullscreenSearchScope();
+}
+
+function getCanvasFullscreenAreaSearchScopeFromElement(element) {
+    if (!element || !element.classList) return null;
+
+    if (element.classList.contains('permanent-bookmark-section')) {
+        const copyId = element.dataset
+            ? String(element.dataset.permanentSectionCopyId || element.getAttribute('data-permanent-section-copy-id') || '').trim()
+            : '';
+        const memberIds = ['permanentSection', 'permanent-section'];
+        if (copyId) {
+            memberIds.push(copyId, `permanent-section-copy-${copyId}`);
+        }
+        return {
+            kind: 'permanent',
+            id: copyId || 'permanentSection',
+            memberIds
+        };
+    }
+
+    if (element.classList.contains('temp-canvas-node')) {
+        const sectionId = element.dataset && element.dataset.sectionId
+            ? String(element.dataset.sectionId).trim()
+            : String(element.id || '').trim();
+        if (!sectionId) return null;
+        return {
+            kind: 'temp',
+            id: sectionId,
+            memberIds: [sectionId]
+        };
+    }
+
+    if (element.classList.contains('md-canvas-node')) {
+        const nodeId = String(element.id || '').trim();
+        if (!nodeId) return null;
+        return {
+            kind: 'blank',
+            id: nodeId,
+            memberIds: [nodeId]
+        };
+    }
+
+    return null;
+}
+
+function syncFullscreenAreaSearchWithActiveMode() {
+    if (!isCanvasFullscreenActive()) return;
+
+    const modeKey = searchUiState.activeMode;
+    let changed = false;
+
+    if (modeKey === 'structure') {
+        if (searchUiState.areaSearchScope !== null || !searchUiState.fullscreenAreaSearchDismissed) {
+            searchUiState.areaSearchScope = null;
+            searchUiState.fullscreenAreaSearchDismissed = true;
+            changed = true;
+        }
+        updateSearchAreaIndicatorUI();
+    } else if (!searchUiState.fullscreenAreaSearchDismissed) {
+        const maximized = document.querySelector('.canvas-node-maximized');
+        const scopeData = getCanvasFullscreenAreaSearchScopeFromElement(maximized);
+        if (scopeData) {
+            const nextScope = {
+                kind: scopeData.kind,
+                id: scopeData.id || null,
+                memberIds: Array.isArray(scopeData.memberIds) ? scopeData.memberIds : []
+            };
+            const prevScope = searchUiState.areaSearchScope;
+            const scopeChanged = !prevScope
+                || prevScope.kind !== nextScope.kind
+                || String(prevScope.id || '') !== String(nextScope.id || '')
+                || JSON.stringify(prevScope.memberIds || []) !== JSON.stringify(nextScope.memberIds || []);
+            if (scopeChanged) {
+                searchUiState.fullscreenAreaSearchDismissed = false;
+                searchUiState.areaSearchScope = nextScope;
+                changed = true;
+                updateSearchAreaIndicatorUI();
+            }
+        }
+    }
+
+    if (changed) {
+        const searchInput = document.getElementById('searchInput');
+        const q = searchInput ? String(searchInput.value || '').trim() : '';
+        if (q) {
+            if (typeof searchCanvasAndRender === 'function') {
+                searchCanvasAndRender(q);
+            }
+        } else {
+            // Keep the suggestion panel open if it was already open or if suggestions are enabled
+            if (getCurrentViewSafe() === 'canvas') {
+                try {
+                    const panel = getSearchResultsPanel();
+                    const suggestionsVisible = !!(searchUiState && searchUiState.canvasSuggestionsVisible);
+                    const panelIsSuggestions = !!(panel && panel.dataset && panel.dataset.panelType === 'canvas-suggestions');
+                    const panelVisible = !!(panel && panel.classList.contains('visible'));
+                    
+                    if (panelVisible && (suggestionsVisible || panelIsSuggestions)) {
+                        if (shouldShowEmptyQuerySuggestions()) {
+                            renderCanvasSearchSuggestions();
+                            showSearchResultsPanel();
+                        } else {
+                            hideSearchResultsPanel();
+                        }
+                    }
+                } catch (_) { }
+            }
+        }
+    }
+}
+
 function isItemInAreaSearchScope(item, scope) {
     if (!scope || !Array.isArray(scope.memberIds)) return true;
     const memberIds = scope.memberIds;
@@ -2356,6 +2483,8 @@ function isItemInAreaSearchScope(item, scope) {
 
 function triggerAreaSearch(scope, options = {}) {
     if (!scope) return;
+
+    searchUiState.fullscreenAreaSearchDismissed = false;
     
     searchUiState.areaSearchScope = {
         kind: scope.kind,
@@ -2388,6 +2517,9 @@ function triggerAreaSearch(scope, options = {}) {
 
 function exitAreaSearch() {
     searchUiState.areaSearchScope = null;
+    if (isCanvasFullscreenActive()) {
+        searchUiState.fullscreenAreaSearchDismissed = true;
+    }
     updateSearchAreaIndicatorUI();
     
     const searchInput = document.getElementById('searchInput');
@@ -2589,6 +2721,7 @@ async function setSearchMode(modeKey, options = {}) {
         searchUiState.fullscreenAutoModeLocked = true;
     }
 
+    const previousModeKey = searchUiState.activeMode;
     searchUiState.activeMode = modeKey;
     searchUiState.showFullscreenDescriptionOthers = false;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
@@ -2663,6 +2796,13 @@ async function setSearchMode(modeKey, options = {}) {
                 try { performSearch(q.toLowerCase()); } catch (_) { }
             }
         }
+    }
+
+    if (isCanvasFullscreenActive()) {
+        if (previousModeKey === 'structure' && modeKey !== 'structure') {
+            searchUiState.fullscreenAreaSearchDismissed = false;
+        }
+        syncFullscreenAreaSearchWithActiveMode();
     }
 }
 
@@ -6178,7 +6318,7 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
 function buildCanvasBookmarkGroupedResultsFromModel(groups) {
     const results = [];
     const isZh = currentLang === 'zh_CN';
-    const fullscreenScope = getCanvasFullscreenSearchScope();
+    const fullscreenScope = getActiveFullscreenSearchScopeForFiltering();
 
     const sourceGroups = Array.isArray(groups) ? groups : [];
 
@@ -6932,7 +7072,7 @@ function searchCanvasAndRender(query, options = {}) {
     clearCanvasSearchHighlight();
 
     const scored = [];
-    const fullscreenScope = getCanvasFullscreenSearchScope();
+    const fullscreenScope = getActiveFullscreenSearchScopeForFiltering();
 
     const currentScopeId = fullscreenScope ? `${fullscreenScope.kind}:${fullscreenScope.id}` : '';
     const lastScopeId = searchUiState.lastFullscreenScopeId || '';
@@ -7275,7 +7415,13 @@ function renderCanvasSearchSuggestions() {
     // Or we could make them clickable to pre-fill the input with a prefix like "#" or "A-".
 
     // [Tweak] Stronger border for separation
-    const arrowUpSvg = `
+    const isBottomDock = !!(document.body && document.body.classList.contains('header-dock-bottom'));
+    const arrowSvg = isBottomDock ? `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+            <path d="M12 3v14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+            <path d="M7 13l5 5 5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    ` : `
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
             <path d="M12 21V7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
             <path d="M7 11l5-5 5 5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -7284,8 +7430,8 @@ function renderCanvasSearchSuggestions() {
 
     const hideLabel = isZh ? '下次不再出现' : "Don't show again";
     const hintText = isZh
-        ? '点左侧按钮切换模式'
-        : 'Use the left button to switch mode';
+        ? (isBottomDock ? '点下侧按钮切换模式' : '点左侧按钮切换模式')
+        : (isBottomDock ? 'Use the bottom button to switch mode' : 'Use the left button to switch mode');
     const hintHelpText = isZh
         ? '模式切换：← 到左侧模式按钮，↑/↓ 切换并实时更新结果；空输入：↑/↓ 直接切换模式。书签模式：光标在输入末尾时，→ 切换书签/文件夹/域名筛选。候选条目：↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。域名粒度：点击域名旁按钮切换主域名/子域名。'
         : 'Mode: ← to the left mode button, ↑/↓ switches and updates results; empty: ↑/↓ switches modes directly. Bookmark mode: with cursor at end, → toggles bookmark/folder/domain filter. Results: ↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section. Domain granularity: click the domain pill to toggle root/subdomain.';
@@ -7298,7 +7444,7 @@ function renderCanvasSearchSuggestions() {
     panel.innerHTML = `
         <div class="search-suggestions-header" style="position:relative; padding:6px 10px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:flex-end; gap:10px;">
             <div class="search-empty-suggestions-hint" style="position:absolute; left:16px; top:50%; transform:translateY(-50%);">
-                <span class="search-hint-icon" style="display:inline-flex; position:relative; top:-1px;">${arrowUpSvg}</span>
+                <span class="search-hint-icon" style="display:inline-flex; position:relative; top:-1px;">${arrowSvg}</span>
                 <span class="search-hint-text">${escapeHtml(hintText)}</span>
                 <button type="button" class="search-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelpText)}">
                     <i class="fas fa-question-circle"></i>
@@ -7331,7 +7477,20 @@ function renderCanvasSearchSuggestions() {
                 const key = el.getAttribute('data-mode-key');
                 if (key) {
                     try { setSearchMode(key, { source: 'user' }); } catch (_) { }
-                    try { hideSearchResultsPanel(); } catch (_) { }
+                    
+                    // Do not automatically collapse the candidate panel, keep it open and re-render suggestions
+                    try {
+                        if (shouldShowEmptyQuerySuggestions()) {
+                            renderCanvasSearchSuggestions();
+                            showSearchResultsPanel();
+                        }
+                    } catch (_) { }
+
+                    // Explicitly focus input to allow direct typing
+                    try {
+                        const input = document.getElementById('searchInput');
+                        if (input) input.focus();
+                    } catch (_) { }
                 }
             });
         });
@@ -7561,7 +7720,7 @@ function resolveDomainSearchScope(scopeInput = null) {
         ? scopeInput
         : (searchUiState && searchUiState.areaSearchScope
             ? searchUiState.areaSearchScope
-            : getCanvasFullscreenSearchScope());
+            : getActiveFullscreenSearchScopeForFiltering());
     if (!scope || typeof scope !== 'object') return null;
     const kind = String(scope.kind || '').trim();
     if (kind === 'temp') {
@@ -7896,7 +8055,7 @@ function renderCanvasSearchResults(results, options = {}) {
         const folderCount = countType('folder');
         try {
             const q = options.query || searchUiState.query || '';
-            const scope = getCanvasFullscreenSearchScope();
+            const scope = getActiveFullscreenSearchScopeForFiltering();
             domainResults = buildCanvasDomainDisplayResultsForQuery(q, scope);
             domainCount = getDomainResultsForQuery(q, scope).length;
         } catch (_) { }
@@ -10836,6 +10995,30 @@ function shouldExpandSearchLocateTargetFolder(target) {
     return String(rawNodeType || '').trim() !== 'folder';
 }
 
+async function ensureBookmarkSearchTargetFullscreen(target) {
+    if (!target || typeof target !== 'object') return false;
+
+    const source = String(target.source || '').trim();
+    if (source === 'temporary') {
+        const sectionId = String(target.sectionId || '').trim();
+        if (!sectionId) return false;
+        if (isMaximizedTempSectionActive(sectionId)) return true;
+        return ensureCanvasSearchResultTargetFullscreen({ type: 'temp-section', id: sectionId });
+    }
+
+    if (source === 'permanent') {
+        const copyId = String(target.copyId || '').trim() || null;
+        if (isMaximizedPermanentSectionActive(copyId)) return true;
+        return ensureCanvasSearchResultTargetFullscreen({
+            type: 'permanent-section',
+            id: copyId || 'permanentSection',
+            copyId
+        });
+    }
+
+    return false;
+}
+
 async function locateCanvasBookmarkItem(item) {
     if (!item || item.type !== 'bookmark-item') return false;
     const expandTargetFolder = shouldExpandSearchLocateTargetFolder(item);
@@ -11460,7 +11643,12 @@ async function activateCanvasSearchResultAtIndex(index) {
                 if (inputEl) inputEl.value = '';
             } catch (_) { }
 
-            const loc = pickBestBookmarkLocationByScope(locations, getCanvasFullscreenSearchScope()) || locations[0];
+            const loc = pickBestBookmarkLocationByScope(locations, getActiveFullscreenSearchScopeForFiltering()) || locations[0];
+            if (isFullscreenGlobalSearchActive() && loc) {
+                try {
+                    await ensureBookmarkSearchTargetFullscreen(loc);
+                } catch (_) { }
+            }
             const opts = {
                 color: loc.color || item.color || '#2563eb',
                 expandTargetFolder: shouldExpandSearchLocateTargetFolder(loc || item)
@@ -11501,7 +11689,7 @@ async function activateCanvasSearchResultAtIndex(index) {
 
     if (item.type === 'domain-group') {
         const domainKey = String(item.domain || item.title || '').trim().toLowerCase();
-        const fullscreenScope = getCanvasFullscreenSearchScope();
+        const fullscreenScope = getActiveFullscreenSearchScopeForFiltering();
         if (fullscreenScope && domainKey) {
             setDomainGroupCollapsed(domainKey, item.isExpanded === true);
             rerenderCanvasBookmarkResults(idx);
@@ -11517,10 +11705,15 @@ async function activateCanvasSearchResultAtIndex(index) {
         return;
     }
 
+    const isInFullscreen = isCanvasFullscreenActive();
     let fullscreenScope = getCanvasFullscreenSearchScope();
-    const shouldExitFullscreenForSearchLocate = !!fullscreenScope
-        && searchUiState.activeMode === 'structure'
-        && (item.type === 'group' || item.type === 'md-node');
+    const isGlobalFullscreenSearch = isFullscreenGlobalSearchActive();
+    const shouldExitFullscreenForSearchLocate = isInFullscreen
+        && (
+            item.type === 'edge'
+            || item.type === 'group'
+            || (searchUiState.activeMode === 'structure' && item.type === 'md-node')
+        );
     if (shouldExitFullscreenForSearchLocate) {
         try {
             await exitCanvasNodeFullscreenForSearchLocate();
@@ -11533,6 +11726,11 @@ async function activateCanvasSearchResultAtIndex(index) {
     if (shouldSwitchFullscreenTarget) {
         try {
             await ensureCanvasSearchResultTargetFullscreen(item);
+        } catch (_) { }
+    }
+    if (isGlobalFullscreenSearch && item.type === 'bookmark-item') {
+        try {
+            await ensureBookmarkSearchTargetFullscreen(item);
         } catch (_) { }
     }
 
@@ -11696,6 +11894,7 @@ async function activateCanvasSearchResultAtIndex(index) {
 
 // 将函数暴露到全局作用域，以便 history.js 可以直接调用
 if (typeof window !== 'undefined') {
+    window.searchUiState = searchUiState;
     // ==================== Phase 3: 画布搜索 ====================
     window.searchCanvasAndRender = searchCanvasAndRender;
     window.resetCanvasSearchDb = resetCanvasSearchDb;
@@ -11726,6 +11925,7 @@ if (typeof window !== 'undefined') {
         if (targetElement) safeOptions.targetElement = targetElement;
         return applyFullscreenDefaultSearchMode(safeOptions);
     };
+    window.__syncFullscreenAreaSearchWithActiveMode = syncFullscreenAreaSearchWithActiveMode;
 
     // 初始化
     window.initSearchEvents = initSearchEvents;

@@ -17449,13 +17449,14 @@ function maximizeCanvasNode(element, options = {}) {
     element.dataset.maxPrevTransform = element.style.transform || '';
     element.dataset.maxPrevZ = element.style.zIndex || '';
 
+    const globalSearchState = (typeof window !== 'undefined' && window.searchUiState) ? window.searchUiState : null;
+
     // Save current search state before entering fullscreen
     try {
-        const globalState = (typeof window !== 'undefined' && window.searchUiState) ? window.searchUiState : null;
         element._preFullscreenSearchState = {
-            activeMode: globalState ? globalState.activeMode : null,
-            areaSearchScope: (globalState && globalState.areaSearchScope) 
-                ? JSON.parse(JSON.stringify(globalState.areaSearchScope)) 
+            activeMode: globalSearchState ? globalSearchState.activeMode : null,
+            areaSearchScope: (globalSearchState && globalSearchState.areaSearchScope) 
+                ? JSON.parse(JSON.stringify(globalSearchState.areaSearchScope)) 
                 : null
         };
     } catch (_) { }
@@ -17498,13 +17499,10 @@ function maximizeCanvasNode(element, options = {}) {
             }
         }
 
-        if (searchMode && scopeData) {
-            if (typeof window.setSearchMode === 'function') {
+        if (searchMode && scopeData && typeof window.setSearchMode === 'function') {
+            try {
                 window.setSearchMode(searchMode, { source: 'auto' });
-            }
-            if (typeof window.triggerAreaSearch === 'function') {
-                window.triggerAreaSearch(scopeData, { silent: true });
-            }
+            } catch (_) { }
         }
     } catch (_) { }
 
@@ -17548,6 +17546,12 @@ function restoreCanvasNodeLayout(element, options = {}) {
     delete element.dataset.maxPrevZ;
     __updateNodeMaximizedState();
     if (!CanvasState.nodeMaximizedActive) {
+        try {
+            const globalState = (typeof window !== 'undefined' && window.searchUiState) ? window.searchUiState : null;
+            if (globalState) {
+                globalState.fullscreenAreaSearchDismissed = false;
+            }
+        } catch (_) { }
         __clearMaximizedNodeStorage();
         requestAnimationFrame(() => {
             if (__isCanvasNodeMaximizedActive()) return;
