@@ -18654,6 +18654,81 @@ function __resolveCanvasLocateZoom(targetZoom) {
     return clampCanvasZoom(Number.isFinite(requested) && requested > 0 ? requested : __getCanvasLocateDefaultZoom());
 }
 
+/**
+ * 将节点从低细节/虚拟化懒加载状态唤醒（如果需要的话）
+ * 适用于定位操作后的即时恢复，避免定位后仍显示低细节覆盖层
+ */
+function __wakeCanvasNodeFromLazyState(element) {
+    if (!element) return;
+
+    // 1. 解除虚拟化懒加载外壳
+    if (element.classList.contains('canvas-viewport-lazy-shell') ||
+        (element.dataset && element.dataset.viewportLazy === 'true')) {
+        element.classList.remove('canvas-viewport-lazy-shell');
+        if (element.dataset) {
+            delete element.dataset.viewportLazy;
+        }
+    }
+
+    // 2. 解除低细节模式
+    if (element.classList.contains('low-detail-active')) {
+        element.classList.remove('low-detail-active');
+        const overlay = element.querySelector('.permanent-node-low-detail-overlay')
+            || element.querySelector('.low-detail-overlay');
+        if (overlay) {
+            try { overlay.remove(); } catch (_) { }
+        }
+    }
+
+    // 3. 永久栏目专项：如果树内容被卸载，重新加载
+    const isPermanent = element.classList.contains('permanent-bookmark-section');
+    if (isPermanent) {
+        const tree = element.querySelector('.bookmark-tree') || element.querySelector('#bookmarkTree');
+        const isUnloaded = tree && (
+            (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
+            element.classList.contains('permanent-tree-unloaded')
+        );
+        if (isUnloaded) {
+            if (tree) {
+                try { tree.style.display = ''; } catch (_) { }
+                try { tree.dataset.contentHidden = 'false'; } catch (_) { }
+                try { tree.dataset.contentUnloaded = 'false'; } catch (_) { }
+
+                const body = element.querySelector('.permanent-section-body');
+                if (body && body.dataset) {
+                    try { body.dataset.contentHidden = 'false'; } catch (_) { }
+                    try { body.dataset.contentUnloaded = 'false'; } catch (_) { }
+                }
+
+                try { element.classList.remove('permanent-tree-unloaded'); } catch (_) { }
+
+                const key = (element.id === 'permanentSection')
+                    ? 'permanentSection'
+                    : (element.dataset && element.dataset.permanentSectionCopyId);
+                if (key && CanvasState.unloadedPermanentSectionTrees) {
+                    try { CanvasState.unloadedPermanentSectionTrees.delete(key); } catch (_) { }
+                }
+
+                if (typeof window.__renderPermanentTreeIntoTree === 'function') {
+                    window.__renderPermanentTreeIntoTree(tree, { force: true, reason: 'locate-wake' });
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 定位操作后调度视口刷新，确保新视口内的节点从低细节/虚拟化状态恢复
+ */
+function __schedulePostLocateViewportRefresh() {
+    // 立即调度视口可见性更新（延迟 0，让平移变换先应用到 DOM）
+    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
+        scheduleCanvasVirtualizationUpdate(0);
+    } else {
+        scheduleDormancyUpdate(0);
+    }
+}
+
 function locateToPermanentSection(targetZoom = null) {
     const permanentSection = document.getElementById('permanentSection');
     const workspace = document.getElementById('canvasWorkspace');
@@ -18690,6 +18765,9 @@ function locateToPermanentSection(targetZoom = null) {
 
     // 应用平移
     updateCanvasScrollBounds();
+    // 定位唤醒：解除低细节/虚拟化懒加载状态
+    __wakeCanvasNodeFromLazyState(permanentSection);
+    __schedulePostLocateViewportRefresh();
     if (CanvasState.nodeMaximizedActive) {
         refreshMaximizedNodes();
     }
@@ -18789,6 +18867,8 @@ function navigateToViewport(anchor) {
     updateCanvasScrollBounds({ initial: false, recomputeBounds: true });
     updateScrollbarThumbs();
     savePanOffsetThrottled();
+    // 视口锚点定位后：刷新视口内节点的低细节/虚拟化状态
+    __schedulePostLocateViewportRefresh();
     CanvasState.lastAutoRecordAnchor = {
         x: CanvasState.panOffsetX,
         y: CanvasState.panOffsetY,
@@ -18835,6 +18915,9 @@ function locateToElement(el, targetZoom = null) {
     CanvasState.panOffsetX = wsW / 2 - centerX * CanvasState.zoom;
     CanvasState.panOffsetY = wsH / 2 - centerY * CanvasState.zoom;
     updateCanvasScrollBounds();
+    // 定位唤醒：解除低细节/虚拟化懒加载状态
+    __wakeCanvasNodeFromLazyState(el);
+    __schedulePostLocateViewportRefresh();
     if (CanvasState.nodeMaximizedActive) {
         refreshMaximizedNodes();
     }
