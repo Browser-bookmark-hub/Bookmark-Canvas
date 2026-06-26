@@ -99,7 +99,12 @@ const CanvasState = {
         lastZoomInputMode: 'wheel',
         lastZoomInputTime: 0,
         isPinchGestureActive: false,
-        gestureEventsSupported: false
+        gestureEventsSupported: false,
+        // 触摸板横向滚动防误触状态
+        horizontalScrollLocked: false,    // 是否已锁定为横向滚动模式
+        horizontalAccumDeltaX: 0,         // 累积窗口内的 deltaX
+        horizontalAccumDeltaY: 0,         // 累积窗口内的 deltaY
+        horizontalAccumTimer: null         // 累积窗口定时器
     },
     physicalModifiers: {
         Control: false,
@@ -17700,6 +17705,51 @@ function shouldHandleCustomScroll(event) {
         // 检测是否为触控板双指滑动
         const isTouchpad = __isCanvasTouchpadLikeScrollInput(event);
 
+        // 触摸板横向滚动防误触：如果已锁定为横向滚动模式，直接拦截给画布
+        if (isTouchpad && CanvasState.touchpadState.horizontalScrollLocked) {
+            return true;
+        }
+
+        // 触摸板横向滑动意图检测：累积短窗口内的 deltaX/deltaY 来判断方向
+        if (isTouchpad) {
+            const absX = Math.abs(event.deltaX || 0);
+            const absY = Math.abs(event.deltaY || 0);
+
+            // 有明显水平分量时，累积判断
+            if (absX > 0.5) {
+                CanvasState.touchpadState.horizontalAccumDeltaX += absX;
+                CanvasState.touchpadState.horizontalAccumDeltaY += absY;
+
+                // 重置累积窗口定时器（80ms 窗口）
+                if (CanvasState.touchpadState.horizontalAccumTimer) {
+                    clearTimeout(CanvasState.touchpadState.horizontalAccumTimer);
+                }
+                CanvasState.touchpadState.horizontalAccumTimer = setTimeout(() => {
+                    // 窗口过期，重置累积
+                    CanvasState.touchpadState.horizontalAccumDeltaX = 0;
+                    CanvasState.touchpadState.horizontalAccumDeltaY = 0;
+                    CanvasState.touchpadState.horizontalAccumTimer = null;
+                }, 80);
+
+                const accumX = CanvasState.touchpadState.horizontalAccumDeltaX;
+                const accumY = CanvasState.touchpadState.horizontalAccumDeltaY;
+
+                // 判定：累积水平 > 阈值 且 水平明显大于垂直（ratio > 1.5）
+                if (accumX > 6 && (accumY < 0.5 || accumX / accumY > 1.5)) {
+                    // 锁定横向滚动模式
+                    CanvasState.touchpadState.horizontalScrollLocked = true;
+                    // 重置累积
+                    CanvasState.touchpadState.horizontalAccumDeltaX = 0;
+                    CanvasState.touchpadState.horizontalAccumDeltaY = 0;
+                    if (CanvasState.touchpadState.horizontalAccumTimer) {
+                        clearTimeout(CanvasState.touchpadState.horizontalAccumTimer);
+                        CanvasState.touchpadState.horizontalAccumTimer = null;
+                    }
+                    return true;
+                }
+            }
+        }
+
         // 如果正在画布级滚动（双指滑动），拦截并让画布处理
         const now = Date.now();
         const recentCanvasScroll = CanvasState.lastCanvasScrollTime && (now - CanvasState.lastCanvasScrollTime < 180);
@@ -17770,9 +17820,11 @@ function handleCanvasCustomScroll(event) {
             clearTimeout(CanvasState.touchpadState.scrollTimeout);
         }
 
-        // 设置新的超时：滚动停止300ms后恢复栏目内滚动
+        // 设置新的超时：滚动停止300ms后恢复栏目内滚动 & 解锁横向滚动
         CanvasState.touchpadState.scrollTimeout = setTimeout(() => {
             CanvasState.touchpadState.isScrolling = false;
+            // 解锁触摸板横向滚动模式
+            CanvasState.touchpadState.horizontalScrollLocked = false;
         }, 300);
     }
 
