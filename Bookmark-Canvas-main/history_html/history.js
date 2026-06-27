@@ -4611,8 +4611,8 @@ const i18n = {
         'en': 'Appearance'
     },
     canvasOtherSettingsText: {
-        'zh_CN': '缩放',
-        'en': 'Zoom'
+        'zh_CN': '滚动',
+        'en': 'Scroll'
     },
     canvasManageSectionGeneralText: {
         'zh_CN': '常规',

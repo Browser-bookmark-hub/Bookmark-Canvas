@@ -2106,6 +2106,9 @@ const SCROLLING_ZOOM_SPEED_BOOST = 1.35;
 const TRACKPAD_ZOOM_RATE_MIN = 0.4;
 const TRACKPAD_ZOOM_RATE_MAX = 3.0;
 const TRACKPAD_ZOOM_RATE_DEFAULT = 1.0;
+const CANVAS_PAN_RATE_MIN = 0.4;
+const CANVAS_PAN_RATE_MAX = 3.0;
+const CANVAS_PAN_RATE_DEFAULT = 1.0;
 const TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER = 3.0;
 const TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR = 100;
 const TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER = 0.44;
@@ -2299,6 +2302,9 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
         p3: { x: 1, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR) }
     },
     trackpadZoomRate: TRACKPAD_ZOOM_RATE_DEFAULT,
+    wheelVerticalPanRate: CANVAS_PAN_RATE_DEFAULT,
+    wheelHorizontalPanRate: CANVAS_PAN_RATE_DEFAULT,
+    trackpadPanRate: CANVAS_PAN_RATE_DEFAULT,
     magnetPoints: {
         m1: { x: 0.67, y: DEFAULT_ZOOM_MAGNET_POINT_1_SPEED },
         m2: { x: 0.4444444444, y: DEFAULT_ZOOM_MAGNET_POINT_2_SPEED }
@@ -2625,6 +2631,9 @@ function normalizeCanvasOtherSettings(input) {
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
     out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
     out.trackpadZoomRate = __clampNumber(input.trackpadZoomRate, TRACKPAD_ZOOM_RATE_MIN, TRACKPAD_ZOOM_RATE_MAX, out.trackpadZoomRate);
+    out.wheelVerticalPanRate = __clampNumber(input.wheelVerticalPanRate, CANVAS_PAN_RATE_MIN, CANVAS_PAN_RATE_MAX, out.wheelVerticalPanRate);
+    out.wheelHorizontalPanRate = __clampNumber(input.wheelHorizontalPanRate, CANVAS_PAN_RATE_MIN, CANVAS_PAN_RATE_MAX, out.wheelHorizontalPanRate);
+    out.trackpadPanRate = __clampNumber(input.trackpadPanRate, CANVAS_PAN_RATE_MIN, CANVAS_PAN_RATE_MAX, out.trackpadPanRate);
     out.magnetPoints = __syncMagnetPointPositionsFromPerf(input.magnetPoints);
     return out;
 }
@@ -3127,8 +3136,8 @@ function __applyPerfLinkedStyles() {
     const isEn = lang === 'en';
     if (magnetJumpLabel) {
         magnetJumpLabel.textContent = flags
-            ? (isEn ? 'Source: Zoom Settings → Zoom Speed & Magnet' : '来源：缩放设置 → 缩放速率与磁矩')
-            : (isEn ? 'Go to Zoom Settings → Zoom Speed & Magnet' : '跳转到缩放设置 → 缩放速率与磁矩');
+            ? (isEn ? 'Source: Scroll & Zoom Settings → 2.3 Zoom Speed' : '来源：滚动与缩放设置 → 2.3 缩放速率调节')
+            : (isEn ? 'Go to Scroll & Zoom Settings → 2.3 Zoom Speed' : '跳转到滚动与缩放设置 → 2.3 缩放速率调节');
         toggleLinkedText(magnetJumpLabel);
     }
     if (magnetJumpBtn) {
@@ -7276,23 +7285,36 @@ function setupCanvasZoomAndPan() {
             markScrolling();
 
             const normalizedWheel = __normalizeCanvasWheelEventDeltas(e);
-            // 检测是否为触控板（避免把 Windows 离散滚轮误判成触控板）
-            const isTouchpad = __isCanvasTouchpadLikeScrollInput(e, normalizedWheel);
+            let isTouchpad = __isCanvasTouchpadLikeScrollInput(e, normalizedWheel);
+            if (isTouchpad && !__shouldTreatMacWheelAsTouchpad(e, normalizedWheel)) {
+                isTouchpad = false;
+            }
             const wheelDeltaX = normalizedWheel.deltaX;
             const wheelDeltaY = normalizedWheel.deltaY;
 
-            // 滚动系数 - 根据缩放比例动态调整（缩得极小时对速度做上限，避免过快）
             const zoomForScroll = getCanvasZoomForScrollFactor();
             let scrollFactor = 1.0 / zoomForScroll;
-
-            // 根据缩放比例动态调整基础系数，让不同缩放级别下的滚动感觉更一致
-            const zoomAdjustment = Math.pow(zoomForScroll, 0.3); // 使用较小的指数，减少缩放对速率的影响
+            const zoomAdjustment = Math.pow(zoomForScroll, 0.3);
             scrollFactor *= zoomAdjustment;
 
+            const trackpadPanRate = getCanvasTrackpadPanRate();
+            const wheelVerticalPanRate = getCanvasWheelVerticalPanRate();
+            const wheelHorizontalPanRate = getCanvasWheelHorizontalPanRate();
+            const preferSnappyPan = __shouldPreferSnappyCanvasPan(
+                isTouchpad,
+                wheelVerticalPanRate,
+                wheelHorizontalPanRate,
+                trackpadPanRate
+            );
+
             if (isTouchpad) {
-                scrollFactor *= 0.7; // 触控板降低灵敏度（从1.4降到0.7）
+                if (preferSnappyPan) {
+                    scrollFactor = 0.8 * trackpadPanRate;
+                } else {
+                    scrollFactor *= 0.7 * trackpadPanRate;
+                }
             } else {
-                scrollFactor *= 0.8; // 鼠标滚轮也稍微降低一点灵敏度
+                scrollFactor *= 0.8;
             }
 
             const prevPanX = CanvasState.panOffsetX;
@@ -7315,13 +7337,13 @@ function setupCanvasZoomAndPan() {
                     // Shift + 滚轮：横向滚动
                     const horizontalDelta = wheelDeltaX !== 0 ? wheelDeltaX : wheelDeltaY;
                     if (horizontalDelta !== 0) {
-                        CanvasState.panOffsetX -= horizontalDelta * scrollFactor;
+                        CanvasState.panOffsetX -= horizontalDelta * scrollFactor * wheelHorizontalPanRate;
                         hasUpdate = true;
                     }
                 } else {
                     // 普通滚轮：纵向滚动
                     if (wheelDeltaY !== 0) {
-                        CanvasState.panOffsetY -= wheelDeltaY * scrollFactor;
+                        CanvasState.panOffsetY -= wheelDeltaY * scrollFactor * wheelVerticalPanRate;
                         hasUpdate = true;
                     }
                 }
@@ -10079,6 +10101,83 @@ function getCanvasTrackpadZoomRate(settingsOverride = null) {
     );
 }
 
+function getCanvasWheelVerticalPanRate(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return __clampNumber(
+        settings && settings.wheelVerticalPanRate,
+        CANVAS_PAN_RATE_MIN,
+        CANVAS_PAN_RATE_MAX,
+        CANVAS_PAN_RATE_DEFAULT
+    );
+}
+
+function getCanvasWheelHorizontalPanRate(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return __clampNumber(
+        settings && settings.wheelHorizontalPanRate,
+        CANVAS_PAN_RATE_MIN,
+        CANVAS_PAN_RATE_MAX,
+        CANVAS_PAN_RATE_DEFAULT
+    );
+}
+
+function getCanvasTrackpadPanRate(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return __clampNumber(
+        settings && settings.trackpadPanRate,
+        CANVAS_PAN_RATE_MIN,
+        CANVAS_PAN_RATE_MAX,
+        CANVAS_PAN_RATE_DEFAULT
+    );
+}
+
+// 平面滚动速率 < 100% 时，加快拖尾收敛，避免“步进变小但惯性拖尾不变”的黏滞感。
+function __getCanvasPanTailCompensation(rate) {
+    const normalized = __clampNumber(rate, CANVAS_PAN_RATE_MIN, CANVAS_PAN_RATE_MAX, CANVAS_PAN_RATE_DEFAULT);
+    if (normalized >= 1) return 1;
+    return 1 / normalized;
+}
+
+function __getCanvasWheelPanTailCompensation(axis) {
+    const rate = axis === 'horizontal'
+        ? getCanvasWheelHorizontalPanRate()
+        : getCanvasWheelVerticalPanRate();
+    return __getCanvasPanTailCompensation(rate);
+}
+
+function __isCanvasDiscretePanWheelEvent(event) {
+    if (!event) return false;
+    return __isLikelyCanvasDiscreteWheelEvent(event);
+}
+
+function __shouldTreatMacWheelAsTouchpad(event, normalizedWheel) {
+    if (!CANVAS_RUNTIME_PLATFORM.isMac || !event) return true;
+    if (__isCanvasTouchpadPinch(event)) return true;
+    if (__isCanvasDiscretePanWheelEvent(event)) return false;
+    const absX = Math.abs(Number(normalizedWheel.deltaX) || 0);
+    const absY = Math.abs(Number(normalizedWheel.deltaY) || 0);
+    if (absX >= 1 && absY >= 1) return true;
+    return false;
+}
+
+function __shouldPreferSnappyCanvasPan(isTouchpad, wheelVerticalPanRate, wheelHorizontalPanRate, trackpadPanRate) {
+    if (isTouchpad) return trackpadPanRate <= 1;
+    // 鼠标滚轮始终同步直达；速率百分比只改变步进大小，不引入额外拖尾。
+    return true;
+}
+
+function __syncCanvasPanVisualImmediate() {
+    if (CanvasState.scrollAnimation.frameId) {
+        cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
+        CanvasState.scrollAnimation.frameId = null;
+    }
+    CanvasState.scrollAnimation.source = 'direct';
+    CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+    CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+    applyPanOffsetFast();
+    updateScrollbarThumbsLightweight();
+}
+
 function __getCanvasWheelDeltaModeScale(event) {
     if (!event) return 1;
     const mode = Number(event.deltaMode);
@@ -10232,11 +10331,10 @@ function __resetWindowsWheelZoomDirLock() {
 
 function __shouldSmoothCanvasWheelPan(event, isTouchpad) {
     if (isTouchpad) return false;
-    const isDiscreteWheel = __isCanvasDiscreteWheelEvent(event);
-    if (!isDiscreteWheel) return false;
-    // Windows/Linux 离散滚轮默认直达；如需实验性微平滑，仅由平台常量打开。
-    if (CANVAS_RUNTIME_WINDOWS_LIKE) return WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED;
-    return true;
+    if (!__isCanvasDiscretePanWheelEvent(event)) return false;
+    // 平面滚动速率已直接缩放步进；再叠平滑追赶会在 >100% 时产生“目标跑在前、画面在后”的果冻拖尾。
+    // Windows/Linux 如需实验性微平滑，仅由平台常量打开。
+    return CANVAS_RUNTIME_WINDOWS_LIKE && WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED;
 }
 
 function __isCanvasTouchpadPinch(e) {
@@ -14815,15 +14913,27 @@ function __startWinWheelPanPump() {
 
     const pump = () => {
         winWheelPanPumpFrame = null;
-        if (Math.abs(winWheelPanAccumX) < WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL && 
-            Math.abs(winWheelPanAccumY) < WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL) {
+        const residualX = WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL
+            * Math.min(1, getCanvasWheelHorizontalPanRate());
+        const residualY = WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL
+            * Math.min(1, getCanvasWheelVerticalPanRate());
+        if (Math.abs(winWheelPanAccumX) < residualX &&
+            Math.abs(winWheelPanAccumY) < residualY) {
             winWheelPanAccumX = 0;
             winWheelPanAccumY = 0;
             return;
         }
 
-        const stepX = winWheelPanAccumX * WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN;
-        const stepY = winWheelPanAccumY * WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN;
+        const drainX = Math.min(
+            0.9,
+            WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN * __getCanvasWheelPanTailCompensation('horizontal')
+        );
+        const drainY = Math.min(
+            0.9,
+            WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN * __getCanvasWheelPanTailCompensation('vertical')
+        );
+        const stepX = winWheelPanAccumX * drainX;
+        const stepY = winWheelPanAccumY * drainY;
         
         winWheelPanAccumX -= stepX;
         winWheelPanAccumY -= stepY;
@@ -14837,8 +14947,8 @@ function __startWinWheelPanPump() {
         applyPanOffsetFast();
         updateScrollbarThumbsLightweight();
 
-        if (Math.abs(winWheelPanAccumX) >= WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL || 
-            Math.abs(winWheelPanAccumY) >= WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL) {
+        if (Math.abs(winWheelPanAccumX) >= residualX ||
+            Math.abs(winWheelPanAccumY) >= residualY) {
             winWheelPanPumpFrame = requestAnimationFrame(pump);
         } else {
             winWheelPanAccumX = 0;
@@ -17820,9 +17930,12 @@ function handleCanvasCustomScroll(event) {
     }
 
     // 检测是否为触控板（触控板的 delta 值较小且连续，deltaMode 通常为 0）
-    const isTouchpad = __isCanvasTouchpadLikeScrollInput(event, normalizedWheel);
-    const isDiscreteWheel = __isCanvasDiscreteWheelEvent(event);
-    const panInertiaInputType = __resolveCanvasPanInertiaInputType(isTouchpad, isDiscreteWheel);
+    let isTouchpad = __isCanvasTouchpadLikeScrollInput(event, normalizedWheel);
+    if (isTouchpad && !__shouldTreatMacWheelAsTouchpad(event, normalizedWheel)) {
+        isTouchpad = false;
+    }
+    const isDiscretePanWheel = __isCanvasDiscretePanWheelEvent(event);
+    const panInertiaInputType = __resolveCanvasPanInertiaInputType(isTouchpad, isDiscretePanWheel);
     __logCanvasWinInput('wheel-pan-input', {
         event: __snapshotCanvasWheelEvent(event),
         normalizedDeltaX: __roundCanvasDebugNumber(normalizedWheel.deltaX, 3),
@@ -17832,7 +17945,7 @@ function handleCanvasCustomScroll(event) {
         horizontalEnabled,
         verticalEnabled,
         isTouchpad,
-        isDiscreteWheel,
+        isDiscretePanWheel,
         panInertiaInputType
     }, { throttleKey: 'wheel-pan-input', throttleMs: 80 });
 
@@ -17858,23 +17971,34 @@ function handleCanvasCustomScroll(event) {
     const zoomForScroll = getCanvasZoomForScrollFactor();
     let scrollFactor = 1.0;
 
+    const trackpadPanRate = getCanvasTrackpadPanRate();
+    const wheelVerticalPanRate = getCanvasWheelVerticalPanRate();
+    const wheelHorizontalPanRate = getCanvasWheelHorizontalPanRate();
+
+    const preferSnappyPan = __shouldPreferSnappyCanvasPan(
+        isTouchpad,
+        wheelVerticalPanRate,
+        wheelHorizontalPanRate,
+        trackpadPanRate
+    );
+
     if (isTouchpad) {
-        scrollFactor = 1.0 / zoomForScroll;
-        scrollFactor *= Math.pow(zoomForScroll, 0.3);
+        if (preferSnappyPan) {
+            scrollFactor = 0.8 * trackpadPanRate;
+        } else {
+            scrollFactor = 1.0 / zoomForScroll;
+            scrollFactor *= Math.pow(zoomForScroll, 0.3);
+            scrollFactor *= 0.7 * trackpadPanRate;
 
-        // 触控板使用适中的滚动系数（降低灵敏度）
-        scrollFactor *= 0.7; // 降低灵敏度（从1.4降到0.7）
-
-        // 根据滚动速度动态调整响应：快速滚动时略微提升（减少加成幅度）
-        const scrollSpeed = Math.sqrt(horizontalDelta * horizontalDelta + verticalDelta * verticalDelta);
-        if (scrollSpeed > 8) { // 提高阈值（从5到8）
-            const speedBoost = Math.min(1.15, 1 + (scrollSpeed - 8) / 200); // 减少加成幅度
-            scrollFactor *= speedBoost;
+            const scrollSpeed = Math.sqrt(horizontalDelta * horizontalDelta + verticalDelta * verticalDelta);
+            if (scrollSpeed > 8) {
+                const speedBoost = Math.min(1.15, 1 + (scrollSpeed - 8) / 200);
+                scrollFactor *= speedBoost;
+            }
         }
     } else {
-        // 鼠标滚轮也应用缩放调整，但保持相对较快的响应
-        scrollFactor *= 0.8; // 鼠标滚轮也稍微降低一点灵敏度
-        if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel) {
+        scrollFactor *= 0.8;
+        if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel) {
             scrollFactor *= WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR;
         }
     }
@@ -17885,12 +18009,14 @@ function handleCanvasCustomScroll(event) {
     let panDeltaY = 0;
 
     if (horizontalEnabled && horizontalDelta !== 0) {
-        panDeltaX -= horizontalDelta * scrollFactor;
+        const horizontalRate = isTouchpad ? 1 : wheelHorizontalPanRate;
+        panDeltaX -= horizontalDelta * scrollFactor * horizontalRate;
         hasUpdate = true;
     }
 
     if (verticalEnabled && verticalDelta !== 0) {
-        panDeltaY -= verticalDelta * scrollFactor;
+        const verticalRate = isTouchpad ? 1 : wheelVerticalPanRate;
+        panDeltaY -= verticalDelta * scrollFactor * verticalRate;
         hasUpdate = true;
     }
 
@@ -17917,22 +18043,26 @@ function handleCanvasCustomScroll(event) {
                 CanvasState.scrollAnimation.frameId = requestAnimationFrame(runScrollAnimation);
             }
         } else {
-            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel && CanvasState.scrollAnimation.frameId) {
+            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel && CanvasState.scrollAnimation.frameId) {
                 cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
                 CanvasState.scrollAnimation.frameId = null;
                 CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
                 CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
                 CanvasState.scrollAnimation.source = null;
             }
-            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel) {
+            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel) {
                 winWheelPanAccumX += panDeltaX;
                 winWheelPanAccumY += panDeltaY;
                 __startWinWheelPanPump();
             } else {
-                CanvasState.scrollAnimation.source = 'direct';
                 CanvasState.panOffsetX += panDeltaX;
                 CanvasState.panOffsetY += panDeltaY;
-                scheduleScrollUpdate();
+                if (preferSnappyPan) {
+                    __syncCanvasPanVisualImmediate();
+                } else {
+                    CanvasState.scrollAnimation.source = 'direct';
+                    scheduleScrollUpdate();
+                }
             }
         }
         __logCanvasWinInput('wheel-pan-apply', {
@@ -18357,6 +18487,9 @@ function getScrollEaseFactor(axis) {
     let ease = Math.min(windowsLike ? 0.50 : 0.52, base + zoomBoost);
     if (isWindowsWheelMicroSmooth) {
         ease = Math.min(0.82, ease * WINDOWS_LINUX_WHEEL_PAN_EASE_MULTIPLIER);
+    }
+    if (animationSource === 'wheel') {
+        ease = Math.min(0.95, ease * __getCanvasWheelPanTailCompensation(axis));
     }
     return ease;
 }
@@ -41363,6 +41496,9 @@ function openCanvasOtherSettingsModal() {
     const unlockSync = modal.querySelector('#otherTempColorUnlockSync');
     const colorAutoLock = modal.querySelector('#otherTempColorAutoLockAfterSplit');
     const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
+    const wheelVerticalPanRateInput = modal.querySelector('#otherWheelVerticalPanRate');
+    const wheelHorizontalPanRateInput = modal.querySelector('#otherWheelHorizontalPanRate');
+    const trackpadPanRateInput = modal.querySelector('#otherTrackpadPanRate');
     const useDefaultCurve = !(settings && settings.useDefaultZoomCurve === false);
     const defaultCurveToggle = modal.querySelector('#otherUseDefaultZoomCurve');
     if (autoLink) autoLink.checked = !!settings.autoLinkSplit;
@@ -41372,6 +41508,15 @@ function openCanvasOtherSettingsModal() {
     if (trackpadZoomRateInput) {
         const trackpadPercent = Math.round(getCanvasTrackpadZoomRate(settings) * 100);
         trackpadZoomRateInput.value = String(trackpadPercent);
+    }
+    if (wheelVerticalPanRateInput) {
+        wheelVerticalPanRateInput.value = String(Math.round(getCanvasWheelVerticalPanRate(settings) * 100));
+    }
+    if (wheelHorizontalPanRateInput) {
+        wheelHorizontalPanRateInput.value = String(Math.round(getCanvasWheelHorizontalPanRate(settings) * 100));
+    }
+    if (trackpadPanRateInput) {
+        trackpadPanRateInput.value = String(Math.round(getCanvasTrackpadPanRate(settings) * 100));
     }
     const minZoomInput = modal.querySelector('#otherInputMinZoom');
     if (minZoomInput) {
@@ -41458,6 +41603,9 @@ function saveCanvasOtherSettings(options = {}) {
     const colorAutoLock = modal.querySelector('#otherTempColorAutoLockAfterSplit');
     const defaultEdgeDirInput = modal.querySelector('#otherDefaultEdgeDirection');
     const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
+    const wheelVerticalPanRateInput = modal.querySelector('#otherWheelVerticalPanRate');
+    const wheelHorizontalPanRateInput = modal.querySelector('#otherWheelHorizontalPanRate');
+    const trackpadPanRateInput = modal.querySelector('#otherTrackpadPanRate');
     const useDefault = (modal && typeof modal._useDefaultZoomCurve === 'boolean') ? modal._useDefaultZoomCurve : !(prevSettings && prevSettings.useDefaultZoomCurve === false);
     const defaultCurve = __cloneDefaultOtherSettings().zoomCurve;
     const defaultMagnets = __getDefaultMagnetPointsFromPerf();
@@ -41472,6 +41620,45 @@ function saveCanvasOtherSettings(options = {}) {
     );
     if (trackpadZoomRateInput && document.activeElement !== trackpadZoomRateInput) {
         trackpadZoomRateInput.value = String(Math.round(trackpadRatePercent));
+    }
+
+    const wheelVerticalPanRatePercentRaw = wheelVerticalPanRateInput
+        ? parseFloat(wheelVerticalPanRateInput.value)
+        : (getCanvasWheelVerticalPanRate(prevSettings) * 100);
+    const wheelVerticalPanRatePercent = __clampNumber(
+        wheelVerticalPanRatePercentRaw,
+        CANVAS_PAN_RATE_MIN * 100,
+        CANVAS_PAN_RATE_MAX * 100,
+        getCanvasWheelVerticalPanRate(prevSettings) * 100
+    );
+    if (wheelVerticalPanRateInput && document.activeElement !== wheelVerticalPanRateInput) {
+        wheelVerticalPanRateInput.value = String(Math.round(wheelVerticalPanRatePercent));
+    }
+
+    const wheelHorizontalPanRatePercentRaw = wheelHorizontalPanRateInput
+        ? parseFloat(wheelHorizontalPanRateInput.value)
+        : (getCanvasWheelHorizontalPanRate(prevSettings) * 100);
+    const wheelHorizontalPanRatePercent = __clampNumber(
+        wheelHorizontalPanRatePercentRaw,
+        CANVAS_PAN_RATE_MIN * 100,
+        CANVAS_PAN_RATE_MAX * 100,
+        getCanvasWheelHorizontalPanRate(prevSettings) * 100
+    );
+    if (wheelHorizontalPanRateInput && document.activeElement !== wheelHorizontalPanRateInput) {
+        wheelHorizontalPanRateInput.value = String(Math.round(wheelHorizontalPanRatePercent));
+    }
+
+    const trackpadPanRatePercentRaw = trackpadPanRateInput
+        ? parseFloat(trackpadPanRateInput.value)
+        : (getCanvasTrackpadPanRate(prevSettings) * 100);
+    const trackpadPanRatePercent = __clampNumber(
+        trackpadPanRatePercentRaw,
+        CANVAS_PAN_RATE_MIN * 100,
+        CANVAS_PAN_RATE_MAX * 100,
+        getCanvasTrackpadPanRate(prevSettings) * 100
+    );
+    if (trackpadPanRateInput && document.activeElement !== trackpadPanRateInput) {
+        trackpadPanRateInput.value = String(Math.round(trackpadPanRatePercent));
     }
 
     const bookmarkTagPosition = __getAppearanceRadioValue(modal, 'other-bookmark-tag-position', prevSettings.bookmarkTreeTagPosition || 'auto');
@@ -41513,6 +41700,9 @@ function saveCanvasOtherSettings(options = {}) {
         useDefaultZoomCurve: useDefault,
         zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || prevSettings.zoomCurve || getCanvasZoomCurveSettings()),
         trackpadZoomRate: trackpadRatePercent / 100,
+        wheelVerticalPanRate: wheelVerticalPanRatePercent / 100,
+        wheelHorizontalPanRate: wheelHorizontalPanRatePercent / 100,
+        trackpadPanRate: trackpadPanRatePercent / 100,
         magnetPoints: useDefault ? defaultMagnets : (modal._magnetPoints || prevSettings.magnetPoints || getCanvasZoomMagnetPoints())
     };
 
@@ -42224,14 +42414,66 @@ function createCanvasOtherSettingsModal() {
         <div class="modal-content other-settings-modal">
             <div class="modal-header">
                 <div class="modal-header-left">
-                    <h3>${isEn ? 'Zoom Settings' : '缩放设置'}</h3>
+                    <h3>${isEn ? 'Scroll & Zoom Settings' : '滚动与缩放设置'}</h3>
                 </div>
                 <button class="perf-modal-close" id="otherModalCloseBtn"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
-                <!-- 全屏模式默认缩放比率 -->
+                <!-- 1. 平面滚动速率调节 -->
                 <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Fullscreen Default Zoom' : '全屏模式默认缩放比率'}</div>
+                    <div class="detail-section-title">${isEn ? '1. Pan Scroll Speed' : '1. 平面滚动速率调节'}</div>
+                    <div class="appearance-row" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px;">
+                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Vertical' : '垂直'}</div>
+                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                                <input
+                                    type="number"
+                                    id="otherWheelVerticalPanRate"
+                                    class="other-trackpad-speed-input"
+                                    min="${Math.round(CANVAS_PAN_RATE_MIN * 100)}"
+                                    max="${Math.round(CANVAS_PAN_RATE_MAX * 100)}"
+                                    step="5"
+                                    style="width: 70px; text-align: center;"
+                                >
+                                <span class="other-trackpad-speed-unit">%</span>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px;">
+                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Horizontal (Shift)' : '水平(Shift)'}</div>
+                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                                <input
+                                    type="number"
+                                    id="otherWheelHorizontalPanRate"
+                                    class="other-trackpad-speed-input"
+                                    min="${Math.round(CANVAS_PAN_RATE_MIN * 100)}"
+                                    max="${Math.round(CANVAS_PAN_RATE_MAX * 100)}"
+                                    step="5"
+                                    style="width: 70px; text-align: center;"
+                                >
+                                <span class="other-trackpad-speed-unit">%</span>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px;">
+                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Trackpad' : '触控板'}</div>
+                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                                <input
+                                    type="number"
+                                    id="otherTrackpadPanRate"
+                                    class="other-trackpad-speed-input"
+                                    min="${Math.round(CANVAS_PAN_RATE_MIN * 100)}"
+                                    max="${Math.round(CANVAS_PAN_RATE_MAX * 100)}"
+                                    step="5"
+                                    style="width: 70px; text-align: center;"
+                                >
+                                <span class="other-trackpad-speed-unit">%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2.1 全屏模式默认缩放比率 -->
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? '2.1 Fullscreen Default Zoom' : '2.1 全屏模式默认缩放比率'}</div>
                     <div class="appearance-row" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
                         <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
                             <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Section (Permanent/Temp)' : '栏目卡片（永久/临时）'}</div>
@@ -42250,9 +42492,9 @@ function createCanvasOtherSettingsModal() {
                     </div>
                 </div>
 
-                <!-- 缩放上下限 -->
+                <!-- 2.2 缩放上下限 -->
                 <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Zoom Limits' : '缩放上下限'}</div>
+                    <div class="detail-section-title">${isEn ? '2.2 Zoom Limits' : '2.2 缩放上下限'}</div>
                     <div class="appearance-row" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
                         <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
                             <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Minimum Zoom Limit' : '缩放下限'}</div>
@@ -42287,12 +42529,12 @@ function createCanvasOtherSettingsModal() {
                     </div>
                 </div>
 
-                <!-- 缩放速率与磁矩 -->
+                <!-- 2.3 缩放速率调节 -->
                 <div class="detail-section">
-                    <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? 'Zoom Speed & Magnet' : '缩放速率与磁矩'}</div>
+                    <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? '2.3 Zoom Speed' : '2.3 缩放速率调节'}</div>
                     <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note" style="margin-left:8px;font-size:12px;color:rgba(var(--text-color-rgb),0.5);font-weight:normal;">${isEn ? '(Pinch)' : '（双指捏合）'}</span></div>
                     <div class="appearance-row other-sub-row other-trackpad-speed-row">
-                        <div class="appearance-row-label">${isEn ? 'Smooth average speed (independent)' : '平滑平均速率（独立于滚动曲线/磁矩）'}</div>
+                        <div class="appearance-row-label">${isEn ? 'Pinch zoom speed (independent from pan scroll)' : '捏合缩放速率（独立于平面滚动）'}</div>
                         <div class="appearance-row-content appearance-row-content-inline">
                             <input
                                 type="number"
@@ -42402,6 +42644,40 @@ function createCanvasOtherSettingsModal() {
     const safeToggle = modal.querySelector('#otherMagnetSafeToggle');
     const midToggle = modal.querySelector('#otherMagnetMidToggle');
     const trackpadZoomRateInput = modal.querySelector('#otherTrackpadZoomRate');
+    const wheelVerticalPanRateInput = modal.querySelector('#otherWheelVerticalPanRate');
+    const wheelHorizontalPanRateInput = modal.querySelector('#otherWheelHorizontalPanRate');
+    const trackpadPanRateInput = modal.querySelector('#otherTrackpadPanRate');
+    const bindPanRateInput = (input) => {
+        if (!input) return;
+        const normalizePanRateInput = () => {
+            const normalized = __clampNumber(
+                parseFloat(input.value),
+                CANVAS_PAN_RATE_MIN * 100,
+                CANVAS_PAN_RATE_MAX * 100,
+                CANVAS_PAN_RATE_DEFAULT * 100
+            );
+            input.value = String(Math.round(normalized));
+        };
+        input.addEventListener('change', () => {
+            normalizePanRateInput();
+            scheduleOtherSave();
+        });
+        input.addEventListener('blur', () => {
+            normalizePanRateInput();
+        });
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                if (event.isComposing) return;
+                event.preventDefault();
+                normalizePanRateInput();
+                scheduleOtherSave();
+                input.blur();
+            }
+        });
+    };
+    bindPanRateInput(wheelVerticalPanRateInput);
+    bindPanRateInput(wheelHorizontalPanRateInput);
+    bindPanRateInput(trackpadPanRateInput);
     if (defaultToggle) {
         defaultToggle.addEventListener('click', (e) => {
             e.preventDefault();
