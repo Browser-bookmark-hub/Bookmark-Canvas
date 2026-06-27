@@ -2099,6 +2099,7 @@ const CANVAS_OTHER_SETTINGS_KEY = 'canvas-other-settings-v1';
 const DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y = 0.65;
 const ZOOM_CURVE_MAX_FACTOR = 1.6;
 const ZOOM_CURVE_ABS_MAX_FACTOR = 2.4;
+const ZOOM_CURVE_CHART_Y_MAX = 2.0;
 const ZOOM_CURVE_EXPONENT = 1.35;
 const ZOOM_CURVE_RAW_MAX = Math.pow(ZOOM_CURVE_ABS_MAX_FACTOR / ZOOM_CURVE_MAX_FACTOR, 1 / ZOOM_CURVE_EXPONENT);
 const ZOOM_SPEED_GLOBAL_MULTIPLIER = 0.5;
@@ -2435,11 +2436,147 @@ function __getDefaultMagnetPointsFromPerf(baseMagnets) {
     };
 }
 
-function __getCanvasMagnetNormXForPercent(percent) {
+const ZOOM_CURVE_AXIS_VERSION = 2;
+
+function __getOtherCurveZoomAxis() {
     const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
-    const maxPercent = 100;
+    const maxPercent = Math.max(100, getCanvasMaxZoomLimit() || 300);
     const range = Math.max(1, maxPercent - minPercent);
-    return __clamp01((percent - minPercent) / range);
+    const viewportEndPercent = 100;
+    const scrollable = maxPercent > viewportEndPercent;
+    const viewportRange = Math.max(1, viewportEndPercent - minPercent);
+    const contentScale = scrollable ? (range / viewportRange) : 1;
+    return {
+        minPercent,
+        maxPercent,
+        range,
+        viewportEndPercent,
+        viewportRange,
+        scrollable,
+        contentScale
+    };
+}
+
+function __getLegacyCurveZoomAxis(minPercent) {
+    const safeMin = Math.max(1, Math.min(100, minPercent || 10));
+    return {
+        minPercent: safeMin,
+        maxPercent: 100,
+        range: Math.max(1, 100 - safeMin)
+    };
+}
+
+function __percentFromNormX(axis, nx) {
+    return axis.minPercent + __clamp01(nx) * axis.range;
+}
+
+function __normXFromPercent(axis, percent) {
+    return __clamp01((percent - axis.minPercent) / axis.range);
+}
+
+function __clampPercentToAxis(axis, percent) {
+    if (!axis || !Number.isFinite(percent)) return axis ? axis.minPercent : 0;
+    return Math.max(axis.minPercent, Math.min(axis.maxPercent, percent));
+}
+
+function __reflowCurvePointsForAxisChange(modal, prevAxis, nextAxis) {
+    if (!modal || !prevAxis || !nextAxis) return false;
+    const axisChanged = prevAxis.minPercent !== nextAxis.minPercent || prevAxis.maxPercent !== nextAxis.maxPercent;
+    if (!axisChanged) return false;
+
+    const curve = __normalizeZoomCurve(modal._zoomCurve || getCanvasZoomCurveSettings());
+    const magnets = __normalizeMagnetPoints(modal._magnetPoints || getCanvasZoomMagnetPoints());
+    const minGap = 0.04;
+    const magnetGap = 0.02;
+
+    const reflowNormX = (nx) => {
+        const percent = __percentFromNormX(prevAxis, nx);
+        const clamped = __clampPercentToAxis(nextAxis, percent);
+        return __normXFromPercent(nextAxis, clamped);
+    };
+
+    curve.p0.x = 0;
+    curve.p3.x = 1;
+    curve.p1.x = reflowNormX(curve.p1.x);
+    curve.p2.x = reflowNormX(curve.p2.x);
+    if (curve.p1.x > curve.p2.x - minGap) {
+        curve.p2.x = Math.min(1, curve.p1.x + minGap);
+        if (curve.p2.x - curve.p1.x < minGap) {
+            curve.p1.x = Math.max(0, curve.p2.x - minGap);
+        }
+    }
+
+    magnets.m1.x = reflowNormX(magnets.m1.x);
+    magnets.m2.x = reflowNormX(magnets.m2.x);
+    if (magnets.m1.x < magnets.m2.x + magnetGap) {
+        magnets.m1.x = Math.min(1, magnets.m2.x + magnetGap);
+        if (magnets.m1.x - magnets.m2.x < magnetGap) {
+            magnets.m2.x = Math.max(0, magnets.m1.x - magnetGap);
+        }
+    }
+
+    modal._zoomCurve = curve;
+    modal._magnetPoints = magnets;
+    if (!modal._useDefaultZoomCurve) {
+        __syncPerfSettingsFromOtherMagnetPoints(magnets);
+    }
+    return true;
+}
+
+function __restoreOtherZoomMagnetCurveToDefault(modal, options = {}) {
+    if (!modal) return;
+    modal._zoomCurve = __cloneDefaultOtherSettings().zoomCurve;
+    modal._magnetPoints = __getDefaultMagnetPointsFromPerf();
+    __applyPerfDefaultBaselineToPerf();
+    modal._useDefaultZoomCurve = true;
+    modal._curveScrollInitialized = false;
+    modal._curveScrollAxisKey = null;
+
+    if (options.resetZoomLimits) {
+        const minZoomInput = modal.querySelector('#otherInputMinZoom');
+        const maxZoomInput = modal.querySelector('#otherInputMaxZoom');
+        if (minZoomInput) minZoomInput.value = '10';
+        if (maxZoomInput) maxZoomInput.value = '300';
+        try { saveSharedState('canvasMinZoomLimit', 10, { asJSON: false }); } catch (_) { }
+        try { saveSharedState('canvasMaxZoomLimit', 300, { asJSON: false }); } catch (_) { }
+    }
+
+    if (options.resetFullscreenZoom) {
+        const fsSectionInput = modal.querySelector('#appearanceFullScreenSectionZoom');
+        const fsMdInput = modal.querySelector('#appearanceFullScreenMdZoom');
+        const defaults = __getDefaultAppearanceFullscreenZoomSettings();
+        if (fsSectionInput) fsSectionInput.value = String(defaults.section);
+        if (fsMdInput) fsMdInput.value = String(defaults.mdNode);
+    }
+}
+
+function __ensureCurvePointsOnUnifiedAxis(modal) {
+    if (!modal) return;
+    let version = 0;
+    try {
+        version = parseInt(localStorage.getItem('canvasZoomCurveAxisVersion'), 10) || 0;
+    } catch (_) { }
+    if (version >= ZOOM_CURVE_AXIS_VERSION) return;
+
+    const nextAxis = __getOtherCurveZoomAxis();
+    const legacyAxis = __getLegacyCurveZoomAxis(nextAxis.minPercent);
+    __reflowCurvePointsForAxisChange(modal, legacyAxis, nextAxis);
+    try {
+        localStorage.setItem('canvasZoomCurveAxisVersion', String(ZOOM_CURVE_AXIS_VERSION));
+    } catch (_) { }
+    try {
+        const settings = getCanvasOtherSettings();
+        if (settings) {
+            settings.zoomCurve = modal._zoomCurve || settings.zoomCurve;
+            settings.magnetPoints = modal._magnetPoints || settings.magnetPoints;
+            saveSharedState(CANVAS_OTHER_SETTINGS_KEY, settings);
+        }
+    } catch (_) { }
+}
+
+function __getCanvasMagnetNormXForPercent(percent) {
+    const axis = __getOtherCurveZoomAxis();
+    return __normXFromPercent(axis, percent);
 }
 
 function __syncMagnetPointPositionsFromPerf(points) {
@@ -3148,15 +3285,13 @@ function __applyPerfLinkedStyles() {
 function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
     __ensurePerfManualBaseline();
     const points = __normalizeMagnetPoints(magnetPoints);
-    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
-    const maxPercent = 100;
-    const range = Math.max(1, maxPercent - minPercent);
-    const safePercent = minPercent + (__clamp01(points.m1.x) * range);
-    const switchPercent = minPercent + (__clamp01(points.m2.x) * range);
+    const axis = __getOtherCurveZoomAxis();
+    const safePercent = __percentFromNormX(axis, points.m1.x);
+    const switchPercent = __percentFromNormX(axis, points.m2.x);
 
-    const minV = 1;
-    const maxV = 100;
-    const enterPercent = Math.max(minV, Math.min(maxV, switchPercent));
+    const minV = axis.minPercent;
+    const maxV = axis.maxPercent;
+    const enterPercent = __clampPercentToAxis(axis, switchPercent);
     const exitPercent = __deriveCanvasLowDetailPrewarmThreshold(enterPercent / 100) * 100;
 
     const safeZoneSettings = (() => {
@@ -3169,7 +3304,7 @@ function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
         } catch (_) { }
         return { threshold: 0.70, enabled: true };
     })();
-    safeZoneSettings.threshold = safePercent / 100;
+    safeZoneSettings.threshold = __clampPercentToAxis(axis, safePercent) / 100;
     try { saveSharedState('canvasSafeZoneSettings', safeZoneSettings); } catch (_) { }
 
     const zoomThresholds = {
@@ -10074,9 +10209,7 @@ function __solveBezierTForX(x, x1, x2) {
 
 function __getZoomSpeedFactorFromCurve(displayZoom, curve) {
     if (!curve || !curve.p1 || !curve.p2) return 1;
-    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
-    const maxPercent = 100;
-    const range = Math.max(1, maxPercent - minPercent);
+    const { minPercent, maxPercent, range } = __getOtherCurveZoomAxis();
     const percent = Math.max(minPercent, Math.min(maxPercent, (displayZoom || 1) * 100));
     const x = (percent - minPercent) / range;
     const t = __solveBezierTForX(x, curve.p1.x, curve.p2.x);
@@ -15361,7 +15494,7 @@ function __runCanvasSmoothWheelZoomStep() {
     const baseZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
     const displayCurrent = currentZoom / baseZoom;
     const displayTarget = targetZoom / baseZoom;
-    const curveFactor = Math.max(0.2, Math.min(2.4, getCanvasZoomSpeedFactor(displayCurrent)));
+    const curveFactor = Math.max(0.2, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, getCanvasZoomSpeedFactor(displayCurrent)));
     const magnet = getCanvasZoomMagnetEffect(displayCurrent, displayTarget);
     const wheelStepMultiplierRaw = Number(smoothWheelZoomOptions && smoothWheelZoomOptions.wheelSmoothStepMultiplier);
     const wheelStepMultiplier = Number.isFinite(wheelStepMultiplierRaw)
@@ -41545,6 +41678,7 @@ function openCanvasOtherSettingsModal() {
     const baseMagnets = __normalizeMagnetPoints(settings.magnetPoints);
     modal._zoomCurve = useDefaultCurve ? __cloneDefaultOtherSettings().zoomCurve : baseCurve;
     modal._magnetPoints = useDefaultCurve ? __getDefaultMagnetPointsFromPerf() : baseMagnets;
+    __ensureCurvePointsOnUnifiedAxis(modal);
     if (useDefaultCurve && __readPerfLinkedFromOther()) {
         __applyPerfDefaultBaselineToPerf();
     }
@@ -41784,6 +41918,60 @@ function __updateOtherMagnetLegend(modal, meta) {
     if (midLegend) midLegend.classList.toggle('is-disabled', !meta.midEnabled);
 }
 
+function __getOtherCurveVisibleXRange(modal, axis) {
+    const plotEl = modal ? modal.querySelector('#otherZoomMagnetPlot') : null;
+    const scrollEl = modal ? modal.querySelector('#otherZoomMagnetPlotScroll') : null;
+    const viewportWidth = (plotEl && plotEl.clientWidth) ? plotEl.clientWidth : 360;
+    const contentWidth = axis.scrollable ? viewportWidth * axis.contentScale : viewportWidth;
+    const maxScroll = Math.max(0, contentWidth - viewportWidth);
+    const scrollLeft = scrollEl ? scrollEl.scrollLeft : 0;
+    const scrollRatio = maxScroll > 0 ? (scrollLeft / maxScroll) : 0;
+    const scrollablePercentExtent = axis.maxPercent - axis.viewportEndPercent;
+    const visibleMin = axis.minPercent + scrollRatio * scrollablePercentExtent;
+    const visibleMax = Math.min(axis.maxPercent, visibleMin + axis.viewportRange);
+    return { visibleMin, visibleMax, viewportWidth, contentWidth, scrollLeft, maxScroll };
+}
+
+function __updateOtherCurveXAxisTicks(modal, axis) {
+    if (!modal || !axis) return;
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    const tickCount = 4;
+    const { visibleMin, visibleMax } = __getOtherCurveVisibleXRange(modal, axis);
+    const visibleRange = Math.max(1, visibleMax - visibleMin);
+    const xTickLabels = modal.querySelectorAll('#otherCurveXAxisTicks .other-curve-tick-label');
+    if (xTickLabels && xTickLabels.length) {
+        for (let i = 0; i <= tickCount && i < xTickLabels.length; i++) {
+            const t = i / tickCount;
+            const v = visibleMin + t * visibleRange;
+            const label = (Math.round(v * 10) / 10).toString();
+            xTickLabels[i].textContent = `${label}%`;
+        }
+    }
+    const xTitle = modal.querySelector('#otherCurveXAxisTitle');
+    if (xTitle) xTitle.textContent = isEn ? 'Zoom Ratio (X)' : '缩放比例 (X)';
+}
+
+function __syncOtherCurvePlotScroll(modal, axis, scrollEl, viewportW, contentW) {
+    if (!scrollEl || !modal || !axis) return;
+    const axisKey = `${axis.minPercent}-${axis.maxPercent}`;
+    const axisChanged = modal._curveScrollAxisKey !== axisKey;
+    modal._curveScrollAxisKey = axisKey;
+    scrollEl.classList.toggle('is-scrollable', axis.scrollable);
+    if (!axis.scrollable) {
+        scrollEl.scrollLeft = 0;
+        modal._curveScrollInitialized = false;
+        return;
+    }
+    const maxScroll = Math.max(0, contentW - viewportW);
+    if (!modal._curveScrollInitialized || axisChanged) {
+        scrollEl.scrollLeft = 0;
+        modal._curveScrollInitialized = true;
+    } else {
+        scrollEl.scrollLeft = Math.min(scrollEl.scrollLeft, maxScroll);
+    }
+}
+
 function __renderOtherZoomMagnetCurve(modal) {
     const canvas = modal ? modal.querySelector('#otherZoomMagnetCurve') : null;
     if (!canvas || typeof canvas.getContext !== 'function') return;
@@ -41801,9 +41989,22 @@ function __renderOtherZoomMagnetCurve(modal) {
         ? modal._useDefaultZoomCurve
         : shouldUseDefaultZoomCurve();
 
+    const plotEl = modal ? modal.querySelector('#otherZoomMagnetPlot') : null;
+    const scrollEl = modal ? modal.querySelector('#otherZoomMagnetPlotScroll') : null;
+    const axis = __getOtherCurveZoomAxis();
+    const { minPercent, maxPercent, range } = axis;
+
     const dpr = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth || 360;
-    const cssHeight = canvas.clientHeight || 180;
+    const viewportCssWidth = (plotEl && plotEl.clientWidth) ? plotEl.clientWidth : (scrollEl ? scrollEl.clientWidth : 360);
+    const cssWidth = axis.scrollable
+        ? Math.max(viewportCssWidth, viewportCssWidth * axis.contentScale)
+        : viewportCssWidth;
+    const cssHeight = (plotEl && plotEl.clientHeight) ? plotEl.clientHeight : (canvas.clientHeight || 180);
+    if (scrollEl) {
+        scrollEl.classList.toggle('is-scrollable', axis.scrollable);
+        canvas.style.width = axis.scrollable ? `${cssWidth}px` : '100%';
+        canvas.style.height = '100%';
+    }
     canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
     canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -41824,30 +42025,18 @@ function __renderOtherZoomMagnetCurve(modal) {
     const plotW = Math.max(1, cssWidth - paddingLeft - paddingRight);
     const plotH = Math.max(1, cssHeight - paddingTop - paddingBottom);
 
-    const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
-    const maxPercent = 100;
-    const range = Math.max(1, maxPercent - minPercent);
     const tickCount = 4;
     if (modal) {
-        const xTitle = modal.querySelector('#otherCurveXAxisTitle');
-        if (xTitle) xTitle.textContent = isEn ? 'Zoom Ratio (X)' : '缩放比例 (X)';
         const yTitle = modal.querySelector('#otherCurveYAxisTitle');
         if (yTitle) {
             const label = isEn ? 'Wheel Zoom Speed' : '滚轮缩放速率';
             yTitle.innerHTML = `<span class="other-curve-axis-label">${label}</span><span class="other-curve-axis-indicator"><span class="other-curve-axis-paren">(</span><span class="other-curve-axis-letter">Y</span><span class="other-curve-axis-paren">)</span></span>`;
         }
-        const xTickLabels = modal.querySelectorAll('#otherCurveXAxisTicks .other-curve-tick-label');
-        if (xTickLabels && xTickLabels.length) {
-            for (let i = 0; i <= tickCount && i < xTickLabels.length; i++) {
-                const t = i / tickCount;
-                const v = minPercent + t * range;
-                const label = (Math.round(v * 10) / 10).toString();
-                xTickLabels[i].textContent = `${label}%`;
-            }
-        }
+        __updateOtherCurveXAxisTicks(modal, axis);
     }
     const percentToX = (p) => paddingLeft + ((p - minPercent) / range) * plotW;
-    let maxFactor = ZOOM_CURVE_MAX_FACTOR;
+    const normToX = (nx) => percentToX(__percentFromNormX(axis, nx));
+    let maxFactor = ZOOM_CURVE_CHART_Y_MAX;
     const factorToY = (factor) => {
         const f = Math.max(0, Math.min(maxFactor, factor));
         return paddingTop + (1 - (f / maxFactor)) * plotH;
@@ -41859,8 +42048,8 @@ function __renderOtherZoomMagnetCurve(modal) {
     if (modal) modal._magnetPoints = magnetPoints;
     if (modal) __syncOtherMagnetTogglesFromSettings(modal, settings);
 
-    const safePercent = minPercent + (__clamp01(magnetPoints.m1.x) * range);
-    const switchPercent = minPercent + (__clamp01(magnetPoints.m2.x) * range);
+    const safePercent = __percentFromNormX(axis, magnetPoints.m1.x);
+    const switchPercent = __percentFromNormX(axis, magnetPoints.m2.x);
     const formatPercent = (v) => Number.isFinite(v) ? `${Math.round(v * 10) / 10}%` : '--';
     const formatSpeed = (v) => Number.isFinite(v) ? `${Math.round(v * 100)}%` : '--';
     const safePercentText = `${formatPercent(safePercent)} · ${formatSpeed(magnetPoints.m1.y)}`;
@@ -41913,18 +42102,7 @@ function __renderOtherZoomMagnetCurve(modal) {
     const p1 = curve && curve.p1 ? curve.p1 : { x: 0.25, y: 1 };
     const p2 = curve && curve.p2 ? curve.p2 : { x: 0.67, y: 1 };
     const p3 = curve && curve.p3 ? curve.p3 : { x: 1, y: 1 };
-    const normToX = (nx) => paddingLeft + Math.max(0, Math.min(1, nx)) * plotW;
-    const curveMax = Math.max(
-        __scaleZoomCurveFactor(p0.y),
-        __scaleZoomCurveFactor(p1.y),
-        __scaleZoomCurveFactor(p2.y),
-        __scaleZoomCurveFactor(p3.y)
-    );
-    const magnetMax = Math.max(
-        Number.isFinite(magnetPoints.m1 && magnetPoints.m1.y) ? magnetPoints.m1.y : 0,
-        Number.isFinite(magnetPoints.m2 && magnetPoints.m2.y) ? magnetPoints.m2.y : 0
-    );
-    maxFactor = Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, Math.max(ZOOM_CURVE_MAX_FACTOR, curveMax, magnetMax));
+    maxFactor = ZOOM_CURVE_CHART_Y_MAX;
     if (modal) modal._curveMaxFactor = maxFactor;
     if (modal) {
         const yTickLabels = modal.querySelectorAll('#otherCurveYAxisTicks .other-curve-tick-label');
@@ -42006,17 +42184,19 @@ function __renderOtherZoomMagnetCurve(modal) {
     };
 
     const drawFactorCurve = (getFactor, color, dash = []) => {
+        const sampleCount = Math.max(101, Math.min(2400, Math.ceil(plotW)));
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
         ctx.setLineDash(dash);
         ctx.beginPath();
-        for (let t = 0; t <= 1.001; t += 0.01) {
+        for (let i = 0; i <= sampleCount; i++) {
+            const t = i / sampleCount;
             const percent = minPercent + t * range;
             const x = percentToX(percent);
             const y = factorToY(getFactor(percent));
-            if (t === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }
         ctx.stroke();
         ctx.setLineDash([]);
@@ -42074,9 +42254,9 @@ function __renderOtherZoomMagnetCurve(modal) {
     ctx.font = '11px sans-serif';
     const p0xVal = minPercent;
     const p0yVal = __scaleZoomCurveFactor(p0.y) * 100;
-    const p1xVal = minPercent + (p1.x * range);
+    const p1xVal = __percentFromNormX(axis, p1.x);
     const p1yVal = __scaleZoomCurveFactor(p1.y) * 100;
-    const p2xVal = minPercent + (p2.x * range);
+    const p2xVal = __percentFromNormX(axis, p2.x);
     const p2yVal = __scaleZoomCurveFactor(p2.y) * 100;
     const p3xVal = maxPercent;
     const p3yVal = __scaleZoomCurveFactor(p3.y) * 100;
@@ -42130,8 +42310,14 @@ function __renderOtherZoomMagnetCurve(modal) {
         plotW,
         plotH,
         cssWidth,
-        cssHeight
+        cssHeight,
+        axis
     };
+    if (modal) modal._curveZoomAxis = axis;
+    if (scrollEl) {
+        __syncOtherCurvePlotScroll(modal, axis, scrollEl, viewportCssWidth, cssWidth);
+        __updateOtherCurveXAxisTicks(modal, axis);
+    }
 }
 
 function __clamp01(value) {
@@ -42141,8 +42327,13 @@ function __clamp01(value) {
 
 function __getOtherCurveLayout(modal, canvas) {
     if (modal && modal._curveLayout) return modal._curveLayout;
-    const cssWidth = canvas.clientWidth || 360;
-    const cssHeight = canvas.clientHeight || 180;
+    const axis = (modal && modal._curveZoomAxis) ? modal._curveZoomAxis : __getOtherCurveZoomAxis();
+    const plotEl = modal ? modal.querySelector('#otherZoomMagnetPlot') : null;
+    const viewportCssWidth = (plotEl && plotEl.clientWidth) ? plotEl.clientWidth : 360;
+    const cssWidth = axis.scrollable
+        ? Math.max(viewportCssWidth, viewportCssWidth * axis.contentScale)
+        : (canvas.clientWidth || viewportCssWidth);
+    const cssHeight = (plotEl && plotEl.clientHeight) ? plotEl.clientHeight : (canvas.clientHeight || 180);
     const paddingLeft = 0;
     const paddingRight = 0;
     const paddingTop = 0;
@@ -42153,7 +42344,8 @@ function __getOtherCurveLayout(modal, canvas) {
         plotW: Math.max(1, cssWidth - paddingLeft - paddingRight),
         plotH: Math.max(1, cssHeight - paddingTop - paddingBottom),
         cssWidth,
-        cssHeight
+        cssHeight,
+        axis
     };
 }
 
@@ -42180,34 +42372,33 @@ function __bindOtherCurveInteractions(modal, onChange) {
         const layout = __getOtherCurveLayout(modal, canvas);
         const curve = getCurve();
         const magnets = getMagnets();
-        const maxFactor = (modal && Number.isFinite(modal._curveMaxFactor)) ? modal._curveMaxFactor : ZOOM_CURVE_MAX_FACTOR;
+        const axis = layout.axis || __getOtherCurveZoomAxis();
+        const maxFactor = (modal && Number.isFinite(modal._curveMaxFactor)) ? modal._curveMaxFactor : ZOOM_CURVE_CHART_Y_MAX;
         const toY = (factor) => layout.paddingTop + (1 - (Math.max(0, Math.min(maxFactor, factor)) / maxFactor)) * layout.plotH;
-        const p0x = layout.paddingLeft + (curve.p0 ? curve.p0.x : 0) * layout.plotW;
+        const normToChartX = (nx) => layout.paddingLeft + __clamp01(nx) * layout.plotW;
+        const p0x = normToChartX(0);
         const p0y = toY(__scaleZoomCurveFactor(curve.p0 ? curve.p0.y : 1));
-        const p1x = layout.paddingLeft + curve.p1.x * layout.plotW;
+        const p1x = normToChartX(curve.p1.x);
         const p1y = toY(__scaleZoomCurveFactor(curve.p1.y));
-        const p2x = layout.paddingLeft + curve.p2.x * layout.plotW;
+        const p2x = normToChartX(curve.p2.x);
         const p2y = toY(__scaleZoomCurveFactor(curve.p2.y));
-        const p3x = layout.paddingLeft + (curve.p3 ? curve.p3.x : 1) * layout.plotW;
+        const p3x = normToChartX(1);
         const p3y = toY(__scaleZoomCurveFactor(curve.p3 ? curve.p3.y : 1));
         const settings = getCanvasZoomMagnetSettings();
         const magnetEnabled = !!(settings && settings.enabled);
         const safeEnabled = magnetEnabled && !!settings.enableSafeZone;
         const midEnabled = magnetEnabled && !!settings.enableLowDetailMid;
-        const minPercent = Math.max(1, Math.min(100, getCanvasMinZoomLimit() || 10));
-        const maxPercent = 100;
-        const range = Math.max(1, maxPercent - minPercent);
         const baseFactorAt = (nx) => {
             if (modal && modal._useDefaultZoomCurve) return 1;
-            const percent = minPercent + (__clamp01(nx) * range);
+            const percent = __percentFromNormX(axis, nx);
             return __getZoomSpeedFactorFromCurve(percent / 100, curve);
         };
         const getMagnetFactorAt = (percent) => {
             const dz = percent / 100;
             let factor = 1;
-            const baseAt = Math.max(0.005, baseFactorAt((percent - minPercent) / range));
+            const baseAt = Math.max(0.005, baseFactorAt(__normXFromPercent(axis, percent)));
             if (safeEnabled && Number.isFinite(magnets.m1.y)) {
-                const safePercent = minPercent + (__clamp01(magnets.m1.x) * range);
+                const safePercent = __percentFromNormX(axis, magnets.m1.x);
                 const safeCenter = safePercent / 100;
                 const minD = Math.abs(dz - safeCenter);
                 if (minD < 0.08) {
@@ -42227,7 +42418,7 @@ function __bindOtherCurveInteractions(modal, onChange) {
                 }
             }
             if (midEnabled && Number.isFinite(magnets.m2.y)) {
-                const switchPercent = minPercent + (__clamp01(magnets.m2.x) * range);
+                const switchPercent = __percentFromNormX(axis, magnets.m2.x);
                 const switchCenter = switchPercent / 100;
                 const enter = getCanvasLowDetailDisplayZoomThreshold();
                 const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
@@ -42254,13 +42445,13 @@ function __bindOtherCurveInteractions(modal, onChange) {
         };
         const combinedFactorAt = (nx) => {
             const base = baseFactorAt(nx);
-            const percent = minPercent + (__clamp01(nx) * range);
+            const percent = __percentFromNormX(axis, nx);
             const magnetFactor = getMagnetFactorAt(percent);
             return Math.max(0.005, Math.min(maxFactor, base * magnetFactor));
         };
-        const m1x = layout.paddingLeft + magnets.m1.x * layout.plotW;
+        const m1x = normToChartX(magnets.m1.x);
         const m1y = layout.paddingTop + (1 - (combinedFactorAt(magnets.m1.x) / maxFactor)) * layout.plotH;
-        const m2x = layout.paddingLeft + magnets.m2.x * layout.plotW;
+        const m2x = normToChartX(magnets.m2.x);
         const m2y = layout.paddingTop + (1 - (combinedFactorAt(magnets.m2.x) / maxFactor)) * layout.plotH;
         return {
             layout,
@@ -42304,12 +42495,13 @@ function __bindOtherCurveInteractions(modal, onChange) {
         const localX = clientX - rect.left;
         const localY = clientY - rect.top;
         const { layout, curve, magnets } = getPointPositions();
+        const axis = layout.axis || __getOtherCurveZoomAxis();
         const nx = __clamp01((localX - layout.paddingLeft) / layout.plotW);
-        const axisMax = (modal && Number.isFinite(modal._curveMaxFactor)) ? modal._curveMaxFactor : ZOOM_CURVE_MAX_FACTOR;
+        const axisMax = (modal && Number.isFinite(modal._curveMaxFactor)) ? modal._curveMaxFactor : ZOOM_CURVE_CHART_Y_MAX;
         const nyRaw = 1 - (localY - layout.paddingTop) / layout.plotH;
-        const maxRatio = ZOOM_CURVE_ABS_MAX_FACTOR / axisMax;
+        const maxRatio = ZOOM_CURVE_CHART_Y_MAX / axisMax;
         const ny = Math.max(0, Math.min(maxRatio, nyRaw));
-        const clampMagnetFactor = (v) => Math.max(0.005, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, v));
+        const clampMagnetFactor = (v) => Math.max(0.005, Math.min(ZOOM_CURVE_CHART_Y_MAX, v));
         if (dragState.point === 'p0') {
             const display = ny * axisMax;
             curve.p0.y = __unscaleZoomCurveFactor(display);
@@ -42590,8 +42782,10 @@ function createCanvasOtherSettingsModal() {
                                     <div class="other-curve-tick"><span class="other-curve-tick-label">0%</span></div>
                                 </div>
                             </div>
-                            <div class="other-curve-plot">
-                                <canvas id="otherZoomMagnetCurve" class="other-curve-canvas"></canvas>
+                            <div class="other-curve-plot" id="otherZoomMagnetPlot">
+                                <div class="other-curve-plot-scroll" id="otherZoomMagnetPlotScroll">
+                                    <canvas id="otherZoomMagnetCurve" class="other-curve-canvas"></canvas>
+                                </div>
                             </div>
                             <div class="other-curve-axis other-curve-axis-x">
                                 <div class="other-curve-axis-ticks" id="otherCurveXAxisTicks">
@@ -42681,19 +42875,10 @@ function createCanvasOtherSettingsModal() {
     if (defaultToggle) {
         defaultToggle.addEventListener('click', (e) => {
             e.preventDefault();
-            modal._zoomCurve = __cloneDefaultOtherSettings().zoomCurve;
-            modal._magnetPoints = __getDefaultMagnetPointsFromPerf();
-            __applyPerfDefaultBaselineToPerf();
-            const minZoomInput = modal.querySelector('#otherInputMinZoom');
-            if (minZoomInput) minZoomInput.value = '10';
-            const maxZoomInput = modal.querySelector('#otherInputMaxZoom');
-            if (maxZoomInput) maxZoomInput.value = '300';
-            const fsSectionInput = modal.querySelector('#appearanceFullScreenSectionZoom');
-            const fsMdInput = modal.querySelector('#appearanceFullScreenMdZoom');
-            const defaults = __getDefaultAppearanceFullscreenZoomSettings();
-            if (fsSectionInput) fsSectionInput.value = String(defaults.section);
-            if (fsMdInput) fsMdInput.value = String(defaults.mdNode);
-            modal._useDefaultZoomCurve = true;
+            __restoreOtherZoomMagnetCurveToDefault(modal, {
+                resetZoomLimits: true,
+                resetFullscreenZoom: true
+            });
             try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
             scheduleOtherSave();
         });
@@ -42744,10 +42929,17 @@ function createCanvasOtherSettingsModal() {
             );
             minZoomInput.value = String(Math.round(normalized));
         };
-        minZoomInput.addEventListener('change', () => {
+        const applyMinZoomLimit = () => {
             normalizeMinZoomInput();
+            const val = parseInt(minZoomInput.value, 10);
+            if (Number.isFinite(val) && val > 0 && val <= 100) {
+                saveSharedState('canvasMinZoomLimit', val, { asJSON: false });
+            }
+            __restoreOtherZoomMagnetCurveToDefault(modal);
+            try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
             scheduleOtherSave();
-        });
+        };
+        minZoomInput.addEventListener('change', applyMinZoomLimit);
         minZoomInput.addEventListener('blur', () => {
             normalizeMinZoomInput();
         });
@@ -42755,8 +42947,7 @@ function createCanvasOtherSettingsModal() {
             if (event.key === 'Enter') {
                 if (event.isComposing) return;
                 event.preventDefault();
-                normalizeMinZoomInput();
-                scheduleOtherSave();
+                applyMinZoomLimit();
                 minZoomInput.blur();
             }
         });
@@ -42772,10 +42963,17 @@ function createCanvasOtherSettingsModal() {
             );
             maxZoomInput.value = String(Math.round(normalized));
         };
-        maxZoomInput.addEventListener('change', () => {
+        const applyMaxZoomLimit = () => {
             normalizeMaxZoomInput();
+            const val = parseInt(maxZoomInput.value, 10);
+            if (Number.isFinite(val) && val >= 100 && val <= 1000) {
+                saveSharedState('canvasMaxZoomLimit', val, { asJSON: false });
+            }
+            __restoreOtherZoomMagnetCurveToDefault(modal);
+            try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
             scheduleOtherSave();
-        });
+        };
+        maxZoomInput.addEventListener('change', applyMaxZoomLimit);
         maxZoomInput.addEventListener('blur', () => {
             normalizeMaxZoomInput();
         });
@@ -42783,8 +42981,7 @@ function createCanvasOtherSettingsModal() {
             if (event.key === 'Enter') {
                 if (event.isComposing) return;
                 event.preventDefault();
-                normalizeMaxZoomInput();
-                scheduleOtherSave();
+                applyMaxZoomLimit();
                 maxZoomInput.blur();
             }
         });
@@ -42925,6 +43122,21 @@ function createCanvasOtherSettingsModal() {
     if (safeToggle) safeToggle.addEventListener('change', syncMagnetSettingsFromOther);
     if (midToggle) midToggle.addEventListener('change', syncMagnetSettingsFromOther);
     __bindOtherCurveInteractions(modal, scheduleOtherCurveSave);
+    const plotScroll = modal.querySelector('#otherZoomMagnetPlotScroll');
+    if (plotScroll) {
+        plotScroll.addEventListener('scroll', () => {
+            const axis = modal._curveZoomAxis || __getOtherCurveZoomAxis();
+            __updateOtherCurveXAxisTicks(modal, axis);
+        }, { passive: true });
+    }
+    const plotEl = modal.querySelector('#otherZoomMagnetPlot');
+    if (plotEl && typeof ResizeObserver !== 'undefined') {
+        const plotResizeObserver = new ResizeObserver(() => {
+            try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+        });
+        plotResizeObserver.observe(plotEl);
+        modal._curvePlotResizeObserver = plotResizeObserver;
+    }
 }
 
 // =============================================================================

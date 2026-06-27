@@ -2527,6 +2527,29 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     overflow: hidden;
 }
 
+.other-curve-plot-scroll {
+    width: 100%;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: hidden;
+}
+
+.other-curve-plot-scroll.is-scrollable {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+}
+
+.other-curve-plot-scroll.is-scrollable::-webkit-scrollbar {
+    height: 8px;
+}
+
+.other-curve-plot-scroll.is-scrollable::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
 .other-curve-canvas {
     width: 100%;
     height: 100%;
@@ -2534,6 +2557,10 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     border-radius: 8px;
     background: transparent;
     touch-action: none;
+}
+
+.other-curve-plot-scroll.is-scrollable .other-curve-canvas {
+    border-radius: 8px 0 0 8px;
 }
 
 .other-curve-axis {
