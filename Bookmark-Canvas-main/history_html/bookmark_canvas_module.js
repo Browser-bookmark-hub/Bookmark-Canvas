@@ -9715,7 +9715,19 @@ function applyCanvasContentTransform(content, panX, panY, scale) {
 }
 
 let canvasViewportAutoRecordTimer = null;
+function __isCanvasNodeMaximizedActiveForAnchorGuard() {
+    if (CanvasState.nodeMaximizedActive) return true;
+    try {
+        return !!document.querySelector('.canvas-node-maximized');
+    } catch (_) {
+        return false;
+    }
+}
+
 function triggerCanvasViewportAutoRecord(x, y, zoom) {
+    if (__isCanvasNodeMaximizedActiveForAnchorGuard()) {
+        return;
+    }
     const settings = getCanvasOtherSettings();
     if (!settings || settings.autoRecordAnchor !== true) {
         return;
@@ -9732,6 +9744,9 @@ function triggerCanvasViewportAutoRecord(x, y, zoom) {
 }
 
 function checkAndRecordCanvasViewport(x, y, zoom) {
+    if (__isCanvasNodeMaximizedActiveForAnchorGuard()) {
+        return;
+    }
     const last = CanvasState.lastAutoRecordAnchor;
     if (last) {
         const dx = Math.abs(x - last.x);

@@ -18556,6 +18556,15 @@ html:fullscreen body.header-compact .canvas-main-container {
     color: var(--danger, #ff4d4f);
 }
 
+.anchor-slot-btn.is-disabled,
+.anchor-slot-btn:disabled,
+.sidebar-action-btn.is-disabled,
+.sidebar-action-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .anchor-slot-info {
     display: flex;
     justify-content: space-between;

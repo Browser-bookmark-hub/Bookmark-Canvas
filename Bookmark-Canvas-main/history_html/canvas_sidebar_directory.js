@@ -3589,6 +3589,69 @@
     return val;
   }
 
+  function isCanvasNodeFullscreenActive() {
+    try {
+      if (document.body && document.body.classList.contains('canvas-node-maximized-active')) return true;
+    } catch (_) {}
+    try {
+      return !!document.querySelector('.canvas-node-maximized');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function getAnchorMutationBlockedMessage(isEn) {
+    return isEn
+      ? 'Anchors cannot be added or changed while a card is fullscreen.'
+      : '卡片全屏模式下无法添加或修改锚点';
+  }
+
+  function showAnchorMutationBlockedToast(isEn) {
+    const msg = getAnchorMutationBlockedMessage(isEn);
+    if (typeof global.showToast === 'function') {
+      global.showToast(msg);
+    } else {
+      alert(msg);
+    }
+  }
+
+  async function exitCanvasNodeFullscreenForAnchorLocate() {
+    if (!isCanvasNodeFullscreenActive()) return true;
+
+    const active = document.querySelector('.canvas-node-maximized');
+    if (!active || !active.classList) return false;
+
+    const fullscreenBtn = active.querySelector(
+      '.canvas-node-fullscreen-btn, .permanent-section-fullscreen-btn, .temp-node-fullscreen-btn, .md-node-toolbar-btn[data-action="md-fullscreen"]'
+    );
+    if (!fullscreenBtn || typeof fullscreenBtn.click !== 'function') return false;
+
+    try {
+      fullscreenBtn.click();
+    } catch (_) {
+      return false;
+    }
+
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+    return !isCanvasNodeFullscreenActive();
+  }
+
+  async function navigateToViewportFromAnchor(anchor) {
+    if (!anchor) return false;
+
+    if (isCanvasNodeFullscreenActive()) {
+      const exited = await exitCanvasNodeFullscreenForAnchorLocate();
+      if (!exited) return false;
+    }
+
+    if (global.CanvasModule && typeof global.CanvasModule.navigateToViewport === 'function') {
+      return global.CanvasModule.navigateToViewport(anchor);
+    }
+    return false;
+  }
+
   function loadAnchorSlots() {
     let slots = [];
     try {
@@ -3620,8 +3683,13 @@
   function handleSlotAction(action, index, btnEl) {
     const slots = loadAnchorSlots();
     const isEn = isEnglish();
-    
+
     if (action === 'save') {
+      if (isCanvasNodeFullscreenActive()) {
+        showAnchorMutationBlockedToast(isEn);
+        return;
+      }
+
       const state = global.CanvasModule && global.CanvasModule.CanvasState;
       if (!state) return;
       
@@ -3645,11 +3713,10 @@
     else if (action === 'locate') {
       const slot = slots[index];
       if (!slot) return;
-      if (global.CanvasModule && typeof global.CanvasModule.navigateToViewport === 'function') {
-        global.CanvasModule.navigateToViewport(slot);
+      navigateToViewportFromAnchor(slot).then(() => {
         setTimeout(renderHistoryPanel, 50);
-      }
-    } 
+      });
+    }
     else if (action === 'rename') {
       const slot = slots[index];
       if (!slot) return;
@@ -3850,6 +3917,7 @@
 
     const isEn = isEnglish();
     const slots = loadAnchorSlots();
+    const isCardFullscreen = isCanvasNodeFullscreenActive();
     
     let historyList = [];
     try {
@@ -3875,7 +3943,7 @@
         <div class="sidebar-section-header manual-anchor-header">
           <span class="sidebar-section-title">${isEn ? 'Pinned Anchors' : '固定锚点'}</span>
           <div class="sidebar-header-actions">
-            <button class="sidebar-action-btn${isFull ? ' is-full' : ''}" id="addManualAnchorBtn" title="${isEn ? 'Add Anchor' : '添加锚点'}">
+            <button class="sidebar-action-btn${isFull ? ' is-full' : ''}${isCardFullscreen ? ' is-disabled' : ''}" id="addManualAnchorBtn" title="${isEn ? 'Add Anchor' : '添加锚点'}"${isCardFullscreen ? ' disabled' : ''}>
               <i class="fas fa-plus"></i>
             </button>
             <button class="sidebar-action-btn" id="manualAnchorSettingsBtn" title="${isEn ? 'Anchor Settings' : '锚点设置'}">
@@ -3922,7 +3990,7 @@
                 <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isEn ? 'Clear slot' : '清除槽位'}">
                   <i class="fas fa-trash-alt"></i>
                 </button>
-                <button class="anchor-slot-btn save-btn" data-index="${index}" title="${isEn ? 'Overwrite with current viewport' : '用当前视口覆盖'}">
+                <button class="anchor-slot-btn save-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Overwrite with current viewport' : '用当前视口覆盖'}"${isCardFullscreen ? ' disabled' : ''}>
                   <i class="fas fa-anchor"></i>
                 </button>
                 <button class="anchor-slot-btn locate-btn" data-index="${index}" title="${isEn ? 'Locate viewport' : '定位到此视口'}">
@@ -3973,7 +4041,7 @@
           <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;">
             <span class="sidebar-section-title" style="line-height: 1.2;">${isEn ? 'Auto' : '自动'}</span>
             <label class="other-toggle-switch" style="margin: 0; transform: scale(0.8); transform-origin: left center; flex-shrink: 0;" title="${isEn ? 'Enable Auto-save' : '开启自动保存'}">
-              <input type="checkbox" id="inlineAutoRecordCheck" ${isAutoRecordEnabled ? 'checked' : ''} />
+              <input type="checkbox" id="inlineAutoRecordCheck" ${isAutoRecordEnabled ? 'checked' : ''}${isCardFullscreen && !isAutoRecordEnabled ? ' disabled' : ''} />
               <span class="other-toggle-slider"></span>
             </label>
           </div>
@@ -4035,7 +4103,7 @@
             <div class="anchor-slot-header">
               <span class="anchor-slot-name" title="${displayName}">${displayName}</span>
               <div class="anchor-slot-actions">
-                <button class="anchor-slot-btn pin-btn" data-index="${index}" title="${isEn ? 'Pin to slot' : '固定到槽位'}">
+                <button class="anchor-slot-btn pin-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Pin to slot' : '固定到槽位'}"${isCardFullscreen ? ' disabled' : ''}>
                   <i class="fas fa-thumbtack"></i>
                 </button>
                 <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isEn ? 'Delete record' : '删除记录'}">
@@ -4131,6 +4199,10 @@
     const addBtn = panel.querySelector('#addManualAnchorBtn');
     if (addBtn) {
       addBtn.addEventListener('click', () => {
+        if (isCanvasNodeFullscreenActive()) {
+          showAnchorMutationBlockedToast(isEn);
+          return;
+        }
         const emptyIndex = slots.indexOf(null);
         if (emptyIndex !== -1) {
           const nonNullCount = slots.slice(0, emptyIndex).filter(s => s !== null).length + 1;
@@ -4265,6 +4337,11 @@
     
     if (inlineCheck) {
       inlineCheck.addEventListener('change', () => {
+        if (inlineCheck.checked && isCanvasNodeFullscreenActive()) {
+          inlineCheck.checked = false;
+          showAnchorMutationBlockedToast(isEn);
+          return;
+        }
         const checked = inlineCheck.checked;
         const currentSettings = getCanvasOtherSettingsSafe();
         currentSettings.autoRecordAnchor = checked;
@@ -4333,21 +4410,19 @@
       
       card.addEventListener('click', (e) => {
         if (e.target.closest('.anchor-slot-btn')) return;
-        
-        if (global.CanvasModule && typeof global.CanvasModule.navigateToViewport === 'function') {
-          global.CanvasModule.navigateToViewport(item);
+
+        navigateToViewportFromAnchor(item).then(() => {
           setTimeout(renderHistoryPanel, 50);
-        }
+        });
       });
       
       const locateBtn = card.querySelector('.locate-btn');
       if (locateBtn) {
         locateBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          if (global.CanvasModule && typeof global.CanvasModule.navigateToViewport === 'function') {
-            global.CanvasModule.navigateToViewport(item);
+          navigateToViewportFromAnchor(item).then(() => {
             setTimeout(renderHistoryPanel, 50);
-          }
+          });
         });
       }
       
@@ -4355,6 +4430,10 @@
       if (pinBtn) {
         pinBtn.addEventListener('click', (e) => {
           e.stopPropagation();
+          if (isCanvasNodeFullscreenActive()) {
+            showAnchorMutationBlockedToast(isEn);
+            return;
+          }
           const slots = loadAnchorSlots();
           
           // Check for duplicate coords (x, y, zoom)
@@ -4525,6 +4604,10 @@
     });
 
     global.addEventListener('canvas-other-settings-updated', () => {
+      try { renderHistoryPanel(); } catch (_) {}
+    });
+
+    global.addEventListener('canvas-maximized-state-change', () => {
       try { renderHistoryPanel(); } catch (_) {}
     });
 
