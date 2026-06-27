@@ -37893,6 +37893,9 @@ function startConnection(e, nodeId, side) {
     const workspace = document.getElementById('canvasWorkspace');
     if (workspace) workspace.classList.add('connecting');
 
+    const sourceEl = __resolveCanvasNodeElementById(nodeId);
+    if (sourceEl) sourceEl.classList.add('connection-source');
+
     // 隐藏连接线工具栏
     hideEdgeToolbar();
 
@@ -37905,7 +37908,10 @@ function startConnection(e, nodeId, side) {
             tempPath.setAttribute('id', 'temp-connection-path');
             tempPath.setAttribute('class', 'canvas-edge');
             tempPath.style.opacity = '0.5';
+            tempPath.style.pointerEvents = 'none';
             svg.appendChild(tempPath);
+        } else {
+            tempPath.style.pointerEvents = 'none';
         }
     }
 }
@@ -37926,7 +37932,7 @@ function __setConnectionTargetNode(nodeEl) {
 function __resolveConnectionTargetNodeByPointer(clientX, clientY) {
     const target = document.elementFromPoint(clientX, clientY);
     if (!target || !target.closest) return null;
-    const nodeEl = target.closest('.temp-canvas-node, .md-canvas-node, .permanent-bookmark-section');
+    const nodeEl = target.closest('.temp-canvas-node, .md-canvas-node, .permanent-bookmark-section, .card-group-canvas-node');
     return nodeEl || null;
 }
 
@@ -37960,6 +37966,9 @@ function endConnection(e) {
     const workspace = document.getElementById('canvasWorkspace');
     if (workspace) workspace.classList.remove('connecting');
 
+    const sourceEl = document.querySelector('.connection-source');
+    if (sourceEl) sourceEl.classList.remove('connection-source');
+
     const tempPath = document.getElementById('temp-connection-path');
     if (tempPath) tempPath.remove();
     __setConnectionTargetNode(null);
@@ -37969,7 +37978,7 @@ function endConnection(e) {
     // but we removed it just above.
     const target = document.elementFromPoint(e.clientX, e.clientY);
     const anchor = target ? target.closest('.canvas-node-anchor') : null;
-    const nodeEl = target ? target.closest('.temp-canvas-node, .md-canvas-node, .permanent-bookmark-section') : null;
+    const nodeEl = target ? target.closest('.temp-canvas-node, .md-canvas-node, .permanent-bookmark-section, .card-group-canvas-node') : null;
 
     if (CanvasState.connectionStart) {
         let toNodeId = null;

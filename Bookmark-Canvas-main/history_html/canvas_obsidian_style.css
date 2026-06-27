@@ -1119,6 +1119,13 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     pointer-events: auto;
 }
 
+/* 当处于连接线绘制状态时，源节点的悬浮区和连接点暂时不响应鼠标事件，防止其 hover zone 阻挡干扰其它节点 */
+.canvas-workspace.connecting .connection-source .canvas-anchor-zone,
+.canvas-workspace.connecting .connection-source .canvas-node-anchor {
+    pointer-events: none !important;
+}
+
+
 /* Hover scale effect */
 .canvas-node-anchor[data-side="top"]:hover {
     transform: scale(1.08);
@@ -3361,9 +3368,9 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     pointer-events: none !important;
 }
 
-/* 避免卡片组上边缘的连接点、高度调整手势与名字标签（Pill）重叠误触的优化：
+/* 避免卡片组上边缘的高度调整手势与名字标签（Pill）重叠误触的优化：
    1. 将上边缘的高度调整手势（resize-handle-n）移入卡片边框内部，缩短高度为 10px。
-   2. 将上边缘的连接点与悬浮感应区（canvas-anchor-zone）向上偏移，使其紧贴在名字标签（Pill）上方。
+   2. 上边缘的连接点与悬浮感应区（canvas-anchor-zone）不再向上偏移，保持在顶部边缘处以保证易触发性（参考空白栏目的做法）。
 */
 .card-group-canvas-node > .resize-handle-n {
     top: 0px !important;
@@ -3372,12 +3379,12 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 .card-group-canvas-node > .canvas-anchor-zone.zone-top,
 .card-group-canvas-node > .canvas-node-anchor[data-side="top"] {
-    top: calc(-62px * var(--card-group-pill-scale-effective)) !important;
-    height: calc(34px * var(--card-group-pill-scale-effective)) !important;
+    top: calc(-30px * var(--card-group-pill-scale-effective)) !important;
+    height: calc(30px * var(--card-group-pill-scale-effective)) !important;
 }
 
 .card-group-canvas-node > .canvas-node-anchor[data-side="top"]::before {
-    bottom: calc(-28px * var(--card-group-pill-scale-effective)) !important;
+    bottom: 0px !important;
 }
 
 /* 左上角 pill（label 在 bbox 上沿之上） */
