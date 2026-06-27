@@ -2450,6 +2450,58 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     padding-bottom: 78px;
 }
 
+.other-settings-modal .detail-section {
+    margin-bottom: 24px;
+}
+
+.other-settings-modal .detail-section:last-child {
+    margin-bottom: 0;
+}
+
+.other-settings-modal .detail-section > .detail-section-title {
+    margin-bottom: 12px;
+}
+
+.other-settings-fields-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 14px 32px;
+    margin: 0;
+    width: fit-content;
+    max-width: 100%;
+}
+
+.other-settings-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+    width: auto;
+    max-width: 100%;
+}
+
+.other-settings-field-label {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-align: left;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.other-settings-field-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0;
+}
+
 .other-toggle-switch {
     position: relative;
     display: inline-block;
@@ -2793,7 +2845,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 .other-trackpad-speed-row {
-    margin-top: 4px;
+    margin-top: 8px;
 }
 
 .other-trackpad-speed-input {

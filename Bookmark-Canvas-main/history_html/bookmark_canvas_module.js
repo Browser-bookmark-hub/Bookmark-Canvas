@@ -42614,10 +42614,10 @@ function createCanvasOtherSettingsModal() {
                 <!-- 1. 平面滚动速率调节 -->
                 <div class="detail-section">
                     <div class="detail-section-title">${isEn ? '1. Pan Scroll Speed' : '1. 平面滚动速率调节'}</div>
-                    <div class="appearance-row" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
-                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px;">
-                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Vertical' : '垂直'}</div>
-                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                    <div class="other-settings-fields-row">
+                        <div class="other-settings-field">
+                            <div class="other-settings-field-label">${isEn ? 'Vertical' : '垂直'}</div>
+                            <div class="other-settings-field-control">
                                 <input
                                     type="number"
                                     id="otherWheelVerticalPanRate"
@@ -42625,14 +42625,13 @@ function createCanvasOtherSettingsModal() {
                                     min="${Math.round(CANVAS_PAN_RATE_MIN * 100)}"
                                     max="${Math.round(CANVAS_PAN_RATE_MAX * 100)}"
                                     step="5"
-                                    style="width: 70px; text-align: center;"
                                 >
                                 <span class="other-trackpad-speed-unit">%</span>
                             </div>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px;">
-                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Horizontal (Shift)' : '水平(Shift)'}</div>
-                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                        <div class="other-settings-field">
+                            <div class="other-settings-field-label">${isEn ? 'Horizontal (Shift)' : '水平(Shift)'}</div>
+                            <div class="other-settings-field-control">
                                 <input
                                     type="number"
                                     id="otherWheelHorizontalPanRate"
@@ -42640,14 +42639,13 @@ function createCanvasOtherSettingsModal() {
                                     min="${Math.round(CANVAS_PAN_RATE_MIN * 100)}"
                                     max="${Math.round(CANVAS_PAN_RATE_MAX * 100)}"
                                     step="5"
-                                    style="width: 70px; text-align: center;"
                                 >
                                 <span class="other-trackpad-speed-unit">%</span>
                             </div>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px;">
-                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Trackpad' : '触控板'}</div>
-                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                        <div class="other-settings-field">
+                            <div class="other-settings-field-label">${isEn ? 'Trackpad' : '触控板'}</div>
+                            <div class="other-settings-field-control">
                                 <input
                                     type="number"
                                     id="otherTrackpadPanRate"
@@ -42655,7 +42653,6 @@ function createCanvasOtherSettingsModal() {
                                     min="${Math.round(CANVAS_PAN_RATE_MIN * 100)}"
                                     max="${Math.round(CANVAS_PAN_RATE_MAX * 100)}"
                                     step="5"
-                                    style="width: 70px; text-align: center;"
                                 >
                                 <span class="other-trackpad-speed-unit">%</span>
                             </div>
@@ -42666,18 +42663,18 @@ function createCanvasOtherSettingsModal() {
                 <!-- 2.1 全屏模式默认缩放比率 -->
                 <div class="detail-section">
                     <div class="detail-section-title">${isEn ? '2.1 Fullscreen Default Zoom' : '2.1 全屏模式默认缩放比率'}</div>
-                    <div class="appearance-row" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
-                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
-                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Section (Permanent/Temp)' : '栏目卡片（永久/临时）'}</div>
-                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
-                                <input type="number" id="appearanceFullScreenSectionZoom" class="other-trackpad-speed-input" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5" style="width: 70px; text-align: center;">
+                    <div class="other-settings-fields-row">
+                        <div class="other-settings-field">
+                            <div class="other-settings-field-label">${isEn ? 'Section (Permanent/Temp)' : '栏目卡片（永久/临时）'}</div>
+                            <div class="other-settings-field-control">
+                                <input type="number" id="appearanceFullScreenSectionZoom" class="other-trackpad-speed-input" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5">
                                 <span class="other-trackpad-speed-unit">%</span>
                             </div>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
-                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Blank card' : '空白栏目卡片'}</div>
-                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
-                                <input type="number" id="appearanceFullScreenMdZoom" class="other-trackpad-speed-input" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5" style="width: 70px; text-align: center;">
+                        <div class="other-settings-field">
+                            <div class="other-settings-field-label">${isEn ? 'Blank card' : '空白栏目卡片'}</div>
+                            <div class="other-settings-field-control">
+                                <input type="number" id="appearanceFullScreenMdZoom" class="other-trackpad-speed-input" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5">
                                 <span class="other-trackpad-speed-unit">%</span>
                             </div>
                         </div>
@@ -42687,25 +42684,10 @@ function createCanvasOtherSettingsModal() {
                 <!-- 2.2 缩放上下限 -->
                 <div class="detail-section">
                     <div class="detail-section-title">${isEn ? '2.2 Zoom Limits' : '2.2 缩放上下限'}</div>
-                    <div class="appearance-row" style="display: flex; align-items: center; gap: 24px; flex-wrap: wrap;">
-                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
-                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Minimum Zoom Limit' : '缩放下限'}</div>
-                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
-                                <input
-                                    type="number"
-                                    id="otherInputMinZoom"
-                                    class="other-trackpad-speed-input"
-                                    min="1"
-                                    max="100"
-                                    step="1"
-                                    style="width: 70px; text-align: center;"
-                                >
-                                <span class="other-trackpad-speed-unit">%</span>
-                            </div>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
-                            <div class="appearance-row-label" style="min-width: auto; padding-top: 0; margin: 0;">${isEn ? 'Maximum Zoom Limit' : '缩放上限'}</div>
-                            <div class="appearance-row-content appearance-row-content-inline" style="margin: 0; padding: 0;">
+                    <div class="other-settings-fields-row">
+                        <div class="other-settings-field">
+                            <div class="other-settings-field-label">${isEn ? 'Maximum Zoom Limit' : '缩放上限'}</div>
+                            <div class="other-settings-field-control">
                                 <input
                                     type="number"
                                     id="otherInputMaxZoom"
@@ -42713,7 +42695,20 @@ function createCanvasOtherSettingsModal() {
                                     min="100"
                                     max="1000"
                                     step="10"
-                                    style="width: 70px; text-align: center;"
+                                >
+                                <span class="other-trackpad-speed-unit">%</span>
+                            </div>
+                        </div>
+                        <div class="other-settings-field">
+                            <div class="other-settings-field-label">${isEn ? 'Minimum Zoom Limit' : '缩放下限'}</div>
+                            <div class="other-settings-field-control">
+                                <input
+                                    type="number"
+                                    id="otherInputMinZoom"
+                                    class="other-trackpad-speed-input"
+                                    min="1"
+                                    max="100"
+                                    step="1"
                                 >
                                 <span class="other-trackpad-speed-unit">%</span>
                             </div>
@@ -42725,18 +42720,20 @@ function createCanvasOtherSettingsModal() {
                 <div class="detail-section">
                     <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? '2.3 Zoom Speed' : '2.3 缩放速率调节'}</div>
                     <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note" style="margin-left:8px;font-size:12px;color:rgba(var(--text-color-rgb),0.5);font-weight:normal;">${isEn ? '(Pinch)' : '（双指捏合）'}</span></div>
-                    <div class="appearance-row other-sub-row other-trackpad-speed-row">
-                        <div class="appearance-row-label">${isEn ? 'Pinch zoom speed (independent from pan scroll)' : '捏合缩放速率（独立于平面滚动）'}</div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <input
-                                type="number"
-                                id="otherTrackpadZoomRate"
-                                class="other-trackpad-speed-input"
-                                min="${Math.round(TRACKPAD_ZOOM_RATE_MIN * 100)}"
-                                max="${Math.round(TRACKPAD_ZOOM_RATE_MAX * 100)}"
-                                step="5"
-                            >
-                            <span class="other-trackpad-speed-unit">%</span>
+                    <div class="other-settings-fields-row other-trackpad-speed-row">
+                        <div class="other-settings-field">
+                            <div class="other-settings-field-label">${isEn ? 'Pinch zoom speed (independent from pan scroll)' : '捏合缩放速率（独立于平面滚动）'}</div>
+                            <div class="other-settings-field-control">
+                                <input
+                                    type="number"
+                                    id="otherTrackpadZoomRate"
+                                    class="other-trackpad-speed-input"
+                                    min="${Math.round(TRACKPAD_ZOOM_RATE_MIN * 100)}"
+                                    max="${Math.round(TRACKPAD_ZOOM_RATE_MAX * 100)}"
+                                    step="5"
+                                >
+                                <span class="other-trackpad-speed-unit">%</span>
+                            </div>
                         </div>
                     </div>
                     <div class="other-zoom-input-title" style="margin-top: 12px; display: flex; align-items: center; gap: 6px;">
