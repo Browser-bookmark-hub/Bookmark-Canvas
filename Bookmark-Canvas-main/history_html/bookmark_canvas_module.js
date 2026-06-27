@@ -17206,8 +17206,12 @@ async function openLastMaximizedNode(options = {}) {
     }
 
     for (let attempt = 0; attempt <= retries; attempt += 1) {
-        const target = __resolveMaximizedNode(descriptor);
+        let target = __resolveMaximizedNode(descriptor);
+        if (!target) {
+            target = __materializeMaximizedNodeFromDescriptor(descriptor);
+        }
         if (target) {
+            __wakeCanvasNodeFromLazyState(target);
             if (__isNodeMaximized(target)) {
                 return { success: true, descriptor };
             }
@@ -17230,10 +17234,19 @@ async function openLastMaximizedNode(options = {}) {
 
 function __updateNodeMaximizedState() {
     try {
+        const wasActive = CanvasState.nodeMaximizedActive;
         CanvasState.nodeMaximizedActive = !!document.querySelector('.canvas-node-maximized');
         if (document && document.body) {
             document.body.classList.toggle('canvas-node-maximized-active', CanvasState.nodeMaximizedActive);
         }
+
+        // Dispatch custom event to notify external listeners of the fullscreen state change
+        window.dispatchEvent(new CustomEvent('canvas-maximized-state-change', {
+            detail: {
+                active: CanvasState.nodeMaximizedActive,
+                element: document.querySelector('.canvas-node-maximized')
+            }
+        }));
     } catch (_) {
         CanvasState.nodeMaximizedActive = false;
     }
@@ -17418,6 +17431,7 @@ function scheduleMaximizedNodesRefresh(options = {}) {
 function maximizeCanvasNode(element, options = {}) {
     if (!element) return;
     if (__isNodeMaximized(element)) {
+        __wakeCanvasNodeFromLazyState(element);
         if (refreshMaximizedNodes({ stabilize: false })) {
             __scheduleNodeLayoutZoomStabilize(element);
             updateNodeFullscreenButtons();
@@ -17425,6 +17439,7 @@ function maximizeCanvasNode(element, options = {}) {
         return;
     }
     const suppressReadyNotify = !!(options && options.suppressReadyNotify);
+    __wakeCanvasNodeFromLazyState(element);
     __restoreTemporaryRaisedCanvasNode();
     const rect = __getCanvasViewportRect({ viewportCoordinates: true });
     if (!rect) return;
@@ -18660,19 +18675,18 @@ function __resolveCanvasLocateZoom(targetZoom) {
 
 /**
  * 将节点从低细节/虚拟化懒加载状态唤醒（如果需要的话）
- * 适用于定位操作后的即时恢复，避免定位后仍显示低细节覆盖层
+ * 适用于定位、全屏切换后的即时恢复，避免目标卡片仍显示低细节覆盖层或空壳
  */
 function __wakeCanvasNodeFromLazyState(element) {
     if (!element) return;
 
-    // 1. 解除虚拟化懒加载外壳
-    if (element.classList.contains('canvas-viewport-lazy-shell') ||
-        (element.dataset && element.dataset.viewportLazy === 'true')) {
-        element.classList.remove('canvas-viewport-lazy-shell');
-        if (element.dataset) {
-            delete element.dataset.viewportLazy;
-        }
+    const nodeId = String(element.id || '').trim();
+    if (nodeId && CanvasState.offScreenNodesTime) {
+        try { CanvasState.offScreenNodesTime.delete(nodeId); } catch (_) { }
     }
+
+    // 1. 解除虚拟化懒加载外壳
+    try { __setCanvasViewportLazyShellClass(element, false); } catch (_) { }
 
     // 2. 解除低细节模式
     if (element.classList.contains('low-detail-active')) {
@@ -18683,42 +18697,89 @@ function __wakeCanvasNodeFromLazyState(element) {
             try { overlay.remove(); } catch (_) { }
         }
     }
+    if (element.classList.contains('card-group-low-detail-child-hidden')) {
+        element.classList.remove('card-group-low-detail-child-hidden');
+    }
+    if (element.dataset && element.dataset.lowDetailHostGroupId) {
+        try { delete element.dataset.lowDetailHostGroupId; } catch (_) { }
+    }
 
-    // 3. 永久栏目专项：如果树内容被卸载，重新加载
-    const isPermanent = element.classList.contains('permanent-bookmark-section');
-    if (isPermanent) {
-        const tree = element.querySelector('.bookmark-tree') || element.querySelector('#bookmarkTree');
-        const isUnloaded = tree && (
-            (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
-            element.classList.contains('permanent-tree-unloaded')
-        );
-        if (isUnloaded) {
-            if (tree) {
-                try { tree.style.display = ''; } catch (_) { }
-                try { tree.dataset.contentHidden = 'false'; } catch (_) { }
-                try { tree.dataset.contentUnloaded = 'false'; } catch (_) { }
+    // 3. 按卡片类型恢复内容
+    if (element.classList.contains('permanent-bookmark-section')) {
+        try { __ensurePermanentSectionTreeLoadedInPlace(element); } catch (_) { }
+        return;
+    }
 
-                const body = element.querySelector('.permanent-section-body');
-                if (body && body.dataset) {
-                    try { body.dataset.contentHidden = 'false'; } catch (_) { }
-                    try { body.dataset.contentUnloaded = 'false'; } catch (_) { }
-                }
+    if (element.classList.contains('temp-canvas-node')) {
+        const sectionId = (element.dataset && element.dataset.sectionId)
+            ? String(element.dataset.sectionId).trim()
+            : nodeId;
+        const section = sectionId ? getTempSection(sectionId) : null;
+        if (!section) return;
 
-                try { element.classList.remove('permanent-tree-unloaded'); } catch (_) { }
+        if (section.dormant) {
+            section.dormant = false;
+            try { cancelDormancyTimer(sectionId); } catch (_) { }
+        }
+        try { element.classList.remove('dormant-content'); } catch (_) { }
 
-                const key = (element.id === 'permanentSection')
-                    ? 'permanentSection'
-                    : (element.dataset && element.dataset.permanentSectionCopyId);
-                if (key && CanvasState.unloadedPermanentSectionTrees) {
-                    try { CanvasState.unloadedPermanentSectionTrees.delete(key); } catch (_) { }
-                }
+        try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
 
-                if (typeof window.__renderPermanentTreeIntoTree === 'function') {
-                    window.__renderPermanentTreeIntoTree(tree, { force: true, reason: 'locate-wake' });
-                }
-            }
+        const refreshedNode = document.getElementById(sectionId) || element;
+        const refreshedTree = refreshedNode ? refreshedNode.querySelector('.temp-bookmark-tree') : null;
+        const treeLoaded = !!(refreshedTree && refreshedTree.querySelector('.tree-item[data-node-id], .tree-load-more'));
+        if (!treeLoaded && typeof renderTempNode === 'function') {
+            try { renderTempNode(section, { forceBuildTree: true }); } catch (_) { }
+        }
+        return;
+    }
+
+    if (element.classList.contains('md-canvas-node')) {
+        const node = (CanvasState.mdNodes || []).find((n) => n && n.id === nodeId);
+        if (node) {
+            try { __ensureMdNodeContentLoadedInPlace(node, { force: true }); } catch (_) { }
         }
     }
+}
+
+function __materializeMaximizedNodeFromDescriptor(descriptor) {
+    if (!descriptor || typeof descriptor !== 'object') return null;
+
+    const existing = __resolveMaximizedNode(descriptor);
+    if (existing) {
+        __wakeCanvasNodeFromLazyState(existing);
+        return existing;
+    }
+
+    const type = String(descriptor.type || '').toLowerCase();
+
+    if (type === 'temp-node') {
+        const id = String(descriptor.id || '').trim();
+        if (!id) return null;
+        const section = getTempSection(id);
+        if (!section) return null;
+        try { renderTempNode(section, { skipTree: true }); } catch (_) { }
+        const el = document.getElementById(id);
+        if (el) {
+            __wakeCanvasNodeFromLazyState(el);
+        }
+        return el;
+    }
+
+    if (type === 'md-node') {
+        const id = String(descriptor.id || '').trim();
+        if (!id) return null;
+        const node = (CanvasState.mdNodes || []).find((n) => n && n.id === id);
+        if (!node) return null;
+        try { renderMdNode(node, { shellOnly: true }); } catch (_) { }
+        const el = document.getElementById(id);
+        if (el) {
+            __wakeCanvasNodeFromLazyState(el);
+        }
+        return el;
+    }
+
+    return null;
 }
 
 /**
@@ -40365,6 +40426,10 @@ window.CanvasModule = {
     scheduleMaximizedNodesRefresh: scheduleMaximizedNodesRefresh,
     updateShortcutDisplays: updateShortcutDisplays, // 更新快捷键显示
     CanvasState: CanvasState, // 导出状态供外部访问（如指针拖拽）
+    serializeMaximizedNode: __serializeMaximizedNode,
+    isNodeMaximized: __isNodeMaximized,
+    wakeCanvasNodeFromLazyState: __wakeCanvasNodeFromLazyState,
+    materializeMaximizedNodeFromDescriptor: __materializeMaximizedNodeFromDescriptor,
     createTempNode: createTempNode, // 导出创建临时节点函数
     createEmptyTempSection: createEmptyTempSection,
     createMdNode: createMdNode,

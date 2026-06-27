@@ -628,6 +628,158 @@
     return title.slice(0, limit) + '...';
   }
 
+  function resolveTempSectionThemeColor(section, colorTokens) {
+    const tokens = colorTokens || getAppearanceBaseColorTokens();
+    const live = normalizeHexColor(section && section.color, null);
+    if (live) return live;
+    return isSpecialTempSection(section) ? tokens.specialTemp : tokens.temp;
+  }
+
+  function resolveMdNodeThemeColor(node, colorTokens) {
+    const tokens = colorTokens || getAppearanceBaseColorTokens();
+    if (node && node.subtype === 'card-group') {
+      return tokens.cardGroup || tokens.blank;
+    }
+    const live = resolveNodeCustomColor(node);
+    if (live) return live;
+    return tokens.blank;
+  }
+
+  function isFullscreenHistoryDescriptorValid(descriptor) {
+    if (!descriptor || typeof descriptor !== 'object') return false;
+
+    const type = normalizeText(descriptor.type);
+    if (type === 'permanent') {
+      return true;
+    }
+
+    if (type === 'permanent-copy') {
+      const copyId = normalizeText(descriptor.copyId);
+      if (!copyId) return false;
+      const copies = readPermanentCopies();
+      return copies.some((copy) => normalizeText(copy && copy.id) === copyId);
+    }
+
+    const state = getCanvasState();
+    const tempSections = Array.isArray(state && state.tempSections) ? state.tempSections.filter(Boolean) : [];
+    const mdNodes = Array.isArray(state && state.mdNodes) ? state.mdNodes.filter(Boolean) : [];
+
+    if (type === 'temp-node') {
+      const sectionId = normalizeText(descriptor.id);
+      if (!sectionId) return false;
+      return tempSections.some((section) => section && normalizeText(section.id) === sectionId);
+    }
+
+    if (type === 'md-node') {
+      const nodeId = normalizeText(descriptor.id);
+      if (!nodeId) return false;
+      return mdNodes.some((node) => node && normalizeText(node.id) === nodeId);
+    }
+
+    if (type === 'node') {
+      const nodeId = normalizeText(descriptor.id);
+      if (!nodeId) return false;
+      if (tempSections.some((section) => section && normalizeText(section.id) === nodeId)) return true;
+      if (mdNodes.some((node) => node && normalizeText(node.id) === nodeId)) return true;
+      try {
+        return !!document.getElementById(nodeId);
+      } catch (_) {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  function resolveFullscreenHistoryCardPresentation(descriptor) {
+    const fallback = {
+      badge: '',
+      title: '--',
+      color: DIRECTORY_COLOR_DEFAULTS.blank,
+      tooltip: '--'
+    };
+    if (!descriptor || typeof descriptor !== 'object') return fallback;
+
+    const colorTokens = getAppearanceBaseColorTokens();
+    const state = getCanvasState();
+    const tempSections = Array.isArray(state && state.tempSections) ? state.tempSections.filter(Boolean) : [];
+    const mdNodes = Array.isArray(state && state.mdNodes) ? state.mdNodes.filter(Boolean) : [];
+
+    if (descriptor.type === 'permanent') {
+      const badge = '#A';
+      const title = t('主体', 'Main');
+      return {
+        badge,
+        title,
+        color: colorTokens.permanent,
+        tooltip: squeezeSpaces(`${badge} ${title}`)
+      };
+    }
+
+    if (descriptor.type === 'permanent-copy') {
+      const copyId = normalizeText(descriptor.copyId);
+      const copies = readPermanentCopies();
+      const orderIndex = copies.findIndex((copy) => normalizeText(copy && copy.id) === copyId);
+      const copy = orderIndex >= 0 ? copies[orderIndex] : { id: copyId };
+      const fullTitle = getPermanentCopyTitle(copy, Math.max(0, orderIndex));
+      const matched = String(fullTitle || '').match(/^(#[A-Z]+)\s+(.+)$/);
+      const badge = matched ? matched[1] : '';
+      const title = matched ? matched[2] : (fullTitle || t('副本', 'Copy'));
+      return {
+        badge,
+        title,
+        color: colorTokens.permanent,
+        tooltip: squeezeSpaces(fullTitle || `${badge} ${title}`.trim())
+      };
+    }
+
+    if (descriptor.type === 'temp-node') {
+      const sectionId = normalizeText(descriptor.id);
+      const section = sectionId
+        ? tempSections.find((item) => item && normalizeText(item.id) === sectionId)
+        : null;
+      if (!section) {
+        return {
+          badge: '',
+          title: t('临时栏目', 'Temp section'),
+          color: colorTokens.temp,
+          tooltip: t('临时栏目', 'Temp section')
+        };
+      }
+
+      let badge = getTempSectionLabel(section);
+      if (isSpecialTempSection(section)) {
+        badge = badge ? `✦ ${badge}` : '✦';
+      }
+      const title = getTempSectionTitle(section);
+      return {
+        badge,
+        title,
+        color: resolveTempSectionThemeColor(section, colorTokens),
+        tooltip: getTempSectionDisplayText(section)
+      };
+    }
+
+    if (descriptor.type === 'md-node') {
+      const nodeId = normalizeText(descriptor.id);
+      const node = nodeId
+        ? mdNodes.find((item) => item && normalizeText(item.id) === nodeId)
+        : null;
+      const title = getMdNodeTitle(node);
+      const isCardGroup = !!(node && node.subtype === 'card-group');
+      return {
+        badge: '',
+        badgeIconText: isCardGroup ? '' : 'md',
+        badgeIconTone: isCardGroup ? '' : 'md',
+        title,
+        color: resolveMdNodeThemeColor(node, colorTokens),
+        tooltip: title
+      };
+    }
+
+    return fallback;
+  }
+
   function getMdNodeTitle(node) {
     if (!node) return '--';
     const mainText = (typeof node.title === 'string' && node.title.trim()) ? node.title.trim() : (node.markdownSource || node.text || node.html || '');
@@ -4417,6 +4569,9 @@
     refresh,
     renderPreviewDirectory,
     getMdNodeTitle,
+    getTempSectionDisplayText,
+    isFullscreenHistoryDescriptorValid,
+    resolveFullscreenHistoryCardPresentation,
     clampCardTitle,
     getSortedMdNodes: (mdNodes) => {
       if (!Array.isArray(mdNodes)) return [];

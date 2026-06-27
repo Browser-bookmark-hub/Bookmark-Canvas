@@ -101,6 +101,12 @@ const CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS = 30000;
 const CANVAS_PAGE_FULLSCREEN_STATE_STORAGE_KEY = 'canvas_page_fullscreen_state_v1';
 const CANVAS_PAGE_FULLSCREEN_STATE_MAX_AGE_MS = 30000;
 const CANVAS_NODE_LAST_MAXIMIZED_STORAGE_KEY = 'canvas-node-last-maximized-v1';
+const CANVAS_FULLSCREEN_HISTORY_LIMIT_STORAGE_KEY = 'canvas_fullscreen_history_limit_v1';
+const CANVAS_FULLSCREEN_HISTORY_MAX_DEFAULT = 5;
+const CANVAS_FULLSCREEN_HISTORY_MAX_MIN = 1;
+const CANVAS_FULLSCREEN_HISTORY_MAX_CAP = 20;
+const FULLSCREEN_HISTORY_LAZY_LOAD_INITIAL = 5;
+const FULLSCREEN_HISTORY_LAZY_LOAD_STEP = 5;
 const QUICK_ADD_WINDOW_FOLDER_OPTION_STORAGE_KEY = 'quickAddWindowAsFolderV1';
 const QUICK_ADD_BLANK_HEADING_OPTION_STORAGE_KEY = 'quickAddBlankHeadingV1';
 const QUICK_ADD_INLINE_OPTION_STATES_STORAGE_KEY = 'quickAddInlineOptionStatesV1';
@@ -4388,6 +4394,42 @@ const i18n = {
         'zh_CN': '未找到上次全屏卡片',
         'en': 'No previous fullscreen card found'
     },
+    fullscreenHistoryTooltip: {
+        'zh_CN': '全屏卡片历史',
+        'en': 'Fullscreen Card History'
+    },
+    fullscreenHistoryPanelTitle: {
+        'zh_CN': '全屏卡片历史',
+        'en': 'Fullscreen Card History'
+    },
+    fullscreenHistoryEmpty: {
+        'zh_CN': '暂无全屏记录',
+        'en': 'No fullscreen history yet'
+    },
+    fullscreenHistoryLimitLabel: {
+        'zh_CN': '记录上限',
+        'en': 'History limit'
+    },
+    fullscreenHistoryLimitHint: {
+        'zh_CN': '保留条数；新进旧出，超出后删最旧。',
+        'en': 'Max records kept; newest in, oldest out.'
+    },
+    fullscreenHistoryLimitHelpAria: {
+        'zh_CN': '记录上限说明',
+        'en': 'History limit help'
+    },
+    fullscreenHistoryDeleteAria: {
+        'zh_CN': '删除记录',
+        'en': 'Delete record'
+    },
+    fullscreenHistorySettingsAria: {
+        'zh_CN': '历史设置',
+        'en': 'History settings'
+    },
+    fullscreenHistoryCloseAria: {
+        'zh_CN': '关闭',
+        'en': 'Close'
+    },
     titleAnchorTooltip: {
         'zh_CN': '视口锚点',
         'en': 'Viewport Anchors'
@@ -6010,6 +6052,32 @@ function applyLanguage() {
     const sideLastFullscreenBtn = document.getElementById('sideLastFullscreenBtn');
     if (sideLastFullscreenBtn) sideLastFullscreenBtn.setAttribute('aria-label', i18n.titleLastFullscreenTooltip[currentLang]);
 
+    const fullscreenHistoryTooltipText = i18n.fullscreenHistoryTooltip[currentLang];
+    const titleFullscreenHistoryTooltip = document.getElementById('titleFullscreenHistoryTooltip');
+    if (titleFullscreenHistoryTooltip) titleFullscreenHistoryTooltip.textContent = fullscreenHistoryTooltipText;
+    const titleFullscreenHistoryBtn = document.getElementById('titleFullscreenHistoryBtn');
+    if (titleFullscreenHistoryBtn) titleFullscreenHistoryBtn.setAttribute('aria-label', fullscreenHistoryTooltipText);
+    const sideFullscreenHistoryTooltip = document.getElementById('sideFullscreenHistoryTooltip');
+    if (sideFullscreenHistoryTooltip) sideFullscreenHistoryTooltip.textContent = fullscreenHistoryTooltipText;
+    const sideFullscreenHistoryBtn = document.getElementById('sideFullscreenHistoryBtn');
+    if (sideFullscreenHistoryBtn) sideFullscreenHistoryBtn.setAttribute('aria-label', fullscreenHistoryTooltipText);
+
+    const fullscreenHistoryPanelTitle = document.getElementById('fullscreenHistoryPanelTitle');
+    if (fullscreenHistoryPanelTitle) fullscreenHistoryPanelTitle.textContent = i18n.fullscreenHistoryPanelTitle[currentLang];
+    const fullscreenHistoryLimitLabel = document.getElementById('fullscreenHistoryLimitLabel');
+    if (fullscreenHistoryLimitLabel) fullscreenHistoryLimitLabel.textContent = i18n.fullscreenHistoryLimitLabel[currentLang];
+    const fullscreenHistoryLimitHelpPopover = document.getElementById('fullscreenHistoryLimitHelpPopover');
+    if (fullscreenHistoryLimitHelpPopover) fullscreenHistoryLimitHelpPopover.textContent = i18n.fullscreenHistoryLimitHint[currentLang];
+    const fullscreenHistoryLimitHelpBtn = document.getElementById('fullscreenHistoryLimitHelpBtn');
+    if (fullscreenHistoryLimitHelpBtn) fullscreenHistoryLimitHelpBtn.setAttribute('aria-label', i18n.fullscreenHistoryLimitHelpAria[currentLang]);
+    const fullscreenHistorySettingsBtn = document.getElementById('fullscreenHistorySettingsBtn');
+    if (fullscreenHistorySettingsBtn) fullscreenHistorySettingsBtn.setAttribute('aria-label', i18n.fullscreenHistorySettingsAria[currentLang]);
+    const fullscreenHistoryCloseBtn = document.getElementById('fullscreenHistoryCloseBtn');
+    if (fullscreenHistoryCloseBtn) fullscreenHistoryCloseBtn.setAttribute('aria-label', i18n.fullscreenHistoryCloseAria[currentLang]);
+    if (typeof renderFullscreenHistoryPanel === 'function') {
+        renderFullscreenHistoryPanel();
+    }
+
     const titleAnchorTooltip = document.getElementById('titleAnchorTooltip');
     if (titleAnchorTooltip) titleAnchorTooltip.textContent = i18n.titleAnchorTooltip[currentLang];
     const titleAnchorBtn = document.getElementById('titleAnchorBtn');
@@ -7013,6 +7081,751 @@ function setupSideLastFullscreenButton() {
         e.preventDefault();
         await handleOpenLastFullscreenCard();
     });
+}
+
+function getFullscreenHistory() {
+    try {
+        const queueStr = localStorage.getItem('canvas_fullscreen_history_queue');
+        const queue = queueStr ? JSON.parse(queueStr) : [];
+        if (Array.isArray(queue)) {
+            return queue;
+        }
+    } catch (_) {}
+    return [];
+}
+
+function getFullscreenHistoryIndex() {
+    try {
+        const idxStr = localStorage.getItem('canvas_fullscreen_history_index');
+        const idx = idxStr ? parseInt(idxStr, 10) : -1;
+        if (Number.isInteger(idx)) {
+            return idx;
+        }
+    } catch (_) {}
+    return -1;
+}
+
+function saveFullscreenHistory(queue, index) {
+    try {
+        localStorage.setItem('canvas_fullscreen_history_queue', JSON.stringify(queue));
+        localStorage.setItem('canvas_fullscreen_history_index', String(index));
+    } catch (_) {}
+}
+
+function getFullscreenHistoryMaxLimit() {
+    try {
+        const raw = localStorage.getItem(CANVAS_FULLSCREEN_HISTORY_LIMIT_STORAGE_KEY);
+        const parsed = raw ? parseInt(raw, 10) : NaN;
+        if (Number.isInteger(parsed)) {
+            return Math.max(
+                CANVAS_FULLSCREEN_HISTORY_MAX_MIN,
+                Math.min(CANVAS_FULLSCREEN_HISTORY_MAX_CAP, parsed)
+            );
+        }
+    } catch (_) {}
+    return CANVAS_FULLSCREEN_HISTORY_MAX_DEFAULT;
+}
+
+function setFullscreenHistoryMaxLimit(limit) {
+    const parsed = parseInt(limit, 10);
+    const normalized = Number.isInteger(parsed)
+        ? Math.max(CANVAS_FULLSCREEN_HISTORY_MAX_MIN, Math.min(CANVAS_FULLSCREEN_HISTORY_MAX_CAP, parsed))
+        : CANVAS_FULLSCREEN_HISTORY_MAX_DEFAULT;
+    try {
+        localStorage.setItem(CANVAS_FULLSCREEN_HISTORY_LIMIT_STORAGE_KEY, String(normalized));
+    } catch (_) {}
+    return normalized;
+}
+
+function trimFullscreenHistoryQueue(queue, maxLimit = getFullscreenHistoryMaxLimit()) {
+    const nextQueue = Array.isArray(queue) ? queue.slice() : [];
+    const limit = Math.max(CANVAS_FULLSCREEN_HISTORY_MAX_MIN, Number(maxLimit) || CANVAS_FULLSCREEN_HISTORY_MAX_DEFAULT);
+    while (nextQueue.length > limit) {
+        nextQueue.shift();
+    }
+    return nextQueue;
+}
+
+function __adjustFullscreenHistoryIndexAfterFrontTrim(index, trimmedCount, queueLength) {
+    if (queueLength === 0) return -1;
+    if (!Number.isInteger(index) || index < 0) return queueLength - 1;
+    if (trimmedCount > 0 && index < trimmedCount) return queueLength - 1;
+    const nextIndex = index - trimmedCount;
+    if (nextIndex < 0) return 0;
+    if (nextIndex >= queueLength) return queueLength - 1;
+    return nextIndex;
+}
+
+function ensureFullscreenHistoryWithinLimit(maxLimit = getFullscreenHistoryMaxLimit()) {
+    let queue = getFullscreenHistory();
+    const limit = Math.max(CANVAS_FULLSCREEN_HISTORY_MAX_MIN, Number(maxLimit) || CANVAS_FULLSCREEN_HISTORY_MAX_DEFAULT);
+    const trimmedCount = Math.max(0, queue.length - limit);
+    if (trimmedCount === 0) {
+        return { queue, index: getFullscreenHistoryIndex(), changed: false };
+    }
+
+    queue = trimFullscreenHistoryQueue(queue, limit);
+    const index = __adjustFullscreenHistoryIndexAfterFrontTrim(
+        getFullscreenHistoryIndex(),
+        trimmedCount,
+        queue.length
+    );
+    saveFullscreenHistory(queue, index);
+    return { queue, index, changed: true };
+}
+
+function getFullscreenHistoryLazyLoadInitial() {
+    return Math.min(FULLSCREEN_HISTORY_LAZY_LOAD_INITIAL, getFullscreenHistoryMaxLimit());
+}
+
+function areFullscreenDescriptorsEqual(d1, d2) {
+    if (!d1 || !d2) return false;
+    if (d1.type !== d2.type) return false;
+    if (d1.type === 'permanent-copy') {
+        return d1.copyId === d2.copyId;
+    }
+    return d1.id === d2.id;
+}
+
+function isFullscreenHistoryDescriptorValid(descriptor) {
+    const dir = window.CanvasSidebarDirectory;
+    if (dir && typeof dir.isFullscreenHistoryDescriptorValid === 'function') {
+        return dir.isFullscreenHistoryDescriptorValid(descriptor);
+    }
+    return false;
+}
+
+function __resolveLiveMaximizedHistoryDescriptor() {
+    try {
+        const element = document.querySelector('.canvas-node-maximized');
+        if (!element || !window.CanvasModule || typeof window.CanvasModule.serializeMaximizedNode !== 'function') {
+            return null;
+        }
+        return window.CanvasModule.serializeMaximizedNode(element);
+    } catch (_) {
+        return null;
+    }
+}
+
+function calibrateFullscreenHistoryOnOpen() {
+    const queue = getFullscreenHistory();
+    const index = getFullscreenHistoryIndex();
+    const currentDescriptor = (Number.isInteger(index) && index >= 0 && index < queue.length)
+        ? queue[index]
+        : null;
+
+    const validQueue = queue.filter((descriptor) => isFullscreenHistoryDescriptorValid(descriptor));
+
+    let nextIndex = -1;
+    if (validQueue.length > 0) {
+        if (currentDescriptor) {
+            const matchedIndex = validQueue.findIndex((item) => areFullscreenDescriptorsEqual(item, currentDescriptor));
+            if (matchedIndex >= 0) {
+                nextIndex = matchedIndex;
+            }
+        }
+
+        if (nextIndex < 0) {
+            const liveDescriptor = __resolveLiveMaximizedHistoryDescriptor();
+            if (liveDescriptor) {
+                const liveIndex = validQueue.findIndex((item) => areFullscreenDescriptorsEqual(item, liveDescriptor));
+                if (liveIndex >= 0) {
+                    nextIndex = liveIndex;
+                }
+            }
+        }
+
+        if (nextIndex < 0 && Number.isInteger(index) && index >= 0) {
+            const removedBefore = queue
+                .slice(0, Math.min(index, queue.length))
+                .filter((descriptor) => !isFullscreenHistoryDescriptorValid(descriptor))
+                .length;
+            nextIndex = Math.max(0, Math.min(index - removedBefore, validQueue.length - 1));
+        }
+
+        if (nextIndex < 0) {
+            nextIndex = validQueue.length - 1;
+        }
+    }
+
+    const changed = validQueue.length !== queue.length || nextIndex !== index;
+    if (changed) {
+        saveFullscreenHistory(validQueue, nextIndex);
+    }
+
+    return { queue: validQueue, index: nextIndex, changed };
+}
+
+function __sanitizeFullscreenHistoryColor(color) {
+    const normalized = String(color || '').trim();
+    if (/^#[0-9a-fA-F]{3,8}$/.test(normalized)) return normalized;
+    return '#888888';
+}
+
+function resolveFullscreenHistoryCardPresentation(descriptor) {
+    const dir = window.CanvasSidebarDirectory;
+    if (dir && typeof dir.resolveFullscreenHistoryCardPresentation === 'function') {
+        return dir.resolveFullscreenHistoryCardPresentation(descriptor);
+    }
+    return {
+        badge: '',
+        title: '--',
+        color: '#888888',
+        tooltip: '--'
+    };
+}
+
+function __clampFullscreenHistoryText(text, limit = 42) {
+    const normalized = String(text || '').trim() || '--';
+    const dir = window.CanvasSidebarDirectory;
+    if (dir && typeof dir.clampCardTitle === 'function') {
+        return dir.clampCardTitle(normalized, limit);
+    }
+    return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
+}
+
+let fullscreenHistoryPanelAnchorBtn = null;
+let fullscreenHistorySettingsExpanded = false;
+let fullscreenHistoryVisibleLimit = FULLSCREEN_HISTORY_LAZY_LOAD_INITIAL;
+let fullscreenHistoryPanelPlacement = 'below';
+
+function isFullscreenHistoryPanelOpen() {
+    const panel = document.getElementById('fullscreenHistoryPanel');
+    return !!(panel && !panel.hasAttribute('hidden'));
+}
+
+function setFullscreenHistorySettingsExpanded(expanded = false) {
+    fullscreenHistorySettingsExpanded = !!expanded;
+    const settingsPanel = document.getElementById('fullscreenHistorySettingsPanel');
+    const settingsBtn = document.getElementById('fullscreenHistorySettingsBtn');
+    if (settingsPanel) {
+        if (fullscreenHistorySettingsExpanded) settingsPanel.removeAttribute('hidden');
+        else settingsPanel.setAttribute('hidden', '');
+    }
+    if (settingsBtn) {
+        settingsBtn.setAttribute('aria-expanded', fullscreenHistorySettingsExpanded ? 'true' : 'false');
+    }
+    if (fullscreenHistoryPanelAnchorBtn) {
+        positionFullscreenHistoryPanel(fullscreenHistoryPanelAnchorBtn, { preservePlacement: true });
+    }
+}
+
+function toggleFullscreenHistorySettingsPanel() {
+    setFullscreenHistorySettingsExpanded(!fullscreenHistorySettingsExpanded);
+    if (fullscreenHistorySettingsExpanded) {
+        const limitInput = document.getElementById('fullscreenHistoryLimitInput');
+        if (limitInput) limitInput.value = String(getFullscreenHistoryMaxLimit());
+    }
+}
+
+function repositionFullscreenHistoryPanelIfOpen(options = {}) {
+    if (!isFullscreenHistoryPanelOpen() || !fullscreenHistoryPanelAnchorBtn) return;
+    positionFullscreenHistoryPanel(fullscreenHistoryPanelAnchorBtn, options);
+}
+
+function positionFullscreenHistoryPanel(anchorBtn, options = {}) {
+    const panel = document.getElementById('fullscreenHistoryPanel');
+    if (!panel || !anchorBtn || typeof anchorBtn.getBoundingClientRect !== 'function') return;
+    const rect = anchorBtn.getBoundingClientRect();
+    const margin = 8;
+    const panelWidth = panel.offsetWidth || 300;
+    const panelHeight = panel.offsetHeight || 0;
+    const btnCenterX = rect.left + rect.width / 2;
+    let left = btnCenterX - panelWidth / 2;
+    left = Math.max(margin, Math.min(left, window.innerWidth - panelWidth - margin));
+
+    const preservePlacement = !!(options && options.preservePlacement);
+    let placement = preservePlacement ? fullscreenHistoryPanelPlacement : 'below';
+
+    if (!preservePlacement) {
+        const belowTop = rect.bottom + margin;
+        placement = (belowTop + panelHeight <= window.innerHeight - margin) ? 'below' : 'above';
+    }
+
+    let top;
+    if (placement === 'above') {
+        top = Math.max(margin, rect.top - panelHeight - margin);
+        fullscreenHistoryPanelPlacement = 'above';
+    } else {
+        top = rect.bottom + margin;
+        if (!preservePlacement && top + panelHeight > window.innerHeight - margin) {
+            top = Math.max(margin, rect.top - panelHeight - margin);
+            fullscreenHistoryPanelPlacement = 'above';
+        } else {
+            fullscreenHistoryPanelPlacement = 'below';
+        }
+    }
+
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.top = `${Math.round(top)}px`;
+}
+
+function closeFullscreenHistoryLimitHelpPopover() {
+    const helpBtn = document.getElementById('fullscreenHistoryLimitHelpBtn');
+    if (helpBtn) helpBtn.classList.remove('is-open');
+}
+
+function closeFullscreenHistoryPanel() {
+    const panel = document.getElementById('fullscreenHistoryPanel');
+    if (!panel) return;
+    panel.setAttribute('hidden', '');
+    fullscreenHistoryPanelAnchorBtn = null;
+    fullscreenHistoryPanelPlacement = 'below';
+    fullscreenHistoryVisibleLimit = getFullscreenHistoryLazyLoadInitial();
+    setFullscreenHistorySettingsExpanded(false);
+    closeFullscreenHistoryLimitHelpPopover();
+}
+
+function openFullscreenHistoryPanel(anchorBtn) {
+    const panel = document.getElementById('fullscreenHistoryPanel');
+    if (!panel || !anchorBtn) return;
+    fullscreenHistoryPanelAnchorBtn = anchorBtn;
+    setFullscreenHistorySettingsExpanded(false);
+    calibrateFullscreenHistoryOnOpen();
+    renderFullscreenHistoryPanel();
+    panel.removeAttribute('hidden');
+    positionFullscreenHistoryPanel(anchorBtn);
+}
+
+function toggleFullscreenHistoryPanel(anchorBtn) {
+    if (isFullscreenHistoryPanelOpen() && fullscreenHistoryPanelAnchorBtn === anchorBtn) {
+        closeFullscreenHistoryPanel();
+        return;
+    }
+    openFullscreenHistoryPanel(anchorBtn);
+}
+
+function __escapeFullscreenHistoryHtml(text) {
+    return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function __buildFullscreenHistoryBadgeHtml(presentation, color) {
+    const iconText = presentation && presentation.badgeIconText;
+    if (iconText) {
+        const safeIconText = __escapeFullscreenHistoryHtml(String(iconText).trim());
+        const iconTone = presentation && presentation.badgeIconTone;
+        const toneClass = iconTone && /^[a-z0-9-]+$/.test(String(iconTone))
+            ? ` canvas-dir-icon-badge-${iconTone}`
+            : '';
+        return `<span class="fullscreen-history-item-icon canvas-dir-icon" aria-hidden="true"><span class="canvas-dir-icon-badge${toneClass}">${safeIconText}</span></span>`;
+    }
+
+    const badge = __clampFullscreenHistoryText(presentation && presentation.badge, 16);
+    if (!badge) return '';
+    const safeBadge = __escapeFullscreenHistoryHtml(badge);
+    return `<span class="fullscreen-history-item-badge" style="color:${color}">${safeBadge}</span>`;
+}
+
+function __renderFullscreenHistoryItem(descriptor, index, currentIndex, lang) {
+    const presentation = resolveFullscreenHistoryCardPresentation(descriptor);
+    const color = __sanitizeFullscreenHistoryColor(presentation && presentation.color);
+    const rawTitle = presentation && presentation.title;
+    const titleSource = (presentation && presentation.badgeIconText && String(rawTitle || '').trim() === '--')
+        ? ''
+        : rawTitle;
+    const title = __clampFullscreenHistoryText(titleSource, 42);
+    const tooltip = __escapeFullscreenHistoryHtml(
+        __clampFullscreenHistoryText(presentation && presentation.tooltip, 80)
+    );
+    const safeTitle = __escapeFullscreenHistoryHtml(title);
+    const deleteAria = __escapeFullscreenHistoryHtml(i18n.fullscreenHistoryDeleteAria[lang]);
+    const activeClass = index === currentIndex ? ' active' : '';
+    const badgeHtml = __buildFullscreenHistoryBadgeHtml(presentation, color);
+    return `
+        <div class="fullscreen-history-item${activeClass}" data-index="${index}" role="button" tabindex="0">
+            <span class="fullscreen-history-item-content" title="${tooltip}">
+                ${badgeHtml}
+                <span class="fullscreen-history-item-title" style="color:${color}">${safeTitle}</span>
+            </span>
+            <button class="fullscreen-history-item-delete" type="button" data-delete-index="${index}" aria-label="${deleteAria}">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `;
+}
+
+function renderFullscreenHistoryPanel() {
+    const listEl = document.getElementById('fullscreenHistoryList');
+    const footerEl = document.getElementById('fullscreenHistoryListFooter');
+    const limitInput = document.getElementById('fullscreenHistoryLimitInput');
+    if (!listEl) return;
+
+    const lang = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'en' : 'zh_CN';
+    const isEn = lang === 'en';
+    const { queue } = ensureFullscreenHistoryWithinLimit();
+    const currentIndex = getFullscreenHistoryIndex();
+    const lazyLoadInitial = getFullscreenHistoryLazyLoadInitial();
+
+    if (limitInput) {
+        limitInput.value = String(getFullscreenHistoryMaxLimit());
+        limitInput.min = String(CANVAS_FULLSCREEN_HISTORY_MAX_MIN);
+        limitInput.max = String(CANVAS_FULLSCREEN_HISTORY_MAX_CAP);
+    }
+
+    if (!queue.length) {
+        listEl.innerHTML = `<div class="fullscreen-history-empty">${__escapeFullscreenHistoryHtml(i18n.fullscreenHistoryEmpty[lang])}</div>`;
+        if (footerEl) {
+            footerEl.innerHTML = '';
+            footerEl.setAttribute('hidden', '');
+        }
+        return;
+    }
+
+    const displayOrder = queue.map((descriptor, index) => ({ descriptor, index })).reverse();
+    const effectiveVisibleLimit = Math.min(fullscreenHistoryVisibleLimit, queue.length);
+    const visibleItems = displayOrder.slice(0, effectiveVisibleLimit);
+
+    listEl.innerHTML = visibleItems.map(({ descriptor, index }) => (
+        __renderFullscreenHistoryItem(descriptor, index, currentIndex, lang)
+    )).join('');
+
+    if (!footerEl) return;
+
+    const hasMore = queue.length > visibleItems.length;
+    const canCollapse = effectiveVisibleLimit > lazyLoadInitial;
+    const canLoadAll = hasMore && queue.length > lazyLoadInitial;
+
+    if (!hasMore && !canCollapse) {
+        footerEl.innerHTML = '';
+        footerEl.setAttribute('hidden', '');
+        return;
+    }
+
+    const remaining = queue.length - visibleItems.length;
+    const willLoad = Math.min(FULLSCREEN_HISTORY_LAZY_LOAD_STEP, remaining);
+    let footerHtml = '<div class="lazy-load-container">';
+
+    if (hasMore) {
+        footerHtml += `
+            <button class="lazy-load-btn load-more-btn" id="fullscreenHistoryLoadMoreBtn" type="button">
+                <i class="fas fa-chevron-down"></i> ${isEn ? `Show More (+${willLoad})` : `展开更多 (+${willLoad})`}
+            </button>
+        `;
+    }
+    if (canLoadAll) {
+        footerHtml += `
+            <button class="lazy-load-btn load-all-btn" id="fullscreenHistoryLoadAllBtn" type="button">
+                <i class="fas fa-angle-double-down"></i> ${isEn ? 'Load All' : '加载全部'}
+            </button>
+        `;
+    }
+    if (canCollapse) {
+        footerHtml += `
+            <button class="lazy-load-btn collapse-btn" id="fullscreenHistoryCollapseBtn" type="button">
+                <i class="fas fa-chevron-up"></i> ${isEn ? 'Collapse' : '收起'}
+            </button>
+        `;
+    }
+
+    footerHtml += '</div>';
+    footerEl.innerHTML = footerHtml;
+    footerEl.removeAttribute('hidden');
+}
+
+function updateFullscreenSwitcherUI() {
+    const isFullscreen = !!(document.querySelector('.canvas-node-maximized') || (window.CanvasModule && window.CanvasModule.CanvasState && window.CanvasModule.CanvasState.nodeMaximizedActive));
+    const titleHistoryBtn = document.getElementById('titleFullscreenHistoryBtn');
+    const sideHistoryBtn = document.getElementById('sideFullscreenHistoryBtn');
+
+    if (titleHistoryBtn) {
+        titleHistoryBtn.style.display = (isFullscreen && !isSidePanelMode) ? 'inline-flex' : 'none';
+    }
+    if (sideHistoryBtn) {
+        sideHistoryBtn.style.display = (isFullscreen && isSidePanelMode) ? 'inline-flex' : 'none';
+    }
+
+    if (!isFullscreen) {
+        closeFullscreenHistoryPanel();
+        return;
+    }
+
+    if (isFullscreenHistoryPanelOpen()) {
+        renderFullscreenHistoryPanel();
+        repositionFullscreenHistoryPanelIfOpen({ preservePlacement: true });
+    }
+}
+
+async function switchFullscreenCardToIndex(targetIndex, options = {}) {
+    let queue = getFullscreenHistory();
+    const index = getFullscreenHistoryIndex();
+    const keepPanelOpen = !!(options && options.keepPanelOpen);
+
+    if (!queue.length) return false;
+    if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= queue.length) return false;
+    if (targetIndex === index) {
+        if (!keepPanelOpen) closeFullscreenHistoryPanel();
+        return true;
+    }
+
+    const descriptor = queue[targetIndex];
+    if (!descriptor) return false;
+
+    window.__isSwitchingFullscreen = true;
+
+    try {
+        saveFullscreenHistory(queue, targetIndex);
+        localStorage.setItem(CANVAS_NODE_LAST_MAXIMIZED_STORAGE_KEY, JSON.stringify(descriptor));
+        window.dispatchEvent(new CustomEvent(CANVAS_LAST_MAXIMIZED_UPDATED_EVENT, {
+            detail: { descriptor }
+        }));
+
+        if (typeof currentView !== 'undefined' && currentView !== 'canvas' && typeof switchView === 'function') {
+            switchView('canvas');
+        }
+
+        if (window.CanvasModule && typeof window.CanvasModule.openLastFullscreenNode === 'function') {
+            const result = await window.CanvasModule.openLastFullscreenNode({
+                retries: 10,
+                retryDelayMs: 100
+            });
+            if (result && !result.success && (result.reason === 'not-found' || result.reason === 'empty')) {
+                queue = getFullscreenHistory();
+                const indexToRemove = queue.findIndex((item) => areFullscreenDescriptorsEqual(item, descriptor));
+                if (indexToRemove !== -1) {
+                    queue.splice(indexToRemove, 1);
+                    const newIndex = Math.min(targetIndex, Math.max(0, queue.length - 1));
+                    saveFullscreenHistory(queue, newIndex);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[History Switcher] Failed to switch card:', error);
+        return false;
+    } finally {
+        setTimeout(() => {
+            window.__isSwitchingFullscreen = false;
+            updateFullscreenSwitcherUI();
+        }, 300);
+    }
+
+    if (!keepPanelOpen) {
+        closeFullscreenHistoryPanel();
+    } else {
+        renderFullscreenHistoryPanel();
+        repositionFullscreenHistoryPanelIfOpen({ preservePlacement: true });
+    }
+    return true;
+}
+
+function deleteFullscreenHistoryItem(targetIndex) {
+    let queue = getFullscreenHistory();
+    let index = getFullscreenHistoryIndex();
+    if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= queue.length) return;
+
+    queue.splice(targetIndex, 1);
+    if (index > targetIndex) {
+        index -= 1;
+    } else if (index === targetIndex) {
+        index = Math.min(targetIndex, Math.max(0, queue.length - 1));
+        if (queue.length === 0) index = -1;
+    }
+    saveFullscreenHistory(queue, index);
+    renderFullscreenHistoryPanel();
+    repositionFullscreenHistoryPanelIfOpen({ preservePlacement: true });
+}
+
+function applyFullscreenHistoryMaxLimitFromSettings(rawValue) {
+    const normalized = setFullscreenHistoryMaxLimit(rawValue);
+    ensureFullscreenHistoryWithinLimit(normalized);
+    fullscreenHistoryVisibleLimit = getFullscreenHistoryLazyLoadInitial();
+    renderFullscreenHistoryPanel();
+    repositionFullscreenHistoryPanelIfOpen({ preservePlacement: true });
+    return normalized;
+}
+
+function setupFullscreenHistorySwitcher() {
+    const historyBtns = [document.getElementById('titleFullscreenHistoryBtn'), document.getElementById('sideFullscreenHistoryBtn')];
+    const panel = document.getElementById('fullscreenHistoryPanel');
+    const listEl = document.getElementById('fullscreenHistoryList');
+    const settingsBtn = document.getElementById('fullscreenHistorySettingsBtn');
+    const closeBtn = document.getElementById('fullscreenHistoryCloseBtn');
+    const limitInput = document.getElementById('fullscreenHistoryLimitInput');
+    const limitHelpBtn = document.getElementById('fullscreenHistoryLimitHelpBtn');
+
+    historyBtns.forEach((btn) => {
+        if (!btn || btn.dataset.bound === 'true') return;
+        btn.dataset.bound = 'true';
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFullscreenHistoryPanel(btn);
+        });
+    });
+
+    if (settingsBtn && settingsBtn.dataset.bound !== 'true') {
+        settingsBtn.dataset.bound = 'true';
+        settingsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFullscreenHistorySettingsPanel();
+        });
+    }
+
+    if (closeBtn && closeBtn.dataset.bound !== 'true') {
+        closeBtn.dataset.bound = 'true';
+        closeBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeFullscreenHistoryPanel();
+        });
+    }
+
+    if (limitInput && limitInput.dataset.bound !== 'true') {
+        limitInput.dataset.bound = 'true';
+        const commitLimit = () => {
+            applyFullscreenHistoryMaxLimitFromSettings(limitInput.value);
+        };
+        limitInput.addEventListener('change', commitLimit);
+        limitInput.addEventListener('blur', commitLimit);
+    }
+
+    if (limitHelpBtn && limitHelpBtn.dataset.bound !== 'true') {
+        limitHelpBtn.dataset.bound = 'true';
+        limitHelpBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            limitHelpBtn.classList.toggle('is-open');
+        });
+    }
+
+    const handleFullscreenHistoryListInteraction = (e) => {
+        const loadMoreBtn = e.target && e.target.closest ? e.target.closest('#fullscreenHistoryLoadMoreBtn') : null;
+        if (loadMoreBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            fullscreenHistoryVisibleLimit += FULLSCREEN_HISTORY_LAZY_LOAD_STEP;
+            renderFullscreenHistoryPanel();
+            repositionFullscreenHistoryPanelIfOpen({ preservePlacement: true });
+            return;
+        }
+
+        const loadAllBtn = e.target && e.target.closest ? e.target.closest('#fullscreenHistoryLoadAllBtn') : null;
+        if (loadAllBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            fullscreenHistoryVisibleLimit = getFullscreenHistory().length;
+            renderFullscreenHistoryPanel();
+            repositionFullscreenHistoryPanelIfOpen({ preservePlacement: true });
+            return;
+        }
+
+        const collapseBtn = e.target && e.target.closest ? e.target.closest('#fullscreenHistoryCollapseBtn') : null;
+        if (collapseBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            fullscreenHistoryVisibleLimit = getFullscreenHistoryLazyLoadInitial();
+            renderFullscreenHistoryPanel();
+            repositionFullscreenHistoryPanelIfOpen({ preservePlacement: true });
+            return;
+        }
+
+        const deleteBtn = e.target && e.target.closest ? e.target.closest('.fullscreen-history-item-delete') : null;
+        if (deleteBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const deleteIndex = parseInt(deleteBtn.getAttribute('data-delete-index'), 10);
+            if (Number.isInteger(deleteIndex)) {
+                deleteFullscreenHistoryItem(deleteIndex);
+            }
+            return;
+        }
+
+        const item = e.target && e.target.closest ? e.target.closest('.fullscreen-history-item') : null;
+        if (!item) return;
+        const targetIndex = parseInt(item.getAttribute('data-index'), 10);
+        if (!Number.isInteger(targetIndex)) return;
+        switchFullscreenCardToIndex(targetIndex);
+    };
+
+    if (listEl && listEl.dataset.bound !== 'true') {
+        listEl.dataset.bound = 'true';
+        listEl.addEventListener('click', handleFullscreenHistoryListInteraction);
+
+        listEl.addEventListener('keydown', (e) => {
+            if (!e || (e.key !== 'Enter' && e.key !== ' ')) return;
+            const item = e.target && e.target.closest ? e.target.closest('.fullscreen-history-item') : null;
+            if (!item || e.target.closest('.fullscreen-history-item-delete')) return;
+            e.preventDefault();
+            const targetIndex = parseInt(item.getAttribute('data-index'), 10);
+            if (Number.isInteger(targetIndex)) {
+                switchFullscreenCardToIndex(targetIndex);
+            }
+        });
+    }
+
+    const footerEl = document.getElementById('fullscreenHistoryListFooter');
+    if (footerEl && footerEl.dataset.bound !== 'true') {
+        footerEl.dataset.bound = 'true';
+        footerEl.addEventListener('click', handleFullscreenHistoryListInteraction);
+    }
+
+    if (panel && panel.dataset.bound !== 'true') {
+        panel.dataset.bound = 'true';
+        document.addEventListener('click', (e) => {
+            if (!isFullscreenHistoryPanelOpen()) return;
+            const target = e.target;
+            if (!target || !target.closest) return;
+            if (target.closest('#fullscreenHistoryPanel')) {
+                if (!target.closest('#fullscreenHistoryLimitHelpBtn') && !target.closest('#fullscreenHistoryLimitHelpPopover')) {
+                    closeFullscreenHistoryLimitHelpPopover();
+                }
+                return;
+            }
+            if (target.closest('.fullscreen-history-btn')) return;
+            closeFullscreenHistoryPanel();
+        });
+        window.addEventListener('resize', () => {
+            repositionFullscreenHistoryPanelIfOpen({ preservePlacement: true });
+        });
+    }
+
+    window.addEventListener('canvas-maximized-state-change', (e) => {
+        const isActive = e.detail.active;
+        const element = e.detail.element;
+
+        if (!isActive || !element) {
+            updateFullscreenSwitcherUI();
+            return;
+        }
+
+        if (window.__isSwitchingFullscreen) {
+            updateFullscreenSwitcherUI();
+            return;
+        }
+
+        const descriptor = window.CanvasModule && typeof window.CanvasModule.serializeMaximizedNode === 'function'
+            ? window.CanvasModule.serializeMaximizedNode(element)
+            : null;
+        if (!descriptor) return;
+
+        let queue = getFullscreenHistory();
+        const existingIdx = queue.findIndex((item) => areFullscreenDescriptorsEqual(item, descriptor));
+        if (existingIdx !== -1) {
+            queue.splice(existingIdx, 1);
+        }
+
+        queue.push(descriptor);
+        queue = trimFullscreenHistoryQueue(queue);
+        const newIndex = queue.length - 1;
+        saveFullscreenHistory(queue, newIndex);
+        updateFullscreenSwitcherUI();
+    });
+
+    window.addEventListener('storage', (e) => {
+        if (
+            e.key === 'canvas_fullscreen_history_queue'
+            || e.key === 'canvas_fullscreen_history_index'
+            || e.key === CANVAS_FULLSCREEN_HISTORY_LIMIT_STORAGE_KEY
+        ) {
+            updateFullscreenSwitcherUI();
+        }
+    });
+
+    updateFullscreenSwitcherUI();
 }
 
 function setupTitleSideTools() {
@@ -8804,6 +9617,7 @@ function initializeUI() {
     setupSideLastFullscreenButton();
     setupTitleSidePanelToggleButton();
     setupTitleSideTools();
+    setupFullscreenHistorySwitcher();
 
     // 搜索
     const searchInputEl = document.getElementById('searchInput');

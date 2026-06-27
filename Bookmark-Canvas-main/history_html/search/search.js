@@ -449,6 +449,64 @@ function hideSearchResultsPanel() {
     } catch (_) { }
 }
 
+function prepareSearchInputBeforeCanvasNavigate() {
+    try {
+        hideSearchResultsPanel();
+        toggleSearchModeMenu(false);
+        toggleSearchHelpMenu(false);
+        const inputEl = document.getElementById('searchInput');
+        if (inputEl) inputEl.value = '';
+    } catch (_) { }
+}
+
+function dismissMainSearchAfterCanvasNavigate() {
+    try {
+        if (typeof window.cancelPendingMainSearchDebounce === 'function') {
+            window.cancelPendingMainSearchDebounce();
+        }
+    } catch (_) { }
+
+    try {
+        const input = document.getElementById('searchInput');
+        if (input) {
+            input.value = '';
+            try { input.blur(); } catch (_) { }
+        }
+    } catch (_) { }
+
+    try {
+        hideSearchResultsPanel();
+        toggleSearchModeMenu(false);
+        toggleSearchHelpMenu(false);
+    } catch (_) { }
+
+    try {
+        if (typeof performSearch === 'function') {
+            performSearch('');
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof searchUiState === 'object' && searchUiState) {
+            searchUiState.query = '';
+            searchUiState.results = [];
+            searchUiState.resultSource = [];
+            searchUiState.resultAll = [];
+            searchUiState.resultPagingKey = '';
+            searchUiState.resultVisibleCount = 0;
+            searchUiState.resultHasMore = false;
+            searchUiState.selectedIndex = -1;
+            searchUiState.canvasSuggestionsVisible = false;
+        }
+    } catch (_) { }
+
+    try {
+        if (isSidePanelModeInSearch()) {
+            setSidePanelSearchExpanded(false);
+        }
+    } catch (_) { }
+}
+
 /**
  * 重置顶部主搜索框（跨视图/标签隔离）
  * - 清空输入框
@@ -2784,7 +2842,12 @@ async function setSearchMode(modeKey, options = {}) {
         } catch (_) { }
 
         // Refresh search if there is query (bookmark mode is skipped as it handles this async via ensurePermTagsLoaded)
-        if (input.value.trim() && modeKey !== 'bookmark') {
+        let suppressSearchRerender = false;
+        try {
+            const pendingCount = Number(window.__canvasSearchSuppressFullscreenAutoModeCounter || 0);
+            suppressSearchRerender = Number.isFinite(pendingCount) && pendingCount > 0;
+        } catch (_) { }
+        if (input.value.trim() && modeKey !== 'bookmark' && !suppressSearchRerender) {
             const q = input.value.trim();
             const isCanvas = getCurrentViewSafe() === 'canvas';
 
@@ -2799,7 +2862,7 @@ async function setSearchMode(modeKey, options = {}) {
     }
 
     if (isCanvasFullscreenActive()) {
-        if (previousModeKey === 'structure' && modeKey !== 'structure') {
+        if (previousModeKey === 'structure' && modeKey !== 'structure' && source === 'user') {
             searchUiState.fullscreenAreaSearchDismissed = false;
         }
         syncFullscreenAreaSearchWithActiveMode();
@@ -10527,14 +10590,24 @@ async function ensureCanvasSearchResultTargetFullscreen(item) {
 
     let target = getCanvasSearchFullscreenTargetElement(item);
 
-    if (!target && type === 'temp-section') {
+    if (!target) {
         try {
-            if (window.CanvasModule && typeof window.CanvasModule.forceWakeAndRender === 'function') {
+            if (window.CanvasModule && typeof window.CanvasModule.materializeMaximizedNodeFromDescriptor === 'function') {
+                const descriptor = type === 'temp-section'
+                    ? { type: 'temp-node', id: String(item.id || '').trim() }
+                    : (type === 'md-node'
+                        ? { type: 'md-node', id: String(item.id || '').trim() }
+                        : null);
+                if (descriptor) {
+                    target = window.CanvasModule.materializeMaximizedNodeFromDescriptor(descriptor);
+                }
+            }
+            if (!target && type === 'temp-section' && window.CanvasModule && typeof window.CanvasModule.forceWakeAndRender === 'function') {
                 window.CanvasModule.forceWakeAndRender(String(item.id || '').trim());
             }
         } catch (_) { }
         await waitForSearchLocateAnimationFrames(1);
-        target = getCanvasSearchFullscreenTargetElement(item);
+        target = target || getCanvasSearchFullscreenTargetElement(item);
     }
 
     if (!target) {
@@ -10549,6 +10622,12 @@ async function ensureCanvasSearchResultTargetFullscreen(item) {
 
     if (!target || !target.classList) return false;
     if (target.classList.contains('canvas-node-maximized')) return true;
+
+    try {
+        if (window.CanvasModule && typeof window.CanvasModule.wakeCanvasNodeFromLazyState === 'function') {
+            window.CanvasModule.wakeCanvasNodeFromLazyState(target);
+        }
+    } catch (_) { }
 
     const fullscreenBtn = target.querySelector('.canvas-node-fullscreen-btn, .permanent-section-fullscreen-btn, .temp-node-fullscreen-btn, .md-node-toolbar-btn[data-action="md-fullscreen"]');
     if (!fullscreenBtn || typeof fullscreenBtn.click !== 'function') return false;
@@ -11705,9 +11784,20 @@ async function activateCanvasSearchResultAtIndex(index) {
         return;
     }
 
+    const navigateModeAtStart = searchUiState.activeMode;
+    const shouldDismissSearchAfterGlobalFullscreenNavigate = isFullscreenGlobalSearchActive()
+        && (navigateModeAtStart === 'structure' || navigateModeAtStart === 'description');
+
     const isInFullscreen = isCanvasFullscreenActive();
     let fullscreenScope = getCanvasFullscreenSearchScope();
     const isGlobalFullscreenSearch = isFullscreenGlobalSearchActive();
+
+    // 清空输入框 (仅针对非群组结果，群组结果需保留文字以维持高亮状态)
+    // 在全屏卡片切换前先清空，避免切换过程中 setSearchMode 用旧关键词重新展开结果面板
+    if (item.type !== 'group-result') {
+        prepareSearchInputBeforeCanvasNavigate();
+    }
+
     const shouldExitFullscreenForSearchLocate = isInFullscreen
         && (
             item.type === 'edge'
@@ -11731,16 +11821,6 @@ async function activateCanvasSearchResultAtIndex(index) {
     if (isGlobalFullscreenSearch && item.type === 'bookmark-item') {
         try {
             await ensureBookmarkSearchTargetFullscreen(item);
-        } catch (_) { }
-    }
-
-    hideSearchResultsPanel();
-
-    // 清空输入框 (仅针对非群组结果，群组结果需保留文字以维持高亮状态)
-    if (item.type !== 'group-result') {
-        try {
-            const inputEl = document.getElementById('searchInput');
-            if (inputEl) inputEl.value = '';
         } catch (_) { }
     }
 
@@ -11885,6 +11965,10 @@ async function activateCanvasSearchResultAtIndex(index) {
         await locateCanvasElement(item.id, item.type, {
             disableAnimation: disableAnimationForFullscreenCardSearch
         });
+    }
+
+    if (shouldDismissSearchAfterGlobalFullscreenNavigate) {
+        dismissMainSearchAfterCanvasNavigate();
     }
 }
 
