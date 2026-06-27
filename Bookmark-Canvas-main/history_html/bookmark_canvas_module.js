@@ -2085,8 +2085,8 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
         edge: '#999999'
     },
     names: {
-        temp: { mode: 'timestamp', manualValue: '' },
-        edge: { mode: 'blank', manualValue: '' }
+        temp: { mode: 'timestamp' },
+        edge: { mode: 'blank' }
     },
     fullScreenZoom: {
         section: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section,
@@ -2545,11 +2545,8 @@ function normalizeCanvasAppearanceSettings(input) {
     const tempMode = String(tempNames.mode || '').toLowerCase();
     const edgeMode = String(edgeNames.mode || '').toLowerCase();
 
-    out.names.temp.mode = ['manual', 'timestamp', 'split', 'blank'].includes(tempMode) ? tempMode : out.names.temp.mode;
-    out.names.temp.manualValue = typeof tempNames.manualValue === 'string' ? tempNames.manualValue : out.names.temp.manualValue;
-
-    out.names.edge.mode = ['manual', 'timestamp', 'parent', 'child', 'blank'].includes(edgeMode) ? edgeMode : out.names.edge.mode;
-    out.names.edge.manualValue = typeof edgeNames.manualValue === 'string' ? edgeNames.manualValue : out.names.edge.manualValue;
+    out.names.temp.mode = ['timestamp', 'split'].includes(tempMode) ? tempMode : out.names.temp.mode;
+    out.names.edge.mode = ['timestamp', 'parent', 'child', 'blank'].includes(edgeMode) ? edgeMode : out.names.edge.mode;
     out.fullScreenZoom = __normalizeAppearanceFullscreenZoom(input.fullScreenZoom, out.fullScreenZoom);
 
     out.version = CANVAS_APPEARANCE_SETTINGS_VERSION;
@@ -4598,12 +4595,9 @@ function formatTimestampForTitle(date = new Date()) {
 function getDefaultTempSectionTitle(options = {}) {
     const settings = getCanvasAppearanceSettings();
     const mode = settings && settings.names && settings.names.temp ? settings.names.temp.mode : 'timestamp';
-    const manualValue = settings && settings.names && settings.names.temp ? settings.names.temp.manualValue : '';
     const splitTitle = (options && typeof options.splitTitle === 'string') ? options.splitTitle.trim() : '';
 
     if (mode === 'split' && splitTitle) return splitTitle;
-    if (mode === 'blank') return '';
-    if (mode === 'manual') return manualValue;
     if (mode === 'timestamp') {
         try {
             return formatTimestampForTitle();
@@ -4676,9 +4670,7 @@ function getDefaultEdgeLabel(options = {}) {
     const settings = getCanvasAppearanceSettings();
     const edgeSettings = settings && settings.names ? settings.names.edge : null;
     const mode = edgeSettings && edgeSettings.mode ? edgeSettings.mode : 'blank';
-    const manualValue = edgeSettings && typeof edgeSettings.manualValue === 'string' ? edgeSettings.manualValue : '';
 
-    if (mode === 'manual') return manualValue;
     if (mode === 'blank') return '';
     if (mode === 'timestamp') {
         try {
@@ -40555,14 +40547,6 @@ function __updateAppearanceSizeMode(modal, groupName, inputsId) {
     inputs.classList.toggle('is-hidden', mode === 'auto');
 }
 
-function __updateAppearanceNameMode(modal, selectId, manualWrapId) {
-    if (!modal) return;
-    const select = modal.querySelector(`#${selectId}`);
-    const manualWrap = modal.querySelector(`#${manualWrapId}`);
-    if (!select || !manualWrap) return;
-    manualWrap.style.display = (select.value === 'manual') ? 'flex' : 'none';
-}
-
 function __syncAppearanceColorRow(rowEl, color) {
     if (!rowEl) return;
     const input = rowEl.querySelector('.appearance-color-input');
@@ -40616,19 +40600,13 @@ function openCanvasAppearanceSettingsModal() {
     });
 
     const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
-    const tempNameManual = modal.querySelector('#appearanceTempNameManual');
     const edgeNameSelect = modal.querySelector('#appearanceEdgeNameMode');
-    const edgeNameManual = modal.querySelector('#appearanceEdgeNameManual');
 
     if (tempNameSelect) tempNameSelect.value = names.temp.mode || 'timestamp';
-    if (tempNameManual) tempNameManual.value = names.temp.manualValue || '';
     if (edgeNameSelect) edgeNameSelect.value = names.edge.mode || 'blank';
-    if (edgeNameManual) edgeNameManual.value = names.edge.manualValue || '';
 
     __updateAppearanceSizeMode(modal, 'appearance-temp-size-mode', 'appearanceTempSizeInputs');
     __updateAppearanceSizeMode(modal, 'appearance-special-temp-size-mode', 'appearanceSpecialTempSizeInputs');
-    __updateAppearanceNameMode(modal, 'appearanceTempNameMode', 'appearanceTempNameManualWrap');
-    __updateAppearanceNameMode(modal, 'appearanceEdgeNameMode', 'appearanceEdgeNameManualWrap');
 
     const otherSettings = getCanvasOtherSettings();
     const otherAutoLink = modal.querySelector('#otherAutoLinkSplit');
@@ -40735,12 +40713,10 @@ function saveCanvasAppearanceSettings(options = {}) {
         },
         names: {
             temp: {
-                mode: (modal.querySelector('#appearanceTempNameMode') || {}).value,
-                manualValue: String((modal.querySelector('#appearanceTempNameManual') || {}).value || '').trim()
+                mode: (modal.querySelector('#appearanceTempNameMode') || {}).value
             },
             edge: {
-                mode: (modal.querySelector('#appearanceEdgeNameMode') || {}).value,
-                manualValue: String((modal.querySelector('#appearanceEdgeNameManual') || {}).value || '').trim()
+                mode: (modal.querySelector('#appearanceEdgeNameMode') || {}).value
             }
         }
     };
@@ -40923,27 +40899,18 @@ function createCanvasAppearanceSettingsModal() {
                             <select id="appearanceTempNameMode" class="appearance-name-select">
                                 <option value="timestamp">${isEn ? 'Timestamp' : '时间标记'}</option>
                                 <option value="split">${isEn ? 'Split name' : '分裂名称'}</option>
-                                <option value="blank">${isEn ? 'Blank' : '空白'}</option>
-                                <option value="manual">${isEn ? 'Manual' : '手动输入'}</option>
                             </select>
-                            <div class="appearance-name-manual" id="appearanceTempNameManualWrap">
-                                <input type="text" id="appearanceTempNameManual" placeholder="${isEn ? 'Enter default temp name' : '输入默认临时栏目名称'}">
-                            </div>
                         </div>
                     </div>
                     <div class="appearance-row">
                         <div class="appearance-row-label">${isEn ? 'Edge' : '连接线'}</div>
                         <div class="appearance-row-content">
                             <select id="appearanceEdgeNameMode" class="appearance-name-select">
-                                <option value="manual">${isEn ? 'Manual' : '手动输入'}</option>
                                 <option value="timestamp">${isEn ? 'Timestamp' : '时间标记'}</option>
                                 <option value="parent">${isEn ? 'Parent name' : '父栏目名字'}</option>
                                 <option value="child">${isEn ? 'Child name' : '子栏目名字'}</option>
                                 <option value="blank">${isEn ? 'Blank' : '空白'}</option>
                             </select>
-                            <div class="appearance-name-manual" id="appearanceEdgeNameManualWrap">
-                                <input type="text" id="appearanceEdgeNameManual" placeholder="${isEn ? 'Enter default edge label' : '输入默认连接线名称'}">
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -41315,15 +41282,9 @@ function createCanvasAppearanceSettingsModal() {
 
 
     const tempNameSelect = modal.querySelector('#appearanceTempNameMode');
-    if (tempNameSelect) tempNameSelect.addEventListener('change', () => {
-        __updateAppearanceNameMode(modal, 'appearanceTempNameMode', 'appearanceTempNameManualWrap');
-        scheduleAppearanceSave();
-    });
+    if (tempNameSelect) tempNameSelect.addEventListener('change', scheduleAppearanceSave);
     const edgeNameSelect = modal.querySelector('#appearanceEdgeNameMode');
-    if (edgeNameSelect) edgeNameSelect.addEventListener('change', () => {
-        __updateAppearanceNameMode(modal, 'appearanceEdgeNameMode', 'appearanceEdgeNameManualWrap');
-        scheduleAppearanceSave();
-    });
+    if (edgeNameSelect) edgeNameSelect.addEventListener('change', scheduleAppearanceSave);
 
     modal.querySelectorAll('.appearance-color-input').forEach(input => {
         input.addEventListener('input', () => {
@@ -41358,9 +41319,7 @@ function createCanvasAppearanceSettingsModal() {
         '#appearanceSpecialTempWidth',
         '#appearanceSpecialTempHeight',
         '#appearanceBlankWidth',
-        '#appearanceBlankHeight',
-        '#appearanceTempNameManual',
-        '#appearanceEdgeNameManual'
+        '#appearanceBlankHeight'
     ];
     appearanceInputs.forEach(selector => {
         const el = modal.querySelector(selector);
