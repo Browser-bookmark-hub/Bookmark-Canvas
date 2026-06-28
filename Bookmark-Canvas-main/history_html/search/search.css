@@ -440,6 +440,8 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     /* Changed from pointer to default to imply mixed content */
     border: 1px solid transparent;
     /* user-select: none; -> Removed to allow copying text */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 48px;
 }
 
 /* Allow text selection on specific content areas */
