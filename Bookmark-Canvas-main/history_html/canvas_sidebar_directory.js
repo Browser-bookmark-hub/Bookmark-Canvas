@@ -3794,6 +3794,13 @@
     }
   }
 
+  function getDynamicStep() {
+    const panel = document.getElementById('canvasHistoryPanel');
+    const height = panel ? panel.clientHeight : 0;
+    if (height <= 0) return 5;
+    return Math.max(5, Math.floor(height / 100));
+  }
+
   let autoRecordSettingsOpen = false;
   let manualAnchorSettingsOpen = false;
   let autoRecordVisibleLimit = 5;
@@ -3926,6 +3933,14 @@
     } catch (_) {}
     if (!Array.isArray(historyList)) historyList = [];
     
+    const step = getDynamicStep();
+    if (manualAnchorVisibleLimit < step) {
+      manualAnchorVisibleLimit = step;
+    }
+    if (autoRecordVisibleLimit < step) {
+      autoRecordVisibleLimit = step;
+    }
+
     const otherSettings = getCanvasOtherSettingsSafe();
     const isAutoRecordEnabled = otherSettings.autoRecordAnchor === true;
     const autoRecordInterval = otherSettings.autoRecordAnchorInterval || 15;
@@ -3936,9 +3951,10 @@
       .filter(s => s !== null);
 
     const isFull = savedSlots.length >= manualAnchorLimit;
+    const isAutoDisabledOrEmpty = historyList.length === 0;
       
     let html = `
-      <div class="sidebar-anchor-container">
+      <div class="sidebar-anchor-container${isAutoDisabledOrEmpty ? ' auto-inactive' : ''}">
         <!-- Section 1: Pinned Anchors -->
         <div class="sidebar-section-header manual-anchor-header">
           <span class="sidebar-section-title">${isEn ? 'Pinned Anchors' : '固定锚点'}</span>
@@ -4008,10 +4024,10 @@
     }
     
     const hasMoreManual = savedSlots.length > visibleSavedSlots.length;
-    const canCollapseManual = manualAnchorVisibleLimit > 5;
+    const canCollapseManual = manualAnchorVisibleLimit > step;
     if (hasMoreManual || canCollapseManual) {
       const remaining = savedSlots.length - visibleSavedSlots.length;
-      const willLoad = Math.min(5, remaining);
+      const willLoad = Math.min(step, remaining);
       
       html += `
         <div class="lazy-load-container" style="display: flex; gap: 8px; margin: 4px 8px 8px 8px; justify-content: center;">
@@ -4037,7 +4053,7 @@
     
     html += `
         <!-- Section 2: Auto-Saved History -->
-        <div class="sidebar-section-header auto-record-header" style="margin-top: 0; display: flex; align-items: center; justify-content: space-between;">
+        <div class="sidebar-section-header auto-record-header" style="margin-top: 12px; display: flex; align-items: center; justify-content: space-between;">
           <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;">
             <span class="sidebar-section-title" style="line-height: 1.2;">${isEn ? 'Auto' : '自动'}</span>
             <label class="other-toggle-switch" style="margin: 0; transform: scale(0.8); transform-origin: left center; flex-shrink: 0;" title="${isEn ? 'Enable Auto-save' : '开启自动保存'}">
@@ -4123,10 +4139,10 @@
     }
     
     const hasMore = currentHistoryList.length > visibleHistoryList.length;
-    const canCollapse = autoRecordVisibleLimit > 5;
+    const canCollapse = autoRecordVisibleLimit > step;
     if (hasMore || canCollapse) {
       const remaining = currentHistoryList.length - visibleHistoryList.length;
-      const willLoad = Math.min(5, remaining);
+      const willLoad = Math.min(step, remaining);
       
       html += `
         <div class="lazy-load-container" style="display: flex; gap: 8px; margin: 8px 8px 4px 8px; justify-content: center;">
@@ -4228,7 +4244,8 @@
     const manualLoadMoreBtn = panel.querySelector('#manualAnchorLoadMoreBtn');
     if (manualLoadMoreBtn) {
       manualLoadMoreBtn.addEventListener('click', () => {
-        manualAnchorVisibleLimit += 5;
+        const step = getDynamicStep();
+        manualAnchorVisibleLimit += step;
         try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
         renderHistoryPanel();
       });
@@ -4237,7 +4254,8 @@
     const manualCollapseBtn = panel.querySelector('#manualAnchorCollapseBtn');
     if (manualCollapseBtn) {
       manualCollapseBtn.addEventListener('click', () => {
-        manualAnchorVisibleLimit = 5;
+        const step = getDynamicStep();
+        manualAnchorVisibleLimit = step;
         try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
         renderHistoryPanel();
       });
@@ -4246,7 +4264,8 @@
     const loadMoreBtn = panel.querySelector('#autoRecordLoadMoreBtn');
     if (loadMoreBtn) {
       loadMoreBtn.addEventListener('click', () => {
-        autoRecordVisibleLimit += 5;
+        const step = getDynamicStep();
+        autoRecordVisibleLimit += step;
         try { localStorage.setItem('canvas-auto-record-visible-limit', autoRecordVisibleLimit); } catch (_) {}
         renderHistoryPanel();
       });
@@ -4255,7 +4274,8 @@
     const collapseBtn = panel.querySelector('#autoRecordCollapseBtn');
     if (collapseBtn) {
       collapseBtn.addEventListener('click', () => {
-        autoRecordVisibleLimit = 5;
+        const step = getDynamicStep();
+        autoRecordVisibleLimit = step;
         try { localStorage.setItem('canvas-auto-record-visible-limit', autoRecordVisibleLimit); } catch (_) {}
         renderHistoryPanel();
       });
@@ -4574,6 +4594,7 @@
       panelHist.style.display = 'none';
       if (navTabs) navTabs.classList.remove('history-tab-active');
     }
+
   }
 
   function init() {
