@@ -6217,7 +6217,6 @@ function showBookmarkEditorModal(options = {}) {
             refs.closeBtn.removeEventListener('click', handleCancel);
             refs.titleInput.removeEventListener('keydown', handleKeydown);
             refs.urlInput.removeEventListener('keydown', handleKeydown);
-            refs.modal.removeEventListener('click', handleBackgroundClick);
             delete refs.modal.dataset.bookmarkEditorType;
         }
 
@@ -6260,18 +6259,11 @@ function showBookmarkEditorModal(options = {}) {
             }
         }
 
-        function handleBackgroundClick(e) {
-            if (e.target === refs.modal) {
-                closeModal(null);
-            }
-        }
-
         refs.saveBtn.addEventListener('click', handleSave);
         refs.cancelBtn.addEventListener('click', handleCancel);
         refs.closeBtn.addEventListener('click', handleCancel);
         refs.titleInput.addEventListener('keydown', handleKeydown);
         refs.urlInput.addEventListener('keydown', handleKeydown);
-        refs.modal.addEventListener('click', handleBackgroundClick);
     });
 }
 
