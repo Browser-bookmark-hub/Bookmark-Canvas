@@ -2191,7 +2191,7 @@ const DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR = DEFAULT_ZOOM_ENDPOINT_DISPLAY_Y * ZOOM
 const DEFAULT_ZOOM_RATE_1_DISPLAY_FACTOR = CANVAS_RUNTIME_PLATFORM.isWindows ? 0.80 : DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR;
 const DEFAULT_ZOOM_RATE_2_DISPLAY_FACTOR = CANVAS_RUNTIME_PLATFORM.isWindows ? 0.60 : DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR;
 const DEFAULT_ZOOM_MAGNET_POINT_1_SPEED = CANVAS_RUNTIME_PLATFORM.isWindows ? 0.80 : 0.10;
-const DEFAULT_ZOOM_MAGNET_POINT_2_SPEED = CANVAS_RUNTIME_PLATFORM.isWindows ? 0.60 : 0.50;
+const DEFAULT_ZOOM_MAGNET_POINT_2_SPEED = 1.0;
 let canvasWinInputDebugSeq = 0;
 const canvasWinInputDebugLastTs = new Map();
 
@@ -2318,8 +2318,8 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
 
 const DEFAULT_PERF_BASELINE = {
     safeZone: 70,
-    exitLowDetail: 45,
-    enterLowDetail: 50
+    exitLowDetail: 65,
+    enterLowDetail: 70
 };
 
 const CANVAS_LOW_DETAIL_PREWARM_GAP = 0.05;
@@ -2327,7 +2327,7 @@ const CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS = 0.02;
 
 function __deriveCanvasLowDetailPrewarmThreshold(enterThreshold) {
     const enter = Number(enterThreshold);
-    const safeEnter = Number.isFinite(enter) && enter > 0 ? enter : 0.50;
+    const safeEnter = Number.isFinite(enter) && enter > 0 ? enter : 0.70;
     return Math.max(0.01, Math.min(1, safeEnter - CANVAS_LOW_DETAIL_PREWARM_GAP));
 }
 
@@ -2425,14 +2425,19 @@ function __normalizeZoomCurve(input) {
 }
 
 function __getDefaultMagnetPointsFromPerf(baseMagnets) {
-    const fallback = baseMagnets ? __normalizeMagnetPoints(baseMagnets) : __cloneDefaultOtherSettings().magnetPoints;
-    const safePercent = getCanvasSafeZoneThreshold() * 100;
-    const switchPercent = getCanvasLowDetailDisplayZoomThreshold() * 100;
-    const m1x = __getCanvasMagnetNormXForPercent(safePercent);
-    const m2x = __getCanvasMagnetNormXForPercent(switchPercent);
+    const defaultM1X = __getCanvasMagnetNormXForPercent(getCanvasLowDetailDisplayZoomThreshold() * 100);
+    const defaultM2X = __getCanvasMagnetNormXForPercent(50);
+    const m1 = (baseMagnets && baseMagnets.m1) || {};
+    const m2 = (baseMagnets && baseMagnets.m2) || {};
     return {
-        m1: { x: m1x, y: fallback.m1.y },
-        m2: { x: m2x, y: fallback.m2.y }
+        m1: {
+            x: __clampNumber(m1.x, 0, 1, defaultM1X),
+            y: __clampNumber(m1.y, 0.005, ZOOM_CURVE_ABS_MAX_FACTOR, DEFAULT_ZOOM_MAGNET_POINT_1_SPEED)
+        },
+        m2: {
+            x: __clampNumber(m2.x, 0, 1, defaultM2X),
+            y: __clampNumber(m2.y, 0.005, ZOOM_CURVE_ABS_MAX_FACTOR, DEFAULT_ZOOM_MAGNET_POINT_2_SPEED)
+        }
     };
 }
 
@@ -2517,20 +2522,11 @@ function __reflowCurvePointsForAxisChange(modal, prevAxis, nextAxis) {
 
     modal._zoomCurve = curve;
     modal._magnetPoints = magnets;
-    if (!modal._useDefaultZoomCurve) {
-        __syncPerfSettingsFromOtherMagnetPoints(magnets);
-    }
     return true;
 }
 
 function __restoreOtherZoomMagnetCurveToDefault(modal, options = {}) {
     if (!modal) return;
-    modal._zoomCurve = __cloneDefaultOtherSettings().zoomCurve;
-    modal._magnetPoints = __getDefaultMagnetPointsFromPerf();
-    __applyPerfDefaultBaselineToPerf();
-    modal._useDefaultZoomCurve = true;
-    modal._curveScrollInitialized = false;
-    modal._curveScrollAxisKey = null;
 
     if (options.resetZoomLimits) {
         const minZoomInput = modal.querySelector('#otherInputMinZoom');
@@ -2548,6 +2544,13 @@ function __restoreOtherZoomMagnetCurveToDefault(modal, options = {}) {
         if (fsSectionInput) fsSectionInput.value = String(defaults.section);
         if (fsMdInput) fsMdInput.value = String(defaults.mdNode);
     }
+
+    __applyPerfDefaultBaselineToPerf();
+    modal._zoomCurve = __cloneDefaultOtherSettings().zoomCurve;
+    modal._magnetPoints = __getDefaultMagnetPointsFromPerf();
+    modal._useDefaultZoomCurve = true;
+    modal._curveScrollInitialized = false;
+    modal._curveScrollAxisKey = null;
 }
 
 function __ensureCurvePointsOnUnifiedAxis(modal) {
@@ -2557,6 +2560,16 @@ function __ensureCurvePointsOnUnifiedAxis(modal) {
         version = parseInt(localStorage.getItem('canvasZoomCurveAxisVersion'), 10) || 0;
     } catch (_) { }
     if (version >= ZOOM_CURVE_AXIS_VERSION) return;
+
+    // Check if there are legacy settings in localStorage to migrate.
+    // If not, this is a fresh installation, so default values are already correct.
+    const hasLegacy = !!localStorage.getItem('canvasOtherSettings');
+    if (!hasLegacy) {
+        try {
+            localStorage.setItem('canvasZoomCurveAxisVersion', String(ZOOM_CURVE_AXIS_VERSION));
+        } catch (_) { }
+        return;
+    }
 
     const nextAxis = __getOtherCurveZoomAxis();
     const legacyAxis = __getLegacyCurveZoomAxis(nextAxis.minPercent);
@@ -2581,32 +2594,12 @@ function __getCanvasMagnetNormXForPercent(percent) {
 
 function __syncMagnetPointPositionsFromPerf(points) {
     const out = __normalizeMagnetPoints(points);
-    out.m1.x = __getCanvasMagnetNormXForPercent(getCanvasSafeZoneThreshold() * 100);
-    out.m2.x = __getCanvasMagnetNormXForPercent(getCanvasLowDetailDisplayZoomThreshold() * 100);
+    out.m1.x = __getCanvasMagnetNormXForPercent(getCanvasLowDetailDisplayZoomThreshold() * 100);
     return out;
 }
 
 function __normalizeMagnetPoints(input) {
-    const fallback = __getDefaultMagnetPointsFromPerf();
-    if (!input || typeof input !== 'object') return fallback;
-    const m1 = input.m1 || {};
-    const m2 = input.m2 || {};
-    const out = {
-        m1: {
-            x: __clampNumber(m1.x, 0, 1, fallback.m1.x),
-            y: __clampNumber(m1.y, 0.005, ZOOM_CURVE_ABS_MAX_FACTOR, fallback.m1.y)
-        },
-        m2: {
-            x: __clampNumber(m2.x, 0, 1, fallback.m2.x),
-            y: __clampNumber(m2.y, 0.005, ZOOM_CURVE_ABS_MAX_FACTOR, fallback.m2.y)
-        }
-    };
-    if (out.m2.x > out.m1.x) {
-        const tmp = out.m1;
-        out.m1 = out.m2;
-        out.m2 = tmp;
-    }
-    return out;
+    return __getDefaultMagnetPointsFromPerf(input);
 }
 
 function normalizeCanvasAppearanceSettings(input) {
@@ -2698,6 +2691,7 @@ function normalizeCanvasAppearanceSettings(input) {
 
 function normalizeCanvasOtherSettings(input) {
     const out = __cloneDefaultOtherSettings();
+    out.magnetPoints = __syncMagnetPointPositionsFromPerf(out.magnetPoints);
     if (!input || typeof input !== 'object') return out;
     if (typeof input.autoLinkSplit === 'boolean') out.autoLinkSplit = input.autoLinkSplit;
     if (typeof input.autoRecordAnchor === 'boolean') out.autoRecordAnchor = input.autoRecordAnchor;
@@ -3282,59 +3276,7 @@ function __applyPerfLinkedStyles() {
     }
 }
 
-function __syncPerfSettingsFromOtherMagnetPoints(magnetPoints) {
-    __ensurePerfManualBaseline();
-    const points = __normalizeMagnetPoints(magnetPoints);
-    const axis = __getOtherCurveZoomAxis();
-    const safePercent = __percentFromNormX(axis, points.m1.x);
-    const switchPercent = __percentFromNormX(axis, points.m2.x);
 
-    const minV = axis.minPercent;
-    const maxV = axis.maxPercent;
-    const enterPercent = __clampPercentToAxis(axis, switchPercent);
-    const exitPercent = __deriveCanvasLowDetailPrewarmThreshold(enterPercent / 100) * 100;
-
-    const safeZoneSettings = (() => {
-        try {
-            const raw = localStorage.getItem('canvasSafeZoneSettings');
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                if (parsed && typeof parsed === 'object') return parsed;
-            }
-        } catch (_) { }
-        return { threshold: 0.70, enabled: true };
-    })();
-    safeZoneSettings.threshold = __clampPercentToAxis(axis, safePercent) / 100;
-    try { saveSharedState('canvasSafeZoneSettings', safeZoneSettings); } catch (_) { }
-
-    const zoomThresholds = {
-        enterLowDetail: enterPercent / 100,
-        exitLowDetail: exitPercent / 100
-    };
-    try { saveSharedState('canvasZoomThresholds', zoomThresholds); } catch (_) { }
-
-    __writePerfLinkedFromOther({
-        safeZone: safePercent,
-        exitLowDetail: exitPercent,
-        enterLowDetail: enterPercent,
-        switchPercent,
-        updatedAt: Date.now()
-    });
-
-    const safeInput = document.getElementById('perfInputSafeZone');
-    if (safeInput) safeInput.value = __formatPercentInputValue(safePercent);
-    const exitInput = document.getElementById('perfInputExitLowDetail');
-    if (exitInput) exitInput.value = __formatPercentInputValue(exitPercent);
-    const enterInput = document.getElementById('perfInputEnterLowDetail');
-    if (enterInput) enterInput.value = __formatPercentInputValue(enterPercent);
-
-    const safeValueEl = document.getElementById('perfMagnetSafeValue');
-    if (safeValueEl) safeValueEl.textContent = `${__formatPercentInputValue(safePercent)}%`;
-    const midValueEl = document.getElementById('perfMagnetMidValue');
-    if (midValueEl) midValueEl.textContent = `${__formatPercentInputValue(enterPercent)}%`;
-
-    __applyPerfLinkedStyles();
-}
 
 function __getTempSectionSizeSettings(section) {
     const settings = getCanvasAppearanceSettings();
@@ -10032,8 +9974,8 @@ function getCanvasZoomMagnetSettings() {
     // Defaults:
     // - magnet enabled: true
     // - safe zone magnet (70%): enabled
-    // - low-detail boundary magnet: enabled
-    const defaults = { enabled: true, enableSafeZone: true, enableLowDetailMid: true };
+    // - low-detail boundary magnet (M2): disabled by default (Y=1.0 = no slowdown)
+    const defaults = { enabled: true, enableSafeZone: true, enableLowDetailMid: false };
 
     // New format
     try {
@@ -10100,15 +10042,12 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
 
     const settings = getCanvasZoomMagnetSettings();
     const magnetPoints = __normalizeMagnetPoints(getCanvasZoomMagnetPoints());
-
-    // 两个“磁矩”位置：
-    // - Safe Zone 阈值（默认 70%）
-    // - low-detail visual switch threshold（默认 50%）
     const magnets = [];
 
     try {
         if (settings.enableSafeZone) {
-            const safe = getCanvasSafeZoneThreshold();
+            const axis = __getOtherCurveZoomAxis();
+            const safe = __percentFromNormX(axis, magnetPoints.m1.x) / 100;
             if (Number.isFinite(safe) && safe > 0) {
                 // Safe Zone 附近更明显（范围更宽、减速更强）
                 const halfWidth = Math.min(0.16, 0.08 * widthBoost);
@@ -10119,10 +10058,12 @@ function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
 
     try {
         if (settings.enableLowDetailMid) {
-            const enter = getCanvasLowDetailDisplayZoomThreshold();
-            const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
-            if (Number.isFinite(enter) && Number.isFinite(exit) && enter > 0 && exit > 0) {
-                const band = Math.max(0.01, Math.abs(enter - exit));
+            const axis = __getOtherCurveZoomAxis();
+            const enter = __percentFromNormX(axis, magnetPoints.m2.x) / 100;
+            if (Number.isFinite(enter) && enter > 0) {
+                const enterLowDetail = getCanvasLowDetailDisplayZoomThreshold();
+                const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+                const band = Math.max(0.01, Math.abs(enterLowDetail - exit));
                 // 中心精准卡在低细节切换点；缓慢区覆盖边界前后，给 DOM/低细节状态切换留反应时间。
                 const baseHalf = Math.min(0.12, Math.max(0.06, band * 2.5));
                 const halfWidth = Math.min(0.18, baseHalf * widthBoost);
@@ -10615,7 +10556,7 @@ function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
 }
 
 function getCanvasLowDetailDisplayZoomThreshold() {
-    // 动态阈值：从 localStorage 读取，默认 50% 启用低细节模式
+    // 动态阈值：从 localStorage 读取，默认 70% 启用低细节模式
     try {
         const saved = localStorage.getItem('canvasZoomThresholds');
         if (saved) {
@@ -10625,7 +10566,7 @@ function getCanvasLowDetailDisplayZoomThreshold() {
             }
         }
     } catch (_) { }
-    return 0.50;
+    return 0.70;
 }
 
 function getCanvasLowDetailPrewarmDisplayZoomThreshold() {
@@ -12884,7 +12825,7 @@ function prewarmCanvasLowDetailVisibleTrees(options = {}) {
     const scale = CanvasState.zoom || 1;
     let warmed = 0;
 
-    // 以“当前视口中心”为基准，仅预热中心附近少量栏目，避免 50% 视界一屏全部一起加载
+    // 以“当前视口中心”为基准，仅预热中心附近少量栏目，避免低细节临界视界一屏全部一起加载
     const centerScreenX = workspaceRect.left + (workspaceRect.width / 2);
     const centerScreenY = workspaceRect.top + (workspaceRect.height / 2);
     const candidates = [];
@@ -13961,14 +13902,18 @@ function __ensureCanvasLowDetailOverlaysReady(workspace = null) {
 }
 
 function __cancelCanvasLowDetailRipple(workspace = null, options = {}) {
+    const hasRunningFrame = !!CanvasState.lowDetailRippleFrame;
     CanvasState.lowDetailRippleGeneration = (Number(CanvasState.lowDetailRippleGeneration || 0) || 0) + 1;
     if (CanvasState.lowDetailRippleFrame) {
         try { cancelAnimationFrame(CanvasState.lowDetailRippleFrame); } catch (_) { }
         CanvasState.lowDetailRippleFrame = null;
     }
     const opts = (options && typeof options === 'object') ? options : {};
-    if (opts.keepClass) return;
     const ws = workspace || document.getElementById('canvasWorkspace');
+    if (hasRunningFrame && !CanvasState.lowDetailActive && !opts.startingNew) {
+        try { __finalizeCanvasLowDetailExitVisualState(ws); } catch (_) { }
+    }
+    if (opts.keepClass) return;
     if (ws && ws.classList) {
         try { ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS); } catch (_) { }
     }
@@ -13983,12 +13928,18 @@ function __clearCanvasLowDetailFreezeInv() {
 }
 
 function __isCanvasSafeZoneActive(displayZoom = null) {
-    if (!isCanvasSafeZoneEnabled()) return false;
     const zoom = (typeof displayZoom === 'number' && isFinite(displayZoom))
         ? displayZoom
         : getCanvasDisplayZoom();
-    const threshold = getCanvasSafeZoneThreshold();
-    return Number.isFinite(zoom) && Number.isFinite(threshold) && threshold > 0 && zoom >= threshold;
+
+    if (isCanvasSafeZoneEnabled()) {
+        const threshold = getCanvasSafeZoneThreshold();
+        return Number.isFinite(zoom) && Number.isFinite(threshold) && threshold > 0 && zoom >= threshold;
+    }
+
+    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
+    const exitThreshold = enterThreshold + CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS;
+    return Number.isFinite(zoom) && zoom >= exitThreshold;
 }
 
 function __hasCanvasGlobalLowDetailResidue(workspace = null) {
@@ -14007,10 +13958,18 @@ function __hasCanvasSafeZoneLowDetailResidue(workspace = null) {
     if (!ws) return !!CanvasState.lowDetailActive;
     if (__hasCanvasGlobalLowDetailResidue(ws)) return true;
     try {
-        return !!ws.querySelector('.low-detail-active, .temp-tree-unloaded, .permanent-tree-unloaded, .card-group-low-detail-child-hidden, .card-group-low-detail-nested-visible, [data-low-detail-host-group-id]');
-    } catch (_) {
-        return false;
-    }
+        if (ws.querySelector('.card-group-low-detail-child-hidden, .card-group-low-detail-nested-visible, [data-low-detail-host-group-id]')) {
+            return true;
+        }
+        const bounds = __getCanvasViewportBounds(ws, 0);
+        const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR + '.low-detail-active'));
+        for (const card of cards) {
+            if (!__isCardOutsideViewportBounds(card, bounds)) {
+                return true;
+            }
+        }
+    } catch (_) { }
+    return false;
 }
 
 function __forceCanvasLowDetailVisualExit(workspace = null, options = {}) {
@@ -14237,7 +14196,7 @@ function __startCanvasLowDetailVisualRipple(shouldActive, workspace = null) {
     if (!ws || !ws.classList) return false;
 
     __clearCanvasLazyLoadQueue();
-    __cancelCanvasLowDetailRipple(ws);
+    __cancelCanvasLowDetailRipple(ws, { startingNew: true });
     const generation = (Number(CanvasState.lowDetailRippleGeneration || 0) || 0) + 1;
     CanvasState.lowDetailRippleGeneration = generation;
 
@@ -14349,7 +14308,7 @@ function __applyLowDetailStateVisualSync(shouldActive, options = {}) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
 
-    if (!shouldActive && __isCanvasSafeZoneActive()) {
+    if (!shouldActive && isCanvasSafeZoneEnabled() && __isCanvasSafeZoneActive()) {
         __forceCanvasLowDetailVisualExit(workspace, {
             clearAllCards: true,
             restoreDom: true,
@@ -15579,7 +15538,7 @@ function __onCanvasZoomEndCleanup() {
     // 强制刷新低细节模式（可能退出），确保逻辑发生在 is-zooming 解除之后
     try { updateCanvasLowDetailMode(true); } catch (_) { }
     try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
-    // 低细节区间（45%~50%）：只预热“视口中心附近少量栏目”，避免一屏全加载
+    // 低细节区间（65%~70%）：只预热“视口中心附近少量栏目”，避免一屏全加载
     if (!isCanvasVirtualizationEnabled()) {
         try { prewarmCanvasLowDetailVisibleTrees(); } catch (_) { }
     }
@@ -41879,6 +41838,31 @@ function saveCanvasOtherSettings(options = {}) {
         settingsInput.directoryAutoCollapseWidth = sidebarAutoCollapseWidth;
     }
 
+    try {
+        const axis = __getOtherCurveZoomAxis();
+        const m1Percent = __percentFromNormX(axis, settingsInput.magnetPoints.m1.x);
+        const zoomThresholds = {
+            enterLowDetail: m1Percent / 100,
+            exitLowDetail: __deriveCanvasLowDetailPrewarmThreshold(m1Percent / 100)
+        };
+        saveSharedState('canvasZoomThresholds', zoomThresholds);
+
+        __writePerfManualBaseline({
+            safeZone: 70,
+            exitLowDetail: zoomThresholds.exitLowDetail * 100,
+            enterLowDetail: zoomThresholds.enterLowDetail * 100
+        });
+
+        const perfEnterInput = document.getElementById('perfInputEnterLowDetail');
+        if (perfEnterInput) {
+            perfEnterInput.value = __formatPercentInputValue(m1Percent);
+        }
+        const perfExitInput = document.getElementById('perfInputExitLowDetail');
+        if (perfExitInput) {
+            perfExitInput.value = __formatPercentInputValue(zoomThresholds.exitLowDetail * 100);
+        }
+    } catch (_) {}
+
     const normalized = normalizeCanvasOtherSettings(settingsInput);
     CanvasState.otherSettings = normalized;
     const minZoomInput = modal.querySelector('#otherInputMinZoom');
@@ -42073,9 +42057,11 @@ function __renderOtherZoomMagnetCurve(modal) {
         return paddingTop + (1 - (f / maxFactor)) * plotH;
     };
 
-    const magnetPoints = useDefaultCurve
-        ? __getDefaultMagnetPointsFromPerf((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints())
-        : __syncMagnetPointPositionsFromPerf((modal && modal._magnetPoints) || getCanvasZoomMagnetPoints());
+    const magnetPoints = (modal && modal._magnetPoints)
+        ? modal._magnetPoints
+        : (useDefaultCurve
+            ? __getDefaultMagnetPointsFromPerf(getCanvasZoomMagnetPoints())
+            : __syncMagnetPointPositionsFromPerf(getCanvasZoomMagnetPoints()));
     if (modal) modal._magnetPoints = magnetPoints;
     if (modal) __syncOtherMagnetTogglesFromSettings(modal, settings);
 
@@ -42332,8 +42318,8 @@ function __renderOtherZoomMagnetCurve(modal) {
         ctx.fillText(text, x + 6, py - 6);
         ctx.restore();
     };
-    drawMagnetPoint(safePercent, getCombinedFactor(safePercent), '#10b981', isEn ? 'M1' : '磁1', safeEnabled, 'm1');
-    drawMagnetPoint(switchPercent, getCombinedFactor(switchPercent), '#a855f7', isEn ? 'M2' : '磁2', midEnabled, 'm2');
+    drawMagnetPoint(safePercent, magnetPoints.m1.y, '#10b981', isEn ? 'M1' : '磁1', safeEnabled, 'm1');
+    drawMagnetPoint(switchPercent, magnetPoints.m2.y, '#a855f7', isEn ? 'M2' : '磁2', midEnabled, 'm2');
 
     modal._curveLayout = {
         paddingLeft,
@@ -42481,9 +42467,9 @@ function __bindOtherCurveInteractions(modal, onChange) {
             return Math.max(0.005, Math.min(maxFactor, base * magnetFactor));
         };
         const m1x = normToChartX(magnets.m1.x);
-        const m1y = layout.paddingTop + (1 - (combinedFactorAt(magnets.m1.x) / maxFactor)) * layout.plotH;
+        const m1y = layout.paddingTop + (1 - (magnets.m1.y / maxFactor)) * layout.plotH;
         const m2x = normToChartX(magnets.m2.x);
-        const m2y = layout.paddingTop + (1 - (combinedFactorAt(magnets.m2.x) / maxFactor)) * layout.plotH;
+        const m2y = layout.paddingTop + (1 - (magnets.m2.y / maxFactor)) * layout.plotH;
         return {
             layout,
             p0: { x: p0x, y: p0y },
@@ -42548,19 +42534,16 @@ function __bindOtherCurveInteractions(modal, onChange) {
             const display = ny * axisMax;
             curve.p3.y = __unscaleZoomCurveFactor(display);
         } else if (dragState.point === 'm1') {
-            magnets.m1.x = Math.max(nx, magnets.m2.x + magnetGap);
+            magnets.m1.x = nx;
             const display = ny * axisMax;
             magnets.m1.y = clampMagnetFactor(display);
         } else if (dragState.point === 'm2') {
-            magnets.m2.x = Math.min(nx, magnets.m1.x - magnetGap);
+            magnets.m2.x = nx;
             const display = ny * axisMax;
             magnets.m2.y = clampMagnetFactor(display);
         }
         setCurve(curve);
         setMagnets(magnets);
-        if (dragState.point === 'm1' || dragState.point === 'm2') {
-            __syncPerfSettingsFromOtherMagnetPoints(magnets);
-        }
         __renderOtherZoomMagnetCurve(modal);
         if (typeof onChange === 'function') onChange();
     };
@@ -42630,8 +42613,8 @@ function createCanvasOtherSettingsModal() {
     const defaultM1Speed = Math.round(DEFAULT_ZOOM_MAGNET_POINT_1_SPEED * 100);
     const defaultM2Speed = Math.round(DEFAULT_ZOOM_MAGNET_POINT_2_SPEED * 100);
     const defaultMagnetHint = isEn
-        ? `Default restore: M1 (X=${DEFAULT_PERF_BASELINE.safeZone}%, Y=${defaultM1Speed}%), M2 (X=${DEFAULT_PERF_BASELINE.enterLowDetail}%, Y=${defaultM2Speed}%).`
-        : `默认还原：磁1（X=${DEFAULT_PERF_BASELINE.safeZone}%，Y=${defaultM1Speed}%），磁2（X=${DEFAULT_PERF_BASELINE.enterLowDetail}%，Y=${defaultM2Speed}%）。`;
+        ? `Default restore: M1 (X=${DEFAULT_PERF_BASELINE.enterLowDetail}%, Y=${defaultM1Speed}%), M2 (X=50%, Y=${defaultM2Speed}%).`
+        : `默认还原：磁1（X=${DEFAULT_PERF_BASELINE.enterLowDetail}%，Y=${defaultM1Speed}%），磁2（X=50%，Y=${defaultM2Speed}%）。`;
 
     modal.innerHTML = `
         <div class="modal-content other-settings-modal">
@@ -42834,8 +42817,8 @@ function createCanvasOtherSettingsModal() {
             <div class="perf-help-popover" id="otherZoomMagnetHelpPopover">
                 <div class="perf-help-popover-content">
                     ${isEn
-                ? '<b>Zoom Magnet</b>: Creates a slow zone around key zoom thresholds (resists approach, relaxes on leave). Magnet 1 follows the <b>"Safe Zone"</b> threshold in the Performance panel. Magnet 2 is centered exactly on the <b>"Zoom Degradation Threshold"</b>, slowing zoom right as low-detail mode enters or exits.<br><br><b>Default values</b>: M1 (X=70%, Y=10%), M2 (X=50%, Y=50%).'
-                : `<b>缩放磁矩</b>：在关键缩放阈值附近创建“缓慢区”（来拒去留）。磁矩1跟随<b>「性能」面板的「安全区」</b>阈值；磁矩2精准居中在 <b>「缩放降级阈值」</b>，在进入或退出低细节模式的边界使缩放变慢，以给系统更多反应时间。<br><br>${defaultMagnetHint}`}
+                ? '<b>Zoom Magnet</b>: Creates a slow zone around key zoom thresholds.<br>Magnet Point 1\'s X value is <b>synchronized</b> with the <b>"Auto-triggered Zoom Percentage"</b> in the Performance panel to slow down zoom when toggling low-detail cards.<br><br>${defaultMagnetHint}'
+                : `<b>缩放磁矩</b>：在关键缩放阈值附近创建“缓慢区”（来拒去留）。<br>磁矩点1的X值与<b>「性能」面板的「自动触发的缩放比例」</b>的值是<b>同步</b>的，在切换低细节模式时使缩放变慢。<br><br>${defaultMagnetHint}`}
                 </div>
             </div>
         </div>
@@ -43564,6 +43547,31 @@ function saveCanvasPerfSettings(options = {}) {
         enterLowDetail: zoomThresholds.enterLowDetail * 100
     });
 
+    try {
+        const otherSaved = localStorage.getItem(CANVAS_OTHER_SETTINGS_KEY);
+        let otherParsed = otherSaved ? JSON.parse(otherSaved) : {};
+        if (!otherParsed || typeof otherParsed !== 'object') {
+            otherParsed = {};
+        }
+        const axis = __getOtherCurveZoomAxis();
+        if (!otherParsed.magnetPoints) {
+            otherParsed.magnetPoints = __getDefaultMagnetPointsFromPerf();
+        } else {
+            otherParsed.magnetPoints = __normalizeMagnetPoints(otherParsed.magnetPoints);
+        }
+        otherParsed.magnetPoints.m1.x = __normXFromPercent(axis, enterLowDetailThreshold * 100);
+        otherParsed.magnetPoints = __normalizeMagnetPoints(otherParsed.magnetPoints);
+        
+        saveSharedState(CANVAS_OTHER_SETTINGS_KEY, otherParsed);
+        CanvasState.otherSettings = otherParsed;
+        
+        const otherModal = document.getElementById('canvasOtherSettingsModal');
+        if (otherModal) {
+            otherModal._magnetPoints = otherParsed.magnetPoints;
+            __renderOtherZoomMagnetCurve(otherModal);
+        }
+    } catch (_) {}
+
     const toggleLow = document.getElementById('perfToggleLowDetail');
     if (toggleLow) {
         CanvasState.lowDetailEnabled = toggleLow.checked;
@@ -43908,8 +43916,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfZoomHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Auto-triggered Zoom Percentage</b>: When the zoom level drops below this threshold, cards automatically collapse into simple color blocks with centered titles, greatly reducing layout and painting overhead. You can use the link icon next to it to adjust the zoom magnet吸附 behaviors.'
-            : '<b>自动触发的缩放比例</b>：当缩放比例低于此设定值时，卡片会自动简化为居中标题的大字色块，以减少平移和缩放时的渲染开销。你可以点击旁边的链接图标跳转微调缩放磁矩（吸附）设置。'}
+            ? '<b>Auto-triggered Zoom Percentage</b>: When the zoom level drops below this threshold, cards automatically collapse into simple color blocks with centered titles, greatly reducing layout and painting overhead. You can use the link icon next to it to adjust the zoom magnet behaviors.<br><b>Magnet Point 1</b>: Synchronized with Magnet Point 1 X in "Scroll & Zoom Settings"; reduces the zoom rate (adsorbs) at this threshold to allow buffer time for card rendering.'
+            : '<b>自动触发的缩放比例</b>：当缩放比例低于此设定值时，卡片会自动简化为居中标题的大字色块，以减少平移和缩放时的渲染开销。你可以点击旁边的链接图标跳转微调缩放磁矩（吸附）设置。<br><b>磁矩点1</b>：与<b>「滚动与缩放设置」</b>中的磁矩点1的X值<b>同步</b>，在此缩放比例处降低缩放变化率（吸附），为卡片渲染切换提供缓冲。'}
             </div>
         </div>
 
