@@ -14482,7 +14482,7 @@ function attachTreeEvents(treeContainer) {
                 } else if (mode === 'same-window-specific-group') {
                     if (typeof openInSameWindowSpecificGroup === 'function') openInSameWindowSpecificGroup(url, { context: contextInfo }); else window.open(url, '_blank');
                 } else if (mode === 'manual-select') {
-                    if (typeof openBookmarkWithManualSelection === 'function') openBookmarkWithManualSelection(url); else window.open(url, '_blank');
+                    if (typeof openBookmarkWithManualSelection === 'function') openBookmarkWithManualSelection(url, contextInfo); else window.open(url, '_blank');
                 } else {
                     if (typeof openBookmarkNewTab === 'function') openBookmarkNewTab(url); else window.open(url, '_blank');
                 }
