@@ -37852,9 +37852,31 @@ function addAnchorsToNode(nodeElement, nodeId) {
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
         if (typeof e.stopPropagation === 'function') e.stopPropagation();
         const url = link.getAttribute('href');
-        // 解析作用域上下文（临时栏目）
+        // 解析作用域上下文
         const tempNode = link.closest('.temp-canvas-node[data-section-id]');
-        const scopedContext = tempNode ? { treeType: 'temporary', sectionId: tempNode.dataset.sectionId } : { treeType: 'permanent' };
+        let scopedContext;
+        if (tempNode) {
+            scopedContext = { 
+                treeType: 'temporary', 
+                sectionId: tempNode.dataset.sectionId,
+                node: tempNode 
+            };
+        } else {
+            const permSection = link.closest('.permanent-bookmark-section');
+            if (permSection) {
+                const copyId = permSection.dataset.permanentSectionCopyId || 
+                               (permSection.id && permSection.id.startsWith('permanent-section-copy-') ? permSection.id.slice('permanent-section-copy-'.length) : null);
+                const displayIndex = permSection.dataset.permanentDisplayIndex || permSection.dataset.permanentSectionDisplayIndex || null;
+                scopedContext = {
+                    treeType: 'permanent',
+                    node: permSection,
+                    permanentCopyId: copyId,
+                    permanentDisplayIndex: displayIndex
+                };
+            } else {
+                scopedContext = { treeType: 'permanent' };
+            }
+        }
         try {
             if (window.defaultOpenMode === undefined && typeof window.getDefaultOpenMode === 'function') {
                 window.defaultOpenMode = window.getDefaultOpenMode();
@@ -37876,7 +37898,7 @@ function addAnchorsToNode(nodeElement, nodeId) {
         } else if (mode === 'same-window-specific-group') {
             if (typeof window.openInSameWindowSpecificGroup === 'function') window.openInSameWindowSpecificGroup(url, { context: scopedContext }); else window.open(url, '_blank');
         } else if (mode === 'manual-select') {
-            if (typeof window.openBookmarkWithManualSelection === 'function') window.openBookmarkWithManualSelection(url); else window.open(url, '_blank');
+            if (typeof window.openBookmarkWithManualSelection === 'function') window.openBookmarkWithManualSelection(url, scopedContext); else window.open(url, '_blank');
         } else {
             if (typeof window.openBookmarkNewTab === 'function') window.openBookmarkNewTab(url); else window.open(url, '_blank');
         }

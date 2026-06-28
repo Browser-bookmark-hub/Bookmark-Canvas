@@ -19,6 +19,119 @@
     }
   }
 
+  // 批量从系统的 FaviconCache (IndexedDB) 读取高精度/缓存的图标
+  function getCachedFaviconsInBatch(urls) {
+    return new Promise((resolve) => {
+      if (!urls || urls.length === 0) return resolve({});
+
+      const domainMap = {};
+      const domains = [];
+      urls.forEach(url => {
+        if (!url) return;
+        try {
+          const parsed = new URL(url);
+          let domain = parsed.hostname;
+          if (domain) {
+            domain = domain.toLowerCase().replace(/\.$/, '');
+            domainMap[url] = domain;
+            domains.push(domain);
+          }
+        } catch (_) {}
+      });
+
+      if (domains.length === 0) return resolve({});
+
+      const request = indexedDB.open('BookmarkFaviconCache', 1);
+      request.onerror = () => resolve({});
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('favicons')) {
+          db.close();
+          resolve({});
+          return;
+        }
+        try {
+          const tx = db.transaction(['favicons'], 'readonly');
+          const store = tx.objectStore('favicons');
+
+          const results = {};
+          const uniqueDomains = Array.from(new Set(domains));
+          const domainCache = {};
+          let completed = 0;
+
+          if (uniqueDomains.length === 0) {
+            db.close();
+            resolve({});
+            return;
+          }
+
+          uniqueDomains.forEach(domain => {
+            const getReq = store.get(domain);
+            getReq.onsuccess = () => {
+              if (getReq.result && getReq.result.dataUrl) {
+                domainCache[domain] = getReq.result.dataUrl;
+              }
+              completed++;
+              if (completed === uniqueDomains.length) {
+                db.close();
+                // Map domains back to URLs
+                urls.forEach(url => {
+                  const dom = domainMap[url];
+                  if (dom && domainCache[dom]) {
+                    results[url] = domainCache[dom];
+                  }
+                });
+                resolve(results);
+              }
+            };
+            getReq.onerror = () => {
+              completed++;
+              if (completed === uniqueDomains.length) {
+                db.close();
+                urls.forEach(url => {
+                  const dom = domainMap[url];
+                  if (dom && domainCache[dom]) {
+                    results[url] = domainCache[dom];
+                  }
+                });
+                resolve(results);
+              }
+            };
+          });
+        } catch (_) {
+          db.close();
+          resolve({});
+        }
+      };
+    });
+  }
+
+  // 异步获取并渲染容器内所有 img[data-url] 的缓存 favicon
+  function updateFaviconsFromCache(container) {
+    if (!container) return;
+    const imgs = container.querySelectorAll('img[data-url]');
+    const urls = [];
+    imgs.forEach(img => {
+      const url = img.dataset.url;
+      if (url && url.startsWith('http')) {
+        urls.push(url);
+      }
+    });
+
+    if (urls.length === 0) return;
+
+    getCachedFaviconsInBatch(urls).then(cachedMap => {
+      imgs.forEach(img => {
+        const url = img.dataset.url;
+        const cached = cachedMap[url];
+        if (cached && cached.startsWith('data:image/')) {
+          img.src = cached;
+          img.style.display = '';
+        }
+      });
+    }).catch(() => {});
+  }
+
   // Helper to get translated prefix based on type/mode
   function getModePrefix(currentLang) {
     const isZh = currentLang === 'zh_CN';
@@ -419,7 +532,7 @@
 
     tabCountEl.textContent = otherTabs.length;
 
-    const showSource = (mode === 'same-window');
+    const showSource = ['same-window', 'scoped-window', 'same-window-specific-group'].includes(mode);
     const thSource = document.getElementById('thSource');
     if (thSource) {
       thSource.style.display = showSource ? '' : 'none';
@@ -496,10 +609,20 @@
       const domain = tab.url ? new URL(tab.url).hostname : 'Local Page';
       const faviconUrl = getFaviconUrl(tab.url);
 
-      const sourceLabel = tabSourceLabels[tab.id] || '';
+      const sourceLabelInfo = tabSourceLabels[tab.id];
+      let sourceLabel = '';
+      let sourceColor = '';
+      if (sourceLabelInfo) {
+        if (typeof sourceLabelInfo === 'object') {
+          sourceLabel = sourceLabelInfo.text || '';
+          sourceColor = sourceLabelInfo.color || '';
+        } else {
+          sourceLabel = String(sourceLabelInfo);
+        }
+      }
       const sourceTd = showSource ? `
-        <td style="text-align: center;">
-          <div class="cell-source" title="${escapeHTML(sourceLabel)}">${escapeHTML(sourceLabel)}</div>
+        <td>
+          <div class="cell-source" title="${escapeHTML(sourceLabel)}" style="${sourceColor ? `color: ${sourceColor} !important; font-weight: 600;` : ''}">${escapeHTML(sourceLabel)}</div>
         </td>
       ` : '';
 
@@ -520,7 +643,7 @@
           </td>
           <td style="text-align: center; padding-left: 4px !important; padding-right: 4px !important;">
             <div class="cell-icon" style="margin: 0 auto;">
-              ${faviconUrl ? `<img src="${faviconUrl}" onerror="this.style.display='none'" />` : ''}
+              <img data-url="${escapeHTML(tab.url || '')}" src="${faviconUrl || '../icons/icon16.png'}" onerror="this.style.display='none'" />
             </div>
           </td>
           <td>
@@ -706,26 +829,32 @@
       });
     });
 
-    // Clean up bookmarkTabSourceLabels to avoid memory leaks
+    // Clean up bookmarkTabSourceLabels to avoid memory leaks (query all tabs globally to support multi-window)
     if (showSource) {
       (async () => {
         try {
-          if (chrome.storage && chrome.storage.local) {
-            const activeTabIds = new Set(tabs.map(t => String(t.id)));
-            let changed = false;
-            for (const tid in tabSourceLabels) {
-              if (!activeTabIds.has(tid)) {
-                delete tabSourceLabels[tid];
-                changed = true;
+          if (chrome.storage && chrome.storage.local && chrome.tabs && chrome.tabs.query) {
+            const allTabs = await new Promise(resolve => {
+              chrome.tabs.query({}, resolve);
+            });
+            if (allTabs) {
+              const activeTabIds = new Set(allTabs.map(t => String(t.id)));
+              let changed = false;
+              for (const tid in tabSourceLabels) {
+                if (!activeTabIds.has(tid)) {
+                  delete tabSourceLabels[tid];
+                  changed = true;
+                }
               }
-            }
-            if (changed) {
-              await chrome.storage.local.set({ bookmarkTabSourceLabels: tabSourceLabels });
+              if (changed) {
+                await chrome.storage.local.set({ bookmarkTabSourceLabels: tabSourceLabels });
+              }
             }
           }
         } catch (_) {}
       })();
     }
+    updateFaviconsFromCache(tabListEl);
   }
 
   // 6. 获取当前状态并更新列表
@@ -823,7 +952,7 @@
             <tr class="tab-row" data-url="${escapeHTML(item.url)}">
               <td style="text-align: center; padding-left: 4px !important; padding-right: 4px !important;">
                 <div class="cell-icon" style="margin: 0 auto;">
-                  <img src="${faviconUrl}" onerror="this.style.display='none'" />
+                  <img data-url="${escapeHTML(item.url || '')}" src="${faviconUrl || '../icons/icon16.png'}" onerror="this.style.display='none'" />
                 </div>
               </td>
               <td>
@@ -842,6 +971,8 @@
             </tr>
           `;
         }).join('');
+
+        updateFaviconsFromCache(bookmarkListEl);
 
         // 绑定书签的整行点击打开 / 激活事件
         bookmarkListEl.querySelectorAll('tr').forEach(row => {

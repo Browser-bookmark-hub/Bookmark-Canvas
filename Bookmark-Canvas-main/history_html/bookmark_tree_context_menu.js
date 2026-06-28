@@ -820,20 +820,66 @@ function toAlphaLabel(n) {
 
 function getScopeFromContext(context) {
     const type = context && context.treeType ? String(context.treeType) : 'permanent';
+    let cardTitle = '';
+    let cardColor = '';
+
+    const resolveCardColor = (element) => {
+        if (!element) return '';
+        try {
+            const computedStyle = window.getComputedStyle(element);
+            const val = computedStyle.getPropertyValue('--section-color') || '';
+            return val.trim();
+        } catch (_) {
+            return '';
+        }
+    };
+
+    // Try to resolve color from DOM
+    try {
+        let sectionEl = null;
+        if (context && context.node) {
+            sectionEl = context.node.closest('.temp-canvas-node, .permanent-bookmark-section');
+        }
+        if (!sectionEl && context && context.sectionId) {
+            sectionEl = document.querySelector(`.temp-canvas-node[data-section-id="${context.sectionId}"]`);
+        }
+        if (!sectionEl) {
+            const raw = (context && (context.permanentCopyId || context.permanentSectionCopyId || context.permanent_section_copy_id)) || '';
+            const copyId = typeof raw === 'string' ? raw.trim() : '';
+            if (copyId) {
+                sectionEl = document.getElementById(`permanent-section-copy-${copyId}`) || 
+                            document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${copyId}"]`);
+            } else if (type === 'permanent') {
+                sectionEl = document.getElementById('permanentSection');
+            }
+        }
+        if (sectionEl) {
+            cardColor = resolveCardColor(sectionEl);
+        }
+    } catch (_) {}
 
     // Temporary sections: use *display label* first (supports split labels like A1/A1-1), fall back to alpha label.
     if (type === 'temporary' && context && context.sectionId) {
         try {
-            const sec = (typeof CanvasModule !== 'undefined' && CanvasModule && CanvasModule.temp && typeof CanvasModule.temp.getSection === 'function')
-                ? CanvasModule.temp.getSection(context.sectionId)
-                : null;
+            const sec = (window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.getSection === 'function')
+                ? window.CanvasModule.temp.getSection(context.sectionId)
+                : (typeof getTempSection === 'function' ? getTempSection(context.sectionId) : null);
             const explicit = (sec && typeof sec.label === 'string') ? sec.label.trim() : '';
             const alpha = (!explicit && sec && sec.sequenceNumber) ? toAlphaLabel(sec.sequenceNumber) : '';
             const autoLabel = alpha ? `${alpha}-1` : '';
             const label = explicit || autoLabel;
-            return { key: `temp:${label || context.sectionId}`, prefix: label, kind: 'temporary' };
+
+            const explicitTitle = (sec && typeof sec.title === 'string') ? sec.title.trim() : '';
+            cardTitle = explicitTitle || ((window.currentLang || 'zh_CN') === 'zh_CN' ? '临时栏目' : 'Temp Section');
+
+            if (!cardColor && sec && sec.color) {
+                cardColor = sec.color;
+            }
+
+            return { key: `temp:${label || context.sectionId}`, prefix: label, kind: 'temporary', title: cardTitle, color: cardColor };
         } catch (_) {
-            return { key: `temp:${context.sectionId}`, prefix: '', kind: 'temporary' };
+            cardTitle = (window.currentLang || 'zh_CN') === 'zh_CN' ? '临时栏目' : 'Temp Section';
+            return { key: `temp:${context.sectionId}`, prefix: '', kind: 'temporary', title: cardTitle, color: cardColor };
         }
     }
 
@@ -845,17 +891,42 @@ function getScopeFromContext(context) {
         if (s) copyId = s;
     } catch (_) { copyId = null; }
 
+    // Try to find the title from the DOM node if available
+    try {
+        const node = context && context.node;
+        const sectionEl = node && node.closest ? node.closest('.permanent-bookmark-section') : null;
+        const titleEl = sectionEl ? sectionEl.querySelector('.permanent-section-title h3') : null;
+        const text = titleEl ? String(titleEl.textContent || '').trim() : '';
+        if (text) cardTitle = text;
+    } catch (_) {}
+
+    // Fallback to reading the main permanent section title from the page
+    if (!cardTitle) {
+        try {
+            const mainTitleEl = document.getElementById('permanentSectionTitle');
+            const text = mainTitleEl ? String(mainTitleEl.textContent || '').trim() : '';
+            if (text) cardTitle = text;
+        } catch (_) {}
+    }
+
+    // Ultimate fallback using language
+    if (!cardTitle) {
+        const lang = (typeof currentLang !== 'undefined' && currentLang) ? currentLang : 'zh_CN';
+        const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+        cardTitle = isEn ? 'Bookmark Tree (Permanent)' : '书签树 (永久栏目)';
+    }
+
     const idx = __ctxMenuNormalizePositiveInt(context && (context.permanentDisplayIndex || context.permanentSectionDisplayIndex));
     if (copyId) {
         const resolved = idx || __ctxMenuResolvePermanentCopyDisplayIndex(copyId);
         // Copy 1 (idx=1) -> #B (toAlphaLabel(1+1))
         const badge = resolved ? `#${toAlphaLabel(resolved + 1)}` : '';
-        return { key: `permanent-copy:${copyId}`, prefix: badge, kind: 'permanent', copyId, displayIndex: resolved };
+        return { key: `permanent-copy:${copyId}`, prefix: badge, kind: 'permanent', copyId, displayIndex: resolved, title: cardTitle, color: cardColor };
     }
 
     // Original -> #A (toAlphaLabel(1))
     const badge = `#${toAlphaLabel(1)}`;
-    return { key: 'permanent', prefix: badge, kind: 'permanent', copyId: null, displayIndex: 0 };
+    return { key: 'permanent', prefix: badge, kind: 'permanent', copyId: null, displayIndex: 0, title: cardTitle, color: cardColor };
 }
 
 function __formatScopedTempTitle(prefix, number) {
@@ -3413,13 +3484,13 @@ async function showContextMenu(e, node) {
                     case 'open-manual-select-template-run':
                         hideContextMenu();
                         if (context.nodeUrl) {
-                            await openBookmarkWithManualSelection(context.nodeUrl);
+                            await openBookmarkWithManualSelection(context.nodeUrl, context);
                         }
                         return;
                     case 'open-all-manual-select-template-run':
                         hideContextMenu();
                         const urls = await getUrlsFromContext(context);
-                        await openFolderWithManualSelection(urls, context.nodeTitle);
+                        await openFolderWithManualSelection(urls, context.nodeTitle, context);
                         return;
                     case 'swsg-new-group':
                     case 'swsg-new-window':
@@ -3565,13 +3636,13 @@ function renderSubmenu(context) {
                     case 'open-manual-select-template-run':
                         hideContextMenu();
                         if (context.nodeUrl) {
-                            await openBookmarkWithManualSelection(context.nodeUrl);
+                            await openBookmarkWithManualSelection(context.nodeUrl, context);
                         }
                         return;
                     case 'open-all-manual-select-template-run':
                         hideContextMenu();
                         const urls = await getUrlsFromContext(context);
-                        await openFolderWithManualSelection(urls, context.nodeTitle);
+                        await openFolderWithManualSelection(urls, context.nodeTitle, context);
                         return;
                     case 'swsg-new-group':
                     case 'swsg-new-window':
@@ -5913,15 +5984,15 @@ function collectTempUrls(sectionId, nodeId) {
     return urls;
 }
 
-async function openUrlList(urls, { newWindow = false, incognito = false, tabGroup = false, groupTitle = '' } = {}) {
+async function openUrlList(urls, { newWindow = false, incognito = false, tabGroup = false, groupTitle = '' } = {}, urlToScopeMap = null) {
     if (!urls || !urls.length) {
-        const lang = currentLang || 'zh_CN';
+        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
         alert(lang === 'zh_CN' ? '没有可打开的书签' : 'No bookmarks to open');
         return;
     }
 
     if (urls.length > 10) {
-        const lang = currentLang || 'zh_CN';
+        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
         const message = lang === 'zh_CN'
             ? `确定要打开 ${urls.length} 个书签吗？`
             : `Open ${urls.length} bookmarks?`;
@@ -5931,16 +6002,62 @@ async function openUrlList(urls, { newWindow = false, incognito = false, tabGrou
     if (newWindow) {
         if (chrome && chrome.windows) {
             try {
-                await chrome.windows.create({ url: urls, incognito });
+                const createdWin = await chrome.windows.create({ url: urls, incognito });
+                if (createdWin && urlToScopeMap) {
+                    let winTabs = createdWin.tabs;
+                    if (!winTabs || winTabs.length === 0) {
+                        try {
+                            winTabs = await chrome.tabs.query({ windowId: createdWin.id });
+                        } catch (_) {}
+                    }
+                    if (winTabs && winTabs.length > 0) {
+                        for (const tab of winTabs) {
+                            if (tab && tab.id != null && tab.url) {
+                                const scope = urlToScopeMap[tab.url];
+                                if (scope) {
+                                    const prefix = scope.prefix || '';
+                                    const title = scope.title || '';
+                                    const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+                                    if (label) {
+                                        await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 if (incognito && error.message && error.message.includes('Incognito mode is disabled')) {
-                    const lang = currentLang || 'zh_CN';
+                    const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
                     const message = lang === 'zh_CN'
-                        ? '无痕模式已被禁用。将在普通窗口中打开。\n\n若要使用无痕模式，请在扩展管理页面启用"在无痕模式下启用"。'
-                        : 'Incognito mode is disabled. Opening in normal window.\n\nTo use incognito mode, enable "Allow in Incognito" in extension settings.';
+                         ? '无痕模式已被禁用。将在普通窗口中打开。\n\n若要使用无痕模式，请在扩展管理页面启用"在无痕模式下启用"。'
+                         : 'Incognito mode is disabled. Opening in normal window.\n\nTo use incognito mode, enable "Allow in Incognito" in extension settings.';
                     alert(message);
                     // 降级为普通新窗口
-                    await chrome.windows.create({ url: urls, incognito: false });
+                    const createdWin = await chrome.windows.create({ url: urls, incognito: false });
+                    if (createdWin && urlToScopeMap) {
+                        let winTabs = createdWin.tabs;
+                        if (!winTabs || winTabs.length === 0) {
+                            try {
+                                winTabs = await chrome.tabs.query({ windowId: createdWin.id });
+                            } catch (_) {}
+                        }
+                        if (winTabs && winTabs.length > 0) {
+                            for (const tab of winTabs) {
+                                if (tab && tab.id != null && tab.url) {
+                                    const scope = urlToScopeMap[tab.url];
+                                    if (scope) {
+                                        const prefix = scope.prefix || '';
+                                        const title = scope.title || '';
+                                        const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+                                        if (label) {
+                                            await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else {
                     console.error('[openUrlList] 新窗口失败:', error);
                     urls.forEach(url => window.open(url, '_blank'));
@@ -5959,6 +6076,17 @@ async function openUrlList(urls, { newWindow = false, incognito = false, tabGrou
                 const tab = await chrome.tabs.create({ url, active: false });
                 if (tab && typeof tab.id === 'number') {
                     openedTabIds.push(tab.id);
+                    if (urlToScopeMap) {
+                        const scope = urlToScopeMap[url];
+                        if (scope) {
+                            const prefix = scope.prefix || '';
+                            const title = scope.title || '';
+                            const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+                            if (label) {
+                                await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+                            }
+                        }
+                    }
                 }
             } catch (error) {
                 console.warn('[临时栏目] 打开标签失败:', error);
@@ -6478,7 +6606,7 @@ async function handleTempMenuAction(action, context) {
         case 'open-all-manual-select-template-run':
             {
                 const urls = await getUrlsFromContext(context);
-                await openFolderWithManualSelection(urls, context.nodeTitle);
+                await openFolderWithManualSelection(urls, context.nodeTitle, context);
             }
             break;
         case 'edit':
@@ -8575,7 +8703,7 @@ async function handleMenuAction(action, context) {
             case 'open-all-manual-select-template-run':
                 {
                     const urls = await getUrlsFromContext(context);
-                    await openFolderWithManualSelection(urls, nodeTitle);
+                    await openFolderWithManualSelection(urls, nodeTitle, context);
                 }
                 break;
 
@@ -8909,6 +9037,9 @@ async function openInSameGroup(url, opts = {}) {
                         } catch (_) { }
                     }
                     localStorage.setItem(HYPERLINK_GROUP_KEY, String(groupId));
+                    const scope = getScopeFromContext(context || {});
+                    const label = (scope.prefix || scope.title) ? `${scope.prefix || ''}${scope.prefix && scope.title ? ' - ' : ''}${scope.title || ''}` : '';
+                    if (label) await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
                 } catch (groupErr) {
                     console.warn('[超链接标签组] 新建标签组失败 (仅保留标签):', groupErr);
                 }
@@ -9071,8 +9202,13 @@ async function openInSpecificWindow(url, options = {}) {
                         if (tab && tab.id != null) {
                             await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
                             const scope = getScopeFromContext(context);
-                            if (scope && scope.prefix) {
-                                await saveTabSourceLabel(tab.id, scope.prefix);
+                            if (scope) {
+                                const prefix = scope.prefix || '';
+                                const title = scope.title || '';
+                                const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+                                if (label) {
+                                    await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+                                }
                             }
                         }
                         return;
@@ -9084,12 +9220,25 @@ async function openInSpecificWindow(url, options = {}) {
             const created = await chrome.windows.create({ url });
             if (created && created.id) {
                 await setSpecificWindowId(created.id);
-                const firstTabId = created?.tabs?.[0]?.id ?? null;
+                let firstTabId = created?.tabs?.[0]?.id ?? null;
+                if (firstTabId == null) {
+                    try {
+                        const winTabs = await chrome.tabs.query({ windowId: created.id });
+                        if (winTabs && winTabs.length > 0) {
+                            firstTabId = winTabs[0].id;
+                        }
+                    } catch (_) {}
+                }
                 if (firstTabId != null) {
                     await reportExtensionBookmarkOpen({ tabId: firstTabId, url, source: 'history_ui' });
                     const scope = getScopeFromContext(context);
-                    if (scope && scope.prefix) {
-                        await saveTabSourceLabel(firstTabId, scope.prefix);
+                    if (scope) {
+                        const prefix = scope.prefix || '';
+                        const title = scope.title || '';
+                        const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+                        if (label) {
+                            await saveTabSourceLabel(firstTabId, { text: label, color: scope.color || '' });
+                        }
                     }
                 }
                 // 为“同一窗口”创建可见标记页（用于命名），标题使用连续编号
@@ -9110,7 +9259,18 @@ async function openInSpecificWindow(url, options = {}) {
                         : null;
                     if (markerUrl && chrome && chrome.tabs && chrome.tabs.create) {
                         const markerTab = await chrome.tabs.create({ windowId: created.id, url: markerUrl, pinned: false, active: false });
-                        try { if (markerTab && markerTab.id != null) await chrome.tabs.move(markerTab.id, { index: 0 }); } catch (_) { }
+                        if (markerTab && markerTab.id != null) {
+                            try { if (markerTab && markerTab.id != null) await chrome.tabs.move(markerTab.id, { index: 0 }); } catch (_) { }
+                            const scope = getScopeFromContext(context);
+                            if (scope) {
+                                const prefix = scope.prefix || '';
+                                const title = scope.title || '';
+                                const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+                                if (label) {
+                                    await saveTabSourceLabel(markerTab.id, { text: label, color: scope.color || '' });
+                                }
+                            }
+                        }
                     }
                 } catch (_) { }
             }
@@ -9227,7 +9387,15 @@ async function openInScopedWindow(url, opts = {}) {
                 try {
                     const win = await chrome.windows.get(winId, { populate: false });
                     if (win && win.id) {
-                        await chrome.tabs.create({ windowId: win.id, url, active: false });
+                        const tab = await chrome.tabs.create({ windowId: win.id, url, active: false });
+                        if (tab && tab.id != null) {
+                            const prefix = scope.prefix || '';
+                            const title = scope.title || '';
+                            const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+                            if (label) {
+                                await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+                            }
+                        }
                         return;
                     }
                 } catch (_) {
@@ -9245,6 +9413,23 @@ async function openInScopedWindow(url, opts = {}) {
         const created = await chrome.windows.create({ url });
         if (created && created.id) {
             await setScopedWindow(scope.key, created.id);
+            let firstTabId = created?.tabs?.[0]?.id ?? null;
+            if (firstTabId == null) {
+                try {
+                    const winTabs = await chrome.tabs.query({ windowId: created.id });
+                    if (winTabs && winTabs.length > 0) {
+                        firstTabId = winTabs[0].id;
+                    }
+                } catch (_) {}
+            }
+            if (firstTabId != null) {
+                const prefix = scope.prefix || '';
+                const title = scope.title || '';
+                const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+                if (label) {
+                    await saveTabSourceLabel(firstTabId, { text: label, color: scope.color || '' });
+                }
+            }
             // 为不同作用域添加可见标记页：
             // permanent -> 标题 "A-Z <n>"；temporary(alpha) -> 标题 "<alpha><n>"
             const markerTitleNumber = await allocateNextScopedWindowNumber(scope.key);
@@ -9267,7 +9452,15 @@ async function openInScopedWindow(url, opts = {}) {
                     : null;
                 if (markerUrl && chrome && chrome.tabs && chrome.tabs.create) {
                     const markerTab = await chrome.tabs.create({ windowId: created.id, url: markerUrl, pinned: false, active: false });
-                    try { if (markerTab && markerTab.id != null) await chrome.tabs.move(markerTab.id, { index: 0 }); } catch (_) { }
+                    if (markerTab && markerTab.id != null) {
+                        try { if (markerTab && markerTab.id != null) await chrome.tabs.move(markerTab.id, { index: 0 }); } catch (_) { }
+                        const prefix = scope.prefix || '';
+                        const titleText = scope.title || '';
+                        const label = (prefix && titleText) ? `${prefix} - ${titleText}` : (prefix || titleText || '');
+                        if (label) {
+                            await saveTabSourceLabel(markerTab.id, { text: label, color: scope.color || '' });
+                        }
+                    }
                 }
             } catch (_) { }
         }
@@ -9316,6 +9509,29 @@ async function createSameWindowSpecificGroupWindow(context) {
     }
     await registerSwsgWindow(created.id, nextNumber);
     await setSameWindowSpecificGroupWindowId(created.id);
+
+    // 为该 marker tab 写入来源标签
+    try {
+        let markerTabId = created?.tabs?.[0]?.id ?? null;
+        if (markerTabId == null) {
+            const winTabs = await chrome.tabs.query({ windowId: created.id });
+            if (winTabs && winTabs.length > 0) {
+                markerTabId = winTabs[0].id;
+            }
+        }
+        if (markerTabId != null) {
+            const scope = getScopeFromContext(context);
+            if (scope) {
+                const prefix = scope.prefix || '';
+                const title = scope.title || '';
+                const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+                if (label) {
+                    await saveTabSourceLabel(markerTabId, { text: label, color: scope.color || '' });
+                }
+            }
+        }
+    } catch (_) {}
+
     return created.id;
 }
 
@@ -9375,6 +9591,15 @@ async function openInSameWindowSpecificGroup(url, opts = {}) {
 
         const tab = await chrome.tabs.create({ url, active: isNewWindow, windowId });
         tabCreated = true;
+
+        if (tab && tab.id != null) {
+            const prefix = scope.prefix || '';
+            const title = scope.title || '';
+            const label = (prefix && title) ? `${prefix} - ${title}` : (prefix || title || '');
+            if (label) {
+                await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+            }
+        }
 
         // 激活窗口，确保显示最新打开的书签页面（如果是新窗口才激活，避免已存在的窗口后续打开tab页时跳转）
         if (isNewWindow) {
@@ -10352,16 +10577,14 @@ async function openSelectedBookmarks() {
         const urls = Array.from(urlSet);
 
         if (urls.length === 0) {
-            const lang = currentLang || 'zh_CN';
+            const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
             alert(lang === 'zh_CN' ? '没有选中书签' : 'No bookmarks selected');
             return;
         }
 
-        // 打开所有URL
-        await openUrlList(urls, {});
-
-        ;
-
+        // 打开所有URL，传入来源映射
+        const urlToScopeMap = await buildSelectionUrlToScopeMap();
+        await openUrlList(urls, {}, urlToScopeMap);
     } catch (error) {
         console.error('[多选] 打开失败:', error);
     }
@@ -10392,17 +10615,16 @@ async function openSelectedInTabGroup() {
         const urls = Array.from(urlSet);
 
         if (urls.length === 0) {
-            const lang = currentLang || 'zh_CN';
+            const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
             alert(lang === 'zh_CN' ? '没有选中书签' : 'No bookmarks selected');
             return;
         }
 
-        await openUrlList(urls, { tabGroup: true });
-        ;
-
+        const urlToScopeMap = await buildSelectionUrlToScopeMap();
+        await openUrlList(urls, { tabGroup: true }, urlToScopeMap);
     } catch (error) {
         console.error('[多选] 打开失败:', error);
-        const lang = currentLang || 'zh_CN';
+        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
         alert(lang === 'zh_CN' ? `打开失败: ${error.message}` : `Failed to open: ${error.message}`);
     }
 }
@@ -10524,6 +10746,62 @@ async function copySelected() {
 // 删除选中的项
 async function deleteSelected() {
     await batchDelete();
+}
+
+// 构建当前选中节点到它们对应的来源 scope 映射的辅助函数
+async function buildSelectionUrlToScopeMap() {
+    const urlToScopeMap = {};
+    try {
+        const permanentIds = getSelectedPermanentNodeIds();
+        const tempNodes = getSelectedTempNodes();
+        
+        // 1. 映射临时栏目节点
+        for (const node of tempNodes) {
+            if (!node) continue;
+            const nodeScope = getScopeFromContext({
+                treeType: 'temporary',
+                sectionId: node.sectionId,
+                node: node.element
+            });
+            if (node.isFolder) {
+                const folderUrls = collectTempUrls(node.sectionId, node.id);
+                folderUrls.forEach(u => {
+                    if (u) urlToScopeMap[u] = nodeScope;
+                });
+            } else if (node.url) {
+                urlToScopeMap[node.url] = nodeScope;
+            }
+        }
+
+        // 2. 映射永久栏目节点
+        for (const nodeId of permanentIds) {
+            const element = document.querySelector(`.tree-item[data-node-id="${nodeId}"]`);
+            const nodeContext = {
+                treeType: 'permanent',
+                node: element,
+                permanentCopyId: element ? (element.dataset.permanentCopyId || element.dataset.permanentSectionCopyId) : null,
+                permanentDisplayIndex: element ? element.dataset.permanentDisplayIndex : null
+            };
+            const nodeScope = getScopeFromContext(nodeContext);
+            const isFolder = element ? (element.dataset.nodeType === 'folder') : false;
+            if (isFolder) {
+                const folderUrls = await getAllUrlsFromFolder(nodeId);
+                folderUrls.forEach(u => {
+                    if (u) urlToScopeMap[u] = nodeScope;
+                });
+            } else {
+                try {
+                    const [node] = await chrome.bookmarks.get(nodeId);
+                    if (node && node.url) {
+                        urlToScopeMap[node.url] = nodeScope;
+                    }
+                } catch (_) {}
+            }
+        }
+    } catch (e) {
+        console.warn('[批量选择] 构建 URL 来源映射失败:', e);
+    }
+    return urlToScopeMap;
 }
 
 // 获取选中节点的所有URL
@@ -11083,7 +11361,7 @@ async function batchOpen() {
         return;
     }
 
-    const lang = currentLang || 'zh_CN';
+    const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
     const permanentIds = getSelectedPermanentNodeIds();
     const tempNodes = getSelectedTempNodes();
 
@@ -11116,11 +11394,21 @@ async function batchOpen() {
         if (!confirm(message)) return;
     }
 
+    const urlToScopeMap = await buildSelectionUrlToScopeMap();
     for (const url of urls) {
-        await chrome.tabs.create({ url: url, active: false });
+        const tab = await chrome.tabs.create({ url: url, active: false });
+        if (tab && tab.id != null) {
+            const scope = urlToScopeMap[url];
+            if (scope) {
+                const prefix = scope.prefix || '';
+                const titleText = scope.title || '';
+                const label = (prefix && titleText) ? `${prefix} - ${titleText}` : (prefix || titleText || '');
+                if (label) {
+                    await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+                }
+            }
+        }
     }
-
-    ;
 }
 
 // 批量打开（新窗口）
@@ -11148,7 +11436,8 @@ async function batchOpenNewWindow() {
         });
     }
     const urls = Array.from(urlSet);
-    await openUrlList(urls, { newWindow: true });
+    const urlToScopeMap = await buildSelectionUrlToScopeMap();
+    await openUrlList(urls, { newWindow: true }, urlToScopeMap);
 }
 
 // 批量打开（标签页组）
@@ -11158,7 +11447,7 @@ async function batchOpenTabGroup() {
         return;
     }
 
-    const lang = currentLang || 'zh_CN';
+    const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
     const permanentIds = getSelectedPermanentNodeIds();
     const tempNodes = getSelectedTempNodes();
 
@@ -11185,11 +11474,23 @@ async function batchOpenTabGroup() {
     }
 
     try {
+        const urlToScopeMap = await buildSelectionUrlToScopeMap();
         // 创建标签页
         const tabIds = [];
         for (const url of urls) {
             const tab = await chrome.tabs.create({ url: url, active: false });
-            tabIds.push(tab.id);
+            if (tab && tab.id != null) {
+                tabIds.push(tab.id);
+                const scope = urlToScopeMap[url];
+                if (scope) {
+                    const prefix = scope.prefix || '';
+                    const titleText = scope.title || '';
+                    const label = (prefix && titleText) ? `${prefix} - ${titleText}` : (prefix || titleText || '');
+                    if (label) {
+                        await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+                    }
+                }
+            }
         }
 
         // 创建标签页组
@@ -11203,8 +11504,6 @@ async function batchOpenTabGroup() {
                 });
             }
         }
-
-        ;
     } catch (error) {
         console.error('[批量] 打开失败:', error);
         alert(lang === 'zh_CN' ? `打开失败: ${error.message}` : `Failed to open: ${error.message}`);
@@ -11487,7 +11786,7 @@ async function batchOpenWithManualSelectionTemplateRun() {
     }
 
     // 调用 openFolderWithManualSelection 打开所有收集到的 URLs
-    await openFolderWithManualSelection(urls, lang === 'zh_CN' ? '批量打开' : 'Batch Open');
+    await openFolderWithManualSelection(urls, lang === 'zh_CN' ? '批量打开' : 'Batch Open', { isBatch: true });
 }
 
 // 批量打开（手动选择窗口/组）
@@ -16367,7 +16666,7 @@ function setupSelectorEvents(overlay, context, lang) {
             // 立即使用选择的窗口/组/模式打开文件夹的所有子书签
             const urls = await getUrlsFromContext(context);
             if (urls && urls.length > 0) {
-                await openFolderWithManualSelection(urls, context.nodeTitle);
+                await openFolderWithManualSelection(urls, context.nodeTitle, context);
             }
         } else {
             const checkbox = overlay.querySelector('#bookmark-focus-window');
@@ -16389,7 +16688,7 @@ function setupSelectorEvents(overlay, context, lang) {
 
             // 如果有书签URL，立即使用选择的窗口/组打开
             if (context && context.nodeUrl) {
-                await openBookmarkWithManualSelection(context.nodeUrl);
+                await openBookmarkWithManualSelection(context.nodeUrl, context);
             }
         }
     });
@@ -16699,7 +16998,7 @@ async function loadManualSelection() {
 /**
  * 使用手动选择的窗口/组打开书签
  */
-async function openBookmarkWithManualSelection(url) {
+async function openBookmarkWithManualSelection(url, context = null) {
     try {
         if (!url) return;
 
@@ -16707,7 +17006,24 @@ async function openBookmarkWithManualSelection(url) {
         const groupId = manualSelectedGroupId;
         const focusWindow = manualFocusWindow;
 
-        ;
+        const handleTabCreated = async (tab) => {
+            if (tab && tab.id != null) {
+                await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
+                if (context) {
+                    try {
+                        const scope = getScopeFromContext(context);
+                        if (scope) {
+                            const prefix = scope.prefix || '';
+                            const titleText = scope.title || '';
+                            const label = (prefix && titleText) ? `${prefix} - ${titleText}` : (prefix || titleText || '');
+                            if (label) {
+                                await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+                            }
+                        }
+                    } catch (_) {}
+                }
+            }
+        };
 
         // 情况1: 窗口 + 组
         if (windowId && groupId) {
@@ -16719,9 +17035,7 @@ async function openBookmarkWithManualSelection(url) {
                 const targetWindowId = group.windowId;
                 const tab = await chrome.tabs.create({ url, windowId: targetWindowId, active: focusWindow });
                 await chrome.tabs.group({ groupId, tabIds: [tab.id] });
-                if (tab && tab.id != null) {
-                    await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
-                }
+                await handleTabCreated(tab);
             } catch (error) {
                 console.warn('[手动选择器] 组不存在，尝试在指定窗口中创建标签:', error);
                 
@@ -16741,9 +17055,7 @@ async function openBookmarkWithManualSelection(url) {
                     createProps.windowId = targetWindowId;
                 }
                 const tab = await chrome.tabs.create(createProps);
-                if (tab && tab.id != null) {
-                    await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
-                }
+                await handleTabCreated(tab);
             }
         }
         // 情况2: 仅窗口
@@ -16760,9 +17072,7 @@ async function openBookmarkWithManualSelection(url) {
                 createProps.windowId = targetWindowId;
             }
             const tab = await chrome.tabs.create(createProps);
-            if (tab && tab.id != null) {
-                await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
-            }
+            await handleTabCreated(tab);
         }
         // 情况3: 仅组
         else if (groupId) {
@@ -16770,23 +17080,17 @@ async function openBookmarkWithManualSelection(url) {
                 const group = await chrome.tabGroups.get(groupId);
                 const tab = await chrome.tabs.create({ url, windowId: group.windowId, active: focusWindow });
                 await chrome.tabs.group({ groupId, tabIds: [tab.id] });
-                if (tab && tab.id != null) {
-                    await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
-                }
+                await handleTabCreated(tab);
             } catch (error) {
                 console.warn('[手动选择器] 组不存在，在新标签页打开:', error);
                 const tab = await chrome.tabs.create({ url, active: focusWindow });
-                if (tab && tab.id != null) {
-                    await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
-                }
+                await handleTabCreated(tab);
             }
         }
         // 情况4: 都不选（新标签页）
         else {
             const tab = await chrome.tabs.create({ url, active: focusWindow });
-            if (tab && tab.id != null) {
-                await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
-            }
+            await handleTabCreated(tab);
         }
 
         // 如果要跳转，激活目标窗口
@@ -16847,12 +17151,12 @@ async function getUrlsFromContext(context) {
 /**
  * 使用手动选择的窗口/组/模式打开文件夹下所有书签
  */
-async function openFolderWithManualSelection(urls, title) {
+async function openFolderWithManualSelection(urls, title, context = null) {
     if (!urls || !urls.length) return;
 
     // 确认是否打开大量书签
     if (urls.length > 10) {
-        const lang = currentLang || 'zh_CN';
+        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
         const message = lang === 'zh_CN'
             ? `确定要打开 ${urls.length} 个书签吗？`
             : `Open ${urls.length} bookmarks?`;
@@ -16864,7 +17168,14 @@ async function openFolderWithManualSelection(urls, title) {
     const openMode = folderManualOpenMode || 'open-all';
     const focusWindow = folderManualFocusWindow;
 
-    ;
+    // 构建来源映射
+    const urlToScopeMap = {};
+    let singleFolderScope = null;
+    if (context && context.isBatch) {
+        Object.assign(urlToScopeMap, await buildSelectionUrlToScopeMap());
+    } else if (context) {
+        singleFolderScope = getScopeFromContext(context);
+    }
 
     try {
         // 1. 确定目标窗口 ID
@@ -16902,6 +17213,21 @@ async function openFolderWithManualSelection(urls, title) {
             if (tab && tab.id != null) {
                 tabIds.push(tab.id);
                 await reportExtensionBookmarkOpen({ tabId: tab.id, url, source: 'history_ui' });
+
+                // 写入来源标记
+                try {
+                    const scope = (context && context.isBatch) ? urlToScopeMap[url] : singleFolderScope;
+                    if (scope) {
+                        const prefix = scope.prefix || '';
+                        const titleText = scope.title || '';
+                        const label = (prefix && titleText) ? `${prefix} - ${titleText}` : (prefix || titleText || '');
+                        if (label) {
+                            await saveTabSourceLabel(tab.id, { text: label, color: scope.color || '' });
+                        }
+                    }
+                } catch (labelErr) {
+                    console.warn('[手动选择器] 保存标签来源失败:', labelErr);
+                }
             }
         }
 
@@ -16915,7 +17241,7 @@ async function openFolderWithManualSelection(urls, title) {
             });
             if (newGroupId != null) {
                 await chrome.tabGroups.update(newGroupId, {
-                    title: title || (currentLang === 'zh_CN' ? '新分组' : 'New Group')
+                    title: title || ((typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN' ? '新分组' : 'New Group')
                 });
             }
         } else {
