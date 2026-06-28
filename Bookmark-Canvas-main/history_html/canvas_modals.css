@@ -5143,6 +5143,7 @@ html:fullscreen body.header-compact .canvas-main-container {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    padding-top: 0;
     padding-bottom: 20px;
     overflow-y: auto;
     overflow-x: hidden;
@@ -5220,7 +5221,7 @@ html:fullscreen body.header-compact .canvas-main-container {
     text-align: center;
     color: var(--text-muted, #888888);
     font-size: 12px;
-    margin: 12px 0;
+    margin: 2px 0 10px 0;
     padding: 0 16px;
 }
 
@@ -5233,7 +5234,7 @@ html:fullscreen body.header-compact .canvas-main-container {
     flex-direction: column;
     height: 100%;
     padding: 0 0 20px 0;
-    gap: 12px;
+    gap: 0;
     overflow-y: hidden;
 }
 
@@ -5366,6 +5367,17 @@ html:fullscreen body.header-compact .canvas-main-container {
     scrollbar-width: thin;
     scrollbar-color: rgba(140, 140, 140, 0.25) transparent;
     scrollbar-gutter: stable;
+    padding-top: 0;
+    padding-bottom: 4px;
+}
+
+.sidebar-anchor-container.auto-inactive .anchor-slots-container {
+    flex: 1 1 0%;
+}
+.sidebar-anchor-container.auto-inactive .history-items-container {
+    flex: 0 0 auto;
+    max-height: 35%;
+    padding-bottom: 8px;
 }
 
 .anchor-slot-row {
@@ -5581,11 +5593,11 @@ html:fullscreen body.header-compact .canvas-main-container {
 @keyframes slot-flash-animation {
     0% {
         background-color: rgba(255, 193, 7, 0.3);
-        outline: 1.5px solid #ffc107;
+        box-shadow: inset 0 0 0 1.5px #ffc107;
     }
     100% {
         background-color: transparent;
-        outline: 1.5px solid transparent;
+        box-shadow: inset 0 0 0 0 transparent;
     }
 }
 
