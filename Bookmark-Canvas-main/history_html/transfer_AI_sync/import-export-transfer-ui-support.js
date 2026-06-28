@@ -1504,20 +1504,40 @@ async function showBackupDialog() {
     const githubPushOtherBtn = document.getElementById('githubPushOtherBtn');
     const githubPullOtherBtn = document.getElementById('githubPullOtherBtn');
 
-    const getGithubTransfer = () => {
-        const transfer = (typeof window !== 'undefined') ? window.BookmarkCanvasGithubTransfer : null;
-        if (!transfer) {
-            const msg = (typeof __getLang === 'function' && __getLang().isEn)
-                ? 'GitHub transfer is unavailable.'
-                : 'GitHub 推送/拉取模块不可用。';
-            try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'error', 5000) : alert(msg); } catch (_) { alert(msg); }
-            return null;
-        }
-        return transfer;
+    const __githubSyncLoadedScripts = new Map();
+    const __loadGithubSyncScript = (src) => {
+        if (__githubSyncLoadedScripts.has(src)) return __githubSyncLoadedScripts.get(src);
+        const promise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            script.onload = () => resolve();
+            script.onerror = () => {
+                __githubSyncLoadedScripts.delete(src);
+                reject(new Error(`Failed to load script: ${src}`));
+            };
+            document.head.appendChild(script);
+        });
+        __githubSyncLoadedScripts.set(src, promise);
+        return promise;
     };
 
-    const runGithubAction = (action) => {
-        const transfer = getGithubTransfer();
+    const runGithubAction = async (action) => {
+        let transfer = (typeof window !== 'undefined') ? window.BookmarkCanvasGithubTransfer : null;
+        if (!transfer) {
+            try {
+                await __loadGithubSyncScript('transfer_AI_sync/github-repo-api.js');
+                await __loadGithubSyncScript('transfer_AI_sync/github-package-transfer.js');
+
+                transfer = (typeof window !== 'undefined') ? window.BookmarkCanvasGithubTransfer : null;
+            } catch (err) {
+                console.error('[GitHub Transfer] failed to load scripts:', err);
+                const isEn = (typeof __getLang === 'function' && __getLang().isEn) || (typeof currentLang !== 'undefined' && currentLang === 'en');
+                const errorMsg = isEn ? 'Failed to load GitHub module.' : '加载 GitHub 同步模块失败。';
+                if (typeof showCanvasToast === 'function') showCanvasToast(errorMsg, 'error', 3000);
+                return;
+            }
+        }
         if (!transfer || typeof transfer[action] !== 'function') return;
         try {
             const result = transfer[action]();
