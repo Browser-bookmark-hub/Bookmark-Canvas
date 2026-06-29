@@ -4122,7 +4122,7 @@ function buildMenuItems(context) {
             { action: 'rename', label: lang === 'zh_CN' ? '重命名' : 'Rename', icon: 'edit', group: 'actions' },
             {
                 action: 'add-entry',
-                labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></div>`,
+                labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '上次' : 'Last'}</span></div>`,
                 label: lang === 'zh_CN' ? '添加' : 'Add',
                 icon: 'plus-circle',
                 group: 'actions',
@@ -4179,7 +4179,7 @@ function buildMenuItems(context) {
             { action: 'edit', label: lang === 'zh_CN' ? '编辑' : 'Edit', icon: 'edit', group: 'actions' },
             {
                 action: 'add-entry',
-                labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></div>`,
+                labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '上次' : 'Last'}</span></div>`,
                 label: lang === 'zh_CN' ? '添加' : 'Add',
                 icon: 'plus-circle',
                 group: 'actions',
@@ -8191,10 +8191,10 @@ function showBookmarkAddSecondaryModal(context, options = {}) {
         : true;
 
     if (titleEl) titleEl.textContent = lang === 'zh_CN' ? '添加' : 'Add';
-    const templateHelpLabel = lang === 'zh_CN' ? '模版说明' : 'Template Help';
+    const templateHelpLabel = lang === 'zh_CN' ? '「上次」说明' : 'Last Help';
     const templateHelpText = lang === 'zh_CN'
-        ? '模版会记住你在这里最后一次确认的“添加内容 + 位置 + 动作结束后目标定位”。点击右键菜单里的「模版」会直接按该组合执行（后改覆盖前改）。'
-        : 'Template remembers the latest confirmed "content + position + locate target after action". Clicking "Template" in the context menu runs that combination directly (last change wins).';
+        ? '会记住你在这里最后一次确认的“添加内容 + 位置 + 动作结束后目标定位”。点击右键菜单里的「上次」会直接按该组合执行（后改覆盖前改）。'
+        : '"Last" remembers the latest confirmed "content + position + locate target after action". Clicking "Last" in the context menu runs that combination directly (last change wins).';
     if (helpBtn) {
         helpBtn.setAttribute('aria-label', templateHelpLabel);
         helpBtn.title = templateHelpLabel;
@@ -14799,7 +14799,7 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
     if (treeType !== 'canvas') {
         menuItems.push({
             action: 'add-entry-blank',
-            labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '模版' : 'Template'}</span></div>`,
+            labelHTML: `<span class="swsg-title">${lang === 'zh_CN' ? '添加' : 'Add'}</span><div class="swsg-badge-row"><span class="sub-badge" data-sub-action="add-template-run">${lang === 'zh_CN' ? '上次' : 'Last'}</span></div>`,
             label: lang === 'zh_CN' ? '添加' : 'Add',
             icon: 'plus-circle',
             className: 'add-entry-option',
@@ -14851,7 +14851,7 @@ function showBlankAreaContextMenu(e, sectionId, treeType) {
 
     contextMenu.innerHTML = menuHTML;
 
-    // 绑定子徽章（如“模版”）点击事件
+    // 绑定子徽章（如“上次”）点击事件
     contextMenu.querySelectorAll('.sub-badge[data-sub-action]').forEach(badge => {
         badge.addEventListener('click', async (clickEvent) => {
             const subAction = badge.dataset.subAction;
