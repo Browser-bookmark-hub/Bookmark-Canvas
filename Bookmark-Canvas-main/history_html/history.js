@@ -15500,6 +15500,8 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     ${favicon ? `<img class="tree-icon" src="${favicon}" alt="">` : `<i class="tree-icon fas fa-bookmark"></i>`}
                     <a href="${escapeHtml(node.url)}" target="_blank" class="tree-label tree-bookmark-link" rel="noopener noreferrer">${escapeHtml(node.title)}</a>
                     <span class="tree-item-hover-actions">
+                        <span class="tree-confirm-icon" data-action="confirm-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Confirm' : '确认'}"></span>
+                        <span class="tree-cancel-icon" data-action="cancel-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Cancel' : '取消'}"></span>
                         <span class="tree-delete-icon" data-action="delete-node" draggable="false" aria-label="${currentLang === 'en' ? 'Delete' : '删除'}"></span>
                         <span class="tree-trace-icon" data-action="trace-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Trace' : '临时溯源'}"></span>
                         <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
@@ -15520,6 +15522,8 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     <i class="tree-icon fas fa-folder"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
                     <span class="tree-item-hover-actions">
+                        <span class="tree-confirm-icon" data-action="confirm-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Confirm' : '确认'}"></span>
+                        <span class="tree-cancel-icon" data-action="cancel-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Cancel' : '取消'}"></span>
                         <span class="tree-delete-icon" data-action="delete-node" draggable="false" aria-label="${currentLang === 'en' ? 'Delete' : '删除'}"></span>
                         <span class="tree-trace-icon" data-action="trace-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Trace' : '临时溯源'}"></span>
                         <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
@@ -15546,6 +15550,8 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                     <i class="tree-icon fas fa-folder${level === 0 ? '-open' : ''}"></i>
                     <span class="tree-label">${escapeHtml(node.title)}</span>
                     <span class="tree-item-hover-actions">
+                        <span class="tree-confirm-icon" data-action="confirm-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Confirm' : '确认'}"></span>
+                        <span class="tree-cancel-icon" data-action="cancel-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Cancel' : '取消'}"></span>
                         <span class="tree-delete-icon" data-action="delete-node" draggable="false" aria-label="${currentLang === 'en' ? 'Delete' : '删除'}"></span>
                         <span class="tree-trace-icon" data-action="trace-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Trace' : '临时溯源'}"></span>
                         <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
