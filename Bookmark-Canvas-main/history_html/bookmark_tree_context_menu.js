@@ -3308,6 +3308,12 @@ try {
 
 // 显示右键菜单
 async function showContextMenu(e, node) {
+    if (typeof selectMode !== 'undefined' && selectMode) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+    }
+
     e.preventDefault();
     e.stopPropagation();
 
