@@ -6333,6 +6333,61 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     color: var(--accent-primary, #1890ff) !important;
 }
 
+.tree-confirm-icon,
+.tree-cancel-icon {
+    position: static !important;
+    top: auto !important;
+    transform: none !important;
+    right: auto !important;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    background: none;
+    opacity: 0.55 !important;
+    transition: opacity 0.12s ease, color 0.12s ease;
+    cursor: pointer;
+    border-radius: 2px;
+    color: var(--text-tertiary) !important;
+    font-size: 11px;
+    line-height: 14px;
+    text-align: center;
+    pointer-events: auto;
+    display: none !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.tree-confirm-icon::before {
+    content: '\f00c';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+}
+
+.tree-cancel-icon::before {
+    content: '\f00d';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+}
+
+.tree-confirm-icon:hover,
+.tree-cancel-icon:hover {
+    opacity: 1 !important;
+}
+
+.tree-confirm-icon:hover {
+    color: var(--success, #2dc26b) !important;
+}
+
+.tree-cancel-icon:hover {
+    color: var(--text-primary, #ffffff) !important;
+}
+
+/* When confirming delete, show confirmation icons */
+.tree-item-hover-actions.confirming-delete .tree-confirm-icon,
+.tree-item-hover-actions.confirming-delete .tree-cancel-icon {
+    display: inline-flex !important;
+}
+
 /* 确保 tag 标识 (dots-trailing) 垂直居中对齐 */
 .tree-item-tag-dots.dots-trailing {
     top: 50% !important;

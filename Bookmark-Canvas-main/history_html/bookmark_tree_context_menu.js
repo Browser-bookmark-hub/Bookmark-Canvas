@@ -2809,7 +2809,7 @@ function initContextMenu() {
         // 如果点击的不是菜单和子菜单内部，并且不是快捷图标本身，关闭菜单
         const clickInMenu = contextMenu && contextMenu.contains(e.target);
         const clickInSubmenu = contextSubmenu && contextSubmenu.contains(e.target);
-        const clickInShortcut = (e.target && typeof e.target.closest === 'function') ? e.target.closest('.tree-trace-icon, .tree-delete-icon') : null;
+        const clickInShortcut = (e.target && typeof e.target.closest === 'function') ? e.target.closest('.tree-trace-icon, .tree-delete-icon, .tree-confirm-icon, .tree-cancel-icon') : null;
         if (!clickInMenu && !clickInSubmenu && !clickInShortcut) {
             hideContextMenu();
         }
@@ -5799,21 +5799,81 @@ document.addEventListener('click', (e) => {
     toggleSubmenu(traceIcon, context);
 }, true);
 
-// 捕获阶段的全局点击监听，用于响应删除行尾快捷图标
+// 捕获阶段的全局点击监听，用于响应删除及确认二次确认快捷图标
 document.addEventListener('click', (e) => {
+    // 1. 点击删除按钮 (trash) -> 进入确认状态
     const deleteIcon = e.target.closest('.tree-delete-icon');
-    if (!deleteIcon) return;
-    e.stopImmediatePropagation();
-    e.preventDefault();
+    if (deleteIcon) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        const hoverActions = deleteIcon.closest('.tree-item-hover-actions');
+        const treeItem = deleteIcon.closest('.tree-item');
+        if (hoverActions && treeItem) {
+            // 清除其它项的确认状态及监听器
+            document.querySelectorAll('.tree-item-hover-actions.confirming-delete').forEach(el => {
+                if (el !== hoverActions) {
+                    el.classList.remove('confirming-delete');
+                    const otherItem = el.closest('.tree-item');
+                    if (otherItem) {
+                        otherItem.onmouseleave = null;
+                    }
+                }
+            });
+            
+            // 进入确认状态
+            hoverActions.classList.add('confirming-delete');
+            
+            // 动态绑定一次性移出事件，用以重置当前行的确认状态
+            treeItem.onmouseleave = () => {
+                hoverActions.classList.remove('confirming-delete');
+                treeItem.onmouseleave = null;
+            };
+        }
+        return;
+    }
 
-    const treeItem = deleteIcon.closest('.tree-item');
-    if (!treeItem) return;
+    // 2. 点击确认按钮 (checkmark) -> 执行删除
+    const confirmIcon = e.target.closest('.tree-confirm-icon');
+    if (confirmIcon) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        const treeItem = confirmIcon.closest('.tree-item');
+        if (!treeItem) return;
+        
+        // 清理绑定的移出事件
+        treeItem.onmouseleave = null;
+        
+        const context = getNodeContext(treeItem);
+        if (!context) return;
+        handleMenuAction('delete', context);
+        return;
+    }
 
-    // 获取节点的上下文并执行删除
-    const context = getNodeContext(treeItem);
-    if (!context) return;
+    // 3. 点击取消按钮 (cross) -> 取消确认状态
+    const cancelIcon = e.target.closest('.tree-cancel-icon');
+    if (cancelIcon) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        const hoverActions = cancelIcon.closest('.tree-item-hover-actions');
+        const treeItem = cancelIcon.closest('.tree-item');
+        if (hoverActions) {
+            hoverActions.classList.remove('confirming-delete');
+        }
+        if (treeItem) {
+            treeItem.onmouseleave = null;
+        }
+        return;
+    }
 
-    handleMenuAction('delete', context);
+    // 4. 点击其它任何地方 -> 清除所有确认状态
+    const activeConfirmActions = document.querySelector('.tree-item-hover-actions.confirming-delete');
+    if (activeConfirmActions && !activeConfirmActions.contains(e.target)) {
+        activeConfirmActions.classList.remove('confirming-delete');
+        const treeItem = activeConfirmActions.closest('.tree-item');
+        if (treeItem) {
+            treeItem.onmouseleave = null;
+        }
+    }
 }, true);
 
 // 捕获阶段全局拦截除 click 外的各类鼠标/指针/拖拽/右键/双击事件，避免快捷按钮触发树节点的选中、高亮、折叠/展开、拖拽等行为
@@ -5829,7 +5889,7 @@ document.addEventListener('click', (e) => {
 // 捕获阶段全局拦截对快捷按钮背景/间隔的点击，防止误触发文件夹的展开或折叠
 document.addEventListener('click', (e) => {
     if (e.target && typeof e.target.closest === 'function' && e.target.closest('.tree-item-hover-actions')) {
-        const button = e.target.closest('.tree-trace-icon, .tree-delete-icon, .tree-tip-icon');
+        const button = e.target.closest('.tree-trace-icon, .tree-delete-icon, .tree-tip-icon, .tree-confirm-icon, .tree-cancel-icon');
         if (!button) {
             e.stopImmediatePropagation();
             e.preventDefault();

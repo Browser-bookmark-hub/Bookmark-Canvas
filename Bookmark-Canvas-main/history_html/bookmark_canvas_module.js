@@ -33097,8 +33097,22 @@ function buildTempTreeNode(section, item, level, options = {}) {
     tipIcon.setAttribute('draggable', 'false');
     tipIcon.setAttribute('aria-label', __getLang().isEn ? 'Tags' : '标签');
 
+    const confirmIcon = document.createElement('span');
+    confirmIcon.className = 'tree-confirm-icon';
+    confirmIcon.dataset.action = 'confirm-delete';
+    confirmIcon.setAttribute('draggable', 'false');
+    confirmIcon.setAttribute('aria-label', __getLang().isEn ? 'Confirm' : '确认');
+
+    const cancelIcon = document.createElement('span');
+    cancelIcon.className = 'tree-cancel-icon';
+    cancelIcon.dataset.action = 'cancel-delete';
+    cancelIcon.setAttribute('draggable', 'false');
+    cancelIcon.setAttribute('aria-label', __getLang().isEn ? 'Cancel' : '取消');
+
     const hoverActions = document.createElement('span');
     hoverActions.className = 'tree-item-hover-actions';
+    hoverActions.appendChild(confirmIcon);
+    hoverActions.appendChild(cancelIcon);
     hoverActions.appendChild(deleteIcon);
     hoverActions.appendChild(traceIcon);
     hoverActions.appendChild(tipIcon);
