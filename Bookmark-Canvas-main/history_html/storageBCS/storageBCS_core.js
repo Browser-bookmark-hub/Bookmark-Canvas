@@ -3185,6 +3185,18 @@ function __buildTempSectionJsonProtocol(section) {
     };
     if (sectionMeta.originPermanent) payload.originPermanent = sectionMeta.originPermanent;
     if (sectionMeta.sequenceNumber) payload.sequenceNumber = sectionMeta.sequenceNumber;
+    [
+        'descFontSize',
+        'descDisplayMode',
+        'descDisplayRows',
+        'descEditMode',
+        'descEditRows',
+        'suppressPlaceholder'
+    ].forEach((key) => {
+        if (!Object.prototype.hasOwnProperty.call(sectionMeta, key)) return;
+        if (typeof sectionMeta[key] === 'undefined') return;
+        payload[key] = sectionMeta[key];
+    });
     if (!payload.id) delete payload.id;
     return payload;
 }
@@ -3477,7 +3489,13 @@ function __flushMdEditorsForExport(options = {}) {
     });
 
     if (changed) {
-        try { saveTempNodes(); } catch (_) { }
+        try {
+            if (typeof saveCanvasManifestOnly === 'function') {
+                saveCanvasManifestOnly();
+            } else if (typeof saveTempNodes === 'function') {
+                saveTempNodes();
+            }
+        } catch (_) { }
     }
 }
 
@@ -5599,7 +5617,14 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     });
 
     // 导入属于正式内容，必须立即持久化，避免用户导入后立刻刷新导致丢失。
-    saveTempNodes({ immediate: true, skipValidation: true });
+    // 新增内容只 upsert 本次导入的 section；bcs:canvas 仍作为 JsonCanvas 清单整体写入。
+    if (Array.isArray(remappedNodes.tempSections) && remappedNodes.tempSections.length && typeof saveCanvasSectionDelta === 'function') {
+        saveCanvasSectionDelta({ upsertSections: remappedNodes.tempSections }, { immediate: true, skipValidation: true });
+    } else if (typeof saveCanvasManifestOnly === 'function') {
+        saveCanvasManifestOnly({ immediate: true, skipValidation: true });
+    } else {
+        saveTempNodes({ immediate: true, skipValidation: true });
+    }
 
     // 边：大数据/极限模式下延后或跳过，优先保证交互流畅
     try { scheduleEdgesRender(); } catch (_) { }
@@ -6090,6 +6115,29 @@ let __canvasTempStateLastSavedTimestamp = 0;
 let __canvasTempStateLastAppliedTimestamp = 0;
 let __canvasTempStateLastPersistedSignature = '';
 let __canvasImportRuntimeMode = 'permanent';
+
+function __cancelPendingBcsStorageWrite() {
+    if (!__canvasTempStateBcsWriteTimer && !__canvasTempStateBcsWritePending && !__canvasTempStateBcsWriteWaiters.length) return;
+    if (__canvasTempStateBcsWriteTimer) {
+        try { clearTimeout(__canvasTempStateBcsWriteTimer); } catch (_) { }
+        __canvasTempStateBcsWriteTimer = null;
+    }
+    __canvasTempStateBcsWritePending = null;
+    const waiters = __canvasTempStateBcsWriteWaiters.slice();
+    __canvasTempStateBcsWriteWaiters = [];
+    waiters.forEach((resolve) => {
+        try { resolve(false); } catch (_) { }
+    });
+}
+
+function __dropPendingBcsStorageKeys(keys) {
+    if (!__canvasTempStateBcsWritePending || typeof __canvasTempStateBcsWritePending !== 'object') return;
+    const list = Array.isArray(keys) ? keys : [keys];
+    list.forEach((key) => {
+        if (!key) return;
+        try { delete __canvasTempStateBcsWritePending[key]; } catch (_) { }
+    });
+}
 
 function __setCanvasImportRuntimeMode(mode) {
     void mode;
@@ -6943,6 +6991,27 @@ function __buildTempSectionProtocolMeta(section) {
     const originPermanent = __normalizeOriginPermanentPayload(section && section.originPermanent);
     if (originPermanent) meta.originPermanent = originPermanent;
 
+    const descFontSize = Number(section && section.descFontSize);
+    if (Number.isFinite(descFontSize) && descFontSize > 0) {
+        meta.descFontSize = descFontSize;
+    }
+
+    const descDisplayMode = String(section && section.descDisplayMode || '').trim();
+    if (descDisplayMode) meta.descDisplayMode = descDisplayMode;
+
+    const descDisplayRows = __normalizePositiveInt(section && section.descDisplayRows);
+    if (descDisplayRows) meta.descDisplayRows = descDisplayRows;
+
+    const descEditMode = String(section && section.descEditMode || '').trim();
+    if (descEditMode) meta.descEditMode = descEditMode;
+
+    const descEditRows = __normalizePositiveInt(section && section.descEditRows);
+    if (descEditRows) meta.descEditRows = descEditRows;
+
+    if (section && Object.prototype.hasOwnProperty.call(section, 'suppressPlaceholder')) {
+        meta.suppressPlaceholder = !!section.suppressPlaceholder;
+    }
+
     return meta;
 }
 
@@ -6986,9 +7055,17 @@ function __normalizeTempSectionProtocolObject(protocolInput) {
         source: rawMeta.source,
         sequenceNumber: rawMeta.sequenceNumber,
         descriptionMd: rawMeta.descriptionMd,
+        descFontSize: rawMeta.descFontSize,
+        descDisplayMode: rawMeta.descDisplayMode,
+        descDisplayRows: rawMeta.descDisplayRows,
+        descEditMode: rawMeta.descEditMode,
+        descEditRows: rawMeta.descEditRows,
         originPermanent: rawMeta.originPermanent,
         isSnapshot: !!rawMeta.isSnapshot
     };
+    if (Object.prototype.hasOwnProperty.call(rawMeta, 'suppressPlaceholder')) {
+        sectionLike.suppressPlaceholder = rawMeta.suppressPlaceholder;
+    }
     const sectionMeta = __buildTempSectionProtocolMeta(sectionLike);
     let sourceItems = [];
     if (Array.isArray(source.items)) {
@@ -7096,6 +7173,16 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
     const restoredDescriptionMd = String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd);
     restored.descriptionMd = restoredDescriptionMd;
     restored.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(restoredDescriptionMd));
+    if (Number.isFinite(Number(sectionMeta.descFontSize)) && Number(sectionMeta.descFontSize) > 0) {
+        restored.descFontSize = Number(sectionMeta.descFontSize);
+    }
+    if (sectionMeta.descDisplayMode) restored.descDisplayMode = sectionMeta.descDisplayMode;
+    if (sectionMeta.descDisplayRows) restored.descDisplayRows = sectionMeta.descDisplayRows;
+    if (sectionMeta.descEditMode) restored.descEditMode = sectionMeta.descEditMode;
+    if (sectionMeta.descEditRows) restored.descEditRows = sectionMeta.descEditRows;
+    if (Object.prototype.hasOwnProperty.call(sectionMeta, 'suppressPlaceholder')) {
+        restored.suppressPlaceholder = !!sectionMeta.suppressPlaceholder;
+    }
     if (options.isSnapshot || sectionMeta.isSnapshot) {
         restored.isSnapshot = true;
         restored.tempKind = restored.tempKind || 'special';
@@ -7475,8 +7562,23 @@ if (typeof window !== 'undefined') {
         async loadCanvasTempStateFromBcs(options = {}) {
             return await __loadCanvasTempStateFromBcs(options);
         },
+        async loadCanvasManifestFromBcs(options = {}) {
+            return await __loadCanvasManifestFromBcs(options);
+        },
         async saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
             return await __saveCanvasTempStateToBcsStorage(stateInput, options);
+        },
+        async saveCanvasManifestToBcsStorage(stateInput, options = {}) {
+            return await __saveCanvasManifestToBcsStorage(stateInput, options);
+        },
+        async saveCanvasSectionDeltaToBcsStorage(deltaInput, options = {}) {
+            return await __saveCanvasSectionDeltaToBcsStorage(deltaInput, options);
+        },
+        async saveTempSectionsToBcsStorage(sectionInputs, options = {}) {
+            return await __saveTempSectionsToBcsStorage(sectionInputs, options);
+        },
+        async loadTempSectionsFromBcs(sectionIds, options = {}) {
+            return await __loadTempSectionsFromBcs(sectionIds, options);
         },
         normalizeTempSectionProtocol(sectionInput) {
             return __normalizeTempSectionProtocolObject(sectionInput) || __buildTempSectionProtocol(sectionInput);
@@ -7654,6 +7756,7 @@ function __bcsStorageRemove(keys) {
     const list = Array.isArray(keys) ? keys : [keys];
     const storage = __getCanvasStorageLocalArea();
     if (!list.length) return Promise.resolve(false);
+    __dropPendingBcsStorageKeys(list);
     if (!storage || typeof storage.remove !== 'function') {
         list.forEach((key) => {
             if (!key) return;
@@ -7683,17 +7786,42 @@ function __bcsStorageRemove(keys) {
 
 function __bcsStorageSet(payload, { immediate = false } = {}) {
     if (!payload || typeof payload !== 'object') return Promise.resolve(false);
+    let effectivePayload = payload;
+    let consumedWaiters = [];
+    if (immediate && (__canvasTempStateBcsWriteTimer || __canvasTempStateBcsWritePending || __canvasTempStateBcsWriteWaiters.length)) {
+        if (__canvasTempStateBcsWriteTimer) {
+            try { clearTimeout(__canvasTempStateBcsWriteTimer); } catch (_) { }
+            __canvasTempStateBcsWriteTimer = null;
+        }
+        const pending = __canvasTempStateBcsWritePending;
+        consumedWaiters = __canvasTempStateBcsWriteWaiters.slice();
+        __canvasTempStateBcsWritePending = null;
+        __canvasTempStateBcsWriteWaiters = [];
+        if (pending && typeof pending === 'object') {
+            effectivePayload = Object.assign({}, pending, payload);
+        }
+    }
+    const resolveConsumedWaiters = (ok) => {
+        if (!consumedWaiters.length) return;
+        const result = ok !== false;
+        const waiters = consumedWaiters.slice();
+        consumedWaiters = [];
+        waiters.forEach((resolve) => {
+            try { resolve(result); } catch (_) { }
+        });
+    };
     const storage = __getCanvasStorageLocalArea();
     if (!storage || typeof storage.set !== 'function') {
-        Object.keys(payload).forEach((key) => {
+        Object.keys(effectivePayload).forEach((key) => {
             if (!key) return;
-            try { saveSharedState(key, payload[key]); } catch (_) { }
+            try { saveSharedState(key, effectivePayload[key]); } catch (_) { }
         });
+        resolveConsumedWaiters(true);
         return Promise.resolve(true);
     }
 
     if (!immediate) {
-        __canvasTempStateBcsWritePending = Object.assign({}, __canvasTempStateBcsWritePending || {}, payload);
+        __canvasTempStateBcsWritePending = Object.assign({}, __canvasTempStateBcsWritePending || {}, effectivePayload);
         const waiter = new Promise((resolve) => {
             __canvasTempStateBcsWriteWaiters.push(resolve);
         });
@@ -7725,10 +7853,12 @@ function __bcsStorageSet(payload, { immediate = false } = {}) {
         const done = (ok) => {
             if (settled) return;
             settled = true;
-            resolve(ok !== false);
+            const result = ok !== false;
+            resolveConsumedWaiters(result);
+            resolve(result);
         };
         try {
-            const maybePromise = storage.set(payload, () => {
+            const maybePromise = storage.set(effectivePayload, () => {
                 done(true);
             });
             if (maybePromise && typeof maybePromise.then === 'function') {
@@ -7787,20 +7917,9 @@ function __getBcsExportFormatCached() {
     return __normalizeCanvasObsidianExportFormat(__bcsExportFormatCache || '', 'json');
 }
 
-function __copyCanvasExtraKeys(source, target, reservedKeys) {
-    if (!source || typeof source !== 'object' || !target || typeof target !== 'object') return target;
-    Object.keys(source).forEach((key) => {
-        if (!key || reservedKeys.has(key)) return;
-        if (typeof source[key] === 'undefined') return;
-        target[key] = source[key];
-    });
-    return target;
-}
-
 function __canonicalizeObsidianCanvasNodeForJson(nodeInput) {
     const node = (nodeInput && typeof nodeInput === 'object') ? nodeInput : {};
     const type = String(node.type || '').trim();
-    const baseKeys = new Set(['id', 'type', 'x', 'y', 'width', 'height']);
     if (type === 'file') {
         const result = {
             id: node.id,
@@ -7812,7 +7931,7 @@ function __canonicalizeObsidianCanvasNodeForJson(nodeInput) {
             height: node.height
         };
         if (node.color != null && String(node.color).trim()) result.color = node.color;
-        return __copyCanvasExtraKeys(node, result, new Set([...baseKeys, 'file', 'color']));
+        return result;
     }
     if (type === 'text') {
         const result = {
@@ -7825,10 +7944,9 @@ function __canonicalizeObsidianCanvasNodeForJson(nodeInput) {
             height: node.height
         };
         if (node.color != null && String(node.color).trim()) result.color = node.color;
-        return __copyCanvasExtraKeys(node, result, new Set([...baseKeys, 'text', 'color']));
+        return result;
     }
     if (type === 'group') {
-        // 严格 JsonCanvas group：仅保留标准 8 字段，不透传任何私有 extra key。
         const result = {
             id: node.id,
             type: 'group',
@@ -7841,14 +7959,14 @@ function __canonicalizeObsidianCanvasNodeForJson(nodeInput) {
         if (node.color != null && String(node.color).trim()) result.color = node.color;
         return result;
     }
-    return __copyCanvasExtraKeys(node, {
+    return {
         id: node.id,
         type: node.type,
         x: node.x,
         y: node.y,
         width: node.width,
         height: node.height
-    }, baseKeys);
+    };
 }
 
 function __canonicalizeObsidianCanvasEdgeForJson(edgeInput) {
@@ -7866,17 +7984,7 @@ function __canonicalizeObsidianCanvasEdgeForJson(edgeInput) {
     if (toEnd !== 'arrow') result.toEnd = toEnd;
     if (edge.color != null && String(edge.color).trim()) result.color = edge.color;
     if (edge.label != null && String(edge.label).trim()) result.label = edge.label;
-    return __copyCanvasExtraKeys(edge, result, new Set([
-        'id',
-        'fromNode',
-        'fromSide',
-        'toNode',
-        'toSide',
-        'fromEnd',
-        'toEnd',
-        'color',
-        'label'
-    ]));
+    return result;
 }
 
 function __formatObsidianCanvasJson(canvasDataInput) {
@@ -8104,15 +8212,8 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
         const updates = documents.updates || {};
         const removals = Array.isArray(documents.removals) ? documents.removals : [];
 
-        if (immediate && __canvasTempStateBcsWriteTimer) {
-            try { clearTimeout(__canvasTempStateBcsWriteTimer); } catch (_) { }
-            __canvasTempStateBcsWriteTimer = null;
-            __canvasTempStateBcsWritePending = null;
-            const waiters = __canvasTempStateBcsWriteWaiters.slice();
-            __canvasTempStateBcsWriteWaiters = [];
-            waiters.forEach((resolve) => {
-                try { resolve(false); } catch (_) { }
-            });
+        if (immediate) {
+            __cancelPendingBcsStorageWrite();
         }
 
         if (removals.length) {
@@ -8138,10 +8239,364 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
     }
 }
 
+async function __saveCanvasManifestToBcsStorage(stateInput, options = {}) {
+    try {
+        const state = options && options.alreadyPersisted === true
+            ? stateInput
+            : __buildPersistedCanvasState(stateInput, options);
+        if (!state || typeof state !== 'object') return null;
+
+        const timestamp = Number(options && options.timestamp) || Number(state.timestamp) || Date.now();
+        state.timestamp = timestamp;
+
+        const fileRefs = __collectBcsFileRefsFromState(state, {
+            exportRoot: __getBcsExportRootCached(),
+            exportFormat: __getBcsExportFormatCached()
+        });
+        const storage = await __bcsStorageGet([BCS_CANVAS_KEY]);
+        const canvasData = __buildBcsCanvasDataFromState(state, fileRefs, {
+            storageMap: storage,
+            alreadyPersisted: true,
+            preferStoragePermanentLayout: options && options.preferStoragePermanentLayout === true
+        });
+        const meta = __buildBcsMetaPayloadFromState(state);
+        const signal = __buildBcsCanvasManifestPatchSignal(timestamp, meta);
+        const updates = {
+            [BCS_META_KEY]: meta,
+            [BCS_CANVAS_KEY]: __formatObsidianCanvasJson({
+                nodes: Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [],
+                edges: Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : []
+            }),
+            [BCS_SIGNAL_KEY]: signal
+        };
+
+        await __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
+        try {
+            saveSharedState(BCS_SIGNAL_KEY, signal);
+        } catch (_) { }
+
+        return {
+            timestamp,
+            nodeCount: Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes.length : 0,
+            edgeCount: Array.isArray(canvasData && canvasData.edges) ? canvasData.edges.length : 0
+        };
+    } catch (e) {
+        console.warn('[Canvas] BCS canvas manifest 写入失败:', e);
+        return null;
+    }
+}
+
+function __getPendingBcsStorageSignal() {
+    return __canvasTempStateBcsWritePending
+        && __canvasTempStateBcsWritePending[BCS_SIGNAL_KEY]
+        && typeof __canvasTempStateBcsWritePending[BCS_SIGNAL_KEY] === 'object'
+            ? __canvasTempStateBcsWritePending[BCS_SIGNAL_KEY]
+            : null;
+}
+
+function __normalizeBcsSectionDeltaInput(deltaInput) {
+    const delta = deltaInput && typeof deltaInput === 'object' ? deltaInput : {};
+    const upsertSections = __normalizeBcsSectionPatchInputs(delta.upsertSections || delta.sections || []);
+    const deleteSectionIds = Array.from(new Set((Array.isArray(delta.deleteSectionIds) ? delta.deleteSectionIds : [delta.deleteSectionIds])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)));
+    const upsertIds = new Set(upsertSections.map((section) => String(section && section.id || '').trim()).filter(Boolean));
+    return {
+        state: delta.state && typeof delta.state === 'object' ? delta.state : null,
+        upsertSections,
+        deleteSectionIds: deleteSectionIds.filter((id) => !upsertIds.has(id))
+    };
+}
+
+function __buildBcsCanvasSectionDeltaSignal(upsertSectionIds, deleteSectionIds, timestamp) {
+    const normalizeIds = (ids) => (Array.isArray(ids) ? ids : [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean);
+    const upserted = new Set();
+    const deleted = new Set();
+    const applyUpsert = (id) => {
+        if (!id) return;
+        deleted.delete(id);
+        upserted.add(id);
+    };
+    const applyDelete = (id) => {
+        if (!id) return;
+        upserted.delete(id);
+        deleted.add(id);
+    };
+
+    const pendingSignal = __getPendingBcsStorageSignal();
+
+    if (pendingSignal && pendingSignal.__storage === 'bcs') {
+        if (pendingSignal.kind === 'canvas-section-delta') {
+            normalizeIds(pendingSignal.upsertSectionIds).forEach(applyUpsert);
+            normalizeIds(pendingSignal.deleteSectionIds).forEach(applyDelete);
+        } else if (pendingSignal.kind === 'section-patch') {
+            normalizeIds(pendingSignal.sectionIds).forEach(applyUpsert);
+        } else if (pendingSignal.kind && pendingSignal.kind !== 'canvas-patch') {
+            return {
+                __storage: 'bcs',
+                timestamp: Math.max(Number(pendingSignal.timestamp) || 0, Number(timestamp) || Date.now())
+            };
+        }
+    }
+    normalizeIds(upsertSectionIds).forEach(applyUpsert);
+    normalizeIds(deleteSectionIds).forEach(applyDelete);
+
+    return {
+        __storage: 'bcs',
+        kind: 'canvas-section-delta',
+        upsertSectionIds: Array.from(upserted),
+        deleteSectionIds: Array.from(deleted),
+        timestamp: Math.max(Number(timestamp) || Date.now(), Number(pendingSignal && pendingSignal.timestamp) || 0)
+    };
+}
+
+function __buildBcsCanvasManifestPatchSignal(timestamp, meta) {
+    const pendingSignal = __getPendingBcsStorageSignal();
+    if (pendingSignal && pendingSignal.__storage === 'bcs') {
+        if (pendingSignal.kind === 'section-patch' || pendingSignal.kind === 'canvas-section-delta') {
+            const signal = __buildBcsCanvasSectionDeltaSignal([], [], timestamp);
+            if ((Array.isArray(signal.upsertSectionIds) && signal.upsertSectionIds.length)
+                || (Array.isArray(signal.deleteSectionIds) && signal.deleteSectionIds.length)) {
+                signal.meta = meta;
+                return signal;
+            }
+        }
+        if (pendingSignal.kind && pendingSignal.kind !== 'canvas-patch') {
+            return {
+                __storage: 'bcs',
+                timestamp: Math.max(Number(pendingSignal.timestamp) || 0, Number(timestamp) || Date.now()),
+                meta
+            };
+        }
+    }
+    return {
+        __storage: 'bcs',
+        kind: 'canvas-patch',
+        timestamp: Number(timestamp) || Date.now(),
+        meta
+    };
+}
+
+async function __saveCanvasSectionDeltaToBcsStorage(deltaInput, options = {}) {
+    try {
+        const delta = __normalizeBcsSectionDeltaInput(deltaInput);
+        if (!delta.upsertSections.length && !delta.deleteSectionIds.length) return null;
+
+        const stateSource = delta.state || (deltaInput && deltaInput.state);
+        const state = options && options.alreadyPersisted === true
+            ? stateSource
+            : __buildPersistedCanvasState(stateSource, options);
+        if (!state || typeof state !== 'object') return null;
+
+        const timestamp = Number(options && options.timestamp) || Number(state.timestamp) || Date.now();
+        state.timestamp = timestamp;
+
+        const fileRefs = __collectBcsFileRefsFromState(state, {
+            exportRoot: __getBcsExportRootCached(),
+            exportFormat: __getBcsExportFormatCached()
+        });
+        const storage = await __bcsStorageGet([BCS_CANVAS_KEY]);
+        const canvasData = __buildBcsCanvasDataFromState(state, fileRefs, {
+            storageMap: storage,
+            alreadyPersisted: true,
+            preferStoragePermanentLayout: options && options.preferStoragePermanentLayout === true
+        });
+        const meta = __buildBcsMetaPayloadFromState(state);
+        const updates = {
+            [BCS_META_KEY]: meta,
+            [BCS_CANVAS_KEY]: __formatObsidianCanvasJson({
+                nodes: Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [],
+                edges: Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : []
+            })
+        };
+        const upsertSectionIds = [];
+        delta.upsertSections.forEach((section) => {
+            const id = String(section && section.id || '').trim();
+            if (!id) return;
+            const payload = __buildBcsSectionPayloadFromSection(section);
+            if (!payload) return;
+            updates[__buildBcsSectionKey(id)] = payload;
+            upsertSectionIds.push(id);
+        });
+
+        const removalKeys = delta.deleteSectionIds
+            .map((id) => __buildBcsSectionKey(id))
+            .filter(Boolean);
+        if (removalKeys.length) {
+            await __bcsStorageRemove(removalKeys);
+        }
+
+        const signal = __buildBcsCanvasSectionDeltaSignal(upsertSectionIds, delta.deleteSectionIds, timestamp);
+        signal.meta = meta;
+        updates[BCS_SIGNAL_KEY] = signal;
+
+        await __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
+        try {
+            saveSharedState(BCS_SIGNAL_KEY, signal);
+        } catch (_) { }
+
+        return {
+            upsertSectionIds,
+            deleteSectionIds: delta.deleteSectionIds,
+            timestamp,
+            nodeCount: Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes.length : 0,
+            edgeCount: Array.isArray(canvasData && canvasData.edges) ? canvasData.edges.length : 0
+        };
+    } catch (e) {
+        console.warn('[Canvas] BCS canvas/section delta 写入失败:', e);
+        return null;
+    }
+}
+
+function __normalizeBcsSectionPatchInputs(sectionInputs) {
+    const sourceList = Array.isArray(sectionInputs) ? sectionInputs : [sectionInputs];
+    const sectionById = new Map();
+    sourceList.forEach((section) => {
+        if (!section || typeof section !== 'object') return;
+        const id = String(section.id || '').trim();
+        if (!id) return;
+        sectionById.set(id, section);
+    });
+    return Array.from(sectionById.values());
+}
+
+function __buildBcsSectionPatchSignal(sectionIds, timestamp) {
+    let ids = Array.isArray(sectionIds)
+        ? sectionIds.map((id) => String(id || '').trim()).filter(Boolean)
+        : [];
+
+    const pendingSignal = __getPendingBcsStorageSignal();
+
+    if (pendingSignal && pendingSignal.__storage === 'bcs') {
+        if (pendingSignal.kind === 'section-patch') {
+            ids = Array.from(new Set([
+                ...((Array.isArray(pendingSignal.sectionIds) ? pendingSignal.sectionIds : [])
+                    .map((id) => String(id || '').trim())
+                    .filter(Boolean)),
+                ...ids
+            ]));
+        } else if (pendingSignal.kind === 'canvas-section-delta' || pendingSignal.kind === 'canvas-patch') {
+            return __buildBcsCanvasSectionDeltaSignal(ids, [], timestamp);
+        } else {
+            return {
+                __storage: 'bcs',
+                timestamp: Math.max(Number(pendingSignal.timestamp) || 0, Number(timestamp) || Date.now())
+            };
+        }
+    }
+
+    return {
+        __storage: 'bcs',
+        kind: 'section-patch',
+        sectionIds: ids,
+        timestamp: Number(timestamp) || Date.now()
+    };
+}
+
+async function __saveTempSectionsToBcsStorage(sectionInputs, options = {}) {
+    try {
+        const sections = __normalizeBcsSectionPatchInputs(sectionInputs);
+        if (!sections.length) return null;
+
+        const timestamp = Number(options && options.timestamp) || Date.now();
+        const updates = {};
+        const sectionIds = [];
+
+        sections.forEach((section) => {
+            const id = String(section && section.id || '').trim();
+            if (!id) return;
+            const payload = __buildBcsSectionPayloadFromSection(section);
+            if (!payload) return;
+            updates[__buildBcsSectionKey(id)] = payload;
+            sectionIds.push(id);
+        });
+
+        if (!sectionIds.length) return null;
+
+        if (!(options && options.skipMeta === true)) {
+            updates[BCS_META_KEY] = __buildBcsMetaPayloadFromState({
+                ...(options && options.state && typeof options.state === 'object' ? options.state : {}),
+                timestamp
+            });
+        }
+
+        const signal = __buildBcsSectionPatchSignal(sectionIds, timestamp);
+        if (updates[BCS_META_KEY] && typeof updates[BCS_META_KEY] === 'object') {
+            signal.meta = updates[BCS_META_KEY];
+        }
+        updates[BCS_SIGNAL_KEY] = signal;
+
+        await __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
+        try {
+            saveSharedState(BCS_SIGNAL_KEY, signal);
+        } catch (_) { }
+
+        return {
+            sectionIds,
+            timestamp
+        };
+    } catch (e) {
+        console.warn('[Canvas] BCS 临时栏目 section patch 写入失败:', e);
+        return null;
+    }
+}
+
+async function __loadTempSectionsFromBcs(sectionIds, options = {}) {
+    try {
+        const ids = Array.from(new Set((Array.isArray(sectionIds) ? sectionIds : [sectionIds])
+            .map((id) => String(id || '').trim())
+            .filter(Boolean)));
+        if (!ids.length) return [];
+
+        const keys = ids.map((id) => __buildBcsSectionKey(id)).filter(Boolean);
+        const storage = await __bcsStorageGet(keys);
+        return ids.map((id) => {
+            const key = __buildBcsSectionKey(id);
+            const payload = storage && storage[key] && typeof storage[key] === 'object'
+                ? storage[key]
+                : null;
+            if (payload && !payload.id) payload.id = id;
+            return {
+                id,
+                payload
+            };
+        });
+    } catch (e) {
+        if (!(options && options.silent === true)) {
+            console.warn('[Canvas] BCS 临时栏目 section patch 读取失败:', e);
+        }
+        return [];
+    }
+}
+
 async function __loadCanvasTempStateFromBcs(options = {}) {
     try { await __migrateLegacyTempSectionKeysOnce(); } catch (_) {}
     const bundle = await __loadCanvasTempStateBundleFromBcs(options);
     return bundle ? bundle.state : null;
+}
+
+async function __loadCanvasManifestFromBcs(options = {}) {
+    try {
+        const storage = await __bcsStorageGet([BCS_META_KEY, BCS_CANVAS_KEY]);
+        const meta = storage ? storage[BCS_META_KEY] : null;
+        if (!__isBcsMetaPayload(meta)) return null;
+        const canvas = __readBcsCanvasPayload(storage ? storage[BCS_CANVAS_KEY] : null) || {};
+        return {
+            meta,
+            canvas: {
+                nodes: Array.isArray(canvas.nodes) ? canvas.nodes : [],
+                edges: Array.isArray(canvas.edges) ? canvas.edges : []
+            },
+            storage
+        };
+    } catch (e) {
+        if (!(options && options.silent === true)) {
+            console.warn('[Canvas] BCS canvas manifest 读取失败:', e);
+        }
+        return null;
+    }
 }
 
 async function __loadCanvasTempStateBundleFromBcs(options = {}) {

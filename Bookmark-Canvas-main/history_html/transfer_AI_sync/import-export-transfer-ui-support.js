@@ -25,6 +25,19 @@ function getOverlayContainer() {
     return document.body;
 }
 
+function __saveImportedTempSectionsDelta(sectionInputs, options = {}) {
+    const sections = (Array.isArray(sectionInputs) ? sectionInputs : [sectionInputs])
+        .filter((section) => section && typeof section === 'object' && section.id);
+    if (!sections.length) return;
+    try {
+        if (typeof saveCanvasSectionDelta === 'function') {
+            saveCanvasSectionDelta({ upsertSections: sections }, options);
+            return;
+        }
+    } catch (_) { }
+    try { if (typeof saveTempNodes === 'function') saveTempNodes(options); } catch (_) { }
+}
+
 // ---- export-folder-name-helpers: source lines 5-7 ----
 
 // Unified Export Folder Paths - 统一的导出文件夹路径（根据语言动态选择）
@@ -575,7 +588,7 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
         pulseBreathingEffect(nodeElement, 1500);
     }
 
-    saveTempNodes();
+    __saveImportedTempSectionsDelta(section);
 
     const message = commonParentTitle
         ? (isEn ? `Imported folder "${commonParentTitle}" with ${items.length} bookmarks`
@@ -729,7 +742,7 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
             pulseBreathingEffect(nodeElement, 1500);
         }
 
-        saveTempNodes();
+        __saveImportedTempSectionsDelta(section);
 
         showCanvasToast(
             isEn ? `Imported folder "${folderNode.title}" with ${totalCount} bookmarks`
@@ -815,7 +828,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         pulseBreathingEffect(nodeElement, 1500);
     }
 
-    saveTempNodes();
+    __saveImportedTempSectionsDelta(section);
 
     showCanvasToast(
         isEn ? 'Created temporary section with 1 bookmark' : '已创建临时栏目，包含 1 个书签',

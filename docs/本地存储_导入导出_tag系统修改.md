@@ -4,6 +4,62 @@
 
 ---
 
+## 零、BCS 文档层与插件本地状态边界（当前执行口径）
+
+### 0.1 存储首要目标
+本插件的 BCS 存储首要服务对象是 **Obsidian JsonCanvas 对齐、导入、导出、备份、拉取、推送** 等基础交互。也就是说，`bcs:*` 文档层应优先表达“画布文档是什么”，而不是表达“当前插件 UI 怎么显示”。
+
+当前不做 `settings.json` 导入/导出，也不做“完整插件工作区备份”。在这个前提下，不需要进行三层物理迁移；只需要保持导入/导出/备份/推送/拉取入口不读取插件 UI 偏好状态。
+
+### 0.2 BCS 文档层范围
+以下 key/前缀属于当前 BCS 文档或文档同步层：
+
+* `bcs:canvas`：Obsidian JsonCanvas 清单，保存 file/text/group nodes 与 edges。它不是运行时 `CanvasState` 原样序列化，而是由 builder 转换成 JsonCanvas 形态。
+* `bcs:section:*`：临时栏目 JSON 协议分片，保存临时栏目的书签/文件夹内容及必要的栏目协议 meta。
+* `bcs:perm:main`：永久栏目主数据，含说明块、`identityMap`、永久书签树。
+* `bcs:perm:copy-*`、`bcs:perm:copies`、`bcs:perm:root-meta`、`bcs:perm:tip-*`：永久栏目副本、根元信息和说明相关数据。
+* `bcs:meta`：画布计数器、颜色游标、时间戳等 BCS 元信息。
+* `bcs:signal`：跨页面/跨上下文同步信号，不属于导出内容本体。
+
+导出、备份、推送、拉取准备流程的基准是：先把运行时状态 flush 到 BCS，再从 BCS 读取并构建 export sandbox，最后由 sandbox 输出导出包或备份槽。懒加载/休眠只卸载 DOM 或降低渲染成本，不卸载 `CanvasState` 中的核心数据。
+
+### 0.3 插件 UI/偏好状态不进入导出包
+以下状态属于插件 UI/偏好/视图状态，默认不进入 BCS 文档导出包，也不参与 Obsidian JsonCanvas 语义：
+
+* 节点 UI 状态：`canvas-node-ui-state-v1`（如 `pinned`、`colorLocked`、Markdown 字号）、旧兼容 `canvas-node-pin-state-v1`。
+* 外观与交互偏好：`canvas-appearance-settings-v1`、`canvas-other-settings-v1`、`canvas-custom-shortcuts`。
+* 缩放/性能偏好：`canvas-node-layout-zoom-v1`、`canvasMinZoomLimit`、`canvasMaxZoomLimit`、`canvasZoomThresholds`、`canvasZoomMagnetSettings`、`canvasSafeZoneSettings`、`canvas-perf-manual-base-v1`、`canvas-perf-linked-from-other-v1`、`canvasLowDetailEnabled`、`canvasVirtualizationEnabled` 等。
+* 视图状态：`canvas-node-maximized-v1`、`canvas-node-last-maximized-v1`、`canvas-scroll-preferences`、`canvas-scrollbar-preload-v1`、`temp-section-scroll:*`、`temp-section-collapsed:*`、`canvas-temp-root-visible:*`、`canvas-temp-expand-state`、`permanent-section-scroll:*`、`permanent-section-expanded:*` 等。
+
+这些状态可以继续留在本地 storage。除非未来明确实现 `settings.json`、完整工作区备份或跨设备同步插件偏好，否则不得把它们写入 `bcs:canvas` 或导出包主体。
+
+### 0.4 流程状态与命名例外
+当前存在少量流程状态使用了 `bcs:` 命名，但它们不是 Obsidian JsonCanvas 文档内容：
+
+* `bcs:backup:slot`：单槽备份内容，来自导出 sandbox 的快照。
+* `bcs:auto-backup:settings:v1`：自动备份开关、间隔、上次备份时间等流程设置。
+* `canvas-import-threshold-v1`：覆盖/增量导入阈值。
+* `bcs:legacy-temp-migrated-v1`：一次性迁移标记。
+
+这些 key 可以继续保留；在不做 `settings.json` 的阶段，不需要为它们进行物理迁移。但新增代码必须在语义上区分“文档数据”“流程状态”“插件 UI/偏好状态”。
+
+### 0.5 临时栏目分片增量边界
+临时栏目分片后的写入规则如下：
+
+* 临时栏目内容编辑：只写受影响的 `bcs:section:<sectionId>`。
+* 临时栏目创建/删除：`bcs:canvas` 作为 JsonCanvas 清单整体重写，同时只 upsert/remove 受影响的 `bcs:section:*`，不得重写无关 section。
+* 画布布局、Markdown 节点、连接线：写 `bcs:canvas` 清单，不重写所有 `bcs:section:*`。
+* 全量覆盖、清空、恢复、迁移兜底等全局语义操作可以全量重建 BCS 文档。
+
+注意：`bcs:canvas` 是单个 JsonCanvas 清单，整体写入是合理边界；本轮分片优化避免的是“临时栏目内容全量重写”，不是把 JsonCanvas 清单拆碎。
+
+### 0.6 `bcs:section:*` 的插件协议 meta
+`bcs:section:*` 是本插件的临时栏目 JSON 协议，不是 Obsidian Canvas 原生节点本体。它可以包含恢复临时栏目所需的最小协议 meta，例如 `sectionMeta.title`、`label`、`source`、`descriptionMd`、`originPermanent`、`descFontSize`、`descDisplayMode`、`descDisplayRows`、`descEditMode`、`descEditRows`、`suppressPlaceholder` 等。
+
+这些字段不属于 `bcs:canvas` 的 JsonCanvas 语义。后续新增字段时必须先判断：若只是插件 UI 偏好或视图状态，应进入独立本地 key；只有服务临时栏目内容恢复、导入、导出、备份、推送、拉取的字段，才允许进入 `bcs:section:*`。
+
+---
+
 ## 一、 插件本地存储改造设计
 
 ### 1.1 永久栏目主数据及映射表设计 (`identityMap`)

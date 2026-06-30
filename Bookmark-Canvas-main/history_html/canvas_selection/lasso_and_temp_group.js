@@ -26,6 +26,36 @@ let __lassoOnUp = null;
 
 let __tempGroup = null; // {members:[{type,data,el}], rect:{x,y,w,h}, maskEl, toolbarEl}
 
+function __saveTempGroupCanvasManifest(options = {}) {
+    try {
+        if (typeof saveCanvasManifestOnly === 'function') {
+            saveCanvasManifestOnly(options);
+            return;
+        }
+    } catch (_) { }
+    try { if (typeof saveTempNodes === 'function') saveTempNodes(options); } catch (_) { }
+}
+
+function __saveTempGroupNodeUiState() {
+    try {
+        if (typeof saveCanvasNodeUiState === 'function') {
+            saveCanvasNodeUiState();
+            return;
+        }
+    } catch (_) { }
+    try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) { }
+}
+
+function __saveTempGroupSectionDelta(deltaInput, options = {}) {
+    try {
+        if (typeof saveCanvasSectionDelta === 'function') {
+            saveCanvasSectionDelta(deltaInput, options);
+            return;
+        }
+    } catch (_) { }
+    try { if (typeof saveTempNodes === 'function') saveTempNodes(options); } catch (_) { }
+}
+
 function getOverlayContainer() {
     if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
         return window.getOverlayContainer();
@@ -537,7 +567,7 @@ function __commitMemberTranslate(snapshot, dx, dy) {
             } catch (_) { }
         }
     });
-    try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) { }
+    __saveTempGroupCanvasManifest();
     try { if (typeof renderEdges === 'function') renderEdges(); } catch (_) { }
     requestAnimationFrame(() => {
         restoreTransitionEls.forEach((el) => {
@@ -818,7 +848,7 @@ function __applyTempGroupColor(presetKey, hex) {
             }
         } catch (_) { }
     });
-    try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) { }
+    __saveTempGroupCanvasManifest();
     try { if (typeof renderEdges === 'function') renderEdges(); } catch (_) { }
 }
 
@@ -927,16 +957,18 @@ function __pinAllTempGroup() {
         } catch (_) { }
     });
     __syncTempGroupPinButton();
-    try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) { }
+    __saveTempGroupNodeUiState();
 }
 
 function __deleteAllTempGroup() {
     if (!__tempGroup) return;
     const members = __tempGroup.members.slice();
+    const removedTempIds = [];
     members.forEach((m) => {
         if (!m || !m.id) return;
         try {
             if (m.type === 'temp-section') {
+                removedTempIds.push(m.id);
                 if (typeof removeTempNode === 'function') removeTempNode(m.id, { skipSave: true });
             } else if (m.type === 'md-node') {
                 if (typeof removeMdNode === 'function') removeMdNode(m.id, false, { skipSave: true });
@@ -951,7 +983,11 @@ function __deleteAllTempGroup() {
             }
         } catch (_) { }
     });
-    try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) { }
+    if (removedTempIds.length) {
+        __saveTempGroupSectionDelta({ deleteSectionIds: removedTempIds }, { immediate: true });
+    } else {
+        __saveTempGroupCanvasManifest({ immediate: true });
+    }
     try { if (typeof renderEdges === 'function') renderEdges(); } catch (_) { }
     dismissTempGroup();
 }
@@ -975,7 +1011,7 @@ function __convertTempGroupToCardGroup() {
             if (window.__BCSCardGroup && typeof window.__BCSCardGroup.setTransientMemberHint === 'function') {
                 window.__BCSCardGroup.setTransientMemberHint(created.node.id, sourceMembers);
             }
-            try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) { }
+            __saveTempGroupCanvasManifest();
             try { if (typeof renderEdges === 'function') renderEdges(); } catch (_) { }
         } catch (_) { }
     }

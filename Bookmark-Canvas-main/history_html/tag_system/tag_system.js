@@ -174,6 +174,46 @@
         return null;
     }
 
+    function __resolveTempSectionForTagSave(sectionId) {
+        const id = String(sectionId || '').trim();
+        if (!id) return null;
+        try {
+            if (typeof getTempSection === 'function') {
+                const section = getTempSection(id);
+                if (section) return section;
+            }
+        } catch (_) { }
+        try {
+            if (typeof CanvasState !== 'undefined' && Array.isArray(CanvasState.tempSections)) {
+                return CanvasState.tempSections.find((section) => section && section.id === id) || null;
+            }
+        } catch (_) { }
+        return null;
+    }
+
+    async function __saveTempTagSections(sectionIds, options = {}) {
+        const ids = Array.from(new Set((Array.isArray(sectionIds) ? sectionIds : [sectionIds])
+            .map((id) => String(id || '').trim())
+            .filter(Boolean)));
+        if (!ids.length) return;
+
+        const sections = ids.map(__resolveTempSectionForTagSave).filter(Boolean);
+        if (sections.length && typeof saveTempSectionsPatch === 'function') {
+            try {
+                const result = saveTempSectionsPatch(sections, options);
+                if (result && typeof result.then === 'function') await result;
+                return;
+            } catch (_) { }
+        }
+
+        try {
+            if (typeof saveTempNodes === 'function') {
+                const result = saveTempNodes(options);
+                if (result && typeof result.then === 'function') await result;
+            }
+        } catch (_) { }
+    }
+
     // -------------------------------------------------------------------------
     // Popover state + DOM (Phase D)
     //
@@ -1044,12 +1084,14 @@
         if (!confirm(confirmMsg)) return;
 
         const permanentUpdates = [];
+        const tempSectionIds = new Set();
         for (const target of targets) {
             if (target.kind === 'permanent') {
                 permanentUpdates.push({ chromeId: target.chromeId, tags: [] });
             } else if (target.kind === 'temporary') {
                 if (typeof setTempItemTags === 'function') {
-                    setTempItemTags(target.sectionId, target.itemId, [], { skipRender: true, skipSave: true });
+                    const changed = setTempItemTags(target.sectionId, target.itemId, [], { skipRender: true, skipSave: true });
+                    if (changed && target.sectionId) tempSectionIds.add(target.sectionId);
                 }
             }
         }
@@ -1064,13 +1106,12 @@
             }
         }
 
-        const hasTemp = targets.some(t => t.kind === 'temporary');
-        if (hasTemp && typeof saveTempNodes === 'function') {
-            saveTempNodes();
+        const hasTemp = tempSectionIds.size > 0;
+        if (hasTemp) {
+            await __saveTempTagSections(Array.from(tempSectionIds));
         }
         if (hasTemp && typeof refreshTempSectionTreeInPlace === 'function') {
-            const sectionIds = new Set(targets.filter(t => t.kind === 'temporary').map(t => t.sectionId));
-            sectionIds.forEach(sid => {
+            tempSectionIds.forEach(sid => {
                 const sec = typeof getTempSection === 'function' ? getTempSection(sid) : null;
                 if (sec) refreshTempSectionTreeInPlace(sec);
             });
