@@ -213,6 +213,35 @@ async function isPermanentDescendantOf(childId, parentFolderId) {
     return false;
 }
 
+function normalizeBookmarkPayloadNote(noteInput) {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (bridge && typeof bridge.normalizeNoteInput === 'function') {
+        return bridge.normalizeNoteInput(noteInput);
+    }
+    return String(noteInput == null ? '' : noteInput).replace(/\r\n?/g, '\n').trim();
+}
+
+function normalizeBookmarkPayloadNoteColor(colorInput, fallback = 'orange') {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (bridge && typeof bridge.normalizeNoteColorInput === 'function') {
+        return bridge.normalizeNoteColorInput(colorInput, fallback);
+    }
+    const palette = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+    const color = String(colorInput || '').trim().toLowerCase();
+    if (palette.includes(color)) return color;
+    const fallbackColor = String(fallback || '').trim().toLowerCase();
+    return palette.includes(fallbackColor) ? fallbackColor : 'orange';
+}
+
+async function ensurePermanentMetadataLoadedForPayloads() {
+    if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+        try { await window.TagSystem.ensurePermTagsLoaded(); } catch (_) {}
+    }
+    if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+        try { await window.NoteSystem.ensurePermNotesLoaded(); } catch (_) {}
+    }
+}
+
 function serializeBookmarkNode(node) {
     if (!node) return null;
     const out = {
@@ -228,6 +257,22 @@ function serializeBookmarkNode(node) {
         if (Array.isArray(cachedTags) && cachedTags.length) {
             out.tags = cachedTags.map(t => ({ color: t.color, text: t.text }));
         }
+    }
+    const inlineNote = normalizeBookmarkPayloadNote(node.note);
+    if (inlineNote) {
+        out.note = inlineNote;
+        out.noteColor = normalizeBookmarkPayloadNoteColor(node.noteColor);
+    } else if (node.id && window.NoteSystem) {
+        try {
+            const meta = typeof window.NoteSystem.getPermNodeNoteMetaCached === 'function'
+                ? window.NoteSystem.getPermNodeNoteMetaCached(node.id)
+                : { note: (typeof window.NoteSystem.getPermNodeNoteCached === 'function' ? window.NoteSystem.getPermNodeNoteCached(node.id) : ''), color: 'orange' };
+            const note = normalizeBookmarkPayloadNote(meta && meta.note);
+            if (note) {
+                out.note = note;
+                out.noteColor = normalizeBookmarkPayloadNoteColor(meta && (meta.noteColor || meta.color));
+            }
+        } catch (_) {}
     }
     return out;
 }
@@ -1123,10 +1168,91 @@ async function createBookmarkFromPayload(parentId, index, payload, tagUpdates = 
             tags: payload.tags
         });
     }
+    const note = normalizeBookmarkPayloadNote(payload.note);
+    if (note && options && Array.isArray(options.noteUpdates)) {
+        options.noteUpdates.push({
+            chromeId: created.id,
+            note,
+            noteColor: normalizeBookmarkPayloadNoteColor(payload.noteColor)
+        });
+    }
 
     if (payload.children && payload.children.length) {
         for (const child of payload.children) {
             await createBookmarkFromPayload(created.id, null, child, tagUpdates, options);
+        }
+    }
+}
+
+async function flushPermanentMetadataUpdates(tagUpdates, noteUpdates, reason = '') {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    const tags = Array.isArray(tagUpdates) ? tagUpdates : [];
+    const notes = Array.isArray(noteUpdates) ? noteUpdates : [];
+
+    if (tags.length > 0 && bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
+        try {
+            await bridge.writePermanentNodeTagsBulk(tags);
+            const tagTargets = tags.map((u) => ({
+                kind: 'permanent',
+                chromeId: u.chromeId,
+                tags: Array.isArray(u.tags) ? u.tags : []
+            }));
+            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                await window.TagSystem.ensurePermTagsLoaded(true);
+            }
+            if (typeof window.__refreshAllTagDots === 'function') {
+                window.__refreshAllTagDots();
+            }
+            try {
+                if (typeof window.markCanvasSearchBookmarkTagDirty === 'function') {
+                    window.markCanvasSearchBookmarkTagDirty(tagTargets);
+                }
+            } catch (_) {}
+        } catch (e) {
+            console.warn('[拖拽] 批量写入永久书签标签失败:', reason, e);
+        }
+    }
+
+    if (notes.length > 0 && bridge) {
+        try {
+            let writtenNotes = [];
+            if (typeof bridge.writePermanentNodeNotesBulk === 'function') {
+                const result = await bridge.writePermanentNodeNotesBulk(notes);
+                if (result && result.changed) writtenNotes = notes;
+            } else if (typeof bridge.writePermanentNodeNoteMeta === 'function') {
+                for (const update of notes) {
+                    const result = await bridge.writePermanentNodeNoteMeta(update.chromeId, update.note, update.noteColor || update.color);
+                    if (result) writtenNotes.push(update);
+                }
+            }
+            if (!writtenNotes.length) return;
+            if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+                await window.NoteSystem.ensurePermNotesLoaded(true);
+            }
+            const noteTargets = writtenNotes.map((u) => ({
+                kind: 'permanent',
+                chromeId: u.chromeId,
+                note: u.note,
+                color: u.noteColor || u.color,
+                noteColor: u.noteColor || u.color
+            }));
+            if (typeof window.__refreshNoteMarkersForTargets === 'function') {
+                window.__refreshNoteMarkersForTargets(noteTargets);
+            } else if (typeof window.__refreshAllNoteMarkers === 'function') {
+                window.__refreshAllNoteMarkers();
+            }
+            try {
+                if (typeof window.updateCanvasSearchBookmarkNotes === 'function') {
+                    window.updateCanvasSearchBookmarkNotes(noteTargets);
+                }
+            } catch (_) {}
+            try {
+                if (typeof window.markCanvasSearchBookmarkNoteDirty === 'function') {
+                    window.markCanvasSearchBookmarkNoteDirty(noteTargets);
+                }
+            } catch (_) {}
+        } catch (e) {
+            console.warn('[拖拽] 批量写入永久书签笔记失败:', reason, e);
         }
     }
 }
@@ -1196,6 +1322,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
 
                     // 1. Serialize permanent selections
                     if (permanentIds.length > 0) {
+                        await ensurePermanentMetadataLoadedForPayloads();
                         for (const id of permanentIds) {
                             let sourceNode = await readPermanentNodeFromBcs(id);
                             if (!sourceNode) {
@@ -1296,7 +1423,8 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                 };
 
                 const createdEvents = [];
-                const createOptions = { createdEvents, progressTracker, loadingToast };
+                const noteUpdates = [];
+                const createOptions = { createdEvents, progressTracker, loadingToast, noteUpdates };
 
                 try {
                     // 1. Move permanent nodes instead of cloning them (using simulation to prevent index drift)
@@ -1386,30 +1514,12 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
 
                     // 2. Create permanent bookmarks from temporary payloads
                     let currIndex = typeof insertInfo.index === 'number' ? insertInfo.index + permanentIds.length : null;
+                    const tagUpdates = [];
                     if (tempPayload.length > 0) {
-                        const tagUpdates = [];
                         for (const item of tempPayload) {
                             await createBookmarkFromPayload(insertInfo.parentId, currIndex, item, tagUpdates, createOptions);
                             if (typeof currIndex === 'number') {
                                 currIndex++;
-                            }
-                        }
-
-                        // Inherit tags in bulk
-                        if (tagUpdates.length > 0) {
-                            const bridge = window.CanvasProtocolBridge;
-                            if (bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
-                                try {
-                                    await bridge.writePermanentNodeTagsBulk(tagUpdates);
-                                    if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-                                        await window.TagSystem.ensurePermTagsLoaded(true);
-                                    }
-                                    if (typeof window.__refreshAllTagDots === 'function') {
-                                        window.__refreshAllTagDots();
-                                    }
-                                } catch (e) {
-                                    console.warn('[拖拽] 批量写入永久书签标签失败:', e);
-                                }
                             }
                         }
                     }
@@ -1417,6 +1527,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                     if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
                         await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'drag-batch-to-permanent');
                     }
+                    await flushPermanentMetadataUpdates(tagUpdates, noteUpdates, 'drag-batch-to-permanent');
 
                     // 3. Remove source temporary items only
                     bySection.forEach((ids, secId) => {
@@ -1488,34 +1599,18 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                 startTime: Date.now()
             };
             const createdEvents = [];
-            const createOptions = { createdEvents, progressTracker, loadingToast };
+            const noteUpdates = [];
+            const createOptions = { createdEvents, progressTracker, loadingToast, noteUpdates };
             try {
                 const tagUpdates = [];
                 for (const item of payload) {
                     await createBookmarkFromPayload(parentId, index, item, tagUpdates, createOptions);
                 }
 
-                // Inherit tags in bulk
-                if (tagUpdates.length > 0) {
-                    const bridge = window.CanvasProtocolBridge;
-                    if (bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
-                        try {
-                            await bridge.writePermanentNodeTagsBulk(tagUpdates);
-                            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-                                await window.TagSystem.ensurePermTagsLoaded(true);
-                            }
-                            if (typeof window.__refreshAllTagDots === 'function') {
-                                window.__refreshAllTagDots();
-                            }
-                        } catch (e) {
-                            console.warn('[拖拽] 批量写入永久书签标签失败:', e);
-                        }
-                    }
-                }
-
                 if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
                     await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'drag-temp-to-permanent');
                 }
+                await flushPermanentMetadataUpdates(tagUpdates, noteUpdates, 'drag-temp-to-permanent');
 
                 // Delete the source temporary items
                 manager.removeItems(sourceSectionId, [dragNodeId]);
@@ -1533,6 +1628,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
         if (sourceTreeType === 'permanent' && targetTreeType === 'temporary' && manager && chrome && chrome.bookmarks) {
             // 单个拖拽逻辑（多选逻辑已由顶部 if (isDraggedNodeSelected) 处理并 return）
             let payload = [];
+            await ensurePermanentMetadataLoadedForPayloads();
             let sourceNode = await readPermanentNodeFromBcs(dragNodeId);
             if (!sourceNode) {
                 const nodes = await chrome.bookmarks.getSubTree(dragNodeId);
@@ -1542,13 +1638,6 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                 payload = [serializeBookmarkNode(sourceNode)];
             }
 
-            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-                try {
-                    await window.TagSystem.ensurePermTagsLoaded();
-                } catch (e) {
-                    console.warn('[拖拽] 加载永久标签失败:', e);
-                }
-            }
             const targetInfo = computeTempInsertion(targetSectionId, targetId, position);
             manager.insertFromPayload(targetSectionId, targetInfo.parentId, payload, targetInfo.index, { defaultCollapseFolders: true });
             return;
@@ -1855,6 +1944,7 @@ async function handleExternalDropOnTreeNode(e, targetNodeId, targetIsFolder, con
     const manager = getTempManager();
     
     if (matchedNode) {
+        await ensurePermanentMetadataLoadedForPayloads();
         if (targetTreeType === 'temporary' && manager) {
             const payload = [serializeBookmarkNode(matchedNode)];
             const targetInfo = computeTempInsertion(targetSectionId, targetNodeId, position);
@@ -1862,7 +1952,10 @@ async function handleExternalDropOnTreeNode(e, targetNodeId, targetIsFolder, con
         } else if (targetTreeType === 'permanent' && chrome && chrome.bookmarks) {
             const insertInfo = await computePermanentInsertion(targetNodeId, targetIsFolder, position);
             const payload = serializeBookmarkNode(matchedNode);
-            await createBookmarkFromPayload(insertInfo.parentId, insertInfo.index, payload);
+            const tagUpdates = [];
+            const noteUpdates = [];
+            await createBookmarkFromPayload(insertInfo.parentId, insertInfo.index, payload, tagUpdates, { noteUpdates });
+            await flushPermanentMetadataUpdates(tagUpdates, noteUpdates, 'external-drop-to-permanent');
         }
     } else {
         let title = '';

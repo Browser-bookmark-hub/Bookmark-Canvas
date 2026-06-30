@@ -32,7 +32,7 @@ This file is written for AI agents that edit an exported Bookmark Canvas package
         └── Add/Search/Import <title>.json (other special temporary sections; see R5)
 ```
 - JSON Mode exports section files as `.json`; blank cards are `.canvas` `type: "text"` nodes, not standalone files.
-- Example index: permanent main [R2](#ref-r2); permanent copy [R3](#ref-r3); regular temporary [R4](#ref-r4); AI/special temporary [R5](#ref-r5)/[R7](#ref-r7); canvas [R6](#ref-r6); tags [R8](#ref-r8).
+- Example index: permanent main [R2](#ref-r2); permanent copy [R3](#ref-r3); regular temporary [R4](#ref-r4); AI/special temporary [R5](#ref-r5)/[R7](#ref-r7); canvas [R6](#ref-r6); tag/note metadata [R8](#ref-r8).
 
 ### A2. Mode-specific Content Grammar
 - {{EXPORT_MODE_LABEL}} stores the bookmark tree as a single plain JSON object body (no fenced code block).
@@ -45,7 +45,7 @@ This file is written for AI agents that edit an exported Bookmark Canvas package
 - `descriptionMd` describes the current bookmark tree. Preserve Markdown source unless the user asks to change the description.
 - The exported `tree.id` and `tree.parentId` values are `syncId_*`, not local Chrome numeric IDs. When adding permanent nodes, mint unique IDs shaped like `syncId_YYYYMMDD_hash_<token7>`, where `token7` is lowercase letters/digits only. See [R1.1](#ref-r1-1) and [R1.2](#ref-r1-2).
 - Top-level browser roots use `folderType` such as `bookmarks-bar`, `other`, or `mobile`, plus `syncing`. Do not add, delete, move, or edit `folderType` / `syncing` on these roots.
-- `identityMap` is exported only for extra metadata such as tags. If present, keep entries keyed by `syncId`; do not invent Chrome local `id` values in exported packages. See [R2](#ref-r2).
+- `identityMap` is exported only for extra metadata such as `tags` and `note`/`noteColor`. If present, keep entries keyed by `syncId`; do not invent Chrome local `id` values in exported packages, and do not put permanent metadata inside `tree` nodes. See [R2](#ref-r2).
 - Permanent copies are not duplicate trees. A copy file has `fileRole: "copy-anchor"`, `anchorOnly: true`, `inheritFrom`, `copyId`, its own `descriptionMd`, and view state. Do not add a `tree` to a copy anchor. See [R3](#ref-r3).
 
 ### A4. Temporary Section Contract
@@ -67,16 +67,19 @@ This file is written for AI agents that edit an exported Bookmark Canvas package
 - A node already geometrically inside a group should not be connected to that same containing group just to express membership.
 - Preserve existing plugin-style IDs such as `permanent-section`, `temp-section-A-1`, `card-group-*`, `md-node-*`, and `edge-*`; do not convert them to generic 16-hex IDs. See [R1.6](#ref-r1-6).
 
-### A6. Tag System Contract
+### A6. Tag / Note Metadata Contract
 - Tags follow a macOS Finder-like model: one bookmark/folder item can have multiple colored tags, each stored as `{ "color": "<palette>", "text": "<label>" }`. See [R8](#ref-r8).
-- Allowed tag `color` values are lowercase palette names only: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`. Use `gray`, not `grey`; do not use hex values, `colorHex`, or canvas color preset numbers for tags.
+- A note is one plain-text note on a bookmark/folder item. Each item has at most one note; store it as sibling fields `note` and `noteColor`, not as a tag object or array. See [R8](#ref-r8).
+- Tag `color` and note `noteColor` values must be lowercase palette names only: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`. Use `gray`, not `grey`; do not use hex values, `colorHex`, or canvas color preset numbers.
 - Palette display colors: red `#ff453a`, orange `#ff9f0a`, yellow `#ffd60a`, green `#30d158`, blue `#0a84ff`, purple `#bf5af2`, gray `#8e8e93`.
 - `text` is the visible tag label. If the UI user only clicks a color, the app uses the localized color name as text; AI edits should write an explicit short `text`.
-- Multiple tags are allowed. Keep their order stable, remove exact duplicates by `color + text`, and preserve existing tags unless the task asks to change them.
-- Add tags only when the user requests tags or the item/folder is important to the task. Avoid over-tagging large URL sets.
-- Permanent tags belong on `identityMap` entries keyed by `syncId`, not inside bookmark tree nodes. See [R2](#ref-r2).
-- Temporary tags belong inline on the affected item object, so they move/delete with that item. See [R4](#ref-r4).
-- Tag colors are separate from `.canvas` node/edge/section `color` and `colorHex` values. Do not convert between them.
+- `note` is a plain-text string; it preserves line breaks and is trimmed as a whole. Empty notes should not be exported, and clearing a note also removes `noteColor`. Old data with `note` but no `noteColor` is treated as `orange`.
+- Multiple tags are allowed. Keep their order stable, remove exact duplicates by `color + text`, and preserve existing tags unless the task asks to change them. Add tags only when requested or when the item/folder is important to the task; avoid over-tagging large URL sets.
+- Add notes only when the user requests a note or when the item/folder needs explicit context. Notes are explanatory/context signals, not bulk taxonomy labels.
+- Permanent metadata belongs on `identityMap` entries keyed by `syncId`: put `tags`, `note`, and `noteColor` on the same `syncId` metadata entry, not inside bookmark tree nodes. See [R2](#ref-r2).
+- Temporary metadata belongs inline on the affected item object: `tags`, `note`, and `noteColor` move/delete with that item. See [R4](#ref-r4).
+- During import, export, push, pull, backup, or restore, treat `tags` and `note`/`noteColor` as the same item metadata family; keep `identityMap` entries that have a note even when they have no tags, and do not prune them as tagless.
+- Tag/note colors are separate from `.canvas` node/edge/section `color` and `colorHex` values. Do not convert between them.
 - Preserve unknown metadata fields unless the task explicitly targets them.
 
 ### A7. Import Recognition Priority
@@ -89,7 +92,7 @@ This file is written for AI agents that edit an exported Bookmark Canvas package
 - Permanent/temporary `descriptionMd` and `.canvas` text nodes are notes or prompts about the nearby bookmark tree. Use them as context, but do not treat them as bookmark items.
 - For first-pass analysis of a regular chain section, inspect its likely source family and parent chain first, such as `#A`, `#B`, `A-1`, `A-1-1`, or `B-1`. If lineage is ambiguous, match by `title` or `url` with local search/tools.
 - Edge direction can encode relationship semantics. Canonical export form: single arrow from `fromNode` to `toNode` omits both ends; no arrow sets `toEnd: "none"`; two-ended arrow sets `fromEnd: "arrow"` and relies on the default `toEnd` arrow. Preserve existing direction unless the task asks to change the relationship.
-- Tags should mark user-requested or especially important items. Avoid adding many tags just because many URLs are present.
+- Tags should mark user-requested or especially important items. Notes should add context for individual bookmark/folder items. Avoid adding many tags or notes just because many URLs are present.
 
 ### A9. Text Formatting Support
 - Blank cards (`.canvas` `text` nodes) and permanent/temporary `descriptionMd` support Obsidian-style Markdown and partial HTML rendering.
@@ -141,7 +144,7 @@ Route principle: edit the minimum file set only. Respect the user-specified targ
 - Keep existing `color` / `colorHex` unless explicit recolor is requested.
 - Regular temp color follows chain inheritance: unlocked child follows parent, locked parent breaks inheritance below.
 - Special temp sections follow the app appearance defaults unless a task gives a color.
-- These section/canvas colors are not tag colors. Tag palette names are defined separately in [R8](#ref-r8).
+- These section/canvas colors are not tag/note colors. Tag palette names and `noteColor` values are defined separately in [R8](#ref-r8).
 
 ### S5. Web Research Capability
 #### S5.1 Rough Screening Before Research
@@ -160,7 +163,7 @@ Route principle: edit the minimum file set only. Respect the user-specified targ
 
 ### S6. Complex Workflow
 - For small scoped edits, edit the target files directly and run the checklist below.
-- For broad or high-risk work touching permanent bookmarks, import/export protocol, tags, `.canvas` topology, or {{GUIDE_RULES}}, first inspect the actual package and relevant references, list the target files, then edit, then validate JSON/canvas integrity.
+- For broad or high-risk work touching permanent bookmarks, import/export protocol, tag/note metadata, `.canvas` topology, or {{GUIDE_RULES}}, first inspect the actual package and relevant references, list the target files, then edit, then validate JSON/canvas integrity.
 - For repeated or high-importance long IDs, titles, or URLs, build a temporary alias map during analysis, such as `P1`, `T-A1-3`, or `U2 -> {id,title,url}`. Keep this map out of exported JSON unless the user explicitly asks to add notes.
 - If multi-agent or parallel review tools are available and the user permits them, suggest splitting review into protocol/data shape, canvas topology, and implementation/tests. If such tools are not available, run those review passes sequentially yourself; do not claim external agents were used.
 
@@ -173,7 +176,7 @@ Route principle: edit the minimum file set only. Respect the user-specified targ
   - **Regular Chain Relationships**: The sequence labels of regular temporary sections (e.g. `A-1` -> `A-1-1` representing a lineage/derived chain) are key indicators of hierarchical categorization. When cards/sections are derived or extended, the AI must inspect this lineage, respect the inheritance, and only inject new themes when requested.
   - **Text Labels on Connectors**: When analyzing the `.canvas` file, pay close attention to the `label` field of edges. Edge texts encode semantic relationships between nodes; preserve or logically extend these relationship descriptions when updating connectors.
   - **Groups and Nesting Topology**: Monospace `.canvas` group nodes (`type: "group"`) and geometric nesting are strong visual classification signals. If bookmark nodes are nested inside a group, the AI must treat them as categorized under that group.
-  - **Trees, Folders, and Tags**: Folder nodes (`type: "folder"`) in bookmark JSON files and the inline/identityMap `tags` array are primary taxonomy dimensions. The AI should match the user's preferred style (whether they tend to categorize via JSON folders, canvas card groups, or colored tags) and maintain styling consistency.
+  - **Trees, Folders, Tags, and Notes**: Folder nodes (`type: "folder"`) in bookmark JSON files and the inline/identityMap `tags` array are primary taxonomy dimensions; `note` is an item-level context signal. The AI should match the user's preferred style (whether they tend to categorize via JSON folders, canvas card groups, or colored tags), preserve styling consistency, and use notes as explanatory context rather than bulk categorization.
 
 ### S8. {{GUIDE_TOOL_PREFIX}}SKILL Creation and Upgrade Reminder
 - **Priority Rule (User Customization First)**: User-edited/generated SKILLs or real-time natural language instructions from the user take precedence over this constraint template. In case of any conflict or inconsistency between this template (such as naming, routing, or categorization rules) and the user's SKILLs or natural language instructions, the user's SKILLs or natural language instructions must prevail. This is emphasized because editing/generating SKILLs or issuing natural language instructions is the primary pathway for users to modify and customize AI behavior.
@@ -192,7 +195,7 @@ Route principle: edit the minimum file set only. Respect the user-specified targ
 - Every edge endpoint references an existing node ID.
 - Permanent root `folderType` / `syncing` values are unchanged unless the user explicitly supplied a browser-root migration task.
 - New permanent IDs are syncIds; new temporary item IDs are tempIds.
-- New or edited tags use only the supported palette names from [R8](#ref-r8).
+- New or edited tag/note metadata uses only the supported palette names from [R8](#ref-r8); permanent notes must live on `identityMap` metadata, temporary notes must live inline on item objects, and empty notes must not keep `noteColor`.
 - **Unrelated files restriction under GitHub Repository scenarios**: If AI detects that Git-related files (such as a `.git` folder, indicating the current environment is a GitHub repository sync directory) are present, it must check sibling filenames and file structures relative to the canonical structure (see [A1](#ref-a1)). If AI detects any non-bookmark unrelated files/folders (such as personal notes, media, etc.) in the sync directory, **it must proactively remind the user to move them out of the sync directory** (to prevent them from being permanently deleted during push sync).
 
 ### Import Steps
@@ -233,7 +236,7 @@ If you only copy the .canvas file without the .json files, Canvas will show that
 <a id="ref-r2"></a>
 ### R2. Permanent Main JSON Example
 Use this shape only when the user explicitly asks to edit the permanent browser-bookmark tree.
-The `identityMap` tag entry below points to the bookmark node with the same `syncId` in `tree`.
+The `identityMap` metadata entry below points to the bookmark node with the same `syncId` in `tree`; `tags` may contain multiple entries, while `note` is a single note and `noteColor` is its sibling field.
 ```json
 {
   "format": "bookmark-canvas-section",
@@ -246,17 +249,19 @@ The `identityMap` tag entry below points to the bookmark node with the same `syn
   "fileNote": "Primary permanent file: canonical bookmark tree source.",
   "identityMap": [
     {
+      "syncId": "syncId_20260530_hash_2i6f661",
+      "note": "Check whether this promo-code search is still useful before keeping it.",
+      "noteColor": "orange",
       "tags": [
         {
           "color": "green",
-          "text": "wqe"
+          "text": "coupon"
         },
         {
           "color": "purple",
-          "text": "124"
+          "text": "promo"
         }
-      ],
-      "syncId": "syncId_20260530_hash_2i6f661"
+      ]
     }
   ],
   "tree": {
@@ -314,6 +319,7 @@ A permanent copy is a view anchor, not another bookmark tree.
 ### R4. Regular Temporary Section Examples
 
 Top-level regular chain section:
+The child bookmark below shows `tags` and `note`/`noteColor` as sibling metadata on the same temporary item; omit these fields when an item has no metadata.
 ```json
 {
   "format": "bookmark-canvas-section",
@@ -340,6 +346,8 @@ Top-level regular chain section:
           "url": "https://github.com/trending/javascript?since=daily",
           "type": "bookmark",
           "children": [],
+          "note": "Daily JavaScript trending page; useful for discovery.",
+          "noteColor": "blue",
           "tags": [
             {
               "color": "orange",
@@ -383,6 +391,7 @@ Derived chain section:
 <a id="ref-r5"></a>
 ### R5. AI Special Temporary Section Example
 Use this when AI adds suggested bookmarks or a generated bookmark tree and no existing target was specified. If the user or context names an existing target, follow [S2](#s2-ai-generated-bookmark-routing).
+The base AI special temporary example does not include `tags` or `note` by default; add metadata to specific items only when the task needs it, following [A6](#a6-tag--note-metadata-contract) / [R8](#ref-r8).
 ```json
 {
   "format": "bookmark-canvas-section",
@@ -439,15 +448,23 @@ For a default single-arrow edge from `fromNode` to `toNode`, omit `fromEnd` and 
 - Add a group, text prompt node, or edge only when it is useful for the task, and keep every edge endpoint valid.
 
 <a id="ref-r8"></a>
-### R8. Tag Palette and Tag Object
-- Valid tag colors are the macOS-style palette names: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`.
+### R8. Tag Palette and Note Metadata
+- Valid tag colors and `noteColor` values are the macOS-style palette names: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`.
 - Palette hex values used by the UI: `red #ff453a`, `orange #ff9f0a`, `yellow #ffd60a`, `green #30d158`, `blue #0a84ff`, `purple #bf5af2`, `gray #8e8e93`.
 - UI default text when no custom text is typed: `Red`, `Orange`, `Yellow`, `Green`, `Blue`, `Purple`, `Gray` in English; `红色`, `橙色`, `黄色`, `绿色`, `蓝色`, `紫色`, `灰色` in Chinese.
-- Standard tag object shape:
+- Write `tags` and `note`/`noteColor` as sibling fields on the same item metadata; only elements inside `tags[]` are tag objects:
 ```json
 {
-  "color": "blue",
-  "text": "Blue"
+  "note": "Plain-text bookmark/folder note.",
+  "noteColor": "orange",
+  "tags": [
+    {
+      "color": "blue",
+      "text": "Blue"
+    }
+  ]
 }
 ```
-- Do not write tag colors as `#0a84ff`, `colorHex`, Obsidian canvas color numbers, or CSS variable names. The exported JSON tag value is the lowercase palette name.
+- Permanent `identityMap` entries add `syncId` to the same shape; temporary items inline these fields directly.
+- `noteColor` is a sibling field of `note` and `tags`, not part of a tag object; do not write it as `{ "color": "...", "text": "..." }`.
+- Do not write tag colors or `noteColor` as `#0a84ff`, `colorHex`, Obsidian canvas color numbers, or CSS variable names. The exported JSON value is the lowercase palette name.

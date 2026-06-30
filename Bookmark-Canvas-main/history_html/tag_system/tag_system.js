@@ -11,6 +11,7 @@
 
 (function tagSystemModule() {
     const TAG_PALETTE = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+    const NOTE_COLOR_DEFAULT = 'orange';
 
     function getOverlayContainer() {
         if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
@@ -198,7 +199,7 @@
             __popoverSubEl.hidden = true;
             return;
         }
-        
+
         const pop = __popoverEl;
         const sub = __popoverSubEl;
         const isAlreadyVisible = !sub.hidden && sub.style.visibility !== 'hidden';
@@ -206,16 +207,16 @@
             sub.style.visibility = 'hidden';
         }
         sub.hidden = false;
-        
+
         const scale = __getCurrentPopoverScale();
         sub.style.transform = `scale(${scale})`;
         sub.style.transformOrigin = 'top left';
-        
+
         const popRect = pop.getBoundingClientRect();
         const subRect = sub.getBoundingClientRect();
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        
+
         // Check spaces in different directions
         const spaceRight = vw - popRect.right - 8;
         const spaceLeft = popRect.left - 8;
@@ -1256,6 +1257,9 @@
 
         const rerenderSearch = () => {
             try {
+                if (typeof window.markCanvasSearchBookmarkTagDirty === 'function') {
+                    window.markCanvasSearchBookmarkTagDirty(list);
+                }
                 if (typeof window.updateCanvasSearchBookmarkTags === 'function') {
                     window.updateCanvasSearchBookmarkTags(list);
                 }
@@ -1360,6 +1364,359 @@
         return { position: 'auto', threshold: 420 };
     }
 
+    let __permNoteIndex = null;
+    let __permNoteIndexLoading = null;
+    const __tempNoteSyncOverlay = new Map();
+
+    function __normalizeNote(raw) {
+        if (raw === undefined || raw === null) return '';
+        return String(raw).replace(/\r\n?/g, '\n').trim();
+    }
+
+    function __normalizeNoteColor(raw, fallback = NOTE_COLOR_DEFAULT) {
+        const color = String(raw || '').trim().toLowerCase();
+        if (TAG_PALETTE.includes(color)) return color;
+        const fallbackColor = String(fallback || '').trim().toLowerCase();
+        return TAG_PALETTE.includes(fallbackColor) ? fallbackColor : NOTE_COLOR_DEFAULT;
+    }
+
+    function __normalizeNoteMeta(raw) {
+        if (raw && typeof raw === 'object') {
+            const color = __normalizeNoteColor(raw.noteColor || raw.color);
+            return {
+                note: __normalizeNote(raw.note),
+                noteColor: color,
+                color
+            };
+        }
+        return { note: __normalizeNote(raw), noteColor: NOTE_COLOR_DEFAULT, color: NOTE_COLOR_DEFAULT };
+    }
+
+    function __getTempNoteOverlayKey(target) {
+        if (!target || target.kind !== 'temporary' || !target.sectionId || !target.itemId) return '';
+        return `${String(target.sectionId)}::${String(target.itemId)}`;
+    }
+
+    function __mergeTempNoteSyncOverlay(targets) {
+        if (!Array.isArray(targets)) return;
+        targets.forEach((target) => {
+            const key = __getTempNoteOverlayKey(target);
+            if (!key) return;
+            const hasNotePayload = Object.prototype.hasOwnProperty.call(target, 'note') ||
+                Object.prototype.hasOwnProperty.call(target, 'noteColor') ||
+                Object.prototype.hasOwnProperty.call(target, 'color');
+            if (!hasNotePayload) return;
+            const meta = __normalizeNoteMeta(target);
+            if (meta.note) {
+                __tempNoteSyncOverlay.set(key, meta);
+            } else {
+                __tempNoteSyncOverlay.delete(key);
+            }
+        });
+    }
+
+    async function __loadPermNoteIndex(force = false) {
+        if (!force && __permNoteIndex) return __permNoteIndex;
+        if (__permNoteIndexLoading) return __permNoteIndexLoading;
+        const bridge = __bridge();
+        if (!bridge || !bridge.readPermanentMainContentFromBcs) return new Map();
+        __permNoteIndexLoading = (async () => {
+            try {
+                const content = await bridge.readPermanentMainContentFromBcs({ skipIdentityMapHeal: true });
+                const map = new Map();
+                if (content && Array.isArray(content.identityMap)) {
+                    for (const entry of content.identityMap) {
+                        if (!entry || !entry.id) continue;
+                        const note = __normalizeNote(entry.note);
+                        if (note) map.set(String(entry.id), {
+                            note,
+                            noteColor: __normalizeNoteColor(entry.noteColor),
+                            color: __normalizeNoteColor(entry.noteColor)
+                        });
+                    }
+                }
+                __permNoteIndex = map;
+                return map;
+            } catch (_) {
+                __permNoteIndex = new Map();
+                return __permNoteIndex;
+            } finally {
+                __permNoteIndexLoading = null;
+            }
+        })();
+        return __permNoteIndexLoading;
+    }
+
+    function __invalidatePermNoteIndex() {
+        __permNoteIndex = null;
+    }
+
+    function __getNoteForTargetSync(target) {
+        return __getNoteMetaForTargetSync(target).note;
+    }
+
+    function __getNoteMetaForTargetSync(target) {
+        if (!target) return { note: '', noteColor: NOTE_COLOR_DEFAULT, color: NOTE_COLOR_DEFAULT };
+        if (target.kind === 'temporary') {
+            const overlayKey = __getTempNoteOverlayKey(target);
+            if (overlayKey && __tempNoteSyncOverlay.has(overlayKey)) {
+                return __normalizeNoteMeta(__tempNoteSyncOverlay.get(overlayKey));
+            }
+            try {
+                if (typeof getTempItemNoteMeta === 'function') {
+                    return __normalizeNoteMeta(getTempItemNoteMeta(target.sectionId, target.itemId));
+                }
+                if (window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.getNoteMeta === 'function') {
+                    return __normalizeNoteMeta(window.CanvasModule.temp.getNoteMeta(target.sectionId, target.itemId));
+                }
+                if (typeof getTempItemNote === 'function') {
+                    return { note: __normalizeNote(getTempItemNote(target.sectionId, target.itemId)), noteColor: NOTE_COLOR_DEFAULT, color: NOTE_COLOR_DEFAULT };
+                }
+                if (window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.getNote === 'function') {
+                    return { note: __normalizeNote(window.CanvasModule.temp.getNote(target.sectionId, target.itemId)), noteColor: NOTE_COLOR_DEFAULT, color: NOTE_COLOR_DEFAULT };
+                }
+            } catch (_) { return { note: '', noteColor: NOTE_COLOR_DEFAULT, color: NOTE_COLOR_DEFAULT }; }
+        }
+        if (target.kind === 'permanent' && __permNoteIndex) {
+            return __normalizeNoteMeta(__permNoteIndex.get(String(target.chromeId)));
+        }
+        return { note: '', noteColor: NOTE_COLOR_DEFAULT, color: NOTE_COLOR_DEFAULT };
+    }
+
+    function __getNoteForTreeItemSync(treeItem) {
+        return __getNoteForTargetSync(__resolveTargetFromTreeItem(treeItem));
+    }
+
+    function __getNoteMetaForTreeItemSync(treeItem) {
+        return __getNoteMetaForTargetSync(__resolveTargetFromTreeItem(treeItem));
+    }
+
+    function __getBookmarkTreeNoteSettings() {
+        if (window.CanvasModule && typeof window.CanvasModule.getCanvasOtherSettings === 'function') {
+            const settings = window.CanvasModule.getCanvasOtherSettings();
+            if (settings) {
+                return {
+                    position: settings.bookmarkTreeNotePosition || 'auto',
+                    threshold: settings.bookmarkTreeNotePositionThreshold !== undefined ? settings.bookmarkTreeNotePositionThreshold : 420
+                };
+            }
+        }
+        return { position: 'auto', threshold: 420 };
+    }
+
+    function __isWideNoteContext(treeItem, currentModeIsWide, cardWidthCache) {
+        if (!treeItem) return false;
+        if (treeItem.closest('.canvas-fullscreen-active, .canvas-fullscreen-node, .search-results-panel')) return true;
+
+        const settings = __getBookmarkTreeNoteSettings();
+        if (settings.position === 'left') return false;
+        if (settings.position === 'right') return true;
+
+        let layoutWidth = 0;
+        const cardEl = treeItem.closest ? treeItem.closest('.temp-canvas-node, .permanent-bookmark-section, .md-canvas-node') : null;
+        if (cardEl) {
+            if (cardWidthCache && cardWidthCache.has(cardEl)) {
+                layoutWidth = cardWidthCache.get(cardEl);
+            } else {
+                layoutWidth = cardEl.offsetWidth || cardEl.clientWidth || 0;
+                if (cardWidthCache) cardWidthCache.set(cardEl, layoutWidth);
+            }
+        } else {
+            layoutWidth = treeItem.offsetWidth || treeItem.clientWidth || treeItem.scrollWidth || 0;
+        }
+
+        const threshold = Number(settings.threshold) || 420;
+        return layoutWidth >= threshold;
+    }
+
+    function __buildNoteMarker(note, color, wide, noteKey) {
+        const marker = document.createElement('span');
+        const safeColor = __normalizeNoteColor(color);
+        marker.className = `tree-item-note-marker note-color-${safeColor} ` + (wide ? 'note-trailing' : 'note-leading');
+        marker.dataset.role = 'note-marker';
+        marker.dataset.note = note;
+        marker.dataset.color = safeColor;
+        marker.dataset.noteKey = noteKey;
+        marker.setAttribute('aria-label', __lang() === 'en' ? 'Note' : '笔记');
+        marker.innerHTML = '<i class="fas fa-pencil-alt"></i>';
+        return marker;
+    }
+
+    function __placeNoteMarker(treeItem, marker, wide) {
+        if (!treeItem || !marker) return;
+        if (wide) {
+            const trailingTags = treeItem.querySelector(':scope > .tree-item-tag-dots.dots-trailing');
+            const tip = treeItem.querySelector(':scope > .tree-tip-icon, :scope > .tree-info-icon');
+            const ref = trailingTags || tip;
+            if (ref && ref !== marker) {
+                treeItem.insertBefore(marker, ref);
+            } else if (!marker.parentElement) {
+                treeItem.appendChild(marker);
+            }
+            return;
+        }
+
+        const leadingTags = treeItem.querySelector(':scope > .tree-item-tag-dots.dots-leading');
+        if (leadingTags && leadingTags.parentElement === treeItem) {
+            const ref = leadingTags.nextSibling;
+            if (ref !== marker) treeItem.insertBefore(marker, ref);
+        } else if (treeItem.firstChild !== marker) {
+            treeItem.insertBefore(marker, treeItem.firstChild);
+        }
+    }
+
+    function __injectNoteMarkerIntoTreeItem(treeItem, cardWidthCache = null) {
+        if (!treeItem || !treeItem.classList || !treeItem.classList.contains('tree-item')) return;
+        const existing = treeItem.querySelector(':scope > .tree-item-note-marker');
+        const noteMeta = __getNoteMetaForTreeItemSync(treeItem);
+        const note = noteMeta.note;
+        const noteColor = __normalizeNoteColor(noteMeta.color);
+        if (!note) {
+            if (existing) existing.remove();
+            return;
+        }
+
+        const currentModeIsWide = existing
+            ? existing.classList.contains('note-trailing')
+            : null;
+        const wide = __isWideNoteContext(treeItem, currentModeIsWide, cardWidthCache);
+        const nextMode = wide ? 'note-trailing' : 'note-leading';
+        const currentMode = existing
+            ? (existing.classList.contains('note-trailing') ? 'note-trailing' : 'note-leading')
+            : null;
+        const noteKey = `${noteColor}:${note}`;
+
+        if (existing && existing.dataset.noteKey === noteKey && currentMode === nextMode) {
+            __placeNoteMarker(treeItem, existing, wide);
+            return;
+        }
+
+        const next = __buildNoteMarker(note, noteColor, wide, noteKey);
+        if (existing) existing.replaceWith(next);
+        __placeNoteMarker(treeItem, next, wide);
+    }
+
+    let __pendingNoteTreeItems = new Set();
+    let __pendingNoteFlushScheduled = false;
+
+    function __observeNoteTreeItem(el) {
+        if (!el || !el.classList || !el.classList.contains('tree-item')) return;
+        __pendingNoteTreeItems.add(el);
+        __scheduleFlushNoteMarkers();
+    }
+
+    function __scheduleFlushNoteMarkers() {
+        if (__pendingNoteFlushScheduled) return;
+        __pendingNoteFlushScheduled = true;
+        requestAnimationFrame(async () => {
+            __pendingNoteFlushScheduled = false;
+            const items = Array.from(__pendingNoteTreeItems);
+            __pendingNoteTreeItems.clear();
+            const hasPermItems = items.some((el) => {
+                const tt = el.dataset.treeType || el.getAttribute('data-tree-type') || '';
+                return tt !== 'temporary';
+            });
+            if (hasPermItems && !__permNoteIndex) {
+                await __loadPermNoteIndex();
+            }
+            const cardWidthCache = new Map();
+            const updates = [];
+            items.forEach((treeItem) => {
+                if (!document.contains(treeItem)) return;
+                const existing = treeItem.querySelector(':scope > .tree-item-note-marker');
+                const noteMeta = __getNoteMetaForTreeItemSync(treeItem);
+                const note = noteMeta.note;
+                const noteColor = __normalizeNoteColor(noteMeta.color);
+                if (!note) {
+                    if (existing) updates.push({ action: 'remove', existing });
+                    return;
+                }
+
+                const currentModeIsWide = existing
+                    ? existing.classList.contains('note-trailing')
+                    : null;
+                const wide = __isWideNoteContext(treeItem, currentModeIsWide, cardWidthCache);
+                const nextMode = wide ? 'note-trailing' : 'note-leading';
+                const currentMode = existing
+                    ? (existing.classList.contains('note-trailing') ? 'note-trailing' : 'note-leading')
+                    : null;
+                const noteKey = `${noteColor}:${note}`;
+
+                if (existing && existing.dataset.noteKey === noteKey && currentMode === nextMode) {
+                    updates.push({ action: 'place', treeItem, existing, wide });
+                    return;
+                }
+                updates.push({
+                    action: existing ? 'replace' : 'insert',
+                    treeItem,
+                    existing,
+                    note,
+                    noteColor,
+                    wide,
+                    noteKey
+                });
+            });
+
+            if (!updates.length) return;
+            updates.forEach((up) => {
+                if (up.action === 'remove') {
+                    up.existing.remove();
+                    return;
+                }
+                if (up.action === 'place') {
+                    __placeNoteMarker(up.treeItem, up.existing, up.wide);
+                    return;
+                }
+                const next = __buildNoteMarker(up.note, up.noteColor, up.wide, up.noteKey);
+                if (up.existing) up.existing.replaceWith(next);
+                __placeNoteMarker(up.treeItem, next, up.wide);
+            });
+        });
+    }
+
+    let __noteHoverBubble = null;
+    function __ensureNoteHoverBubble() {
+        if (__noteHoverBubble) return __noteHoverBubble;
+        const el = document.createElement('div');
+        el.className = 'note-hover-bubble';
+        el.hidden = true;
+        getOverlayContainer().appendChild(el);
+        __noteHoverBubble = el;
+        return el;
+    }
+
+    function __showNoteHoverBubble(marker) {
+        const note = __normalizeNote(marker && marker.dataset ? marker.dataset.note : '');
+        if (!note) return;
+        const bubble = __ensureNoteHoverBubble();
+        const targetParent = getOverlayContainer();
+        if (bubble.parentElement !== targetParent) targetParent.appendChild(bubble);
+
+        const prefix = __lang() === 'en' ? 'Note: ' : '笔记: ';
+        const color = __normalizeNoteColor(marker && marker.dataset ? marker.dataset.color : '');
+        const safeNote = typeof escapeHtml === 'function'
+            ? escapeHtml(note)
+            : note.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+
+        bubble.dataset.color = color;
+        bubble.innerHTML = `<strong class="note-hover-bubble-prefix" style="font-weight: 600; margin-right: 4px; display: inline-block;">${prefix}</strong><span class="note-hover-bubble-content" style="white-space: pre-wrap; vertical-align: top;">${safeNote}</span>`;
+
+        bubble.hidden = false;
+        const r = marker.getBoundingClientRect();
+        const br = bubble.getBoundingClientRect();
+        let top = r.top - br.height - 6;
+        let left = r.left + r.width / 2 - br.width / 2;
+        if (top < 8) top = r.bottom + 6;
+        if (left < 8) left = 8;
+        if (left + br.width > window.innerWidth - 8) left = window.innerWidth - br.width - 8;
+        bubble.style.top = `${top}px`;
+        bubble.style.left = `${left}px`;
+    }
+
+    function __hideNoteHoverBubble() {
+        if (__noteHoverBubble) __noteHoverBubble.hidden = true;
+    }
+
     function __isWideRowContext(treeItem, currentModeIsWide, cardWidthCache) {
         if (!treeItem) return false;
         // Fullscreen / global search panel → always wide.
@@ -1386,18 +1743,7 @@
                 layoutWidth = treeItem.offsetWidth || treeItem.clientWidth || treeItem.scrollWidth || 0;
             }
             
-            const threshold = settings.threshold;
-            
-            // Implement hysteresis to prevent layout oscillation (flashing) near the threshold
-            if (currentModeIsWide === true) {
-                // Currently wide (dots-trailing): stay wide unless width drops below threshold - 40px
-                return layoutWidth >= Math.max(100, threshold - 40);
-            } else if (currentModeIsWide === false) {
-                // Currently narrow (dots-leading): stay narrow unless width exceeds threshold + 10px
-                return layoutWidth >= (threshold + 10);
-            }
-            
-            return layoutWidth >= threshold;
+            return layoutWidth >= settings.threshold;
         }
     }
 
@@ -1564,6 +1910,15 @@
     document.addEventListener('mouseout', (ev) => {
         const dot = ev.target.closest('.tree-item-tag-dots.dots-leading .tag-dot');
         if (dot) __hideHoverBubble();
+    });
+
+    document.addEventListener('mouseover', (ev) => {
+        const marker = ev.target.closest('.tree-item-note-marker');
+        if (marker) __showNoteHoverBubble(marker);
+    });
+    document.addEventListener('mouseout', (ev) => {
+        const marker = ev.target.closest('.tree-item-note-marker');
+        if (marker) __hideNoteHoverBubble();
     });
 
     // Mutation observer: auto-inject dots on newly-rendered tree items.
@@ -1744,6 +2099,7 @@
         }
         __pendingTreeItems.add(el);
         __scheduleFlushDots();
+        __observeNoteTreeItem(el);
     }
 
     let __deferredTreeItemScanTimer = null;
@@ -1833,6 +2189,9 @@
         if (typeof window.__refreshAllTagDots === 'function') {
             window.__refreshAllTagDots();
         }
+        if (typeof window.__refreshAllNoteMarkers === 'function') {
+            window.__refreshAllNoteMarkers();
+        }
     });
 
     const tagSyncChannel = new BroadcastChannel('bookmark-canvas-tag-sync');
@@ -1852,6 +2211,9 @@
                 }
             }
             try {
+                if (typeof window.markCanvasSearchBookmarkTagDirty === 'function') {
+                    window.markCanvasSearchBookmarkTagDirty(targets);
+                }
                 if (typeof window.updateCanvasSearchBookmarkTags === 'function') {
                     window.updateCanvasSearchBookmarkTags(targets);
                 }
@@ -1895,6 +2257,64 @@
     window.__refreshTagDotsForTargets = refreshTagDotsForTargets;
     window.__refreshAllTagDots = function () {
         __invalidatePermIdentityIndex();
+        document.querySelectorAll('.tree-item').forEach(__observeTreeItem);
+    };
+
+    const noteSyncChannel = new BroadcastChannel('bookmark-canvas-note-sync');
+    noteSyncChannel.onmessage = (event) => {
+        const data = event && event.data ? event.data : {};
+        const { action, targets } = data;
+        if (action !== 'sync-notes') return;
+        refreshNoteMarkersForTargets(targets, true);
+        try {
+            if (typeof window.markCanvasSearchBookmarkNoteDirty === 'function') {
+                window.markCanvasSearchBookmarkNoteDirty(targets);
+            }
+            if (typeof window.updateCanvasSearchBookmarkNotes === 'function') {
+                window.updateCanvasSearchBookmarkNotes(targets);
+            }
+            if (typeof window.invalidateCanvasNoteSearchCaches === 'function') {
+                window.invalidateCanvasNoteSearchCaches();
+            }
+            const input = document.getElementById('searchInput');
+            const q = input && typeof input.value === 'string' ? input.value.trim() : '';
+            const panel = document.getElementById('searchResultsPanel');
+            const panelVisible = !!(panel && panel.classList && panel.classList.contains('visible'));
+            if (q && panelVisible && typeof window.searchCanvasAndRender === 'function') {
+                window.searchCanvasAndRender(q);
+            }
+        } catch (_) {}
+    };
+
+    function refreshNoteMarkersForTargets(targets, skipBroadcast = false) {
+        if (!Array.isArray(targets)) return;
+        __mergeTempNoteSyncOverlay(targets);
+        const hasPerm = targets.some((t) => t && t.kind === 'permanent');
+        if (hasPerm) __invalidatePermNoteIndex();
+
+        const items = new Set();
+        targets.forEach((t) => {
+            if (!t) return;
+            let sel;
+            if (t.kind === 'temporary') sel = `.tree-item[data-tree-type="temporary"][data-section-id="${CSS.escape(t.sectionId || '')}"][data-node-id="${CSS.escape(t.itemId || '')}"]`;
+            else sel = `.tree-item[data-node-id="${CSS.escape(t.chromeId || '')}"]:not([data-tree-type="temporary"])`;
+            document.querySelectorAll(sel).forEach((el) => items.add(el));
+        });
+        items.forEach(__observeTreeItem);
+
+        if (!skipBroadcast) {
+            try {
+                noteSyncChannel.postMessage({
+                    action: 'sync-notes',
+                    targets
+                });
+            } catch (_) {}
+        }
+    }
+
+    window.__refreshNoteMarkersForTargets = refreshNoteMarkersForTargets;
+    window.__refreshAllNoteMarkers = function () {
+        __invalidatePermNoteIndex();
         document.querySelectorAll('.tree-item').forEach(__observeTreeItem);
     };
 
@@ -1970,23 +2390,6 @@
         if (tagMark) {
             ev.stopImmediatePropagation();
             ev.preventDefault();
-            const treeItem = tagMark.closest('.tree-item');
-            const target = __resolveTargetFromTreeItem(treeItem);
-            if (!target) return;
-            __hideHoverBubble();
-            const color = tagMark.dataset.color || '';
-            const text = tagMark.dataset.text || '';
-            const tagAnchor = document.createElement('span');
-            tagAnchor.__tagPopoverAnchorRect = __rectToPlainObject(tagMark.getBoundingClientRect());
-            tagAnchor.closest = (selector) => {
-                if (selector === '.tree-item') return treeItem;
-                return tagMark.closest(selector);
-            };
-            openTagPopover({
-                target,
-                anchor: tagAnchor,
-                initialTag: color ? { color, text } : null
-            });
             return;
         }
 
@@ -2003,7 +2406,7 @@
     // Prevent dragstart from initiating on the tip icon (it's draggable=false but
     // some browsers still bubble the dragstart up; this is defensive).
     document.addEventListener('mousedown', (ev) => {
-        const tip = ev.target.closest('.tree-tip-icon, .tree-item-tag-dots');
+        const tip = ev.target.closest('.tree-tip-icon, .tree-item-tag-dots, .tree-item-note-marker');
         if (tip) {
             ev.stopImmediatePropagation();
             ev.preventDefault();
@@ -2030,7 +2433,36 @@
             async ensurePermTagsLoaded(force) {
                 return await __loadPermIdentityIndex(!!force);
             },
+            isPermTagsLoaded() {
+                return !!__permIdentityIndex;
+            },
             invalidatePermTagsCache() { __invalidatePermIdentityIndex(); }
+        };
+        window.NoteSystem = {
+            resolveTargetFromTreeItem: __resolveTargetFromTreeItem,
+            getNoteForTargetSync: __getNoteForTargetSync,
+            getNoteMetaForTargetSync: __getNoteMetaForTargetSync,
+            getPermNodeNoteCached(chromeId) {
+                if (!__permNoteIndex) return '';
+                return __normalizeNoteMeta(__permNoteIndex.get(String(chromeId))).note;
+            },
+            getPermNodeNoteMetaCached(chromeId) {
+                if (!__permNoteIndex) return { note: '', noteColor: NOTE_COLOR_DEFAULT, color: NOTE_COLOR_DEFAULT };
+                return __normalizeNoteMeta(__permNoteIndex.get(String(chromeId)));
+            },
+            async ensurePermNotesLoaded(force) {
+                return await __loadPermNoteIndex(!!force);
+            },
+            isPermNotesLoaded() {
+                return !!__permNoteIndex;
+            },
+            invalidatePermNotesCache() { __invalidatePermNoteIndex(); },
+            refreshNoteMarkersForTargets,
+            refreshAllNoteMarkers() {
+                if (typeof window.__refreshAllNoteMarkers === 'function') {
+                    window.__refreshAllNoteMarkers();
+                }
+            }
         };
         window.openTagPopover = openTagPopover;
         window.closeTagPopover = closeTagPopover;

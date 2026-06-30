@@ -32,7 +32,7 @@
         └── 添加/搜索/导入 <标题>.json            (其他特殊临时栏目；见 R5)
 ```
 - JSON模式不导出栏目 `.md` 文件；栏目文件都是 `.json`，空白栏目只存在于 `.canvas` 的 `type: "text"` 节点。
-- 示例索引：永久主文件见 [R2](#ref-r2)；永久副本见 [R3](#ref-r3)；普通链式临时栏目见 [R4](#ref-r4)；AI/特殊临时栏目见 [R5](#ref-r5)/[R7](#ref-r7)；.canvas 见 [R6](#ref-r6)；tag 见 [R8](#ref-r8)。
+- 示例索引：永久主文件见 [R2](#ref-r2)；永久副本见 [R3](#ref-r3)；普通链式临时栏目见 [R4](#ref-r4)；AI/特殊临时栏目见 [R5](#ref-r5)/[R7](#ref-r7)；.canvas 见 [R6](#ref-r6)；tag/note 元数据见 [R8](#ref-r8)。
 
 ### A2. 模式内容语法（JSON）
 - {{EXPORT_MODE_LABEL}}使用单一 JSON 对象正文承载书签树（不使用代码围栏）。
@@ -45,7 +45,7 @@
 - `descriptionMd` 是当前书签树的说明。除非任务要求修改说明，否则保留原 Markdown 源码。
 - 导出包里的 `tree.id` / `tree.parentId` 是 `syncId_*`，不是本机 Chrome 数字 ID。新增永久节点时生成唯一 `syncId_YYYYMMDD_hash_<token7>`，其中 `token7` 只能是小写字母/数字。见 [R1.1](#ref-r1-1) 与 [R1.2](#ref-r1-2)。
 - 顶层浏览器根目录用 `folderType`（如 `bookmarks-bar`、`other`、`mobile`）和 `syncing` 识别。绝对不要增加、删除、移动或修改这些根目录上的 `folderType` / `syncing`。
-- `identityMap` 只在有 tags 等扩展元数据时导出。若存在，按 `syncId` 关联；不要在导出包里凭空写入本机 Chrome `id`。见 [R2](#ref-r2)。
+- `identityMap` 只在有 `tags`、`note`/`noteColor` 等扩展元数据时导出。若存在，按 `syncId` 关联；不要在导出包里凭空写入本机 Chrome `id`，也不要把永久 metadata 塞进 `tree` 节点。见 [R2](#ref-r2)。
 - 永久栏目副本不是一份重复书签树。副本文件应是 `fileRole: "copy-anchor"`、`anchorOnly: true`、`inheritFrom`、`copyId`、自己的 `descriptionMd` 和视图状态；不要给副本锚点添加 `tree`。见 [R3](#ref-r3)。
 
 ### A4. 临时栏目协议
@@ -67,16 +67,19 @@
 - 已经几何嵌套在某卡片组里的元素，不要再用连接线连接到所属卡片组来表达成员关系。
 - 保留插件现有 ID 风格，如 `permanent-section`、`temp-section-A-1`、`card-group-*`、`md-node-*`、`edge-*`；不要统一改成 16 位十六进制 ID。见 [R1.6](#ref-r1-6)。
 
-### A6. tag 系统协议
+### A6. tag / note 元数据协议
 - tag 系统模仿 macOS Finder：一个书签/文件夹可以有多个彩色 tag，每个 tag 存为 `{ "color": "<颜色名>", "text": "<显示文字>" }`。见 [R8](#ref-r8)。
-- `color` 只能使用小写英文色名：`red`、`orange`、`yellow`、`green`、`blue`、`purple`、`gray`。使用 `gray`，不要写 `grey`；不要把十六进制、`colorHex` 或 `.canvas` 颜色编号写进 tag。
+- note 是书签/文件夹的一条纯文本备注，一个 item 最多一条；写为并列字段 `note` 与 `noteColor`，不要写成 tag 对象或数组。见 [R8](#ref-r8)。
+- tag 的 `color` 与 note 的 `noteColor` 都只能使用小写英文色名：`red`、`orange`、`yellow`、`green`、`blue`、`purple`、`gray`。使用 `gray`，不要写 `grey`；不要写十六进制、`colorHex` 或 `.canvas` 颜色编号。
 - 调色板显示色：red `#ff453a`、orange `#ff9f0a`、yellow `#ffd60a`、green `#30d158`、blue `#0a84ff`、purple `#bf5af2`、gray `#8e8e93`。
 - `text` 是 tag 的显示文字。用户在 UI 里只点颜色时，插件会用对应本地化颜色名；AI 手动编辑 JSON 时应写明确、简短的 `text`。
-- 允许多个 tag。保持已有顺序，按 `color + text` 去重；除非任务要求改 tag，不要删除已有 tag。
-- 只有用户要求打 tag，或该书签/文件夹对任务特别重要时才新增 tag；避免对大量 URL 过度打 tag。
-- 永久栏目 tags 属于 `identityMap` 里的 `syncId` 条目，不直接塞进书签树节点。见 [R2](#ref-r2)。
-- 临时栏目 tags 直接内嵌在对应 item 对象里，随该 item 移动或删除。见 [R4](#ref-r4)。
-- tag 颜色和 `.canvas` 节点/边/栏目里的 `color`、`colorHex` 是两套东西，不要互相转换。
+- `note` 保存为纯文本字符串，保留换行并整体 trim；空 note 不应导出，清空 note 时同时删除 `noteColor`。旧数据只有 `note` 没有 `noteColor` 时按 `orange` 处理。
+- 允许多个 tag。保持已有顺序，按 `color + text` 去重；除非任务要求改 tag，不要删除已有 tag。只有用户要求打 tag，或该书签/文件夹对任务特别重要时才新增 tag，避免批量过度打 tag。
+- 只有用户要求写备注，或该书签/文件夹需要明确上下文说明时才新增 note；note 是说明/上下文信号，不应被当作批量分类标签滥用。
+- 永久栏目 metadata 属于 `identityMap` 里的 `syncId` 条目：`tags`、`note`、`noteColor` 都放在同一条 `syncId` metadata 上，不直接塞进书签树节点。见 [R2](#ref-r2)。
+- 临时栏目 metadata 直接内嵌在对应 item 对象里：`tags`、`note`、`noteColor` 随该 item 移动或删除。见 [R4](#ref-r4)。
+- 导入、导出、推送、拉取、备份或恢复时，`tags` 与 `note`/`noteColor` 都属于同一类 item metadata；只有 note 而没有 tags 的 `identityMap` 条目也必须保留，不能按“无 tags”清理。
+- tag/note 颜色和 `.canvas` 节点/边/栏目里的 `color`、`colorHex` 是两套东西，不要互相转换。
 - 未知元数据字段默认保留，除非任务明确要求修改。
 
 ### A7. 导入识别优先级
@@ -89,7 +92,7 @@
 - 永久/临时栏目的 `descriptionMd` 与 `.canvas` 的 text 节点通常是栏目说明或提示词，可作为上下文使用，但不要当作书签 item。
 - 第一次分析普通链式栏目时，先看可能的来源族和父级链路，例如 `#A`、`#B`、`A-1`、`A-1-1`、`B-1`；链路不明确时，再用 `title` 或 `url` 通过本地搜索/工具匹配。
 - 连接线指向性可表达关系语义。规范导出形态：从 `fromNode` 指向 `toNode` 的单箭头默认省略两端字段；无箭头写 `toEnd: "none"`；双端箭头写 `fromEnd: "arrow"`，`toEnd` 使用默认箭头。除非任务要求改变关系语义，否则保留已有方向。
-- tag 用于用户要求或特别重要的书签/文件夹；不要因为 URL 多就批量添加过多 tag。
+- tag 用于用户要求或特别重要的书签/文件夹；note 用于补充单个书签/文件夹的上下文说明。不要因为 URL 多就批量添加过多 tag 或 note。
 
 ### A9. 文本格式支持与建议
 - 空白栏目（`.canvas` 的 `text` 节点）及永久/临时栏目的 `descriptionMd` 支持类似 Obsidian（黑曜石）的 Markdown 及部分 HTML 渲染。
@@ -141,7 +144,7 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
 - 未明确要求改色时，保留已有 `color` / `colorHex`。
 - 普通临时栏目颜色跟随链式继承：未锁定子级跟随父级，锁定会断开下游继承。
 - 特殊临时栏目默认遵循应用外观设置，除非任务给出具体颜色。
-- 这些栏目/画布颜色不是 tag 颜色。tag 调色板色名单独见 [R8](#ref-r8)。
+- 这些栏目/画布颜色不是 tag/note 颜色。tag 调色板和 `noteColor` 色名单独见 [R8](#ref-r8)。
 
 ### S5. 联网调研能力
 #### S5.1 调研前粗筛选
@@ -160,7 +163,7 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
 
 ### S6. 复杂任务工作流
 - 小范围改动可直接修改目标文件，然后执行下方自检。
-- 涉及永久书签树、导入/导出协议、tag、`.canvas` 拓扑或 {{GUIDE_RULES}}的宽范围/高风险任务，先检查实际导出包和相关参考，列出目标文件，再修改，最后验证 JSON 与 canvas 完整性。
+- 涉及永久书签树、导入/导出协议、tag/note metadata、`.canvas` 拓扑或 {{GUIDE_RULES}}的宽范围/高风险任务，先检查实际导出包和相关参考，列出目标文件，再修改，最后验证 JSON 与 canvas 完整性。
 - 对重复性高或特别重要的长 ID、长 title、长 URL，可在分析阶段临时建立别名映射，例如 `P1`、`T-A1-3`、`U2 -> {id,title,url}`。除非用户要求写入说明，否则不要把这套临时映射写进导出 JSON。
 - 如果有多代理或并行审查工具，且用户允许，可以建议拆成协议/数据结构、canvas 拓扑、实现/测试三类审查；如果没有这类工具，就按这些角色顺序自检，不要声称已经调用外部多代理。
 
@@ -173,7 +176,7 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
   - **普通链式关系**：普通临时栏目（如常规链式）的标号是识别关系的重要线索（如 `A-1` -> `A-1-1` -> `A-1-1-1` 构成的派生与继承关系链）。当用户或任务将卡片拖入、派生或修改为子路径时，AI 应仔细辨别其层级继承关系，尊重这种结构，仅在任务明确要求时才在中途加入新要素。
   - **连接线上的关系文字**：在编辑或分析 `.canvas` 文件时，连接线（edges）的 `label` 字段如果包含特定的文字或关系说明，AI 应将其视为重要的分类逻辑。在重构或新增连接关系时，应继承或合理扩展此关系描述。
   - **卡片组与嵌套拓扑**：`.canvas` 中的组套（card groups）和几何嵌套关系也是极其强烈的分类信号。如果某书签节点在几何上位于某个 group 内部，AI 应认知到其已被归类在此分组下。
-  - **书签树、文件夹与 tags**：永久/临时 `.json` 书签树中的文件夹节点（`type: "folder"`）以及 identityMap 里的标签数组（`tags`）是天然的分类维度。AI 应根据实际情况，在用户结构清晰时，匹配使用用户习惯的分类维度（如倾向于划分子文件夹、使用卡片组或使用 tags）；在用户结构混乱时，合理规范各维度分工（如 JSON 侧通过文件夹进行树状归类，canvas 侧通过卡片组进行空间归类）。
+  - **书签树、文件夹、tags 与 note**：永久/临时 `.json` 书签树中的文件夹节点（`type: "folder"`）以及 identityMap/inline item 里的标签数组（`tags`）是天然的分类维度；`note` 是单个书签/文件夹的补充上下文信号。AI 应根据实际情况，在用户结构清晰时，匹配使用用户习惯的分类维度（如倾向于划分子文件夹、使用卡片组或使用 tags），并把 note 作为说明线索；在用户结构混乱时，合理规范各维度分工（如 JSON 侧通过文件夹进行树状归类，canvas 侧通过卡片组进行空间归类，note 侧保留必要备注）。
 
 ### S8. {{GUIDE_TOOL_PREFIX}}SKILL 创建与自升级提醒
 - **优先级原则（用户自定义优先）**：用户编辑/生成的技能（SKILL）或用户实时提出的自然语言指令，其优先级高于本约束模板。一旦本约束模板（如命名、路由、分类规则等）与用户的 SKILL 或自然语言指令发生冲突或不一致，必须优先以用户的 SKILL 或自然语言指令为准。这是因为用户调整与定制 AI 行为的主要路径就是通过编辑/生成 SKILL 或直接下达自然语言指令。
@@ -192,7 +195,7 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
 - 每条 edge 的端点都引用存在的节点 ID。
 - 永久根目录的 `folderType` / `syncing` 未被改动，除非用户明确要求做浏览器根目录迁移。
 - 新增永久节点使用 syncId；新增临时 item 使用 tempId。
-- 新增或修改 tag 时，只使用 [R8](#ref-r8) 中支持的调色板色名。
+- 新增或修改 tag/note 时，只使用 [R8](#ref-r8) 中支持的调色板色名；永久 note 只能写在 `identityMap` metadata 上，临时 note 只能写在 item 内联字段上；空 note 不保留 `noteColor`。
 - **GitHub 仓库场景下的无关文件限制**：若 AI 检测到当前环境存在 Git 相关文件（如 `.git` 文件夹，表明当前处于 GitHub 仓库同步目录下），必须检查与规范目录（见 [A1](#ref-a1)）同级的文件名与文件结构。如果发现非书签系统的无关文件/文件夹（如个人笔记、多媒体等），**必须主动提醒用户将其移动到同步目录之外**，以防推送时被远端同步机制彻底清理。
 
 ### 导入步骤
@@ -233,7 +236,7 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
 <a id="ref-r2"></a>
 ### R2. 永久栏目主文件示例
 只有用户明确要求修改永久浏览器书签树时才使用这种形状。
-下面 `identityMap` 里的 tag 条目通过同一个 `syncId` 指向 `tree` 里的书签节点。
+下面 `identityMap` 里的 metadata 条目通过同一个 `syncId` 指向 `tree` 里的书签节点；`tags` 可多条，`note` 只有一条，`noteColor` 是 note 的并列字段。
 ```json
 {
   "format": "bookmark-canvas-section",
@@ -246,17 +249,19 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
   "fileNote": "永久栏目主文件：书签树的规范真相源。",
   "identityMap": [
     {
+      "syncId": "syncId_20260530_hash_2i6f661",
+      "note": "保留前确认这个促销码搜索是否仍然有用。",
+      "noteColor": "orange",
       "tags": [
         {
           "color": "green",
-          "text": "wqe"
+          "text": "coupon"
         },
         {
           "color": "purple",
-          "text": "124"
+          "text": "promo"
         }
-      ],
-      "syncId": "syncId_20260530_hash_2i6f661"
+      ]
     }
   ],
   "tree": {
@@ -313,6 +318,7 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
 <a id="ref-r4"></a>
 ### R4. 普通链式临时栏目示例
 顶层普通链式栏目：
+下面子书签同时展示 `tags` 与 `note`/`noteColor` 作为同一个临时 item 的并列 metadata；没有 metadata 的 item 可省略这些字段。
 ```json
 {
   "format": "bookmark-canvas-section",
@@ -339,6 +345,8 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
           "url": "https://github.com/trending/javascript?since=daily",
           "type": "bookmark",
           "children": [],
+          "note": "每日 JavaScript 趋势页面，适合做技术发现。",
+          "noteColor": "blue",
           "tags": [
             {
               "color": "orange",
@@ -382,6 +390,7 @@ AI 应先根据用户原话、当前文件/目录、项目结构与本文件协�
 <a id="ref-r5"></a>
 ### R5. AI 特殊临时栏目示例
 AI 新增书签建议或生成书签树且没有现成指定落点时，使用这种栏目；若用户或上下文已经指定已有落点，按 [S2](#s2-ai-生成书签的路由优先级) 路由。
+基础 AI 特殊临时栏目示例不默认展示 `tags` 或 `note`；只有任务需要时，才按 [A6](#a6-tag--note-元数据协议) / [R8](#ref-r8) 在具体 item 上添加 metadata。
 ```json
 {
   "format": "bookmark-canvas-section",
@@ -438,15 +447,23 @@ file 节点路径是 vault 相对路径，不是相对 `.canvas` 文件本身。
 - 只有任务需要时才额外新增 group、text prompt 节点或 edge；新增 edge 时端点必须引用现有节点。
 
 <a id="ref-r8"></a>
-### R8. tag 调色板与 tag 对象
-- 合法 tag 颜色是 macOS 风格调色板色名：`red`、`orange`、`yellow`、`green`、`blue`、`purple`、`gray`。
+### R8. tag 调色板与 note 元数据
+- 合法 tag 颜色和 `noteColor` 都是 macOS 风格调色板色名：`red`、`orange`、`yellow`、`green`、`blue`、`purple`、`gray`。
 - UI 使用的调色板十六进制：`red #ff453a`、`orange #ff9f0a`、`yellow #ffd60a`、`green #30d158`、`blue #0a84ff`、`purple #bf5af2`、`gray #8e8e93`。
 - 未输入自定义文字时，UI 默认文字：英文为 `Red`、`Orange`、`Yellow`、`Green`、`Blue`、`Purple`、`Gray`；中文为 `红色`、`橙色`、`黄色`、`绿色`、`蓝色`、`紫色`、`灰色`。
-- 标准 tag 对象形态：
+- `tags` 与 `note`/`noteColor` 并列写在同一个 item metadata 上；只有 `tags[]` 里面的元素才是 tag 对象：
 ```json
 {
-  "color": "blue",
-  "text": "蓝色"
+  "note": "纯文本书签/文件夹备注。",
+  "noteColor": "orange",
+  "tags": [
+    {
+      "color": "blue",
+      "text": "蓝色"
+    }
+  ]
 }
 ```
-- 不要把 tag 颜色写成 `#0a84ff`、`colorHex`、Obsidian canvas 颜色编号或 CSS 变量名。导出 JSON 里的 tag 颜色值就是小写英文调色板名。
+- 永久栏目 `identityMap` 条目在上面形态基础上再带 `syncId`；临时栏目 item 则直接内联这些字段。
+- `noteColor` 是 `note` 的并列字段，也是 `tags` 的并列字段，不是 tag 对象的一部分；不要写成 `{ "color": "...", "text": "..." }`。
+- 不要把 tag 颜色或 `noteColor` 写成 `#0a84ff`、`colorHex`、Obsidian canvas 颜色编号或 CSS 变量名。导出 JSON 里的颜色值就是小写英文调色板名。

@@ -14494,7 +14494,7 @@ function attachTreeEvents(treeContainer) {
         const treeItem = e.target && e.target.closest ? e.target.closest('.tree-item[data-node-id]') : null;
         if (treeItem) {
             // 如果点击在右侧快捷图标区域或标签区域，不触发展开/收起，防止误触
-            if (e.target.closest('.tree-item-hover-actions') || e.target.closest('.tree-item-tag-dots') || e.target.closest('.tree-tip-icon')) {
+            if (e.target.closest('.tree-item-hover-actions') || e.target.closest('.tree-item-tag-dots') || e.target.closest('.tree-item-note-marker') || e.target.closest('.tree-tip-icon') || e.target.closest('.tree-info-icon')) {
                 return;
             }
             // 另外，如果点击在快捷图标区域或标签区域实际可见的边界内，才屏蔽展开/收起，防止误触且保留最大可点击范围
@@ -14512,6 +14512,8 @@ function attachTreeEvents(treeContainer) {
 
             if (isClickInsideElement('.tree-item-hover-actions') || 
                 isClickInsideElement('.tree-item-tag-dots') || 
+                isClickInsideElement('.tree-item-note-marker') ||
+                isClickInsideElement('.tree-info-icon') ||
                 isClickInsideElement('.tree-tip-icon')) {
                 return;
             }
@@ -15503,7 +15505,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                         <span class="tree-confirm-icon" data-action="confirm-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Confirm' : '确认'}"></span>
                         <span class="tree-cancel-icon" data-action="cancel-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Cancel' : '取消'}"></span>
                         <span class="tree-delete-icon" data-action="delete-node" draggable="false" aria-label="${currentLang === 'en' ? 'Delete' : '删除'}"></span>
-                        <span class="tree-trace-icon" data-action="trace-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Trace' : '临时溯源'}"></span>
+                        <span class="tree-info-icon" data-action="info-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Info' : '信息'}"></span>
                         <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
                     </span>
                 </div>
@@ -15525,7 +15527,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                         <span class="tree-confirm-icon" data-action="confirm-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Confirm' : '确认'}"></span>
                         <span class="tree-cancel-icon" data-action="cancel-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Cancel' : '取消'}"></span>
                         <span class="tree-delete-icon" data-action="delete-node" draggable="false" aria-label="${currentLang === 'en' ? 'Delete' : '删除'}"></span>
-                        <span class="tree-trace-icon" data-action="trace-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Trace' : '临时溯源'}"></span>
+                        <span class="tree-info-icon" data-action="info-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Info' : '信息'}"></span>
                         <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
                     </span>
                 </div>
@@ -15553,7 +15555,7 @@ function renderTreeNodeWithChanges(node, level = 0, maxDepth = 50, visitedIds = 
                         <span class="tree-confirm-icon" data-action="confirm-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Confirm' : '确认'}"></span>
                         <span class="tree-cancel-icon" data-action="cancel-delete" draggable="false" aria-label="${currentLang === 'en' ? 'Cancel' : '取消'}"></span>
                         <span class="tree-delete-icon" data-action="delete-node" draggable="false" aria-label="${currentLang === 'en' ? 'Delete' : '删除'}"></span>
-                        <span class="tree-trace-icon" data-action="trace-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Trace' : '临时溯源'}"></span>
+                        <span class="tree-info-icon" data-action="info-submenu-trigger" draggable="false" aria-label="${currentLang === 'en' ? 'Info' : '信息'}"></span>
                         <span class="tree-tip-icon" data-action="open-tag-popover" draggable="false" aria-label="${currentLang === 'en' ? 'Tags' : '标签'}"></span>
                     </span>
                 </div>

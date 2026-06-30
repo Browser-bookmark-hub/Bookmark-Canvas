@@ -1304,14 +1304,49 @@ async function __performOverwriteImport(payload) {
         muteSession = await window.beginBookmarkBulkMute('overwrite-import');
     }
 
-    // Extract extras (tags, etc.) from import identityMap keyed by syncId — both branches reuse.
+    const normalizeTagArrayForOverwrite = (rawList) => {
+        if (bridge && typeof bridge.normalizeTagArray === 'function') {
+            return bridge.normalizeTagArray(rawList);
+        }
+        if (!Array.isArray(rawList)) return [];
+        const out = [];
+        const seen = new Set();
+        rawList.forEach((raw) => {
+            if (!raw || typeof raw !== 'object') return;
+            const color = String(raw.color || '').trim();
+            if (!color) return;
+            const text = String(raw.text || '').trim();
+            const key = `${color.toLowerCase()}::${text}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            out.push({ color, text });
+        });
+        return out;
+    };
+
+    // Extract item metadata from import identityMap keyed by syncId — both branches reuse.
     const importExtrasBySyncId = new Map();
     for (const entry of importIdentityMap) {
         if (!entry || !entry.syncId) continue;
-        const extras = Object.keys(entry).filter((k) => k !== 'id' && k !== 'syncId');
-        if (extras.length) {
-            const obj = {};
-            for (const k of extras) obj[k] = entry[k];
+        const obj = {};
+        const tags = normalizeTagArrayForOverwrite(entry.tags);
+        if (tags.length) obj.tags = tags;
+        const note = bridge && typeof bridge.normalizeNoteInput === 'function'
+            ? bridge.normalizeNoteInput(entry.note)
+            : String(entry.note == null ? '' : entry.note).replace(/\r\n?/g, '\n').trim();
+        if (note) {
+            obj.note = note;
+            obj.noteColor = bridge && typeof bridge.normalizeNoteColorInput === 'function'
+                ? bridge.normalizeNoteColorInput(entry.noteColor)
+                : (['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'].includes(String(entry.noteColor || '').trim().toLowerCase())
+                    ? String(entry.noteColor || '').trim().toLowerCase()
+                    : 'orange');
+        }
+        for (const k of Object.keys(entry)) {
+            if (k === 'id' || k === 'syncId' || k === 'tags' || k === 'note' || k === 'noteColor') continue;
+            obj[k] = entry[k];
+        }
+        if (Object.keys(obj).length) {
             importExtrasBySyncId.set(String(entry.syncId), obj);
         }
     }
@@ -1328,8 +1363,23 @@ async function __performOverwriteImport(payload) {
             }
         } catch (_) {}
         try {
+            if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+                await window.NoteSystem.ensurePermNotesLoaded(true);
+            }
+        } catch (_) {}
+        try {
             if (typeof window.__refreshAllTagDots === 'function') {
                 window.__refreshAllTagDots();
+            }
+        } catch (_) {}
+        try {
+            if (typeof window.__refreshAllNoteMarkers === 'function') {
+                window.__refreshAllNoteMarkers();
+            }
+        } catch (_) {}
+        try {
+            if (typeof window.invalidateCanvasNoteSearchCaches === 'function') {
+                window.invalidateCanvasNoteSearchCaches();
             }
         } catch (_) {}
     };
@@ -2422,6 +2472,19 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
             children: []
         };
 
+        if (Array.isArray(node.tags) && node.tags.length) {
+            item.tags = node.tags;
+        }
+
+        const note = String(node.note == null ? '' : node.note).replace(/\r\n?/g, '\n').trim();
+        if (note) {
+            const noteColor = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'].includes(String(node.noteColor || '').trim().toLowerCase())
+                ? String(node.noteColor || '').trim().toLowerCase()
+                : 'orange';
+            item.note = note;
+            item.noteColor = noteColor;
+        }
+
         if (node.children && Array.isArray(node.children)) {
             item.children = node.children.map(convertToTempItem).filter(Boolean);
         }
@@ -2624,6 +2687,90 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     // 统计书签总数
     let totalBookmarkCount = 0;
 
+    const normalizeTagArrayForImport = (rawList) => {
+        const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+        if (bridge && typeof bridge.normalizeTagArray === 'function') {
+            return bridge.normalizeTagArray(rawList);
+        }
+        if (!Array.isArray(rawList)) return [];
+        const out = [];
+        const seen = new Set();
+        rawList.forEach((raw) => {
+            if (!raw || typeof raw !== 'object') return;
+            const color = String(raw.color || '').trim();
+            if (!color) return;
+            const text = String(raw.text || '').trim();
+            const key = `${color.toLowerCase()}::${text}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            out.push({ color, text });
+        });
+        return out;
+    };
+
+    const normalizeNoteInputForImport = (raw) => {
+        const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+        if (bridge && typeof bridge.normalizeNoteInput === 'function') {
+            return bridge.normalizeNoteInput(raw);
+        }
+        return String(raw == null ? '' : raw).replace(/\r\n?/g, '\n').trim();
+    };
+
+    const normalizeNoteColorForImport = (raw, fallback = 'orange') => {
+        const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+        if (bridge && typeof bridge.normalizeNoteColorInput === 'function') {
+            return bridge.normalizeNoteColorInput(raw, fallback);
+        }
+        const color = String(raw || '').trim().toLowerCase();
+        if (['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'].includes(color)) return color;
+        const fallbackColor = String(fallback || '').trim().toLowerCase();
+        return ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'].includes(fallbackColor)
+            ? fallbackColor
+            : 'orange';
+    };
+
+    const normalizeNoteMetaForImport = (noteInput, colorInput, fallbackColor = 'orange') => {
+        const note = normalizeNoteInputForImport(noteInput);
+        const color = normalizeNoteColorForImport(colorInput, fallbackColor);
+        return note ? { note, color } : { note: '', color };
+    };
+
+    const buildPermanentMetadataMapsForImport = (identityMap) => {
+        const tagsByNodeId = new Map();
+        const notesByNodeId = new Map();
+        if (!Array.isArray(identityMap)) return { tagsByNodeId, notesByNodeId };
+        identityMap.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') return;
+            const nodeId = String(entry.syncId || entry.id || '').trim();
+            if (!nodeId) return;
+            const tags = normalizeTagArrayForImport(entry.tags);
+            if (tags.length) tagsByNodeId.set(nodeId, tags);
+            const noteMeta = normalizeNoteMetaForImport(entry.note, entry.noteColor);
+            if (noteMeta.note) notesByNodeId.set(nodeId, noteMeta);
+        });
+        return { tagsByNodeId, notesByNodeId };
+    };
+
+    const resolvePermanentMetadataForImport = (node, metadataMaps) => {
+        if (!node || !metadataMaps) return { tags: [], noteMeta: { note: '', color: 'orange' } };
+        const nodeId = String(node.id || node.syncId || '').trim();
+        const inlineTags = normalizeTagArrayForImport(node.tags);
+        const mappedTags = (!inlineTags.length && nodeId && metadataMaps.tagsByNodeId instanceof Map)
+            ? normalizeTagArrayForImport(metadataMaps.tagsByNodeId.get(nodeId))
+            : [];
+        const inlineNoteMeta = normalizeNoteMetaForImport(node.note, node.noteColor);
+        const mappedNoteMeta = (!inlineNoteMeta.note && nodeId && metadataMaps.notesByNodeId instanceof Map)
+            ? normalizeNoteMetaForImport(
+                metadataMaps.notesByNodeId.get(nodeId) && metadataMaps.notesByNodeId.get(nodeId).note,
+                metadataMaps.notesByNodeId.get(nodeId) && metadataMaps.notesByNodeId.get(nodeId).color
+            )
+            : { note: '', color: 'orange' };
+        return {
+            tags: inlineTags.length ? inlineTags : mappedTags,
+            noteMeta: inlineNoteMeta.note ? inlineNoteMeta : mappedNoteMeta
+        };
+    };
+
     const isRootNode = (node) => {
         if (!node) return false;
         if (node.id === '0') return true;
@@ -2632,7 +2779,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     };
 
     // 通用转换器 - 支持多种字段名
-    const convert = (node) => {
+    const convert = (node, metadataMaps = null) => {
         if (!node || typeof node !== 'object') return null;
 
         // 获取标题：支持 title, name, label, text
@@ -2679,17 +2826,23 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
             totalBookmarkCount++;
         }
 
-        // 提取 tags
-        if (Array.isArray(node.tags) && node.tags.length) {
-            item.tags = node.tags
-                .map(t => (t && typeof t === 'object') ? { color: String(t.color || '').trim(), text: String(t.text || '').trim() } : null)
-                .filter(t => t && t.color);
-            if (!item.tags.length) delete item.tags;
+        const metadata = metadataMaps
+            ? resolvePermanentMetadataForImport(node, metadataMaps)
+            : {
+                tags: normalizeTagArrayForImport(node.tags),
+                noteMeta: normalizeNoteMetaForImport(node.note, node.noteColor)
+            };
+        if (metadata.tags.length) {
+            item.tags = metadata.tags;
+        }
+        if (metadata.noteMeta.note) {
+            item.note = metadata.noteMeta.note;
+            item.noteColor = metadata.noteMeta.color;
         }
 
         // 递归处理子节点
         if (node.children && Array.isArray(node.children)) {
-            item.children = node.children.map(convert).filter(Boolean);
+            item.children = node.children.map((child) => convert(child, metadataMaps)).filter(Boolean);
         }
 
         return item;
@@ -2706,8 +2859,15 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
             children: []
         };
 
-        if (Array.isArray(node.tags) && node.tags.length) {
-            item.tags = node.tags;
+        const tags = normalizeTagArrayForImport(node.tags);
+        if (tags.length) {
+            item.tags = tags;
+        }
+
+        const noteMeta = normalizeNoteMetaForImport(node.note, node.noteColor);
+        if (noteMeta.note) {
+            item.note = noteMeta.note;
+            item.noteColor = noteMeta.color;
         }
 
         if (node.children && Array.isArray(node.children)) {
@@ -2745,12 +2905,13 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     // 检测并处理不同格式
     if (looksLikeCanvasPermanentProtocol) {
         ;
+        const permanentMetadataMaps = buildPermanentMetadataMapsForImport(data.identityMap);
         const permanentTree = data.tree;
         const roots = permanentTree && Array.isArray(permanentTree.children)
             ? permanentTree.children
             : [permanentTree];
         roots.forEach((entry) => {
-            const item = convert(entry);
+            const item = convert(entry, permanentMetadataMaps);
             if (item) items.push(item);
         });
     } else if (looksLikeCanvasTempProtocol) {
@@ -4769,7 +4930,13 @@ function __buildImportedStorageFromCanvasPackage(canvasData, sourceFiles, option
             parsed = JSON.parse(text);
         } catch (_) {
             try {
-                if (typeof __extractCanvasSectionJsonCodeBlock === 'function') {
+                if (typeof __parseCanvasMarkdownPayload === 'function') {
+                    const parsedMarkdown = __parseCanvasMarkdownPayload(text);
+                    parsed = parsedMarkdown && parsedMarkdown.jsonProtocol ? parsedMarkdown.jsonProtocol : null;
+                }
+            } catch (_) { }
+            try {
+                if (!parsed && typeof __extractCanvasSectionJsonCodeBlock === 'function') {
                     const extracted = __extractCanvasSectionJsonCodeBlock(text);
                     parsed = extracted && extracted.jsonProtocol ? extracted.jsonProtocol : null;
                 }

@@ -1380,13 +1380,8 @@ function __buildPermanentMainSyncPayload(contentInput, options = {}) {
             if (!entry || typeof entry !== 'object') continue;
             const syncId = String(entry.syncId || '').trim();
             if (!syncId) continue;
-            const out = {};
-            for (const key of Object.keys(entry)) {
-                if (key === 'id' || key === 'syncId') continue;
-                out[key] = entry[key];
-            }
-            if (!Object.keys(out).length) continue;
-            out.syncId = syncId;
+            const out = __normalizeIdentityMapExtrasForExport(entry, syncId);
+            if (!out) continue;
             pruned.push(out);
         }
         exportIdentityMap = pruned;
@@ -1424,17 +1419,53 @@ function __buildPermanentMainSyncPayload(contentInput, options = {}) {
 // `tree` (the doc requires that exact ordering). Internally we expose a non-enumerable
 // lookup index `content.__identityMapIndex__` for O(1) chromeId/syncId lookups.
 
+function __normalizeNoteInput(raw) {
+    if (raw === undefined || raw === null) return '';
+    return String(raw).replace(/\r\n?/g, '\n').trim();
+}
+
+const __NOTE_COLOR_DEFAULT = 'orange';
+const __NOTE_COLOR_PALETTE = new Set(['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray']);
+
+function __normalizeNoteColorInput(raw, fallback = __NOTE_COLOR_DEFAULT) {
+    const color = String(raw || '').trim().toLowerCase();
+    if (__NOTE_COLOR_PALETTE.has(color)) return color;
+    const fallbackColor = String(fallback || '').trim().toLowerCase();
+    return __NOTE_COLOR_PALETTE.has(fallbackColor) ? fallbackColor : __NOTE_COLOR_DEFAULT;
+}
+
+function __normalizeNoteMetaInput(noteInput, colorInput, fallbackColor = __NOTE_COLOR_DEFAULT) {
+    const note = __normalizeNoteInput(noteInput);
+    const color = __normalizeNoteColorInput(colorInput, fallbackColor);
+    return note ? { note, color } : { note: '', color };
+}
+
+function __normalizeNoteMetaValue(raw, fallbackColor = __NOTE_COLOR_DEFAULT) {
+    if (raw && typeof raw === 'object') {
+        const colorInput = Object.prototype.hasOwnProperty.call(raw, 'noteColor') ? raw.noteColor : raw.color;
+        return __normalizeNoteMetaInput(raw.note, colorInput, fallbackColor);
+    }
+    return __normalizeNoteMetaInput(raw, undefined, fallbackColor);
+}
+
 function __normalizeIdentityMapEntry(entry) {
     if (!entry || typeof entry !== 'object') return null;
     const id = String(entry.id || '').trim();
     const syncId = String(entry.syncId || '').trim();
     if (!id || !syncId) return null;
     const out = { id, syncId };
+    const note = __normalizeNoteInput(entry.note);
+    if (note) {
+        out.note = note;
+        out.noteColor = __normalizeNoteColorInput(entry.noteColor);
+    }
     if (Array.isArray(entry.tags) && entry.tags.length) {
-        out.tags = entry.tags
+        const tags = entry.tags
             .map((t) => (t && typeof t === 'object') ? { color: String(t.color || '').trim(), text: String(t.text || '').trim() } : null)
             .filter((t) => t && t.color);
-        if (!out.tags.length) delete out.tags;
+        if (tags.length) {
+            out.tags = tags;
+        }
     }
     return out;
 }
@@ -1454,6 +1485,32 @@ function __normalizeIdentityMapArray(rawList) {
         result.push(normalized);
     }
     return result;
+}
+
+function __normalizeIdentityMapExtrasForExport(entry, syncId = null) {
+    if (!entry || typeof entry !== 'object') return null;
+    const out = {};
+    const actualSyncId = syncId || String(entry.syncId || '').trim();
+    if (actualSyncId) {
+        out.syncId = actualSyncId;
+    }
+
+    const noteMeta = __normalizeNoteMetaInput(entry.note, entry.noteColor);
+    if (noteMeta.note) {
+        out.note = noteMeta.note;
+        out.noteColor = noteMeta.color;
+    }
+
+    const tags = __normalizeTagArrayInput(Array.isArray(entry.tags) ? entry.tags : []);
+    if (tags.length) out.tags = tags;
+
+    for (const key of Object.keys(entry)) {
+        if (key === 'id' || key === 'syncId' || key === 'tags' || key === 'note' || key === 'noteColor') continue;
+        out[key] = entry[key];
+    }
+
+    const hasExtras = Object.keys(out).some(k => k !== 'syncId');
+    return hasExtras ? out : null;
 }
 
 function __collectChromeIdsFromTree(treeRoot) {
@@ -1522,7 +1579,9 @@ function __verifyAndHealIdentityMap(content) {
         if (!chromeIds.has(entry.id)) continue;
         if (bySyncId.has(entry.syncId)) {
             const fresh = __generateSyncId();
-            const replacement = { ...entry, syncId: fresh };
+            const entryCopy = { ...entry };
+            delete entryCopy.syncId;
+            const replacement = __normalizeIdentityMapEntry({ id: entry.id, syncId: fresh, ...entryCopy });
             byChromeId.set(replacement.id, replacement);
             bySyncId.set(replacement.syncId, replacement);
             regenerated += 1;
@@ -1660,6 +1719,96 @@ async function __writePermanentNodeTagsBulk(updates, options = {}) {
     for (const u of updates) {
         if (!u || !u.chromeId) continue;
         if (__setPermanentNodeTagsInContent(content, u.chromeId, u.tags)) changed += 1;
+    }
+    if (!changed) return null;
+    await __writePermanentMainContentToBcs(content, {
+        immediate: !(options && options.immediate === false),
+        skipIdentityMapHeal: true
+    });
+    return { changed };
+}
+
+function __getPermanentNodeNoteFromContent(content, chromeId) {
+    return __getPermanentNodeNoteMetaFromContent(content, chromeId).note;
+}
+
+function __getPermanentNodeNoteMetaFromContent(content, chromeId) {
+    if (!content || !chromeId) return { note: '', noteColor: __NOTE_COLOR_DEFAULT, color: __NOTE_COLOR_DEFAULT };
+    const { byChromeId } = __getIdentityMapIndex(content);
+    const entry = byChromeId.get(String(chromeId));
+    if (!entry) return { note: '', noteColor: __NOTE_COLOR_DEFAULT, color: __NOTE_COLOR_DEFAULT };
+    const note = __normalizeNoteInput(entry.note);
+    const color = __normalizeNoteColorInput(entry.noteColor);
+    return { note, noteColor: color, color };
+}
+
+function __setPermanentNodeNoteInContent(content, chromeId, noteInput, options = {}) {
+    const colorInput = options && Object.prototype.hasOwnProperty.call(options, 'noteColor')
+        ? options.noteColor
+        : (options && Object.prototype.hasOwnProperty.call(options, 'color') ? options.color : undefined);
+    return __setPermanentNodeNoteMetaInContent(content, chromeId, noteInput, colorInput);
+}
+
+function __setPermanentNodeNoteMetaInContent(content, chromeId, noteInput, colorInput) {
+    if (!content || !chromeId) return false;
+    const { byChromeId } = __getIdentityMapIndex(content);
+    const entry = byChromeId.get(String(chromeId));
+    if (!entry) return false;
+    const previousColor = __normalizeNoteColorInput(entry.noteColor);
+    const meta = __normalizeNoteMetaInput(noteInput, colorInput, previousColor);
+    if (meta.note) {
+        entry.note = meta.note;
+        entry.noteColor = meta.color;
+    } else if (Object.prototype.hasOwnProperty.call(entry, 'note')) {
+        delete entry.note;
+        if (Object.prototype.hasOwnProperty.call(entry, 'noteColor')) delete entry.noteColor;
+    } else if (Object.prototype.hasOwnProperty.call(entry, 'noteColor')) {
+        delete entry.noteColor;
+    }
+    return true;
+}
+
+async function __readPermanentNodeNote(chromeId) {
+    const content = await __readPermanentMainContentFromBcs({ skipIdentityMapHeal: true });
+    if (!content) return '';
+    return __getPermanentNodeNoteFromContent(content, chromeId);
+}
+
+async function __readPermanentNodeNoteMeta(chromeId) {
+    const content = await __readPermanentMainContentFromBcs({ skipIdentityMapHeal: true });
+    if (!content) return { note: '', noteColor: __NOTE_COLOR_DEFAULT, color: __NOTE_COLOR_DEFAULT };
+    return __getPermanentNodeNoteMetaFromContent(content, chromeId);
+}
+
+async function __writePermanentNodeNote(chromeId, noteInput, options = {}) {
+    const content = await __readPermanentMainContentFromBcs();
+    if (!content) return null;
+    if (!__setPermanentNodeNoteInContent(content, chromeId, noteInput, options)) return null;
+    return await __writePermanentMainContentToBcs(content, {
+        immediate: !(options && options.immediate === false),
+        skipIdentityMapHeal: true
+    });
+}
+
+async function __writePermanentNodeNoteMeta(chromeId, noteInput, colorInput, options = {}) {
+    const content = await __readPermanentMainContentFromBcs();
+    if (!content) return null;
+    if (!__setPermanentNodeNoteMetaInContent(content, chromeId, noteInput, colorInput)) return null;
+    return await __writePermanentMainContentToBcs(content, {
+        immediate: !(options && options.immediate === false),
+        skipIdentityMapHeal: true
+    });
+}
+
+async function __writePermanentNodeNotesBulk(updates, options = {}) {
+    if (!Array.isArray(updates) || !updates.length) return null;
+    const content = await __readPermanentMainContentFromBcs();
+    if (!content) return null;
+    let changed = 0;
+    for (const u of updates) {
+        if (!u || !u.chromeId) continue;
+        const colorInput = Object.prototype.hasOwnProperty.call(u, 'noteColor') ? u.noteColor : u.color;
+        if (__setPermanentNodeNoteMetaInContent(content, u.chromeId, u.note, colorInput)) changed += 1;
     }
     if (!changed) return null;
     await __writePermanentMainContentToBcs(content, {
@@ -2546,19 +2695,30 @@ function __buildPermanentTreeProtocolNode(nodeInput, options = {}) {
     if (!nodeInput || typeof nodeInput !== 'object') return null;
 
     const rawUrl = String(nodeInput.url || '').trim();
+    const preserveIds = !!(options && options.preserveIds === true);
+    const rawId = String(nodeInput.id || nodeInput.syncId || '').trim();
+    const rawParentId = String(nodeInput.parentId || '').trim();
+    const withPreservedIds = (output) => {
+        if (!preserveIds || !output || typeof output !== 'object') return output;
+        if (rawId) output.id = rawId;
+        if (rawParentId) output.parentId = rawParentId;
+        return output;
+    };
+
     if (rawUrl) {
-        return {
+        return withPreservedIds({
             title: String(nodeInput.title || nodeInput.name || rawUrl).trim() || rawUrl,
             url: rawUrl
-        };
+        });
     }
 
     const node = {
         title: String(nodeInput.title || nodeInput.name || 'Folder').trim() || 'Folder',
         children: (Array.isArray(nodeInput.children) ? nodeInput.children : [])
-            .map((child) => __buildPermanentTreeProtocolNode(child, {}))
+            .map((child) => __buildPermanentTreeProtocolNode(child, { preserveIds }))
             .filter(Boolean)
     };
+    withPreservedIds(node);
 
     if (options && options.isRootChild) {
         const folderType = __normalizeBookmarkFolderType(nodeInput.folderType || nodeInput.folder_type || '');
@@ -2573,7 +2733,7 @@ function __buildPermanentTreeProtocolNode(nodeInput, options = {}) {
 }
 
 function __normalizePermanentTreeSnapshotForProtocol(rawTree, options = {}) {
-    void options;
+    const preserveIds = !!(options && options.preserveIds === true);
     const source = Array.isArray(rawTree)
         ? rawTree
         : ((rawTree && typeof rawTree === 'object' && Array.isArray(rawTree.children)) ? [rawTree] : null);
@@ -2584,9 +2744,15 @@ function __normalizePermanentTreeSnapshotForProtocol(rawTree, options = {}) {
     const normalizedRoot = {
         title: String(sourceRoot.title || sourceRoot.name || '').trim(),
         children: rootChildren
-            .map((child) => __buildPermanentTreeProtocolNode(child, { isRootChild: true }))
+            .map((child) => __buildPermanentTreeProtocolNode(child, { isRootChild: true, preserveIds }))
             .filter(Boolean)
     };
+    if (preserveIds) {
+        const rootId = String(sourceRoot.id || sourceRoot.syncId || '').trim();
+        const rootParentId = String(sourceRoot.parentId || '').trim();
+        if (rootId) normalizedRoot.id = rootId;
+        if (rootParentId) normalizedRoot.parentId = rootParentId;
+    }
 
     return [normalizedRoot];
 }
@@ -2831,6 +2997,9 @@ function __buildBookmarkItemsFromProtocolTree(treeInput, options = {}) {
     const tagMapByNodeId = options && options.tagMapByNodeId instanceof Map
         ? options.tagMapByNodeId
         : null;
+    const noteMapByNodeId = options && options.noteMapByNodeId instanceof Map
+        ? options.noteMapByNodeId
+        : null;
     const sourceNodes = Array.isArray(treeInput)
         ? treeInput
         : ((treeInput && typeof treeInput === 'object') ? [treeInput] : []);
@@ -2849,12 +3018,17 @@ function __buildBookmarkItemsFromProtocolTree(treeInput, options = {}) {
             || (kind === 'bookmark' ? 'Untitled Bookmark' : 'Folder');
         const normalizedId = String(nodeInput.id || '').trim();
         const normalizedSyncId = String(nodeInput.syncId || '').trim();
-        const nodeIdForTagLookup = normalizedId || normalizedSyncId;
+        const nodeIdForMetadataLookup = normalizedId || normalizedSyncId;
         const inlineTags = __normalizeTagArrayInput(Array.isArray(nodeInput.tags) ? nodeInput.tags : []);
-        const mappedTags = (!inlineTags.length && tagMapByNodeId && nodeIdForTagLookup)
-            ? __normalizeTagArrayInput(tagMapByNodeId.get(nodeIdForTagLookup))
+        const mappedTags = (!inlineTags.length && tagMapByNodeId && nodeIdForMetadataLookup)
+            ? __normalizeTagArrayInput(tagMapByNodeId.get(nodeIdForMetadataLookup))
             : [];
         const resolvedTags = inlineTags.length ? inlineTags : mappedTags;
+        const inlineNoteMeta = __normalizeNoteMetaInput(nodeInput.note, nodeInput.noteColor);
+        const mappedNoteMeta = (!inlineNoteMeta.note && noteMapByNodeId && nodeIdForMetadataLookup)
+            ? __normalizeNoteMetaValue(noteMapByNodeId.get(nodeIdForMetadataLookup))
+            : { note: '', color: __NOTE_COLOR_DEFAULT };
+        const resolvedNoteMeta = inlineNoteMeta.note ? inlineNoteMeta : mappedNoteMeta;
 
         if (kind === 'bookmark') {
             const out = {
@@ -2863,6 +3037,10 @@ function __buildBookmarkItemsFromProtocolTree(treeInput, options = {}) {
                 title,
                 url: rawUrl
             };
+            if (resolvedNoteMeta.note) {
+                out.note = resolvedNoteMeta.note;
+                out.noteColor = resolvedNoteMeta.color;
+            }
             if (resolvedTags.length) out.tags = resolvedTags;
             return out;
         }
@@ -2873,6 +3051,10 @@ function __buildBookmarkItemsFromProtocolTree(treeInput, options = {}) {
             title,
             children: (Array.isArray(nodeInput.children) ? nodeInput.children : []).map(convertNode).filter(Boolean)
         };
+        if (resolvedNoteMeta.note) {
+            out.note = resolvedNoteMeta.note;
+            out.noteColor = resolvedNoteMeta.color;
+        }
         if (resolvedTags.length) out.tags = resolvedTags;
         return out;
     };
@@ -2897,7 +3079,7 @@ function __buildBookmarkTreeSnapshotFromPermanentJsonProtocol(protocolInput) {
     const sourceTree = normalizedProtocol.tree && typeof normalizedProtocol.tree === 'object'
         ? normalizedProtocol.tree
         : null;
-    const normalizedTree = __normalizePermanentTreeSnapshotForProtocol(sourceTree);
+    const normalizedTree = __normalizePermanentTreeSnapshotForProtocol(sourceTree, { preserveIds: true });
     if (normalizedTree) return normalizedTree;
 
     const sourceRootChildren = sourceTree && Array.isArray(sourceTree.children) ? sourceTree.children : [];
@@ -2905,9 +3087,9 @@ function __buildBookmarkTreeSnapshotFromPermanentJsonProtocol(protocolInput) {
     return __normalizePermanentTreeSnapshotForProtocol([{
         title: '',
         children: sourceRootChildren
-            .map((child) => __buildPermanentTreeProtocolNode(child, { isRootChild: true }))
+            .map((child) => __buildPermanentTreeProtocolNode(child, { isRootChild: true, preserveIds: true }))
             .filter(Boolean)
-    }]);
+    }], { preserveIds: true });
 }
 
 function __resolvePermanentSectionDescriptionMarkdown(copyId = null, descriptionOverride = null, options = {}) {
@@ -3648,9 +3830,10 @@ function __parseMarkdownAuto(content) {
             return extractedJson.jsonProtocol.items;
         }
         if (extractedJson.jsonProtocol.sectionType === 'permanent') {
-            // Snapshot-import path: convert permanent identityMap tags into inline item.tags
-            // so permanent->temporary downgrade keeps tag semantics.
+            // Snapshot-import path: convert permanent identityMap metadata into inline
+            // item fields so permanent->temporary downgrade keeps tag/note semantics.
             const tagMapByNodeId = new Map();
+            const noteMapByNodeId = new Map();
             const identityMap = Array.isArray(extractedJson.jsonProtocol.identityMap)
                 ? extractedJson.jsonProtocol.identityMap
                 : [];
@@ -3658,11 +3841,14 @@ function __parseMarkdownAuto(content) {
                 if (!entry || typeof entry !== 'object') return;
                 const nodeId = String(entry.syncId || entry.id || '').trim();
                 const tags = __normalizeTagArrayInput(Array.isArray(entry.tags) ? entry.tags : []);
-                if (!nodeId || !tags.length) return;
-                tagMapByNodeId.set(nodeId, tags);
+                const noteMeta = __normalizeNoteMetaInput(entry.note, entry.noteColor);
+                if (!nodeId) return;
+                if (tags.length) tagMapByNodeId.set(nodeId, tags);
+                if (noteMeta.note) noteMapByNodeId.set(nodeId, noteMeta);
             });
             return __buildBookmarkItemsFromProtocolTree(extractedJson.jsonProtocol.tree, {
-                tagMapByNodeId
+                tagMapByNodeId,
+                noteMapByNodeId
             });
         }
         return __buildBookmarkItemsFromProtocolTree(extractedJson.jsonProtocol.tree);
@@ -3682,20 +3868,34 @@ function __convertImportedTreeItemsToBookmarkSnapshotNodes(items) {
             if (!node || typeof node !== 'object') return;
             const title = String(node.title || node.name || '').trim();
             const url = String(node.url || '').trim();
+            const tags = __normalizeTagArrayInput(Array.isArray(node.tags) ? node.tags : []);
+            const noteMeta = __normalizeNoteMetaInput(node.note, node.noteColor);
 
             if (url) {
-                output.push({
+                const out = {
                     title: title || url,
                     url
-                });
+                };
+                if (noteMeta.note) {
+                    out.note = noteMeta.note;
+                    out.noteColor = noteMeta.color;
+                }
+                if (tags.length) out.tags = tags;
+                output.push(out);
                 return;
             }
 
             const children = walk(node.children || node.items || []);
-            output.push({
+            const out = {
                 title: title || 'Folder',
                 children
-            });
+            };
+            if (noteMeta.note) {
+                out.note = noteMeta.note;
+                out.noteColor = noteMeta.color;
+            }
+            if (tags.length) out.tags = tags;
+            output.push(out);
         });
         return output;
     };
@@ -4883,14 +5083,33 @@ function __rebuildTempStateFromObsidianCanvasPackage(canvasData, sourceFiles, pr
                 importedPermanentCount += 1;
                 const resolvedSlot = __resolvePermanentSectionSlotForImport(parsedMarkdown, node.file, importedPermanentCount);
                 try {
-                    if (!safePrimaryState.permanentTreeSnapshot && Number(resolvedSlot) === 1) {
-                        const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
-                            resolvedContentToParse,
-                            parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
-                        );
-                        const normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree);
-                        if (normalizedPermanentTreeSnapshot) {
-                            safePrimaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+                    if (Number(resolvedSlot) === 1) {
+                        let normalizedPermanentTreeSnapshot = null;
+                        if (!safePrimaryState.permanentTreeSnapshot) {
+                            const snapshotTree = __buildBookmarkTreeSnapshotFromPermanentMarkdown(
+                                resolvedContentToParse,
+                                parsedMarkdown && parsedMarkdown.rootMeta ? parsedMarkdown.rootMeta : null
+                            );
+                            normalizedPermanentTreeSnapshot = __normalizePermanentTreeSnapshotForProtocol(snapshotTree, { preserveIds: true });
+                            if (normalizedPermanentTreeSnapshot) {
+                                safePrimaryState.permanentTreeSnapshot = normalizedPermanentTreeSnapshot;
+                            }
+                        }
+                        const permanentProtocol = parsedMarkdown
+                            && parsedMarkdown.jsonProtocol
+                            && parsedMarkdown.jsonProtocol.sectionType === 'permanent'
+                            ? parsedMarkdown.jsonProtocol
+                            : null;
+                        if (!safePrimaryState[BCS_PERM_MAIN_KEY]
+                            && permanentProtocol
+                            && Array.isArray(permanentProtocol.identityMap)
+                            && permanentProtocol.identityMap.length) {
+                            const fallbackPermMain = __cloneCanvasProtocolJson(permanentProtocol) || {};
+                            const fallbackSnapshot = normalizedPermanentTreeSnapshot || safePrimaryState.permanentTreeSnapshot;
+                            if (!fallbackPermMain.tree && fallbackSnapshot && fallbackSnapshot[0]) {
+                                fallbackPermMain.tree = fallbackSnapshot[0];
+                            }
+                            safePrimaryState[BCS_PERM_MAIN_KEY] = fallbackPermMain;
                         }
                     }
                 } catch (_) { }
@@ -5402,19 +5621,36 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     try { scheduleCanvasVirtualizationUpdate(60); } catch (_) { }
 
     // Snapshot-package import appends new sections/nodes in-place (no full overwrite teardown).
-    // Tag UI uses cached indexes + dot injection, so trigger a lightweight refresh pass here.
+    // Metadata UI uses cached indexes + marker injection, so trigger a lightweight refresh pass here.
     try {
-        const refreshAllTagDots = () => {
+        const refreshAllMetadataMarkers = () => {
             try {
                 if (typeof window !== 'undefined' && typeof window.__refreshAllTagDots === 'function') {
                     window.__refreshAllTagDots();
                 }
             } catch (_) { }
+            try {
+                if (typeof window !== 'undefined' && typeof window.__refreshAllNoteMarkers === 'function') {
+                    window.__refreshAllNoteMarkers();
+                }
+            } catch (_) { }
+            try {
+                if (typeof window !== 'undefined' && typeof window.invalidateCanvasNoteSearchCaches === 'function') {
+                    window.invalidateCanvasNoteSearchCaches();
+                }
+            } catch (_) { }
         };
+        const preloaders = [];
         if (typeof window !== 'undefined' && window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-            window.TagSystem.ensurePermTagsLoaded(true).then(refreshAllTagDots).catch(refreshAllTagDots);
+            preloaders.push(window.TagSystem.ensurePermTagsLoaded(true));
+        }
+        if (typeof window !== 'undefined' && window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+            preloaders.push(window.NoteSystem.ensurePermNotesLoaded(true));
+        }
+        if (preloaders.length) {
+            Promise.allSettled(preloaders).then(refreshAllMetadataMarkers).catch(refreshAllMetadataMarkers);
         } else {
-            refreshAllTagDots();
+            refreshAllMetadataMarkers();
         }
     } catch (_) { }
 
@@ -5433,6 +5669,9 @@ function __adaptChromeTreeToCanvasItems(chromeTree, options = {}) {
     const tagsBySyncId = options && options.tagsBySyncId instanceof Map
         ? options.tagsBySyncId
         : null;
+    const notesBySyncId = options && options.notesBySyncId instanceof Map
+        ? options.notesBySyncId
+        : null;
 
     const convertNode = (node) => {
         if (!node) return null;
@@ -5442,6 +5681,11 @@ function __adaptChromeTreeToCanvasItems(chromeTree, options = {}) {
             ? __normalizeTagArrayInput(tagsBySyncId.get(nodeId))
             : [];
         const resolvedTags = inlineTags.length ? inlineTags : mappedTags;
+        const inlineNoteMeta = __normalizeNoteMetaInput(node.note, node.noteColor);
+        const mappedNoteMeta = (!inlineNoteMeta.note && notesBySyncId && nodeId)
+            ? __normalizeNoteMetaValue(notesBySyncId.get(nodeId))
+            : { note: '', color: __NOTE_COLOR_DEFAULT };
+        const resolvedNoteMeta = inlineNoteMeta.note ? inlineNoteMeta : mappedNoteMeta;
 
         // 书签
         if (node.url) {
@@ -5451,6 +5695,10 @@ function __adaptChromeTreeToCanvasItems(chromeTree, options = {}) {
                 title: node.title || node.name || node.url,
                 url: node.url
             };
+            if (resolvedNoteMeta.note) {
+                out.note = resolvedNoteMeta.note;
+                out.noteColor = resolvedNoteMeta.color;
+            }
             if (resolvedTags.length) out.tags = resolvedTags;
             return out;
         }
@@ -5466,6 +5714,10 @@ function __adaptChromeTreeToCanvasItems(chromeTree, options = {}) {
             title: node.title || node.name || 'Folder',
             children: children
         };
+        if (resolvedNoteMeta.note) {
+            out.note = resolvedNoteMeta.note;
+            out.noteColor = resolvedNoteMeta.color;
+        }
         if (resolvedTags.length) out.tags = resolvedTags;
         return out;
     };
@@ -5576,6 +5828,18 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         });
         return map;
     })();
+    const importedPermNotesBySyncId = (() => {
+        const map = new Map();
+        if (!importedPermMainPayload || !Array.isArray(importedPermMainPayload.identityMap)) return map;
+        importedPermMainPayload.identityMap.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') return;
+            const syncId = String(entry.syncId || '').trim();
+            const noteMeta = __normalizeNoteMetaInput(entry.note, entry.noteColor);
+            if (!syncId || !noteMeta.note) return;
+            map.set(syncId, noteMeta);
+        });
+        return map;
+    })();
     const toNumber = (value, fallback) => {
         const parsed = parseFloat(String(value == null ? '' : value));
         return Number.isFinite(parsed) ? parsed : fallback;
@@ -5592,7 +5856,8 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         if (primaryState && primaryState.permanentTreeSnapshot) {
             const bookmarkTree = primaryState.permanentTreeSnapshot;
             snapshotItems = __adaptChromeTreeToCanvasItems(bookmarkTree, {
-                tagsBySyncId: importedPermTagsBySyncId
+                tagsBySyncId: importedPermTagsBySyncId,
+                notesBySyncId: importedPermNotesBySyncId
             });
         }
 
@@ -5634,7 +5899,8 @@ function __remapImportedData(tempState, fullStorage, primaryState = {}) {
         if (primaryState && primaryState.permanentTreeSnapshot) {
             try {
                 snapshotItems = __adaptChromeTreeToCanvasItems(primaryState.permanentTreeSnapshot, {
-                    tagsBySyncId: importedPermTagsBySyncId
+                    tagsBySyncId: importedPermTagsBySyncId,
+                    notesBySyncId: importedPermNotesBySyncId
                 });
             } catch (_) { }
         }
@@ -6576,7 +6842,10 @@ const TEMP_SECTION_PROTOCOL_ITEM_RESERVED_KEYS = new Set([
     'dateAdded',
     'parentId',
     'index',
-    'syncing'
+    'syncing',
+    'note',
+    'noteColor',
+    'tags'
 ]);
 
 function __buildTempSectionProtocolItems(itemsInput, sectionIdFallback = '') {
@@ -6625,6 +6894,17 @@ function __buildTempSectionProtocolItemPayload(itemInput, sectionIdFallback = ''
 
     if (typeof source.syncing === 'boolean') {
         payload.syncing = source.syncing;
+    }
+
+    const noteMeta = __normalizeNoteMetaInput(source.note, source.noteColor);
+    if (noteMeta.note) {
+        payload.note = noteMeta.note;
+        payload.noteColor = noteMeta.color;
+    }
+
+    const tags = __normalizeTagArrayInput(Array.isArray(source.tags) ? source.tags : []);
+    if (tags.length) {
+        payload.tags = tags;
     }
 
     Object.keys(source).sort().forEach((key) => {
@@ -6765,6 +7045,17 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
 
         if (typeof payloadSource.syncing === 'boolean') {
             runtimeItem.syncing = payloadSource.syncing;
+        }
+
+        const noteMeta = __normalizeNoteMetaInput(payloadSource.note, payloadSource.noteColor);
+        if (noteMeta.note) {
+            runtimeItem.note = noteMeta.note;
+            runtimeItem.noteColor = noteMeta.color;
+        }
+
+        const tags = __normalizeTagArrayInput(Array.isArray(payloadSource.tags) ? payloadSource.tags : []);
+        if (tags.length) {
+            runtimeItem.tags = tags;
         }
 
         Object.keys(payloadSource).sort().forEach((key) => {
@@ -7034,13 +7325,8 @@ function __pruneIdentityMapEntriesInSandbox(sandbox) {
             if (!entry || typeof entry !== 'object') continue;
             const syncId = String(entry.syncId || '').trim();
             if (!syncId) continue;
-            const pruned = {};
-            for (const key of Object.keys(entry)) {
-                if (key === 'id' || key === 'syncId') continue;
-                pruned[key] = entry[key];
-            }
-            if (!Object.keys(pruned).length) continue;
-            pruned.syncId = syncId;
+            const pruned = __normalizeIdentityMapExtrasForExport(entry, syncId);
+            if (!pruned) continue;
             next.push(pruned);
         }
         if (next.length) {
@@ -7145,6 +7431,18 @@ if (typeof window !== 'undefined') {
         async writePermanentNodeTags(chromeId, tagsInput, options = {}) { return await __writePermanentNodeTags(chromeId, tagsInput, options); },
         async togglePermanentNodeTag(chromeId, tagInput, options = {}) { return await __togglePermanentNodeTag(chromeId, tagInput, options); },
         async writePermanentNodeTagsBulk(updates, options = {}) { return await __writePermanentNodeTagsBulk(updates, options); },
+        normalizeNoteInput(raw) { return __normalizeNoteInput(raw); },
+        normalizeNoteColorInput(raw, fallback) { return __normalizeNoteColorInput(raw, fallback); },
+        normalizeNoteMetaInput(noteInput, colorInput, fallbackColor) { return __normalizeNoteMetaInput(noteInput, colorInput, fallbackColor); },
+        getPermanentNodeNoteFromContent(content, chromeId) { return __getPermanentNodeNoteFromContent(content, chromeId); },
+        getPermanentNodeNoteMetaFromContent(content, chromeId) { return __getPermanentNodeNoteMetaFromContent(content, chromeId); },
+        setPermanentNodeNoteInContent(content, chromeId, noteInput, options = {}) { return __setPermanentNodeNoteInContent(content, chromeId, noteInput, options); },
+        setPermanentNodeNoteMetaInContent(content, chromeId, noteInput, colorInput) { return __setPermanentNodeNoteMetaInContent(content, chromeId, noteInput, colorInput); },
+        async readPermanentNodeNote(chromeId) { return await __readPermanentNodeNote(chromeId); },
+        async readPermanentNodeNoteMeta(chromeId) { return await __readPermanentNodeNoteMeta(chromeId); },
+        async writePermanentNodeNote(chromeId, noteInput, options = {}) { return await __writePermanentNodeNote(chromeId, noteInput, options); },
+        async writePermanentNodeNoteMeta(chromeId, noteInput, colorInput, options = {}) { return await __writePermanentNodeNoteMeta(chromeId, noteInput, colorInput, options); },
+        async writePermanentNodeNotesBulk(updates, options = {}) { return await __writePermanentNodeNotesBulk(updates, options); },
         collectTagsFromIdentityMap(content) { return __collectTagsFromIdentityMap(content); },
         collectTagsFromTempState(stateInput) { return __collectTagsFromTempState(stateInput); },
         async collectAllUsedTags() { return await __collectAllUsedTags(); },

@@ -39,8 +39,9 @@ const searchUiState = {
     // Canvas bookmark mode: group-by-section UI state
     bookmarkGroupCollapse: new Map(), // groupId -> boolean (true = collapsed)
     bookmarkGroupVisibleCount: new Map(), // groupId -> number (visible count)
-    bookmarkGroupModel: null // [{ header, children:[{item,s}] }]
-    ,
+    bookmarkGroupModel: null, // [{ header, children:[{item,s}] }]
+    bookmarkDetailsExpanded: new Set(), // Set of expanded item IDs / childKeys
+
     // Canvas bookmark search: whether to show bookmark / folder / domain results
     // Values: 'bookmark' | 'folder' | 'domain' | null (auto)
     bookmarkTypeFilter: null,
@@ -66,6 +67,9 @@ const searchUiState = {
     tagBrowseDetail: null,
     tagBrowseBucketsLimit: 5,
     tagBrowseBucketLimits: {},
+    noteBrowseDetail: null,
+    noteBrowseBucketsLimit: 5,
+    noteBrowseBucketLimits: {},
 
     // Localized area search range
     areaSearchScope: null,
@@ -237,6 +241,7 @@ function isSidePanelSearchExpanded() {
 const DOMAIN_GROUP_PREF_KEY = 'canvas-search-domain-grouping';
 const TAG_BROWSER_COLOR_ORDER = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
 const TAG_BROWSER_ROOT_QUERIES = new Set(['#', '{#}']);
+const NOTE_BROWSER_ROOT_QUERIES = new Set(['*', '{*}']);
 const TAG_BROWSER_ALPHA_KEYS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 const TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES = [
     { letter: 'A', marker: '阿' },
@@ -945,6 +950,16 @@ function handleSearchKeydown(e) {
                     searchCanvasAndRender(queryText || '#');
                     return;
                 }
+                const isNoteBrowseBackEscape = panelType === 'results'
+                    && isNoteBrowseRootQuery(queryText)
+                    && searchUiState
+                    && searchUiState.noteBrowseDetail
+                    && searchUiState.noteBrowseDetail.active === true;
+                if (isNoteBrowseBackEscape) {
+                    searchUiState.noteBrowseDetail = null;
+                    searchCanvasAndRender(queryText || '*');
+                    return;
+                }
                 hideSearchResultsPanel();
             }
             toggleSearchModeMenu(false);
@@ -1009,6 +1024,60 @@ function handleSearchResultsPanelClick(e) {
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') return;
 
+    // Handle Details Expand/Collapse Toggle
+    const bookmarkDetailsToggle = e.target.closest('.canvas-bookmark-details-toggle');
+    if (bookmarkDetailsToggle) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const itemId = String(bookmarkDetailsToggle.getAttribute('data-item-id') || '').trim();
+        if (!itemId) return;
+
+        if (!(searchUiState.bookmarkDetailsExpanded instanceof Set)) {
+            searchUiState.bookmarkDetailsExpanded = new Set();
+        }
+        
+        const isCurrentlyExpanded = searchUiState.bookmarkDetailsExpanded.has(itemId);
+        const willExpand = !isCurrentlyExpanded;
+        
+        if (willExpand) {
+            searchUiState.bookmarkDetailsExpanded.add(itemId);
+        } else {
+            searchUiState.bookmarkDetailsExpanded.delete(itemId);
+        }
+
+        // Toggle DOM in-place to avoid vertical scroll jumps/resets
+        const detailsRow = bookmarkDetailsToggle.closest('.canvas-bookmark-details-row');
+        const itemRow = bookmarkDetailsToggle.closest('.search-result-item, .canvas-bookmark-group-child-item');
+        if (itemRow) {
+            // Update toggle button attributes
+            bookmarkDetailsToggle.setAttribute('aria-expanded', String(willExpand));
+            const isZh = (currentLang === 'zh_CN');
+            bookmarkDetailsToggle.setAttribute('title', isZh ? (willExpand ? '收起信息' : '展开信息') : (willExpand ? 'Collapse info' : 'Expand info'));
+            
+            // Update caret icon
+            const caret = bookmarkDetailsToggle.querySelector('i.fas');
+            if (caret) {
+                caret.className = `fas ${willExpand ? 'fa-chevron-down' : 'fa-chevron-right'}`;
+            }
+
+            // Toggle collapsible container
+            const collapsible = itemRow.querySelector('.canvas-bookmark-details-collapsible');
+            if (collapsible) {
+                collapsible.style.display = willExpand ? 'flex' : 'none';
+            }
+
+            // Toggle preview context
+            const preview = itemRow.querySelector('.search-result-details-preview-context');
+            if (preview) {
+                preview.style.display = willExpand ? 'none' : 'flex';
+            }
+        }
+        return;
+    }
+
     const tagBucketLoadMore = e.target.closest('.canvas-tag-bucket-load-more-btn');
     if (tagBucketLoadMore) {
         try {
@@ -1017,15 +1086,26 @@ function handleSearchResultsPanelClick(e) {
         } catch (_) { }
         const bucketKey = tagBucketLoadMore.getAttribute('data-bucket');
         if (bucketKey) {
-            if (!searchUiState.tagBrowseBucketLimits) {
-                searchUiState.tagBrowseBucketLimits = {};
-            }
-            const currentLimit = searchUiState.tagBrowseBucketLimits[bucketKey] || 5;
-            searchUiState.tagBrowseBucketLimits[bucketKey] = currentLimit + 5;
             const db = buildCanvasSearchDb();
             const sourceIndex = db.bookmarkIndex || [];
-            const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
-            renderCanvasTagBrowseRootPanel(rootModel, { query: searchUiState.query });
+            const query = String(searchUiState.query || '').trim();
+            if (isNoteBrowseRootQuery(query)) {
+                if (!searchUiState.noteBrowseBucketLimits) {
+                    searchUiState.noteBrowseBucketLimits = {};
+                }
+                const currentLimit = searchUiState.noteBrowseBucketLimits[bucketKey] || 5;
+                searchUiState.noteBrowseBucketLimits[bucketKey] = currentLimit + 5;
+                const rootModel = buildCanvasNoteBrowseRootModel(sourceIndex);
+                renderCanvasNoteBrowseRootPanel(rootModel, { query: searchUiState.query });
+            } else {
+                if (!searchUiState.tagBrowseBucketLimits) {
+                    searchUiState.tagBrowseBucketLimits = {};
+                }
+                const currentLimit = searchUiState.tagBrowseBucketLimits[bucketKey] || 5;
+                searchUiState.tagBrowseBucketLimits[bucketKey] = currentLimit + 5;
+                const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
+                renderCanvasTagBrowseRootPanel(rootModel, { query: searchUiState.query });
+            }
         }
         return;
     }
@@ -1038,14 +1118,24 @@ function handleSearchResultsPanelClick(e) {
         } catch (_) { }
         const bucketKey = tagBucketCollapse.getAttribute('data-bucket');
         if (bucketKey) {
-            if (!searchUiState.tagBrowseBucketLimits) {
-                searchUiState.tagBrowseBucketLimits = {};
-            }
-            searchUiState.tagBrowseBucketLimits[bucketKey] = 5;
             const db = buildCanvasSearchDb();
             const sourceIndex = db.bookmarkIndex || [];
-            const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
-            renderCanvasTagBrowseRootPanel(rootModel, { query: searchUiState.query });
+            const query = String(searchUiState.query || '').trim();
+            if (isNoteBrowseRootQuery(query)) {
+                if (!searchUiState.noteBrowseBucketLimits) {
+                    searchUiState.noteBrowseBucketLimits = {};
+                }
+                searchUiState.noteBrowseBucketLimits[bucketKey] = 5;
+                const rootModel = buildCanvasNoteBrowseRootModel(sourceIndex);
+                renderCanvasNoteBrowseRootPanel(rootModel, { query: searchUiState.query });
+            } else {
+                if (!searchUiState.tagBrowseBucketLimits) {
+                    searchUiState.tagBrowseBucketLimits = {};
+                }
+                searchUiState.tagBrowseBucketLimits[bucketKey] = 5;
+                const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
+                renderCanvasTagBrowseRootPanel(rootModel, { query: searchUiState.query });
+            }
         }
         return;
     }
@@ -1069,10 +1159,13 @@ function handleSearchResultsPanelClick(e) {
             e.preventDefault();
             e.stopPropagation();
         } catch (_) { }
-        if (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.kind === 'color') {
+        const query = String(searchUiState.query || '').trim();
+        if (isNoteBrowseRootQuery(query) && searchUiState.noteBrowseDetail && searchUiState.noteBrowseDetail.kind === 'color') {
+            searchUiState.noteBrowseDetail.showBookmarks = true;
+            searchCanvasAndRender(query || '*', { source: 'system', keepNoteBrowseDetail: true });
+        } else if (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.kind === 'color') {
             searchUiState.tagBrowseDetail.showBookmarks = true;
-            const query = String(searchUiState.query || '').trim() || '#';
-            searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
+            searchCanvasAndRender(query || '#', { source: 'system', keepTagBrowseDetail: true });
         }
         return;
     }
@@ -1084,15 +1177,20 @@ function handleSearchResultsPanelClick(e) {
             e.stopPropagation();
         } catch (_) { }
         
+        const query = String(searchUiState.query || '').trim();
+        if (isNoteBrowseRootQuery(query)) {
+            searchUiState.noteBrowseDetail = null;
+            searchCanvasAndRender(query || '*', { source: 'system', keepNoteBrowseDetail: true });
+            return;
+        }
+
         if (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.kind === 'color' && searchUiState.tagBrowseDetail.showBookmarks === true) {
             searchUiState.tagBrowseDetail.showBookmarks = false;
-            const query = String(searchUiState.query || '').trim();
             searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
             return;
         }
 
         searchUiState.tagBrowseDetail = null;
-        const query = String(searchUiState.query || '').trim();
         if (isTagBrowseRootQuery(query)) {
             searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
         } else {
@@ -2158,10 +2256,10 @@ function initSearchEvents() {
         searchResultsPanel.setAttribute('data-search-wheel-bound', 'true');
     }
 
-    // Global delegation listener for tag helper link
+    // Global delegation listener for bookmark-mode helper links (# tag / * note).
     if (!document.documentElement.hasAttribute('data-search-helper-link-bound')) {
         document.addEventListener('mousedown', (e) => {
-            const link = e.target.closest('.search-helper-tag-link');
+            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link');
             if (link) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2171,10 +2269,11 @@ function initSearchEvents() {
                     try { setSearchMode('bookmark', { source: 'user' }); } catch (_) {}
                 }
                 
-                // Clear input and insert #
+                // Clear input and insert the helper query.
+                const helperQuery = String(link.getAttribute('data-helper-query') || (link.classList.contains('search-helper-note-link') ? '*' : '#')).trim() || '#';
                 const input = document.getElementById('searchInput');
                 if (input) {
-                    input.value = '#';
+                    input.value = helperQuery;
                     input.dispatchEvent(new Event('input', { bubbles: true }));
                     input.focus();
                 }
@@ -2187,7 +2286,7 @@ function initSearchEvents() {
         }, true); // Capture phase
         
         document.addEventListener('click', (e) => {
-            const link = e.target.closest('.search-helper-tag-link');
+            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link');
             if (link) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2268,8 +2367,8 @@ const SEARCH_MODES = [
         labelEn: 'Bookmark',
         icon: 'fa-bookmark',
         color: 'mode-color-blue',
-        desc: '标题、URL、文件夹、<span class="search-helper-tag-link" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</span> (如 #/红/#红/#工作)',
-        descEn: 'Title, URL, Folders, <span class="search-helper-tag-link" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</span> (e.g. #/Blue/#Blue/#work)'
+        desc: '标题、URL、文件夹、<span class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</span>、<span class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*笔记</span>',
+        descEn: 'Title, URL, Folders, <span class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</span>, <span class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*Notes</span>'
     },
     {
         key: 'structure',
@@ -2797,11 +2896,25 @@ async function setSearchMode(modeKey, options = {}) {
         return;
     }
 
-    // Bookmark mode includes tag matching, so warm up the permanent identityMap cache.
+    // Bookmark mode includes metadata matching, so warm up permanent identityMap caches.
     if (modeKey === 'bookmark' && typeof window !== 'undefined' && window.TagSystem && window.TagSystem.ensurePermTagsLoaded) {
         try {
             window.TagSystem.ensurePermTagsLoaded().then(() => {
                 invalidateCanvasTagSearchCaches();
+                if (searchUiState && searchUiState.domainIndexCache) {
+                    searchUiState.domainIndexCache = null;
+                }
+                const input2 = document.getElementById('searchInput');
+                if (input2 && input2.value && input2.value.trim()) {
+                    try { searchCanvasAndRender(input2.value.trim()); } catch (_) {}
+                }
+            });
+        } catch (_) {}
+    }
+    if (modeKey === 'bookmark' && typeof window !== 'undefined' && window.NoteSystem && window.NoteSystem.ensurePermNotesLoaded) {
+        try {
+            window.NoteSystem.ensurePermNotesLoaded().then(() => {
+                invalidateCanvasNoteSearchCaches();
                 if (searchUiState && searchUiState.domainIndexCache) {
                     searchUiState.domainIndexCache = null;
                 }
@@ -3119,6 +3232,122 @@ function renderSearchModeUI() {
     if (container) container.classList.add('canvas-search-active');
 }
 
+function getSearchHintHelpContent() {
+    const isZh = getCurrentLangSafe() === 'zh_CN';
+    const text = isZh
+        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换并实时更新结果；空输入：↑/↓ 直接切换模式。书签模式：光标在输入末尾时，→ 切换书签/文件夹/域名筛选。标签/笔记：搜索标签前加 #，搜索笔记前加 *。候选条目：↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。域名粒度：点击域名旁按钮切换主域名/子域名。'
+        : 'Mode: ← to the left mode button, ↑/↓ switches and updates results; empty: ↑/↓ switches modes directly. Bookmark mode: with cursor at end, → toggles bookmark/folder/domain filter. Tags/notes: prefix tag searches with # and note searches with *. Results: ↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section. Domain granularity: click the domain pill to toggle root/subdomain.';
+    const rows = isZh
+        ? [
+            ['模式切换：', '← 到左侧模式按钮，↑/↓ 切换并实时更新结果；'],
+            ['', '空输入：↑/↓ 直接切换模式。'],
+            ['书签模式：', '光标在输入末尾时，→ 切换书签/文件夹/域名筛选。'],
+            ['标签/笔记：', '搜索标签前加 #，搜索笔记前加 *。'],
+            ['候选条目：', '↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。'],
+            ['域名粒度：', '点击域名旁按钮切换主域名/子域名。']
+        ]
+        : [
+            ['Mode:', '← to the left mode button, ↑/↓ switches and updates results;'],
+            ['', 'Empty: ↑/↓ switches modes directly.'],
+            ['Bookmark:', 'with cursor at end, → toggles bookmark/folder/domain filter.'],
+            ['Tags/notes:', 'prefix tag searches with # and note searches with *.'],
+            ['Results:', '↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section.'],
+            ['Domain:', 'click the domain pill to toggle root/subdomain.']
+        ];
+    const html = rows.map(([label, value]) => `
+        <div class="search-hint-help-row">
+            <span class="search-hint-help-label">${escapeHtml(label)}</span>
+            <span class="search-hint-help-value">${escapeHtml(value)}</span>
+        </div>
+    `).join('');
+    return { text, html };
+}
+
+function bindSearchHintHelpButton(helpBtn, helpHtml) {
+    if (!helpBtn) return;
+    const getOverlayContainer = () => {
+        if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+            return window.getOverlayContainer();
+        }
+        const container = document.querySelector('.canvas-main-container');
+        if (container && (document.fullscreenElement === container ||
+            document.webkitFullscreenElement === container ||
+            document.mozFullScreenElement === container ||
+            document.msFullscreenElement === container)) {
+            return container;
+        }
+        return document.body;
+    };
+
+    const ensurePopover = () => {
+        let pop = document.getElementById('searchHintPopover');
+        const targetParent = getOverlayContainer();
+        if (!pop) {
+            pop = document.createElement('div');
+            pop.id = 'searchHintPopover';
+            pop.className = 'perf-help-popover search-hint-help-popover';
+            pop.innerHTML = '<div class="perf-help-popover-content"></div>';
+            targetParent.appendChild(pop);
+        } else if (pop.parentElement !== targetParent) {
+            targetParent.appendChild(pop);
+        }
+        return pop;
+    };
+
+    const helpPopover = ensurePopover();
+    const contentEl = helpPopover.querySelector('.perf-help-popover-content');
+    if (contentEl) contentEl.innerHTML = helpHtml;
+
+    let outsideHandler = null;
+    const hideHelp = () => {
+        helpPopover.classList.remove('show');
+        if (outsideHandler) {
+            document.removeEventListener('mousedown', outsideHandler, true);
+            outsideHandler = null;
+        }
+    };
+    const showHelp = () => {
+        const targetParent = getOverlayContainer();
+        if (helpPopover.parentElement !== targetParent) {
+            targetParent.appendChild(helpPopover);
+        }
+        helpPopover.classList.add('show');
+        helpPopover.style.visibility = 'hidden';
+        helpPopover.style.width = 'max-content';
+        helpPopover.style.maxWidth = '560px';
+
+        const rect = helpBtn.getBoundingClientRect();
+        const popRect = helpPopover.getBoundingClientRect();
+        const margin = 12;
+        let left = rect.left + rect.width / 2 - popRect.width / 2;
+        const maxLeft = window.innerWidth - popRect.width - margin;
+        left = Math.max(margin, Math.min(maxLeft, left));
+
+        const top = Math.min(window.innerHeight - popRect.height - margin, rect.bottom + 8);
+
+        helpPopover.style.left = left + 'px';
+        helpPopover.style.top = top + 'px';
+        helpPopover.style.visibility = '';
+        helpPopover.classList.add('show');
+
+        if (!outsideHandler) {
+            outsideHandler = (ev) => {
+                if (helpBtn.contains(ev.target) || helpPopover.contains(ev.target)) return;
+                hideHelp();
+            };
+            document.addEventListener('mousedown', outsideHandler, true);
+        }
+    };
+
+    helpPopover.classList.remove('show');
+    helpBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (helpPopover.classList.contains('show')) hideHelp();
+        else showHelp();
+    };
+}
+
 function renderSearchModeMenu() {
     const menu = document.getElementById('searchModeMenu');
     if (!menu) return;
@@ -3130,8 +3359,14 @@ function renderSearchModeMenu() {
     const hintText = currentLang === 'zh_CN'
         ? '↑/↓ 切换模式，Enter 选择，→ 返回输入'
         : '↑/↓ switch mode, Enter select, → back to input';
+    const hintHelp = getSearchHintHelpContent();
 
-    let html = `<div class="search-mode-hint" style="text-align:left;">${hintText}</div>`;
+    let html = `<div class="search-mode-hint" style="text-align:left; display:flex; align-items:center; gap:6px;">
+        <span>${escapeHtml(hintText)}</span>
+        <button type="button" class="search-hint-help-btn search-mode-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}">
+            <i class="fas fa-question-circle"></i>
+        </button>
+    </div>`;
 
     const modes = getCanvasModesInOrder();
 
@@ -3151,6 +3386,7 @@ function renderSearchModeMenu() {
         `;
     }).join('');
     menu.innerHTML = html;
+    bindSearchHintHelpButton(menu.querySelector('.search-mode-hint-help-btn'), hintHelp.html);
 }
 
 function initSearchModeUI() {
@@ -3403,6 +3639,7 @@ function resetCanvasSearchDb(reason = '') {
     };
     canvasSearchLoadedModes = new Set();
     invalidateCanvasTagSearchCaches();
+    invalidateCanvasNoteSearchCaches();
     if (searchUiState && searchUiState.domainIndexCache) {
         searchUiState.domainIndexCache = null;
     }
@@ -3453,6 +3690,69 @@ function updateCanvasSearchBookmarkTags(targets) {
 
     if (changed) {
         invalidateCanvasTagSearchCaches();
+        if (searchUiState && searchUiState.domainIndexCache) {
+            searchUiState.domainIndexCache = null;
+        }
+    }
+
+    return changed;
+}
+
+function updateCanvasSearchBookmarkNotes(targets) {
+    const list = Array.isArray(targets) ? targets : [];
+    if (!list.length || !canvasSearchDb || !Array.isArray(canvasSearchDb.bookmarkIndex)) return false;
+
+    let changed = false;
+    list.forEach((target) => {
+        if (!target) return;
+        let matched = [];
+        if (target.kind === 'temporary') {
+            const sectionId = String(target.sectionId || '');
+            const itemId = String(target.itemId || '');
+            matched = canvasSearchDb.bookmarkIndex.filter((item) =>
+                item && item.type === 'bookmark-item' &&
+                item.source === 'temporary' &&
+                String(item.sectionId || '') === sectionId &&
+                String(item.id || '') === itemId
+            );
+        } else if (target.kind === 'permanent') {
+            const chromeId = String(target.chromeId || '');
+            matched = canvasSearchDb.bookmarkIndex.filter((item) =>
+                item && item.type === 'bookmark-item' &&
+                item.source === 'permanent' &&
+                String(item.id || '') === chromeId
+            );
+        }
+
+        matched.forEach((item) => {
+            const sourceMeta = __getItemNoteMetaForSearch(item);
+            const note = normalizeNoteForSearch(
+                Object.prototype.hasOwnProperty.call(target, 'note')
+                    ? target.note
+                    : sourceMeta.note
+            );
+            const color = normalizeNoteColorForSearch(
+                Object.prototype.hasOwnProperty.call(target, 'color')
+                    ? target.color
+                    : (Object.prototype.hasOwnProperty.call(target, 'noteColor') ? target.noteColor : sourceMeta.color)
+            );
+            if (note) {
+                item.note = note;
+                item.noteColor = color;
+            } else {
+                if (Object.prototype.hasOwnProperty.call(item, 'note')) delete item.note;
+                if (Object.prototype.hasOwnProperty.call(item, 'noteColor')) delete item.noteColor;
+            }
+            item.__note = note.toLowerCase();
+            if (canvasBookmarkNoteSearchStateCache && typeof canvasBookmarkNoteSearchStateCache.delete === 'function') {
+                canvasBookmarkNoteSearchStateCache.delete(item);
+            }
+            changed = true;
+        });
+    });
+
+    if (changed) {
+        invalidateCanvasNoteSearchCaches();
         if (searchUiState && searchUiState.domainIndexCache) {
             searchUiState.domainIndexCache = null;
         }
@@ -3568,9 +3868,12 @@ function stringifyCanvasSearchSignaturePayload(payload) {
 
 function parseCanvasSearchSignaturePayload(signature) {
     const raw = normalizeCanvasSearchString(signature);
-    if (!raw.startsWith('v3:')) return null;
+    const sep = raw.indexOf(':');
+    if (sep <= 0) return null;
+    const version = raw.slice(0, sep);
+    if (!/^v\d+$/.test(version)) return null;
     try {
-        const parsed = JSON.parse(raw.slice(3));
+        const parsed = JSON.parse(raw.slice(sep + 1));
         return parsed && typeof parsed === 'object' ? parsed : null;
     } catch (_) {
         return null;
@@ -3642,6 +3945,44 @@ function collectSectionSearchContentSignature(activeCanvasState) {
     return sectionItems;
 }
 
+function collectPermanentBookmarkMetadataSearchSignature() {
+    const metadata = [];
+    let permanentTree = null;
+    try {
+        if (typeof cachedCurrentTree !== 'undefined' && Array.isArray(cachedCurrentTree)) {
+            permanentTree = cachedCurrentTree;
+        } else if (typeof window !== 'undefined' && Array.isArray(window.cachedCurrentTree)) {
+            permanentTree = window.cachedCurrentTree;
+        }
+    } catch (_) { }
+    if (!permanentTree || !permanentTree[0]) return metadata;
+
+    const stack = [permanentTree[0]];
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node.id === 'undefined' || node.id === null) continue;
+        const id = String(node.id);
+        const tags = normalizeTagsForPayload(readPermanentNodeTagsCachedForPayload(id));
+        const noteMeta = readPermanentNodeNoteMetaCachedForPayload(id);
+        const note = normalizeNoteForSearch(noteMeta.note);
+        if (tags.length || note) {
+            metadata.push({
+                id,
+                tags,
+                note,
+                noteColor: normalizeNoteColorForSearch(noteMeta.noteColor || noteMeta.color)
+            });
+        }
+        if (Array.isArray(node.children) && node.children.length) {
+            for (let i = node.children.length - 1; i >= 0; i--) {
+                stack.push(node.children[i]);
+            }
+        }
+    }
+    metadata.sort((a, b) => a.id.localeCompare(b.id));
+    return metadata;
+}
+
 function collectPermanentSearchContentSignature() {
     const treeVersion = (typeof lastTreeSnapshotVersion !== 'undefined' && lastTreeSnapshotVersion !== null)
         ? String(lastTreeSnapshotVersion)
@@ -3673,6 +4014,7 @@ function collectPermanentSearchContentSignature() {
         treeVersion,
         treeFingerprint,
         mainDescription: normalizeCanvasSearchString(mainDescription),
+        metadata: collectPermanentBookmarkMetadataSearchSignature(),
         copies
     };
 }
@@ -3879,6 +4221,21 @@ function getInlineTagSearchSignature(tags) {
         .join('|');
 }
 
+function normalizeNoteForSearch(noteInput) {
+    if (noteInput === undefined || noteInput === null) return '';
+    return String(noteInput).replace(/\r\n?/g, '\n').trim();
+}
+
+const NOTE_COLOR_DEFAULT = 'orange';
+const NOTE_COLOR_PALETTE = new Set(['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray']);
+
+function normalizeNoteColorForSearch(colorInput, fallback = NOTE_COLOR_DEFAULT) {
+    const color = String(colorInput || '').trim().toLowerCase();
+    if (NOTE_COLOR_PALETTE.has(color)) return color;
+    const fallbackColor = String(fallback || '').trim().toLowerCase();
+    return NOTE_COLOR_PALETTE.has(fallbackColor) ? fallbackColor : NOTE_COLOR_DEFAULT;
+}
+
 function collectTempSectionSearchItemSnapshots(section) {
     const snapshots = [];
     if (!section || !Array.isArray(section.items)) return snapshots;
@@ -3918,7 +4275,9 @@ function collectTempSectionSearchItemSnapshots(section) {
                 url: itemUrl,
                 parentId: frame.parentId ? String(frame.parentId) : '',
                 namedPath: pathStack.length ? pathStack.join(' > ') : '',
-                tags: getInlineTagSearchSignature(it.tags)
+                tags: getInlineTagSearchSignature(it.tags),
+                note: normalizeNoteForSearch(it.note),
+                noteColor: normalizeNoteColorForSearch(it.noteColor)
             });
         }
 
@@ -4059,6 +4418,8 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
                 const inlineTags = Array.isArray(it.tags)
                     ? it.tags.filter(t => t && t.color).map(t => ({ color: String(t.color), text: String(t.text || '') }))
                     : [];
+                const inlineNote = normalizeNoteForSearch(it.note);
+                const inlineNoteColor = normalizeNoteColorForSearch(it.noteColor);
                 const bItem = {
                     id: String(it.id),
                     type: 'bookmark-item',
@@ -4074,10 +4435,13 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
                     namedPath,
                     color: color,
                     tags: inlineTags,
+                    note: inlineNote,
+                    noteColor: inlineNoteColor,
                     __title: itemTitle.toLowerCase(),
                     __url: itemUrl.toLowerCase(),
                     __path: namedPath.toLowerCase(),
                     __tags: inlineTags.map(t => `${t.color} ${t.text}`).join(' ').toLowerCase(),
+                    __note: inlineNote.toLowerCase(),
                     bookmarkSearchOrder: bookmarkOrderRef.value++
                 };
                 db.bookmarkIndex.push(bItem);
@@ -4730,7 +5094,7 @@ const SearchIndexManager = {
         // Before rebuilding, check if another tab/end already wrote a fresh IndexedDB index.
         try {
             const liveSig = getCanvasSearchSignature();
-            if (window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(liveSig)) {
+            if (window.SearchIndexDb && !shouldBypassFreshIndexShortcutForProcessingDirty() && await window.SearchIndexDb.hasFreshIndex(liveSig)) {
                 ;
                 await this.clearProcessedDirtyState();
 
@@ -4937,6 +5301,40 @@ function getSearchIndexOwnerKeyForItem(item) {
     return 'bcs:canvas';
 }
 
+function markCanvasSearchBookmarkNoteDirty(targets) {
+    const list = Array.isArray(targets) ? targets : [];
+    const keys = new Set();
+    list.forEach((target) => {
+        if (!target || typeof target !== 'object') return;
+        if (target.kind === 'temporary' && target.sectionId) {
+            keys.add(`bcs:section:${String(target.sectionId)}`);
+        } else if (target.kind === 'permanent' && target.chromeId) {
+            keys.add('bcs:perm:main');
+        }
+    });
+    if (!keys.size || !SearchIndexManager || typeof SearchIndexManager.markDirty !== 'function') return Promise.resolve();
+    return SearchIndexManager.markDirty({ full: false, keys: Array.from(keys) }).catch((err) => {
+        console.error('[Search] Failed to mark note search index dirty:', err);
+    });
+}
+
+function markCanvasSearchBookmarkTagDirty(targets) {
+    const list = Array.isArray(targets) ? targets : [];
+    const keys = new Set();
+    list.forEach((target) => {
+        if (!target || typeof target !== 'object') return;
+        if (target.kind === 'temporary' && target.sectionId) {
+            keys.add(`bcs:section:${String(target.sectionId)}`);
+        } else if (target.kind === 'permanent' && target.chromeId) {
+            keys.add('bcs:perm:main');
+        }
+    });
+    if (!keys.size || !SearchIndexManager || typeof SearchIndexManager.markDirty !== 'function') return Promise.resolve();
+    return SearchIndexManager.markDirty({ full: false, keys: Array.from(keys) }).catch((err) => {
+        console.error('[Search] Failed to mark tag search index dirty:', err);
+    });
+}
+
 function getSearchIndexOwnerKeysFromDirtyKeys(keys) {
     const source = keys instanceof Set ? Array.from(keys) : (Array.isArray(keys) ? keys : []);
     const ownerKeys = new Set();
@@ -5022,6 +5420,11 @@ function getPendingIncrementalPersistenceOwnerKeys() {
     return ownerKeys.size > 0 ? ownerKeys : null;
 }
 
+function shouldBypassFreshIndexShortcutForProcessingDirty() {
+    if (!SearchIndexManager || !SearchIndexManager.processingKeys || SearchIndexManager.processingKeys.size === 0) return false;
+    return getSearchIndexOwnerKeysFromDirtyKeys(SearchIndexManager.processingKeys).has('bcs:perm:main');
+}
+
 async function saveMemoryIndexToIndexedDb() {
     const startTime = performance.now();
     const liveSig = getCanvasSearchSignature();
@@ -5032,7 +5435,7 @@ async function saveMemoryIndexToIndexedDb() {
 
     // Check if another tab/end already indexed and wrote it to IndexedDB.
     try {
-        if (await window.SearchIndexDb.hasFreshIndex(liveSig)) {
+        if (!shouldBypassFreshIndexShortcutForProcessingDirty() && await window.SearchIndexDb.hasFreshIndex(liveSig)) {
             ;
             await SearchIndexManager.clearProcessedDirtyState();
 
@@ -5448,7 +5851,9 @@ function detectDirtyKeysFromLiveState() {
                     normalizeCanvasSearchString(cachedItem.url) !== normalizeCanvasSearchString(liveItem.url) ||
                     normalizeCanvasSearchString(cachedItem.parentId) !== normalizeCanvasSearchString(liveItem.parentId) ||
                     normalizeCanvasSearchString(cachedItem.namedPath) !== normalizeCanvasSearchString(liveItem.namedPath) ||
-                    getInlineTagSearchSignature(cachedItem.tags) !== normalizeCanvasSearchString(liveItem.tags)) {
+                    getInlineTagSearchSignature(cachedItem.tags) !== normalizeCanvasSearchString(liveItem.tags) ||
+                    normalizeCanvasSearchString(cachedItem.note) !== normalizeCanvasSearchString(liveItem.note) ||
+                    normalizeCanvasSearchString(cachedItem.noteColor || NOTE_COLOR_DEFAULT) !== normalizeCanvasSearchString(liveItem.noteColor || NOTE_COLOR_DEFAULT)) {
                     detected.add(`bcs:section:${sec.id}`);
                     break;
                 }
@@ -5640,6 +6045,7 @@ function releaseSearchMemory() {
     };
     canvasSearchLoadedModes = new Set();
     invalidateCanvasTagSearchCaches();
+    invalidateCanvasNoteSearchCaches();
     if (searchUiState) {
         searchUiState.results = [];
         searchUiState.resultSource = [];
@@ -6149,7 +6555,11 @@ function scoreCanvasSearchItem(item, query, options = {}) {
 
         case 'bookmark-item': {
             // 书签/文件夹匹配（支持多关键词，以空格分隔）；
-            // 标签归入书签模式：#tag 优先查标签，普通关键词也可命中 tag text/color。
+            // 普通关键词只匹配标题、URL、路径；#... 专门匹配标签，*... 专门匹配笔记。
+            if (queryContext.isBookmarkMode && isCanvasNoteSearchQuery(q)) {
+                return doesCanvasBookmarkItemNoteMatchQuery(item, q) ? 132 : -Infinity;
+            }
+
             const tokens = queryContext.tokens;
             if (!tokens.length) return -Infinity;
 
@@ -6168,8 +6578,8 @@ function scoreCanvasSearchItem(item, query, options = {}) {
                     if (item.__path.startsWith(t)) tokenScore = Math.max(tokenScore, 105);
                     else if (!isSingleToken && item.__path.includes(t)) tokenScore = Math.max(tokenScore, 95);
                 }
-                if ((isTagToken || tokenScore < 100) && doesCanvasBookmarkItemTagsMatchQuery(item, t)) {
-                    tokenScore = Math.max(tokenScore, isTagToken ? 135 : 100);
+                if (isTagToken && doesCanvasBookmarkItemTagsMatchQuery(item, t)) {
+                    tokenScore = Math.max(tokenScore, 135);
                 }
 
                 if (tokenScore === 0) return -Infinity;
@@ -6576,6 +6986,417 @@ function doesCanvasBookmarkItemTagsMatchQuery(item, query) {
         return state.exactTerms.has(tagQuery);
     }
     return state.terms.some((term) => term.includes(q));
+}
+
+function __getItemNoteForSearch(item) {
+    return __getItemNoteMetaForSearch(item).note;
+}
+
+function __getItemNoteMetaForSearch(item) {
+    if (!item) return { note: '', color: NOTE_COLOR_DEFAULT };
+    const inlineNote = normalizeNoteForSearch(item.note);
+    if (inlineNote) {
+        return {
+            note: inlineNote,
+            color: normalizeNoteColorForSearch(item.noteColor)
+        };
+    }
+    if (item.source === 'permanent' && typeof window !== 'undefined' && window.NoteSystem
+        && typeof window.NoteSystem.getPermNodeNoteMetaCached === 'function') {
+        const meta = window.NoteSystem.getPermNodeNoteMetaCached(item.id) || {};
+        return {
+            note: normalizeNoteForSearch(meta.note),
+            color: normalizeNoteColorForSearch(meta.noteColor || meta.color)
+        };
+    }
+    if (item.source === 'permanent' && typeof window !== 'undefined' && window.NoteSystem
+        && typeof window.NoteSystem.getPermNodeNoteCached === 'function') {
+        return {
+            note: normalizeNoteForSearch(window.NoteSystem.getPermNodeNoteCached(item.id)),
+            color: NOTE_COLOR_DEFAULT
+        };
+    }
+    return { note: '', color: NOTE_COLOR_DEFAULT };
+}
+
+function normalizeNoteBrowseRootQuery(query) {
+    return String(query || '').trim().toLowerCase();
+}
+
+function isNoteBrowseRootQuery(query) {
+    return NOTE_BROWSER_ROOT_QUERIES.has(normalizeNoteBrowseRootQuery(query));
+}
+
+function isCanvasTagSearchQuery(query) {
+    const q = String(query || '').trim().toLowerCase();
+    return !!q && (q.startsWith('#') || q.startsWith('{#}'));
+}
+
+function getCanvasNoteSearchNeedle(query) {
+    const raw = String(query || '').trim();
+    const lower = raw.toLowerCase();
+    if (NOTE_BROWSER_ROOT_QUERIES.has(lower)) return '';
+    if (lower.startsWith('*/')) return raw.slice(2).trim().toLowerCase();
+    if (lower.startsWith('*')) return raw.slice(1).trim().toLowerCase();
+    if (lower.startsWith('{*}')) return raw.slice(3).trim().toLowerCase();
+    return null;
+}
+
+function isCanvasNoteSearchQuery(query) {
+    return getCanvasNoteSearchNeedle(query) !== null;
+}
+
+let canvasNoteSearchCacheRevision = 0;
+let canvasNoteBrowseRootCache = null;
+const canvasBookmarkNoteSearchStateCache = new WeakMap();
+
+function invalidateCanvasNoteSearchCaches() {
+    canvasNoteSearchCacheRevision += 1;
+    canvasNoteBrowseRootCache = null;
+}
+
+function getCanvasBookmarkNoteSearchState(item) {
+    if (!item || typeof item !== 'object') {
+        return { note: '', lower: '', color: NOTE_COLOR_DEFAULT };
+    }
+
+    const cached = canvasBookmarkNoteSearchStateCache.get(item);
+    if (cached && cached.revision === canvasNoteSearchCacheRevision) return cached;
+
+    const noteMeta = __getItemNoteMetaForSearch(item);
+    const note = normalizeNoteForSearch(noteMeta.note);
+    const state = {
+        revision: canvasNoteSearchCacheRevision,
+        note,
+        color: normalizeNoteColorForSearch(noteMeta.color),
+        lower: note.toLowerCase()
+    };
+    canvasBookmarkNoteSearchStateCache.set(item, state);
+    return state;
+}
+
+function getCanvasBookmarkNoteForSearchCached(item) {
+    return getCanvasBookmarkNoteSearchState(item).note;
+}
+
+function getCanvasBookmarkNoteMetaForSearchCached(item) {
+    const state = getCanvasBookmarkNoteSearchState(item);
+    return { note: state.note, color: state.color || NOTE_COLOR_DEFAULT };
+}
+
+function doesCanvasBookmarkItemNoteMatchQuery(item, query) {
+    const needle = getCanvasNoteSearchNeedle(query);
+    if (needle === null) return false;
+    const state = getCanvasBookmarkNoteSearchState(item);
+    if (!state.note) return false;
+    if (!needle) return true;
+    return state.lower.includes(needle);
+}
+
+function normalizeNoteBrowseColor(rawColor) {
+    return normalizeNoteColorForSearch(rawColor);
+}
+
+function getNoteBrowseColorLabel(color, isZh) {
+    return getTagBrowseColorLabel(normalizeNoteBrowseColor(color), isZh);
+}
+
+function getNoteBrowseLabel(note) {
+    return String(note || '').replace(/\s+/g, ' ').trim();
+}
+
+function getNoteBrowseBucketKey(label, collator = null) {
+    const text = String(label || '').trim();
+    if (!text) return '#';
+    const first = text.charAt(0);
+    if (/^[0-9]$/.test(first)) return first; // individual digits 0-9
+    if (/^[A-Za-z]$/.test(first)) return first.toUpperCase();
+
+    if (/^[\u4e00-\u9fff]$/.test(first)) {
+        const cmp = collator && typeof collator.compare === 'function'
+            ? collator
+            : getTagBrowseSortCollator(true);
+        if (cmp && TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES.length) {
+            let bucket = 'A';
+            for (let i = 0; i < TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES.length; i += 1) {
+                const marker = TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES[i];
+                try {
+                    if (cmp.compare(first, marker.marker) >= 0) {
+                        bucket = marker.letter;
+                    } else {
+                        break;
+                    }
+                } catch (_) { }
+            }
+            if (cmp && cmp.compare(first, TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES[TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES.length - 1].marker) >= 0) {
+                return 'Z';
+            }
+            return bucket;
+        }
+        return 'A';
+    }
+    return '#';
+}
+
+function buildCanvasNoteBrowseRootModel(sourceIndex) {
+    const isZh = currentLang === 'zh_CN';
+    const list = Array.isArray(sourceIndex) ? sourceIndex : [];
+    const cacheKey = [
+        canvasSearchDb && canvasSearchDb.signature ? canvasSearchDb.signature : '',
+        canvasNoteSearchCacheRevision,
+        isZh ? 'zh_CN' : 'en',
+        list.length
+    ].join('::');
+    if (canvasNoteBrowseRootCache && canvasNoteBrowseRootCache.key === cacheKey) {
+        return canvasNoteBrowseRootCache.model;
+    }
+
+    const colorMap = new Map();
+    TAG_BROWSER_COLOR_ORDER.forEach((color) => {
+        colorMap.set(color, {
+            type: 'note-browser-color',
+            color,
+            label: getNoteBrowseColorLabel(color, isZh),
+            count: 0
+        });
+    });
+
+    const numberBuckets = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    const alphabetBuckets = TAG_BROWSER_ALPHA_KEYS;
+    const otherBucket = '#';
+
+    const bucketCounts = new Map();
+    numberBuckets.forEach(b => bucketCounts.set(b, 0));
+    alphabetBuckets.forEach(b => bucketCounts.set(b, 0));
+    bucketCounts.set(otherBucket, 0);
+
+    const collator = getTagBrowseSortCollator(isZh);
+
+    list.forEach((item) => {
+        if (!item || item.type !== 'bookmark-item') return;
+        const itemKey = String(item.locationKey || getCanvasBookmarkLocationKeyForSearch(item) || item.id || '').trim();
+        if (!itemKey) return;
+
+        const meta = getCanvasBookmarkNoteMetaForSearchCached(item);
+        const note = normalizeNoteForSearch(meta && meta.note);
+        if (!note) return;
+
+        const color = normalizeNoteBrowseColor(meta && meta.color);
+        const colorEntry = colorMap.get(color);
+        if (colorEntry) {
+            colorEntry.count += 1;
+        }
+
+        const label = getNoteBrowseLabel(note);
+        const bucket = getNoteBrowseBucketKey(label, collator);
+        if (bucketCounts.has(bucket)) {
+            bucketCounts.set(bucket, bucketCounts.get(bucket) + 1);
+        } else {
+            bucketCounts.set(otherBucket, bucketCounts.get(otherBucket) + 1);
+        }
+    });
+
+    const colorEntries = TAG_BROWSER_COLOR_ORDER.map((color) => {
+        const entry = colorMap.get(color);
+        return {
+            type: 'note-browser-color',
+            color,
+            label: entry ? entry.label : getNoteBrowseColorLabel(color, isZh),
+            count: entry ? entry.count : 0
+        };
+    });
+
+    const numberEntries = numberBuckets.map(b => ({
+        type: 'note-browser-bucket',
+        bucket: b,
+        label: b,
+        count: bucketCounts.get(b) || 0
+    }));
+
+    const alphabetEntries = alphabetBuckets.map(b => ({
+        type: 'note-browser-bucket',
+        bucket: b,
+        label: b,
+        count: bucketCounts.get(b) || 0
+    }));
+
+    const otherEntries = [{
+        type: 'note-browser-bucket',
+        bucket: otherBucket,
+        label: otherBucket,
+        count: bucketCounts.get(otherBucket) || 0
+    }];
+
+    const model = { colorEntries, numberEntries, alphabetEntries, otherEntries };
+    canvasNoteBrowseRootCache = { key: cacheKey, model };
+    return model;
+}
+
+function noteMatchesBrowseDetail(item, detail) {
+    if (!item || !detail) return false;
+    const state = getCanvasBookmarkNoteSearchState(item);
+    if (!state.note) return false;
+    const color = normalizeNoteBrowseColor(state.color);
+    if (detail.kind === 'color') {
+        return color === normalizeNoteBrowseColor(detail.color);
+    }
+    if (detail.kind === 'bucket') {
+        const label = getNoteBrowseLabel(state.note);
+        const collator = getTagBrowseSortCollator(currentLang === 'zh_CN');
+        const itemBucket = getNoteBrowseBucketKey(label, collator);
+        return itemBucket === detail.bucket;
+    }
+    const targetColor = normalizeNoteBrowseColor(detail.color);
+    const targetNoteLower = String(detail.noteLower || '').trim().toLowerCase();
+    if (!targetNoteLower) return color === targetColor;
+    return color === targetColor && state.lower === targetNoteLower;
+}
+
+function renderCanvasNoteBrowseRootPanel(model, options = {}) {
+    const panel = getSearchResultsPanel();
+    if (!panel) return;
+
+    try {
+        if (typeof window.currentView === 'string' && window.currentView !== 'canvas') return;
+        const input = document.getElementById('searchInput');
+        const currentQ = (input && typeof input.value === 'string') ? input.value.trim().toLowerCase() : '';
+        const expectedQ = normalizeNoteBrowseRootQuery(options && options.query || '');
+        if (currentQ !== expectedQ) return;
+    } catch (_) { }
+
+    const isZh = currentLang === 'zh_CN';
+    const colorEntries = Array.isArray(model && model.colorEntries) ? model.colorEntries : [];
+    const numberEntries = Array.isArray(model && model.numberEntries) ? model.numberEntries : [];
+    const alphabetEntries = Array.isArray(model && model.alphabetEntries) ? model.alphabetEntries : [];
+    const otherEntries = Array.isArray(model && model.otherEntries) ? model.otherEntries : [];
+
+    const activeColorDetail = (searchUiState && searchUiState.noteBrowseDetail && searchUiState.noteBrowseDetail.active && searchUiState.noteBrowseDetail.kind === 'color')
+        ? searchUiState.noteBrowseDetail
+        : null;
+    const selectedColor = activeColorDetail ? normalizeNoteBrowseColor(activeColorDetail.color) : null;
+
+    const colorTitle = isZh ? '按颜色筛选' : 'Filter by Color';
+    const alphabetTitle = isZh ? '按首字母筛选 (A-Z)' : 'Filter by Letter (A-Z)';
+    const numberTitle = isZh ? '按数字首字符筛选 (0-9)' : 'Filter by Number (0-9)';
+
+    const visibleColors = colorEntries.filter(e => e && e.count > 0);
+    const combinedAlphaAndOther = alphabetEntries.concat(otherEntries).filter(e => e && e.count > 0);
+    const visibleNumbers = numberEntries.filter(e => e && e.count > 0);
+
+    const resultItems = [];
+    const registerResultItem = (entry) => {
+        const color = normalizeNoteBrowseColor(entry && entry.color);
+        const note = String(entry && entry.note || '').trim();
+        const noteLower = String(entry && entry.noteLower || '').trim().toLowerCase();
+        const type = String(entry && entry.type || 'note-browser-note');
+        const label = String(entry && entry.label || '').trim() || (type === 'note-browser-bucket' ? entry.bucket : getNoteBrowseColorLabel(color, isZh));
+        const count = Number(entry && entry.count || 0);
+        const index = resultItems.length;
+        const item = {
+            id: type === 'note-browser-bucket' ? `note-browser::bucket::${entry.bucket}::${index}` : `note-browser::${type}::${color}::${index}`,
+            type,
+            color,
+            note,
+            noteLower,
+            label,
+            count,
+            bucket: entry.bucket || null
+        };
+        resultItems.push(item);
+        return { item, index };
+    };
+
+    const renderColorCards = (entries) => {
+        return entries.map((entry) => {
+            const { item, index } = registerResultItem(entry);
+            const isSelectedClass = normalizeNoteBrowseColor(entry.color) === selectedColor ? ' is-selected' : '';
+            return `
+                <div class="search-result-item canvas-tag-browse-item canvas-note-browse-item is-color-card${isSelectedClass}" data-index="${index}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}" title="${escapeHtml(item.label)} (${item.count})">
+                    <div class="search-result-content">
+                        <div class="search-result-title">
+                            <span class="canvas-tag-browse-dot-wrap"><i class="fas fa-pencil-alt canvas-note-browse-icon note-color-${escapeHtml(item.color)}"></i></span>
+                        </div>
+                    </div>
+                    <span class="canvas-tag-browse-count">${escapeHtml(String(item.count))}</span>
+                </div>
+            `;
+        }).join('');
+    };
+
+    const renderBucketGrid = (entries) => {
+        return entries.map((entry) => {
+            const { item, index } = registerResultItem(entry);
+            return `
+                <div class="search-result-item canvas-note-browse-bucket-btn" data-index="${index}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}" title="${escapeHtml(item.label)} (${item.count})">
+                    <span class="bucket-label">${escapeHtml(item.label)}</span>
+                    <span class="bucket-count">${escapeHtml(String(item.count))}</span>
+                </div>
+            `;
+        }).join('');
+    };
+
+    let html = '';
+
+    if (visibleColors.length > 0) {
+        html += `
+            <div class="canvas-tag-browse-section">
+                <div class="canvas-tag-browse-section-title">${escapeHtml(colorTitle)}</div>
+                <div class="canvas-tag-browse-color-grid">
+                    ${renderColorCards(visibleColors)}
+                </div>
+            </div>
+        `;
+    }
+
+    if (visibleNumbers.length > 0) {
+        html += `
+            <div class="canvas-tag-browse-section">
+                <div class="canvas-tag-browse-section-title">${escapeHtml(numberTitle)}</div>
+                <div class="canvas-note-browse-bucket-grid">
+                    ${renderBucketGrid(visibleNumbers)}
+                </div>
+            </div>
+        `;
+    }
+
+    if (combinedAlphaAndOther.length > 0) {
+        html += `
+            <div class="canvas-tag-browse-section">
+                <div class="canvas-tag-browse-section-title">${escapeHtml(alphabetTitle)}</div>
+                <div class="canvas-note-browse-bucket-grid">
+                    ${renderBucketGrid(combinedAlphaAndOther)}
+                </div>
+            </div>
+        `;
+    }
+
+    if (!html) {
+        const noNotesMsg = isZh ? '暂无任何带有笔记的书签' : 'No bookmarks with notes found';
+        html = `<div class="search-result-empty">${escapeHtml(noNotesMsg)}</div>`;
+    }
+
+    panel.innerHTML = html;
+
+    searchUiState.view = 'canvas';
+    searchUiState.query = String(options && options.query || '*');
+    searchUiState.resultSource = resultItems;
+    searchUiState.resultAll = resultItems;
+    searchUiState.resultVisibleCount = resultItems.length;
+    searchUiState.resultHasMore = false;
+    searchUiState.resultPagingKey = `note-browse-root|${searchUiState.query}`;
+    searchUiState.results = resultItems;
+    searchUiState.bookmarkModeCounts = null;
+    searchUiState.bookmarkGroupModel = null;
+    searchUiState.selectedIndex = resultItems.length > 0 ? 0 : -1;
+    try {
+        searchUiState.canvasSuggestionsVisible = false;
+        panel.dataset.panelType = 'results';
+    } catch (_) { }
+
+    showSearchResultsPanel();
+    if (resultItems.length > 0) {
+        updateSearchResultSelection(0);
+    }
 }
 
 function normalizeTagBrowseRootQuery(query) {
@@ -7004,13 +7825,19 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
         }
     });
 
-    panel.innerHTML = `
-        <div class="canvas-tag-browse-section">
-            <div class="canvas-tag-browse-section-title">${escapeHtml(colorTitle)}</div>
-            <div class="canvas-tag-browse-color-grid">
-                ${renderColorCards(colorEntries)}
+    const visibleColors = colorEntries.filter(e => e && e.count > 0);
+    let html = '';
+    if (visibleColors.length > 0) {
+        html += `
+            <div class="canvas-tag-browse-section">
+                <div class="canvas-tag-browse-section-title">${escapeHtml(colorTitle)}</div>
+                <div class="canvas-tag-browse-color-grid">
+                    ${renderColorCards(visibleColors)}
+                </div>
             </div>
-        </div>
+        `;
+    }
+    html += `
         <div class="canvas-tag-browse-section">
             ${titleHtml}
             <div class="canvas-tag-browse-buckets">
@@ -7018,6 +7845,8 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
             </div>
         </div>
     `;
+
+    panel.innerHTML = html;
 
     searchUiState.view = 'canvas';
     searchUiState.query = String(options && options.query || '#');
@@ -7044,7 +7873,7 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
 /**
  * 执行画布搜索并渲染结果
  * @param {string} query - 搜索关键词
- * @param {Object} options - 触发选项（source/keepTagBrowseDetail）
+ * @param {Object} options - 触发选项（source/keepTagBrowseDetail/keepNoteBrowseDetail）
  */
 function searchCanvasAndRender(query, options = {}) {
     const db = buildCanvasSearchDb();
@@ -7052,6 +7881,7 @@ function searchCanvasAndRender(query, options = {}) {
         ? String(options.source || 'system')
         : 'system';
     const keepTagBrowseDetail = !!(options && typeof options === 'object' && options.keepTagBrowseDetail === true);
+    const keepNoteBrowseDetail = !!(options && typeof options === 'object' && options.keepNoteBrowseDetail === true);
 
     // Check if entire DB is broken
     if (!db.itemById) {
@@ -7064,6 +7894,9 @@ function searchCanvasAndRender(query, options = {}) {
         searchUiState.tagBrowseDetail = null;
         searchUiState.tagBrowseBucketsLimit = 5;
         searchUiState.tagBrowseBucketLimits = {};
+        searchUiState.noteBrowseDetail = null;
+        searchUiState.noteBrowseBucketsLimit = 5;
+        searchUiState.noteBrowseBucketLimits = {};
         hideSearchResultsPanel();
         return;
     }
@@ -7072,10 +7905,19 @@ function searchCanvasAndRender(query, options = {}) {
         searchUiState.tagBrowseDetail = null;
         searchUiState.bookmarkTypeFilter = null;
     }
+    if (isNoteBrowseRootQuery(trimmedQuery) && triggerSource === 'input' && !keepNoteBrowseDetail) {
+        searchUiState.noteBrowseDetail = null;
+        searchUiState.bookmarkTypeFilter = null;
+    }
     if (!isTagBrowseRootQuery(trimmedQuery)) {
         searchUiState.tagBrowseDetail = null;
         searchUiState.tagBrowseBucketsLimit = 5;
         searchUiState.tagBrowseBucketLimits = {};
+    }
+    if (!isNoteBrowseRootQuery(trimmedQuery)) {
+        searchUiState.noteBrowseDetail = null;
+        searchUiState.noteBrowseBucketsLimit = 5;
+        searchUiState.noteBrowseBucketLimits = {};
     }
     const previousCanvasQuery = String(searchUiState.query || '').trim().toLowerCase();
     const nextCanvasQuery = trimmedQuery.toLowerCase();
@@ -7084,6 +7926,44 @@ function searchCanvasAndRender(query, options = {}) {
     let sourceIndex = [];
     const mode = searchUiState.activeMode;
     const queryContext = createCanvasSearchQueryContext(trimmedQuery, mode);
+    if (mode === 'bookmark' && isCanvasTagSearchQuery(trimmedQuery) &&
+        typeof window !== 'undefined' && window.TagSystem &&
+        typeof window.TagSystem.ensurePermTagsLoaded === 'function' &&
+        typeof window.TagSystem.isPermTagsLoaded === 'function' &&
+        !window.TagSystem.isPermTagsLoaded()) {
+        window.TagSystem.ensurePermTagsLoaded().then(() => {
+            try {
+                invalidateCanvasTagSearchCaches();
+                if (searchUiState && searchUiState.domainIndexCache) {
+                    searchUiState.domainIndexCache = null;
+                }
+                const currentQuery = String(searchUiState && searchUiState.query || '').trim();
+                const currentMode = searchUiState && searchUiState.activeMode;
+                if (currentMode === 'bookmark' && currentQuery === trimmedQuery) {
+                    searchCanvasAndRender(trimmedQuery, { source: 'tag-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                }
+            } catch (_) {}
+        }).catch(() => {});
+    }
+    if (mode === 'bookmark' && isCanvasNoteSearchQuery(trimmedQuery) &&
+        typeof window !== 'undefined' && window.NoteSystem &&
+        typeof window.NoteSystem.ensurePermNotesLoaded === 'function' &&
+        typeof window.NoteSystem.isPermNotesLoaded === 'function' &&
+        !window.NoteSystem.isPermNotesLoaded()) {
+        window.NoteSystem.ensurePermNotesLoaded().then(() => {
+            try {
+                invalidateCanvasNoteSearchCaches();
+                if (searchUiState && searchUiState.domainIndexCache) {
+                    searchUiState.domainIndexCache = null;
+                }
+                const currentQuery = String(searchUiState && searchUiState.query || '').trim();
+                const currentMode = searchUiState && searchUiState.activeMode;
+                if (currentMode === 'bookmark' && currentQuery === trimmedQuery) {
+                    searchCanvasAndRender(trimmedQuery, { source: 'note-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                }
+            } catch (_) {}
+        }).catch(() => {});
+    }
     if (mode === 'bookmark' && previousCanvasQuery !== nextCanvasQuery) {
         searchUiState.bookmarkGroupCollapse = new Map();
     }
@@ -7114,14 +7994,28 @@ function searchCanvasAndRender(query, options = {}) {
             return;
         }
     }
+    if (mode === 'bookmark' && isNoteBrowseRootQuery(trimmedQuery)) {
+        const detail = searchUiState && searchUiState.noteBrowseDetail ? searchUiState.noteBrowseDetail : null;
+        if (!detail || detail.active !== true) {
+            const rootModel = buildCanvasNoteBrowseRootModel(sourceIndex);
+            renderCanvasNoteBrowseRootPanel(rootModel, { query: trimmedQuery });
+            return;
+        }
+    }
     const activeTagBrowseDetail = mode === 'bookmark' && isTagBrowseRootQuery(trimmedQuery)
         && searchUiState
         && searchUiState.tagBrowseDetail
         && searchUiState.tagBrowseDetail.active === true
         ? searchUiState.tagBrowseDetail
         : null;
-    const bookmarkScoringQuery = activeTagBrowseDetail ? '#' : trimmedQuery;
-    const scoringQueryContext = activeTagBrowseDetail
+    const activeNoteBrowseDetail = mode === 'bookmark' && isNoteBrowseRootQuery(trimmedQuery)
+        && searchUiState
+        && searchUiState.noteBrowseDetail
+        && searchUiState.noteBrowseDetail.active === true
+        ? searchUiState.noteBrowseDetail
+        : null;
+    const bookmarkScoringQuery = activeTagBrowseDetail ? '#' : (activeNoteBrowseDetail ? '*' : trimmedQuery);
+    const scoringQueryContext = (activeTagBrowseDetail || activeNoteBrowseDetail)
         ? createCanvasSearchQueryContext(bookmarkScoringQuery, mode)
         : queryContext;
 
@@ -7259,6 +8153,11 @@ function searchCanvasAndRender(query, options = {}) {
         if (activeTagBrowseDetail && item.type === 'bookmark-item') {
             const itemTags = getCanvasBookmarkTagsForSearchCached(item);
             if (!itemTags.some((tag) => tagMatchesBrowseDetail(tag, activeTagBrowseDetail))) {
+                continue;
+            }
+        }
+        if (activeNoteBrowseDetail && item.type === 'bookmark-item') {
+            if (!noteMatchesBrowseDetail(item, activeNoteBrowseDetail)) {
                 continue;
             }
         }
@@ -7495,21 +8394,14 @@ function renderCanvasSearchSuggestions() {
     const hintText = isZh
         ? (isBottomDock ? '点下侧按钮切换模式' : '点左侧按钮切换模式')
         : (isBottomDock ? 'Use the bottom button to switch mode' : 'Use the left button to switch mode');
-    const hintHelpText = isZh
-        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换并实时更新结果；空输入：↑/↓ 直接切换模式。书签模式：光标在输入末尾时，→ 切换书签/文件夹/域名筛选。候选条目：↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。域名粒度：点击域名旁按钮切换主域名/子域名。'
-        : 'Mode: ← to the left mode button, ↑/↓ switches and updates results; empty: ↑/↓ switches modes directly. Bookmark mode: with cursor at end, → toggles bookmark/folder/domain filter. Results: ↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section. Domain granularity: click the domain pill to toggle root/subdomain.';
-    const hintLabelWidth = isZh ? '5em' : '6ch';
-    const hintLabelStyle = `display:inline-block; min-width:${hintLabelWidth};`;
-    const hintHelpHtml = isZh
-        ? `<span style="${hintLabelStyle}">模式切换：</span><span>← 到左侧模式按钮，↑/↓ 切换并实时更新结果；</span><br><span style="${hintLabelStyle}"></span><span>空输入：↑/↓ 直接切换模式。</span><br>书签模式：光标在输入末尾时，→ 切换书签/文件夹/域名筛选。<br>候选条目：↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。<br>域名粒度：点击域名旁按钮切换主域名/子域名。`
-        : `<span style="${hintLabelStyle}">Mode:</span><span>← to the left mode button, ↑/↓ switches and updates results;</span><br><span style="${hintLabelStyle}"></span><span>Empty: ↑/↓ switches modes directly.</span><br>Bookmark mode: with cursor at end, → toggles bookmark/folder/domain filter.<br>Results: ↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section.<br>Domain granularity: click the domain pill to toggle root/subdomain.`;
+    const hintHelp = getSearchHintHelpContent();
 
     panel.innerHTML = `
         <div class="search-suggestions-header" style="position:relative; padding:6px 10px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:flex-end; gap:10px;">
             <div class="search-empty-suggestions-hint" style="position:absolute; left:16px; top:50%; transform:translateY(-50%);">
                 <span class="search-hint-icon" style="display:inline-flex; position:relative; top:-1px;">${arrowSvg}</span>
                 <span class="search-hint-text">${escapeHtml(hintText)}</span>
-                <button type="button" class="search-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelpText)}">
+                <button type="button" class="search-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}">
                     <i class="fas fa-question-circle"></i>
                 </button>
             </div>
@@ -7557,94 +8449,7 @@ function renderCanvasSearchSuggestions() {
                 }
             });
         });
-        const helpBtn = panel.querySelector('.search-hint-help-btn');
-        if (helpBtn) {
-            const getOverlayContainer = () => {
-                if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
-                    return window.getOverlayContainer();
-                }
-                const container = document.querySelector('.canvas-main-container');
-                if (container && (document.fullscreenElement === container || 
-                                  document.webkitFullscreenElement === container || 
-                                  document.mozFullScreenElement === container || 
-                                  document.msFullscreenElement === container)) {
-                    return container;
-                }
-                return document.body;
-            };
-
-            const ensurePopover = () => {
-                let pop = document.getElementById('searchHintPopover');
-                const targetParent = getOverlayContainer();
-                if (!pop) {
-                    pop = document.createElement('div');
-                    pop.id = 'searchHintPopover';
-                    pop.className = 'perf-help-popover search-hint-help-popover';
-                    pop.innerHTML = '<div class="perf-help-popover-content"></div>';
-                    targetParent.appendChild(pop);
-                } else if (pop.parentElement !== targetParent) {
-                    targetParent.appendChild(pop);
-                }
-                return pop;
-            };
-
-            const helpPopover = ensurePopover();
-            const contentEl = helpPopover.querySelector('.perf-help-popover-content');
-            if (contentEl) contentEl.innerHTML = hintHelpHtml;
-
-            let outsideHandler = null;
-            const showHelp = () => {
-                const targetParent = getOverlayContainer();
-                if (helpPopover.parentElement !== targetParent) {
-                    targetParent.appendChild(helpPopover);
-                }
-                helpPopover.classList.add('show');
-                helpPopover.style.visibility = 'hidden';
-                helpPopover.style.width = 'max-content';
-                helpPopover.style.maxWidth = '560px';
-
-                const rect = helpBtn.getBoundingClientRect();
-                const popRect = helpPopover.getBoundingClientRect();
-                const margin = 12;
-                let left = rect.left - 8;
-                const maxLeft = window.innerWidth - popRect.width - margin;
-                left = Math.max(margin, Math.min(maxLeft, left));
-
-                const top = Math.min(window.innerHeight - popRect.height - margin, rect.bottom + 8);
-
-                helpPopover.style.left = left + 'px';
-                helpPopover.style.top = top + 'px';
-                helpPopover.style.visibility = '';
-                helpPopover.classList.add('show');
-
-                if (!outsideHandler) {
-                    outsideHandler = (ev) => {
-                        if (helpBtn.contains(ev.target) || helpPopover.contains(ev.target)) return;
-                        hideHelp();
-                    };
-                    document.addEventListener('mousedown', outsideHandler, true);
-                }
-            };
-            const hideHelp = () => {
-                helpPopover.classList.remove('show');
-                if (outsideHandler) {
-                    document.removeEventListener('mousedown', outsideHandler, true);
-                    outsideHandler = null;
-                }
-            };
-
-            helpPopover.classList.remove('show');
-
-            helpBtn.onclick = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (helpPopover.classList.contains('show')) {
-                    hideHelp();
-                } else {
-                    showHelp();
-                }
-            };
-        }
+        bindSearchHintHelpButton(panel.querySelector('.search-hint-help-btn'), hintHelp.html);
     } catch (_) { }
 
 }
@@ -7749,14 +8554,26 @@ function getActiveTagBrowseDetailForQuery(query) {
     return (detail && detail.active === true) ? detail : null;
 }
 
-function isDomainSearchItemMatched(domain, item, query, detailInput = null) {
+function getActiveNoteBrowseDetailForQuery(query) {
+    const q = String(query || '').trim();
+    if (!isNoteBrowseRootQuery(q)) return null;
+    const detail = searchUiState && searchUiState.noteBrowseDetail ? searchUiState.noteBrowseDetail : null;
+    return (detail && detail.active === true) ? detail : null;
+}
+
+function isDomainSearchItemMatched(domain, item, query, detailInput = null, noteDetailInput = null) {
     const q = String(query || '').trim().toLowerCase();
     const detail = detailInput && detailInput.active === true ? detailInput : null;
+    const noteDetail = noteDetailInput && noteDetailInput.active === true ? noteDetailInput : null;
     if (!q) return true;
 
     if (detail) {
         const tags = getCanvasBookmarkTagsForSearchCached(item);
         return tags.some((tag) => tagMatchesBrowseDetail(tag, detail));
+    }
+
+    if (noteDetail) {
+        return noteMatchesBrowseDetail(item, noteDetail);
     }
 
     const domainText = String(domain || '').trim().toLowerCase();
@@ -7771,7 +8588,11 @@ function isDomainSearchItemMatched(domain, item, query, detailInput = null) {
     const pathText = String(item && item.__path || '').trim().toLowerCase();
     if (pathText && pathText.includes(q)) return true;
 
-    if (doesCanvasBookmarkItemTagsMatchQuery(item, q)) {
+    if (q.startsWith('#') && doesCanvasBookmarkItemTagsMatchQuery(item, q)) {
+        return true;
+    }
+
+    if (isCanvasNoteSearchQuery(q) && doesCanvasBookmarkItemNoteMatchQuery(item, q)) {
         return true;
     }
 
@@ -7814,6 +8635,10 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
     const tagBrowseDetailKey = tagBrowseDetail
         ? `${String(tagBrowseDetail.kind || '')}:${normalizeTagBrowseColor(tagBrowseDetail.color)}:${String(tagBrowseDetail.textLower || '').trim().toLowerCase()}`
         : '';
+    const noteBrowseDetail = getActiveNoteBrowseDetailForQuery(query);
+    const noteBrowseDetailKey = noteBrowseDetail
+        ? `${String(noteBrowseDetail.kind || '')}:${normalizeNoteBrowseColor(noteBrowseDetail.color)}:${String(noteBrowseDetail.noteLower || '').trim().toLowerCase()}`
+        : '';
     const scope = resolveDomainSearchScope(scopeInput);
     const scopeKey = scope ? scope.key : 'global';
     const cache = searchUiState.domainIndexCache;
@@ -7822,7 +8647,8 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
         && cache.treeKey === treeKey
         && cache.groupLevel === groupLevel
         && cache.scopeKey === scopeKey
-        && cache.tagBrowseDetailKey === tagBrowseDetailKey) return cache;
+        && cache.tagBrowseDetailKey === tagBrowseDetailKey
+        && cache.noteBrowseDetailKey === noteBrowseDetailKey) return cache;
 
     const db = buildCanvasSearchDb();
     const items = Array.isArray(db.bookmarkIndex) ? db.bookmarkIndex : [];
@@ -7876,7 +8702,7 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             };
             map.set(domain, entry);
         }
-        const itemMatched = isDomainSearchItemMatched(domain, item, q, tagBrowseDetail);
+        const itemMatched = isDomainSearchItemMatched(domain, item, q, tagBrowseDetail, noteBrowseDetail);
 
         entry.count += 1;
         entry.items.push({
@@ -7890,9 +8716,12 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             color: item.color || '#0ea5e9',
             host: host || '',
             tags: getCanvasBookmarkTagsForSearchCached(item),
+            note: getCanvasBookmarkNoteForSearchCached(item),
+            noteColor: getCanvasBookmarkNoteMetaForSearchCached(item).color,
             __title: item.__title || '',
             __url: item.__url || '',
             __path: item.__path || '',
+            __note: item.__note || '',
             matched: !!itemMatched
         });
         if (host) {
@@ -7938,7 +8767,7 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
         return String(a.domain || '').localeCompare(String(b.domain || ''));
     });
 
-    const nextCache = { query: q, treeKey, groupLevel, scopeKey, tagBrowseDetailKey, map, results };
+    const nextCache = { query: q, treeKey, groupLevel, scopeKey, tagBrowseDetailKey, noteBrowseDetailKey, map, results };
     searchUiState.domainIndexCache = nextCache;
     return nextCache;
 }
@@ -8002,6 +8831,9 @@ function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
                 domain: domainKey,
                 domainHost: child.host || '',
                 tags: Array.isArray(child.tags) ? child.tags : [],
+                note: normalizeNoteForSearch(child.note),
+                noteColor: normalizeNoteColorForSearch(child.noteColor),
+                __note: normalizeNoteForSearch(child.note).toLowerCase(),
                 groupLevel
             });
         });
@@ -8202,6 +9034,49 @@ function renderCanvasSearchResults(results, options = {}) {
         ? searchUiState.tagBrowseDetail
         : null;
     const isTagBrowseSecondary = !!activeTagBrowseDetail;
+    const normalizedNoteRenderQuery = normalizeNoteBrowseRootQuery(renderQuery);
+    const isNoteBrowseQuery = isNoteBrowseRootQuery(normalizedNoteRenderQuery);
+    const activeNoteBrowseDetail = isNoteBrowseQuery
+        && searchUiState
+        && searchUiState.noteBrowseDetail
+        && searchUiState.noteBrowseDetail.active === true
+        ? searchUiState.noteBrowseDetail
+        : null;
+    const isNoteBrowseSecondary = !!activeNoteBrowseDetail;
+    const isBrowseSecondary = isTagBrowseSecondary || isNoteBrowseSecondary;
+    const renderBrowseDetailHeaderHtml = (extraClass = '') => {
+        const isZhLocal = currentLang === 'zh_CN';
+        const backLabel = isZhLocal ? '返回' : 'Back';
+        if (isTagBrowseSecondary) {
+            const detailColor = normalizeTagBrowseColor(activeTagBrowseDetail.color) || 'gray';
+            const detailLabel = activeTagBrowseDetail.kind === 'color'
+                ? getTagBrowseColorLabel(activeTagBrowseDetail.color, isZhLocal)
+                : (String(activeTagBrowseDetail.text || '').trim() || getTagBrowseColorLabel(activeTagBrowseDetail.color, isZhLocal));
+            return `<div class="canvas-tag-browse-detail-header${extraClass ? ` ${escapeHtml(extraClass)}` : ''}">
+                <span class="canvas-tag-browse-detail-pill">
+                    <span class="tag-dot tag-dot-${escapeHtml(detailColor)}"></span>
+                    <span class="canvas-tag-browse-detail-pill-text">${escapeHtml(detailLabel)}</span>
+                </span>
+                <button type="button" class="canvas-tag-browse-back-btn" style="margin-left: auto;">${escapeHtml(backLabel)}</button>
+            </div>`;
+        }
+        if (isNoteBrowseSecondary) {
+            const detailColor = activeNoteBrowseDetail.kind === 'bucket' ? 'gray' : normalizeNoteBrowseColor(activeNoteBrowseDetail.color);
+            const detailLabel = activeNoteBrowseDetail.kind === 'color'
+                ? getNoteBrowseColorLabel(activeNoteBrowseDetail.color, isZhLocal)
+                : (activeNoteBrowseDetail.kind === 'bucket'
+                    ? activeNoteBrowseDetail.bucket
+                    : (String(activeNoteBrowseDetail.note || '').trim() || getNoteBrowseColorLabel(activeNoteBrowseDetail.color, isZhLocal)));
+            return `<div class="canvas-tag-browse-detail-header${extraClass ? ` ${escapeHtml(extraClass)}` : ''}">
+                <span class="canvas-tag-browse-detail-pill">
+                    <i class="fas fa-pencil-alt canvas-note-browse-detail-icon note-color-${escapeHtml(detailColor)}"></i>
+                    <span class="canvas-tag-browse-detail-pill-text">${escapeHtml(getNoteBrowseLabel(detailLabel))}</span>
+                </span>
+                <button type="button" class="canvas-tag-browse-back-btn" style="margin-left: auto;">${escapeHtml(backLabel)}</button>
+            </div>`;
+        }
+        return '';
+    };
     const pageSize = Math.max(
         SEARCH_RESULT_MIN_PAGE_SIZE,
         Number(searchUiState.resultPageSize) || SEARCH_RESULT_MIN_PAGE_SIZE
@@ -8250,21 +9125,9 @@ function renderCanvasSearchResults(results, options = {}) {
             // Or just standard no results.
             // msg = "No bookmark matches found"; 
         }
-        if (isTagBrowseSecondary) {
-            const isZh = currentLang === 'zh_CN';
-            const detailColor = normalizeTagBrowseColor(activeTagBrowseDetail.color) || 'gray';
-            const detailLabel = activeTagBrowseDetail.kind === 'color'
-                ? getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh)
-                : (String(activeTagBrowseDetail.text || '').trim() || getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh));
-            const backLabel = isZh ? '返回' : 'Back';
+        if (isBrowseSecondary) {
             panel.innerHTML = `
-                <div class="canvas-tag-browse-detail-header canvas-tag-browse-detail-header-empty">
-                    <span class="canvas-tag-browse-detail-pill">
-                        <span class="tag-dot tag-dot-${escapeHtml(detailColor)}"></span>
-                        <span class="canvas-tag-browse-detail-pill-text">${escapeHtml(detailLabel)}</span>
-                    </span>
-                    <button type="button" class="canvas-tag-browse-back-btn" style="margin-left: auto;">${escapeHtml(backLabel)}</button>
-                </div>
+                ${renderBrowseDetailHeaderHtml('canvas-tag-browse-detail-header-empty')}
                 <div class="search-result-empty">${msg}</div>
             `;
         } else {
@@ -8289,6 +9152,10 @@ function renderCanvasSearchResults(results, options = {}) {
     };
 
     const queryText = String(searchUiState.query || '');
+    const normalizedDetailsQuery = queryText.trim().toLowerCase();
+    const isTagDetailsQuery = normalizedDetailsQuery.startsWith('#');
+    const isNoteDetailsQuery = isCanvasNoteSearchQuery(normalizedDetailsQuery);
+    const isPlainBookmarkDetailsQuery = !!normalizedDetailsQuery && !isTagDetailsQuery && !isNoteDetailsQuery;
     const fullscreenScope = getCanvasFullscreenSearchScope();
     const disableLocationJumpBadges = false;
     const compactBookmarkToolbar = Boolean(fullscreenScope);
@@ -8322,25 +9189,50 @@ function renderCanvasSearchResults(results, options = {}) {
         if (!raw) return [];
         return raw.split('>').map((part) => String(part || '').trim()).filter(Boolean);
     };
-    const renderPathTextWithFolderUnderline = (pathText) => {
+    const getPlainPathMatchTokens = () => {
+        if (!isPlainBookmarkDetailsQuery) return [];
+        return queryText.split(/\s+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+    };
+    const renderMatchedPathLevelPreview = (pathText) => {
+        const parts = parsePathParts(pathText);
+        const tokens = getPlainPathMatchTokens();
+        if (!parts.length || !tokens.length) return '';
+        const matchIndex = parts.findIndex((part) => {
+            const lower = String(part || '').toLowerCase();
+            return tokens.some((token) => lower.includes(token));
+        });
+        if (matchIndex < 0) return '';
+        const prefix = matchIndex > 0
+            ? `<button class="search-result-path-ellipsis-toggle" type="button" title="${escapeHtml(isZh ? '展开完整路径' : 'Show full path')}" aria-label="${escapeHtml(isZh ? '展开完整路径' : 'Show full path')}">...</button><span class="search-result-path-sep"> &gt; </span>`
+            : '';
+        const suffix = matchIndex < parts.length - 1
+            ? `<span class="search-result-path-sep"> &gt; </span><button class="search-result-path-ellipsis-toggle" type="button" title="${escapeHtml(isZh ? '展开完整路径' : 'Show full path')}" aria-label="${escapeHtml(isZh ? '展开完整路径' : 'Show full path')}">...</button>`
+            : '';
+        return `${prefix}<span class="search-result-path-part">${markQueryInText(parts[matchIndex])}</span>${suffix}`;
+    };
+    const renderPathTextWithFolderUnderline = (pathText, options = {}) => {
         const raw = String(pathText || '').trim();
         if (!raw) return '';
+        if (!(options && options.forceFull === true)) {
+            const matchedPreview = renderMatchedPathLevelPreview(raw);
+            if (matchedPreview) return matchedPreview;
+        }
         const parts = parsePathParts(raw);
         if (!parts.length) return escapeHtml(raw);
         return parts.map((part, index) => {
-            const safePart = `<span class="search-result-path-part">${escapeHtml(part)}</span>`;
+            const safePart = `<span class="search-result-path-part">${markQueryInText(part)}</span>`;
             if (index >= parts.length - 1) return safePart;
             return `${safePart}<span class="search-result-path-sep"> &gt; </span>`;
         }).join('');
     };
-    const renderPathListWithFolderUnderline = (paths, rootLabel) => {
+    const renderPathListWithFolderUnderline = (paths, rootLabel, options = {}) => {
         const list = Array.isArray(paths) ? paths : [];
         const normalized = list.length
             ? list.map((p) => String(p || '').trim()).filter((p) => p !== '')
             : [];
         if (!normalized.length) return `<span class="search-result-path-part">${escapeHtml(rootLabel)}</span>`;
         return normalized.map((path, idx) => {
-            const safe = renderPathTextWithFolderUnderline(path);
+            const safe = renderPathTextWithFolderUnderline(path, options);
             if (idx >= normalized.length - 1) return safe;
             return `${safe}<span class="search-result-path-list-sep"> ｜ </span>`;
         }).join('');
@@ -8360,6 +9252,13 @@ function renderCanvasSearchResults(results, options = {}) {
         const hasMultiplePath = normalized.length > 1;
         const primaryPath = normalized[0];
         const ellipsisTitle = isZh ? '展开完整路径' : 'Show full path';
+        const matchedPreview = renderMatchedPathLevelPreview(primaryPath);
+        if (matchedPreview) {
+            return {
+                html: matchedPreview,
+                hasTruncated: hasMultiplePath || matchedPreview.includes('search-result-path-ellipsis')
+            };
+        }
         const parts = parsePathParts(primaryPath);
         if (!parts.length) {
             return {
@@ -8372,7 +9271,7 @@ function renderCanvasSearchResults(results, options = {}) {
         const needsEllipsis = isPathDeep || hasMultiplePath;
         const visibleParts = isPathDeep ? parts.slice(parts.length - maxDepth) : parts;
         const visibleHtml = visibleParts.map((part, partIdx) => {
-            const safePart = `<span class="search-result-path-part">${escapeHtml(part)}</span>`;
+            const safePart = `<span class="search-result-path-part">${markQueryInText(part)}</span>`;
             if (partIdx >= visibleParts.length - 1) return safePart;
             return `${safePart}<span class="search-result-path-sep"> &gt; </span>`;
         }).join('');
@@ -8392,7 +9291,7 @@ function renderCanvasSearchResults(results, options = {}) {
             return `<div class="search-result-path-hint ${pathHintTypeClass}"><span class="search-result-path-text">${collapsed.html}</span></div>`;
         }
 
-        const fullHtml = renderPathListWithFolderUnderline(paths, rootLabel);
+        const fullHtml = renderPathListWithFolderUnderline(paths, rootLabel, { forceFull: true });
         return `<div class="search-result-path-hint ${pathHintTypeClass}" data-path-expandable="true">
             <span class="search-result-path-text">
                 <span class="search-result-path-preview">${collapsed.html}</span>
@@ -8445,9 +9344,71 @@ function renderCanvasSearchResults(results, options = {}) {
         }
         const chips = tags.map((tag) => {
             const label = tag.text || tag.color;
-            return `<span class="search-result-tag-chip" title="${escapeHtml(label)}"><span class="tag-dot tag-dot-${safeColorClass(tag.color)}"></span><span class="search-result-tag-chip-text">${escapeHtml(label)}</span></span>`;
+            let highlightedLabel = escapeHtml(label);
+            if (isTagDetailsQuery) {
+                const tokens = queryText.split(/\s+/).map(s => {
+                    let t = s.trim();
+                    if (t.startsWith('#')) {
+                        t = t.slice(1);
+                        if (t.startsWith('/')) t = t.slice(1);
+                    }
+                    return t;
+                }).filter(Boolean);
+                
+                if (tokens.length > 0) {
+                    tokens.sort((a, b) => b.length - a.length);
+                    let safe = escapeHtml(label);
+                    tokens.forEach((token) => {
+                        const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const re = new RegExp(`(${escapedToken})(?![^<>]*>)`, 'gi');
+                        safe = safe.replace(re, '<mark>$1</mark>');
+                    });
+                    highlightedLabel = safe;
+                }
+            }
+            return `<span class="search-result-tag-chip" title="${escapeHtml(label)}"><span class="tag-dot tag-dot-${safeColorClass(tag.color)}"></span><span class="search-result-tag-chip-text">${highlightedLabel}</span></span>`;
         }).join('');
         return `<div class="search-result-tag-strip" title="${escapeHtml(tagTitle)}">${chips}</div>`;
+    };
+    const getBookmarkResultNotes = (item) => {
+        const result = [];
+        const seen = new Set();
+        const addNote = (noteInput, colorInput) => {
+            const note = normalizeNoteForSearch(noteInput);
+            if (!note) return;
+            const key = note.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            result.push({
+                note,
+                color: normalizeNoteColorForSearch(colorInput)
+            });
+        };
+        if (item && (item.type === 'bookmark-group' || item.type === 'domain-group')) {
+            const children = Array.isArray(item.targetItems) ? item.targetItems : [];
+            children.forEach((child) => {
+                const meta = getCanvasBookmarkNoteMetaForSearchCached(child);
+                addNote(meta.note, meta.color);
+            });
+        } else {
+            const meta = getCanvasBookmarkNoteMetaForSearchCached(item);
+            addNote(meta.note, meta.color);
+        }
+        return result;
+    };
+    const renderBookmarkResultNoteMarker = (item) => {
+        return '';
+    };
+    const renderBookmarkResultNoteSnippet = (item) => {
+        const notes = getBookmarkResultNotes(item);
+        if (!notes.length) return '';
+        const first = notes[0];
+        const note = first.note;
+        const needle = getCanvasNoteSearchNeedle(queryText);
+        const snippet = needle ? generateSearchSnippet(note, needle) : escapeHtml(note);
+        const more = notes.length > 1 ? `<span class="search-result-note-more">+${notes.length - 1}</span>` : '';
+        const matchClass = needle ? ' is-note-match-snippet' : '';
+        return `<div class="search-result-note-snippet${matchClass} note-color-${escapeHtml(first.color)}" data-note-color="${escapeHtml(first.color)}"><i class="fas fa-pencil-alt"></i><span class="search-result-note-text">${snippet}</span>${more}</div>`;
     };
     const getPermanentCopyLabelForBookmarkSearch = (copyId) => {
         const safeCopyId = String(copyId || '').trim();
@@ -8528,6 +9489,22 @@ function renderCanvasSearchResults(results, options = {}) {
         const collapsed = searchUiState.bookmarkGroupCollapse.get(groupId);
         return collapsed === false;
     };
+    const isBookmarkDetailsExpanded = (itemId) => {
+        if (!itemId) return false;
+        if (!(searchUiState.bookmarkDetailsExpanded instanceof Set)) {
+            searchUiState.bookmarkDetailsExpanded = new Set();
+        }
+        return searchUiState.bookmarkDetailsExpanded.has(String(itemId));
+    };
+    const buildMatchedDetailsPreviewHtml = (entries) => {
+        const lines = (Array.isArray(entries) ? entries : [])
+            .filter((entry) => entry && entry.matched && entry.html)
+            .map((entry) => `<div class="search-result-details-preview-line">${entry.html}</div>`);
+        return {
+            html: lines.join(''),
+            count: lines.length
+        };
+    };
     const renderBookmarkGroupChildRow = (child, groupItem, childIndex) => {
         if (!child) return '';
         const groupId = String(groupItem && groupItem.id || '').trim();
@@ -8537,12 +9514,56 @@ function renderCanvasSearchResults(results, options = {}) {
         const parentPath = getBookmarkItemParentPathForSearchScope(child, fullscreenScope);
         const pathList = parentPath ? [parentPath] : [];
         const pathHintTypeClass = child.nodeType === 'folder' ? 'is-folder' : 'is-bookmark';
-        const pathHtml = `<div class="search-result-path-hint ${pathHintTypeClass}"><span class="search-result-path-text">${renderPathListWithFolderUnderline(pathList, rootLabel)}</span></div>`;
+        const pathHtml = renderPathHintWithTailPreview(pathList, rootLabel, pathHintTypeClass);
         const urlHtml = child.url
             ? `<div class="search-result-link-row">${renderExternalLinkHtml(child.url)}</div>`
             : '';
         const sourceHtml = renderBookmarkChildSourceHtml(child);
         const childTagMarkersHtml = renderBookmarkResultTagMarkers(child);
+        const childNoteMarkerHtml = renderBookmarkResultNoteMarker(child);
+        const childNoteSnippetHtml = renderBookmarkResultNoteSnippet(child);
+
+        const detailsExpanded = isBookmarkDetailsExpanded(childKey);
+
+        const hasPathMatch = isPlainBookmarkDetailsQuery && pathHtml && pathHtml.includes('<mark>');
+        const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
+        const hasTagMatch = isTagDetailsQuery && childTagMarkersHtml && childTagMarkersHtml.includes('<mark>');
+        const hasNoteMatch = isNoteDetailsQuery && childNoteSnippetHtml && childNoteSnippetHtml.includes('<mark>');
+        
+        const preview = buildMatchedDetailsPreviewHtml([
+            { matched: hasPathMatch, html: pathHtml },
+            { matched: hasUrlMatch, html: urlHtml },
+            { matched: hasTagMatch, html: childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '' },
+            { matched: hasNoteMatch, html: childNoteSnippetHtml }
+        ]);
+
+        const previewContextHtml = preview.html
+            ? `<div class="search-result-details-preview-context ${preview.count === 1 ? 'is-single-line' : ''}" style="display: ${detailsExpanded ? 'none' : 'flex'};">${preview.html}</div>`
+            : '';
+
+        const infoToggleHtml = `
+            <div class="canvas-bookmark-details-row">
+                <button class="canvas-bookmark-details-toggle" type="button" data-item-id="${escapeHtml(String(childKey))}" aria-expanded="${detailsExpanded ? 'true' : 'false'}" title="${escapeHtml(isZh ? (detailsExpanded ? '收起信息' : '展开信息') : (detailsExpanded ? 'Collapse info' : 'Expand info'))}">
+                    <i class="fas ${detailsExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i>
+                    <span>${isZh ? '信息' : 'Info'}</span>
+                </button>
+                ${previewContextHtml}
+            </div>
+        `;
+
+        const childTagsHtml = childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '';
+        
+        let childDetailsContentHtml = '';
+        childDetailsContentHtml += pathHtml;
+        childDetailsContentHtml += urlHtml;
+        if (childTagsHtml) childDetailsContentHtml += childTagsHtml;
+        if (childNoteSnippetHtml) childDetailsContentHtml += childNoteSnippetHtml;
+
+        const detailsHtml = `
+            <div class="canvas-bookmark-details-collapsible" style="display: ${detailsExpanded ? 'flex' : 'none'}; flex-direction: column; width: 100%; min-width: 0; margin-top: 4px; gap: 4px;">
+                ${childDetailsContentHtml}
+            </div>
+        `;
 
         return `
             <div class="canvas-bookmark-group-child-item ${child.nodeType === 'folder' ? 'is-folder' : 'is-bookmark'}" role="button" tabindex="0"
@@ -8553,12 +9574,12 @@ function renderCanvasSearchResults(results, options = {}) {
                     <span class="canvas-bookmark-group-child-index">${childIndex + 1}</span>
                     ${renderBookmarkChildIconHtml(child)}
                     <span class="canvas-bookmark-group-child-title">${titleHtml}</span>
-                    ${childTagMarkersHtml ? `<span class="canvas-bookmark-group-child-tags">${childTagMarkersHtml}</span>` : ''}
+                    ${childNoteMarkerHtml ? `<span class="canvas-bookmark-group-child-note">${childNoteMarkerHtml}</span>` : ''}
                 </div>
                 <div class="canvas-bookmark-group-child-meta">
                     ${sourceHtml}
-                    ${pathHtml}
-                    ${urlHtml}
+                    ${infoToggleHtml}
+                    ${detailsHtml}
                 </div>
             </div>
         `;
@@ -8613,19 +9634,8 @@ function renderCanvasSearchResults(results, options = {}) {
 
         if (showBookmarkBtn || showFolderBtn || showDomainBtn) {
             const isZh = currentLang === 'zh_CN';
-            if (isTagBrowseSecondary) {
-                const detailColor = normalizeTagBrowseColor(activeTagBrowseDetail.color) || 'gray';
-                const detailLabel = activeTagBrowseDetail.kind === 'color'
-                    ? getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh)
-                    : (String(activeTagBrowseDetail.text || '').trim() || getTagBrowseColorLabel(activeTagBrowseDetail.color, isZh));
-                const backLabel = isZh ? '返回' : 'Back';
-                html += `<div class="canvas-tag-browse-detail-header">
-                    <span class="canvas-tag-browse-detail-pill">
-                        <span class="tag-dot tag-dot-${escapeHtml(detailColor)}"></span>
-                        <span class="canvas-tag-browse-detail-pill-text">${escapeHtml(detailLabel)}</span>
-                    </span>
-                    <button type="button" class="canvas-tag-browse-back-btn" style="margin-left: auto;">${escapeHtml(backLabel)}</button>
-                </div>`;
+            if (isBrowseSecondary) {
+                html += renderBrowseDetailHeaderHtml();
             }
             const makeBtn = ({ type, icon, color, count, isActiveOverride = null }) => {
                 const isActive = (typeof isActiveOverride === 'boolean') ? isActiveOverride : active === type;
@@ -8671,7 +9681,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 ? `生成临时栏目${visibleCount ? ` (${visibleCount})` : ''}`
                 : `To Temp${visibleCount ? ` (${visibleCount})` : ''}`;
 
-            const showExportBtn = (active !== 'domain') && (!compactBookmarkToolbar || isTagBrowseSecondary);
+            const showExportBtn = (active !== 'domain') && (!compactBookmarkToolbar || isBrowseSecondary);
             const exportBtnHtml = showExportBtn
                 ? `<button class="canvas-bookmark-to-temp-btn${compactBookmarkToolbar ? ' canvas-bookmark-to-temp-btn-compact' : ''}" type="button"${compactBookmarkToolbar ? ' style="padding:5px 8px; font-size:11px; border-radius:7px;"' : ''}>${escapeHtml(exportLabel)}</button>`
                 : '';
@@ -8748,6 +9758,11 @@ function renderCanvasSearchResults(results, options = {}) {
         let badge = '';
         let indexLabel = '';
         let descHtml = '';
+
+        const hideAggregateTags = (item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || '')))
+            || (item.type === 'domain-group' && item.isExpanded === true);
+        const tagMarkersHtml = isBookmarkMode && !hideAggregateTags ? renderBookmarkResultTagMarkers(item) : '';
+        const tagsRowHtml = tagMarkersHtml ? `<div class="canvas-bookmark-tags-row" style="margin-top:4px;">${tagMarkersHtml}</div>` : '';
 
         const itemColor = item.color || '#999';
         const colorStyle = `color:${itemColor}; background:${itemColor}15; border-color:${itemColor}30;`;
@@ -8851,8 +9866,8 @@ function renderCanvasSearchResults(results, options = {}) {
                     </span>
                     <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(domainUrl)}" style="display:${hasRealFavicon ? '' : 'none'}; width:16px; height:16px; object-fit:contain; border-radius:3px;" alt="">
                 </div>`;
-                title = `<div class="search-result-domain-title-text">${domainText}</div>`;
-                descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:11px;">${escapeHtml(countLabel)}</div>`;
+                title = `<div class="search-result-domain-title-text">${domainText}</div>${renderBookmarkResultNoteMarker(item)}`;
+                descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:11px;">${escapeHtml(countLabel)}</div>${tagsRowHtml}${renderBookmarkResultNoteSnippet(item)}`;
                 badge = `<div class="search-domain-actions">
                     ${makeColoredBadge(isZh ? '域名' : 'Domain', 'domain')}
                     <button class="search-domain-toggle-btn" type="button" data-domain="${escapeHtml(item.domain || item.title || '')}" aria-label="${escapeHtml(toggleTitle)}" title="${escapeHtml(toggleTitle)}">
@@ -8921,13 +9936,14 @@ function renderCanvasSearchResults(results, options = {}) {
                 const countHtml = canExpandGroup
                     ? `<button class="canvas-bookmark-match-count canvas-bookmark-group-count" type="button" data-bookmark-group-id="${escapeHtml(groupId)}" aria-expanded="${isGroupExpanded ? 'true' : 'false'}">${isZh ? `${matchCount}处` : `${matchCount} locations`}</button>`
                     : '';
+                const noteMarkerHtml = renderBookmarkResultNoteMarker(item);
                 const toggleHtml = canExpandGroup
                     ? `<button class="canvas-bookmark-group-toggle" type="button" data-bookmark-group-id="${escapeHtml(groupId)}" aria-label="${escapeHtml(isZh ? '展开或收起候选路径' : 'Expand or collapse candidate paths')}"><i class="fas ${isGroupExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>`
                     : '';
                 const groupActionsHtml = countHtml || toggleHtml
                     ? `<div class="canvas-bookmark-group-actions">${countHtml}${toggleHtml}</div>`
                     : '';
-                title = `<div class="search-result-bookmark-title-text">${titleText}</div>${groupActionsHtml}`;
+                title = `<div class="search-result-bookmark-title-text">${titleText}</div>${noteMarkerHtml}${groupActionsHtml}`;
                 const rootLabel = isZh ? '根目录' : 'Root';
                 const parentPathListRaw = Array.isArray(item.parentPaths) ? item.parentPaths : [];
                 const parentPathList = parentPathListRaw.length
@@ -9061,11 +10077,48 @@ function renderCanvasSearchResults(results, options = {}) {
                 }
 
                 const childrenHtml = renderBookmarkGroupChildren(item);
+                const noteSnippetHtml = renderBookmarkResultNoteSnippet(item);
+
+                const hasPathMatch = isPlainBookmarkDetailsQuery && parentPathHtml && parentPathHtml.includes('<mark>');
+                const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
+                const hasTagMatch = isTagDetailsQuery && tagsRowHtml && tagsRowHtml.includes('<mark>');
+                const hasNoteMatch = isNoteDetailsQuery && noteSnippetHtml && noteSnippetHtml.includes('<mark>');
+                
+                const preview = buildMatchedDetailsPreviewHtml([
+                    { matched: hasPathMatch, html: parentPathHtml },
+                    { matched: hasUrlMatch, html: urlHtml },
+                    { matched: hasTagMatch, html: tagsRowHtml },
+                    { matched: hasNoteMatch, html: noteSnippetHtml }
+                ]);
+
+                const detailsExpanded = isBookmarkDetailsExpanded(item.id);
+                const previewContextHtml = preview.html
+                    ? `<div class="search-result-details-preview-context ${preview.count === 1 ? 'is-single-line' : ''}" style="display: ${detailsExpanded ? 'none' : 'flex'};">${preview.html}</div>`
+                    : '';
+
+                const infoToggleHtml = `
+                    <div class="canvas-bookmark-details-row">
+                        <button class="canvas-bookmark-details-toggle" type="button" data-item-id="${escapeHtml(String(item.id))}" aria-expanded="${detailsExpanded ? 'true' : 'false'}" title="${escapeHtml(isZh ? (detailsExpanded ? '收起信息' : '展开信息') : (detailsExpanded ? 'Collapse info' : 'Expand info'))}">
+                            <i class="fas ${detailsExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i>
+                            <span>${isZh ? '信息' : 'Info'}</span>
+                        </button>
+                        ${previewContextHtml}
+                    </div>
+                `;
+
+                const detailsHtml = `
+                    <div class="canvas-bookmark-details-collapsible" style="display: ${detailsExpanded ? 'flex' : 'none'}; flex-direction: column; width: 100%; min-width: 0; margin-top: 4px; gap: 4px;">
+                        ${parentPathHtml}
+                        ${urlHtml}
+                        ${tagsRowHtml}
+                        ${noteSnippetHtml}
+                    </div>
+                `;
 
                 descHtml = `<div class="search-result-match canvas-bookmark-group-summary" style="display:flex; flex-direction:column; width:100%; min-width:0;">
                     ${locationsHtml}
-                    ${parentPathHtml}
-                    ${urlHtml}
+                    ${infoToggleHtml}
+                    ${detailsHtml}
                 </div>${childrenHtml}`;
 
                 badge = '';
@@ -9115,7 +10168,9 @@ function renderCanvasSearchResults(results, options = {}) {
                     }
                 }
 
-                title = `<span class="search-result-bookmark-title-text">${markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'))}</span>`;
+                const itemNoteMarkerHtml = renderBookmarkResultNoteMarker(item);
+                const itemNoteSnippetHtml = renderBookmarkResultNoteSnippet(item);
+                title = `<span class="search-result-bookmark-title-text">${markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'))}</span>${itemNoteMarkerHtml}`;
                 if (item.domainChild) {
                     const hostText = String(item.domainHost || '').trim().toLowerCase();
                     const showHost = hostText && (String(item.groupLevel || '') === 'root' || hostText !== String(item.domain || '').trim().toLowerCase());
@@ -9125,7 +10180,11 @@ function renderCanvasSearchResults(results, options = {}) {
                     const linkHtml = item.url
                         ? `<div class="search-result-link-row">${renderExternalLinkHtml(item.url)}</div>`
                         : '';
-                    descHtml = `<div class="search-result-match search-domain-children-meta">${hostLabel}${linkHtml}</div>`;
+                    descHtml = `<div class="search-result-match search-domain-children-meta">${hostLabel}${linkHtml}${tagsRowHtml}${itemNoteSnippetHtml}</div>`;
+                } else {
+                    descHtml = '';
+                    if (tagsRowHtml) descHtml += tagsRowHtml;
+                    if (itemNoteSnippetHtml) descHtml += itemNoteSnippetHtml;
                 }
 
                 // 子项不再显示右侧 badge（更像“折叠列表”）
@@ -9293,17 +10352,68 @@ function renderCanvasSearchResults(results, options = {}) {
             descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:12px;">${escapeHtml(d)}</div>`;
         }
 
-        // Bookmark/Folder meta: show URL only (no path)
-        if (item.type === 'bookmark-item' && item.url) {
-            descHtml = item.domainChild
-                ? descHtml
-                : `<div class="search-result-match search-result-link-row">${renderExternalLinkHtml(item.url)}</div>`;
-        }
-        const hideAggregateTags = (item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || '')))
-            || (item.type === 'domain-group' && item.isExpanded === true);
-        const tagMarkersHtml = isBookmarkMode && !hideAggregateTags ? renderBookmarkResultTagMarkers(item) : '';
-        if (tagMarkersHtml) {
-            badge = `<div class="search-result-right-stack">${tagMarkersHtml}${badge}</div>`;
+        // Bookmark/Folder meta: show matched path/URL plus explicit tag/note searches.
+        if (item.type === 'bookmark-item' && !item.isChild && !item.domainChild) {
+            const rootLabel = isZh ? '根目录' : 'Root';
+            const parentPath = getBookmarkItemParentPathForSearchScope(item, fullscreenScope);
+            const pathList = parentPath ? [parentPath] : [];
+            const pathHintTypeClass = item.nodeType === 'folder' ? 'is-folder' : 'is-bookmark';
+            const pathHtml = pathList.length
+                ? renderPathHintWithTailPreview(pathList, rootLabel, pathHintTypeClass)
+                : '';
+            const linkHtml = item.url ? `<div class="search-result-match search-result-link-row">${renderExternalLinkHtml(item.url)}</div>` : '';
+            const itemNoteSnippetHtml = renderBookmarkResultNoteSnippet(item);
+            
+            let detailsContentHtml = '';
+            if (pathHtml) detailsContentHtml += pathHtml;
+            if (linkHtml) detailsContentHtml += linkHtml;
+            if (tagsRowHtml) detailsContentHtml += tagsRowHtml;
+            if (itemNoteSnippetHtml) detailsContentHtml += itemNoteSnippetHtml;
+
+            const hasPathMatch = isPlainBookmarkDetailsQuery && pathHtml && pathHtml.includes('<mark>');
+            const hasUrlMatch = isPlainBookmarkDetailsQuery && linkHtml && linkHtml.includes('<mark>');
+            const hasTagMatch = isTagDetailsQuery && tagsRowHtml && tagsRowHtml.includes('<mark>');
+            const hasNoteMatch = isNoteDetailsQuery && itemNoteSnippetHtml && itemNoteSnippetHtml.includes('<mark>');
+            
+            const preview = buildMatchedDetailsPreviewHtml([
+                { matched: hasPathMatch, html: pathHtml },
+                { matched: hasUrlMatch, html: linkHtml },
+                { matched: hasTagMatch, html: tagsRowHtml },
+                { matched: hasNoteMatch, html: itemNoteSnippetHtml }
+            ]);
+
+            const detailsExpanded = isBookmarkDetailsExpanded(item.id);
+            const previewContextHtml = preview.html
+                ? `<div class="search-result-details-preview-context ${preview.count === 1 ? 'is-single-line' : ''}" style="display: ${detailsExpanded ? 'none' : 'flex'};">${preview.html}</div>`
+                : '';
+
+            const infoToggleHtml = `
+                <div class="canvas-bookmark-details-row">
+                    <button class="canvas-bookmark-details-toggle" type="button" data-item-id="${escapeHtml(String(item.id))}" aria-expanded="${detailsExpanded ? 'true' : 'false'}" title="${escapeHtml(isZh ? (detailsExpanded ? '收起信息' : '展开信息') : (detailsExpanded ? 'Collapse info' : 'Expand info'))}">
+                        <i class="fas ${detailsExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i>
+                        <span>${isZh ? '信息' : 'Info'}</span>
+                    </button>
+                    ${previewContextHtml}
+                </div>
+            `;
+
+            const detailsHtml = `
+                <div class="canvas-bookmark-details-collapsible" style="display: ${detailsExpanded ? 'flex' : 'none'}; flex-direction: column; width: 100%; min-width: 0; margin-top: 4px; gap: 4px;">
+                    ${detailsContentHtml}
+                </div>
+            `;
+
+            descHtml = `
+                <div style="display: flex; flex-direction: column; width: 100%; min-width: 0;">
+                    ${infoToggleHtml}
+                    ${detailsHtml}
+                </div>
+            `;
+        } else if (item.type === 'bookmark-item' && item.url && item.domainChild) {
+            // Keep original logic for domainChild but swap tag and note
+            const linkHtml = `<div class="search-result-match search-result-link-row">${renderExternalLinkHtml(item.url)}</div>`;
+            const itemNoteSnippetHtml = renderBookmarkResultNoteSnippet(item);
+            descHtml = `<div class="search-result-match search-domain-children-meta">${linkHtml}${tagsRowHtml}${itemNoteSnippetHtml}</div>`;
         }
 
         const extraClasses = [];
@@ -9515,6 +10625,39 @@ function readPermanentNodeTagsCachedForPayload(chromeId) {
     return [];
 }
 
+function normalizeNoteMetaForPayload(noteInput, colorInput) {
+    const note = normalizeNoteForSearch(noteInput);
+    return note ? {
+        note,
+        noteColor: normalizeNoteColorForSearch(colorInput)
+    } : { note: '', noteColor: normalizeNoteColorForSearch(colorInput) };
+}
+
+function readPermanentNodeNoteMetaCachedForPayload(chromeId) {
+    const safeId = String(chromeId || '').trim();
+    if (!safeId) return { note: '', noteColor: NOTE_COLOR_DEFAULT };
+    try {
+        if (typeof window !== 'undefined' && window.NoteSystem) {
+            if (typeof window.NoteSystem.getPermNodeNoteMetaCached === 'function') {
+                const meta = window.NoteSystem.getPermNodeNoteMetaCached(safeId) || {};
+                return normalizeNoteMetaForPayload(meta.note, meta.noteColor || meta.color);
+            }
+            if (typeof window.NoteSystem.getPermNodeNoteCached === 'function') {
+                return normalizeNoteMetaForPayload(window.NoteSystem.getPermNodeNoteCached(safeId), NOTE_COLOR_DEFAULT);
+            }
+        }
+    } catch (_) { }
+    return { note: '', noteColor: NOTE_COLOR_DEFAULT };
+}
+
+function applyNoteMetaToBookmarkPayload(payload, noteMeta) {
+    if (!payload || !noteMeta) return;
+    const note = normalizeNoteForSearch(noteMeta.note);
+    if (!note) return;
+    payload.note = note;
+    payload.noteColor = normalizeNoteColorForSearch(noteMeta.noteColor || noteMeta.color);
+}
+
 async function buildPermanentNodeMap(root) {
     const map = new Map();
     if (!root) return map;
@@ -9557,6 +10700,11 @@ function buildSearchBookmarkPayload(item, isZh) {
         : [];
     const payloadTags = inlineTags.length ? inlineTags : fallbackPermanentTags;
     if (payloadTags.length) payload.tags = payloadTags;
+    const inlineNoteMeta = normalizeNoteMetaForPayload(item && item.note, item && item.noteColor);
+    const fallbackPermanentNoteMeta = (!inlineNoteMeta.note && source === 'permanent' && item && item.id)
+        ? readPermanentNodeNoteMetaCachedForPayload(item.id)
+        : { note: '', noteColor: NOTE_COLOR_DEFAULT };
+    applyNoteMetaToBookmarkPayload(payload, inlineNoteMeta.note ? inlineNoteMeta : fallbackPermanentNoteMeta);
     if (source === 'permanent') {
         payload.__canvasPayloadSource = 'permanent';
     }
@@ -9568,17 +10716,29 @@ async function buildPayloadFromPermanentNode(node, isZh, options = {}) {
     const resolvePermanentNodeTags = (options && typeof options.resolvePermanentNodeTags === 'function')
         ? options.resolvePermanentNodeTags
         : null;
+    const resolvePermanentNodeNotes = (options && typeof options.resolvePermanentNodeNotes === 'function')
+        ? options.resolvePermanentNodeNotes
+        : null;
     const resolveTags = (nodeId, fallback = []) => {
         const fromResolver = resolvePermanentNodeTags ? resolvePermanentNodeTags(nodeId) : [];
         const primary = normalizeTagsForPayload(fromResolver);
         if (primary.length) return primary;
         return normalizeTagsForPayload(fallback);
     };
+    const resolveNoteMeta = (nodeId, fallback = {}) => {
+        const fromResolver = resolvePermanentNodeNotes ? resolvePermanentNodeNotes(nodeId) : null;
+        const primary = fromResolver
+            ? normalizeNoteMetaForPayload(fromResolver.note, fromResolver.noteColor || fromResolver.color)
+            : { note: '', noteColor: NOTE_COLOR_DEFAULT };
+        if (primary.note) return primary;
+        return normalizeNoteMetaForPayload(fallback.note, fallback.noteColor || fallback.color);
+    };
 
     const nodeUrl = typeof node.url === 'string' ? node.url : '';
     const nodeTitle = typeof node.title === 'string' ? node.title : '';
     const rootId = node && node.id ? String(node.id) : '';
     const rootTags = resolveTags(rootId, options && options.rootTags);
+    const rootNoteMeta = resolveNoteMeta(rootId, options && options.rootNoteMeta ? options.rootNoteMeta : node);
     if (nodeUrl) {
         const bookmarkPayload = {
             id: node.id ? String(node.id) : undefined,
@@ -9589,6 +10749,7 @@ async function buildPayloadFromPermanentNode(node, isZh, options = {}) {
             children: []
         };
         if (rootTags.length) bookmarkPayload.tags = rootTags;
+        applyNoteMetaToBookmarkPayload(bookmarkPayload, rootNoteMeta);
         return bookmarkPayload;
     }
 
@@ -9601,6 +10762,7 @@ async function buildPayloadFromPermanentNode(node, isZh, options = {}) {
         children: []
     };
     if (rootTags.length) rootPayload.tags = rootTags;
+    applyNoteMetaToBookmarkPayload(rootPayload, rootNoteMeta);
 
     const stack = [{ source: node, target: rootPayload, index: 0 }];
     let scanned = 0;
@@ -9622,6 +10784,7 @@ async function buildPayloadFromPermanentNode(node, isZh, options = {}) {
         const childTitle = typeof child.title === 'string' ? child.title : '';
         const childId = child && child.id ? String(child.id) : '';
         const childTags = resolveTags(childId);
+        const childNoteMeta = resolveNoteMeta(childId, child);
 
         if (childUrl) {
             const childPayload = {
@@ -9633,6 +10796,7 @@ async function buildPayloadFromPermanentNode(node, isZh, options = {}) {
                 children: []
             };
             if (childTags.length) childPayload.tags = childTags;
+            applyNoteMetaToBookmarkPayload(childPayload, childNoteMeta);
             frame.target.children.push(childPayload);
         } else {
             const folderPayload = {
@@ -9644,6 +10808,7 @@ async function buildPayloadFromPermanentNode(node, isZh, options = {}) {
                 children: []
             };
             if (childTags.length) folderPayload.tags = childTags;
+            applyNoteMetaToBookmarkPayload(folderPayload, childNoteMeta);
             frame.target.children.push(folderPayload);
 
             if (Array.isArray(child.children) && child.children.length) {
@@ -9787,6 +10952,7 @@ async function createTempSectionFromSearchResults() {
         const needsPermanentLookup = items.some(item => item && item.source === 'permanent');
         let permanentNodeMap = null;
         let resolvePermanentNodeTags = null;
+        let resolvePermanentNodeNotes = null;
         if (needsPermanentLookup) {
             showCanvasToastSafe(isZh ? '正在整理文件夹结构…' : 'Preparing folder structure…', 'info', 1600);
             permanentNodeMap = await buildPermanentNodeMap(await getPermanentTreeRoot());
@@ -9797,7 +10963,15 @@ async function createTempSectionFromSearchResults() {
                     await window.TagSystem.ensurePermTagsLoaded();
                 }
             } catch (_) { }
+            try {
+                if (typeof window !== 'undefined'
+                    && window.NoteSystem
+                    && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+                    await window.NoteSystem.ensurePermNotesLoaded();
+                }
+            } catch (_) { }
             resolvePermanentNodeTags = (chromeId) => readPermanentNodeTagsCachedForPayload(chromeId);
+            resolvePermanentNodeNotes = (chromeId) => readPermanentNodeNoteMetaCachedForPayload(chromeId);
         }
 
         const payloadItems = [];
@@ -9835,7 +11009,9 @@ async function createTempSectionFromSearchResults() {
                 const node = permanentNodeMap.get(String(item.id));
                 const built = await buildPayloadFromPermanentNode(node, isZh, {
                     resolvePermanentNodeTags,
-                    rootTags: item.tags
+                    resolvePermanentNodeNotes,
+                    rootTags: item.tags,
+                    rootNoteMeta: item
                 });
                 if (built) {
                     await appendPayloadList([built], item.title || (isZh ? '文件夹' : 'Folder'));
@@ -9874,6 +11050,15 @@ async function createTempSectionFromSearchResults() {
                                 : [])
                     );
                     if (fallbackTags.length) fallbackPayload.tags = fallbackTags;
+                    const fallbackNoteMeta = normalizeNoteMetaForPayload(item && item.note, item && item.noteColor);
+                    applyNoteMetaToBookmarkPayload(
+                        fallbackPayload,
+                        fallbackNoteMeta.note
+                            ? fallbackNoteMeta
+                            : (item && item.source === 'permanent' && item.id
+                                ? readPermanentNodeNoteMetaCachedForPayload(item.id)
+                                : null)
+                    );
                     payloadItems.push(fallbackPayload);
                 }
             } else {
@@ -9959,6 +11144,16 @@ async function createTempSectionFromDomainResult(domain) {
                 && window.TagSystem
                 && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
                 await window.TagSystem.ensurePermTagsLoaded();
+                if (searchUiState && searchUiState.domainIndexCache) {
+                    searchUiState.domainIndexCache = null;
+                }
+            }
+        } catch (_) { }
+        try {
+            if (typeof window !== 'undefined'
+                && window.NoteSystem
+                && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+                await window.NoteSystem.ensurePermNotesLoaded();
                 if (searchUiState && searchUiState.domainIndexCache) {
                     searchUiState.domainIndexCache = null;
                 }
@@ -11711,6 +12906,31 @@ async function activateCanvasSearchResultAtIndex(index) {
         return;
     }
 
+    if (item.type === 'note-browser-color' || item.type === 'note-browser-note') {
+        searchUiState.noteBrowseDetail = {
+            active: true,
+            kind: item.type === 'note-browser-color' ? 'color' : 'note',
+            color: normalizeNoteBrowseColor(item.color),
+            note: String(item.note || '').trim(),
+            noteLower: String(item.noteLower || '').trim().toLowerCase()
+        };
+        const query = String(searchUiState.query || '').trim() || '*';
+        searchCanvasAndRender(query, { source: 'system', keepNoteBrowseDetail: true });
+        return;
+    }
+
+    if (item.type === 'note-browser-bucket') {
+        if (item.count === 0) return;
+        searchUiState.noteBrowseDetail = {
+            active: true,
+            kind: 'bucket',
+            bucket: item.bucket
+        };
+        const query = String(searchUiState.query || '').trim() || '*';
+        searchCanvasAndRender(query, { source: 'system', keepNoteBrowseDetail: true });
+        return;
+    }
+
     // Canvas Bookmark Mode: flat group card
     if (item.type === 'bookmark-group') {
         const locations = Array.isArray(item.locations) ? item.locations : [];
@@ -11983,6 +13203,13 @@ if (typeof window !== 'undefined') {
     window.searchCanvasAndRender = searchCanvasAndRender;
     window.resetCanvasSearchDb = resetCanvasSearchDb;
     window.updateCanvasSearchBookmarkTags = updateCanvasSearchBookmarkTags;
+    window.updateCanvasSearchBookmarkNotes = updateCanvasSearchBookmarkNotes;
+    window.markCanvasSearchBookmarkNoteDirty = markCanvasSearchBookmarkNoteDirty;
+    window.markCanvasSearchBookmarkTagDirty = markCanvasSearchBookmarkTagDirty;
+    window.invalidateCanvasNoteSearchCaches = invalidateCanvasNoteSearchCaches;
+    window.getCanvasBookmarkNoteForSearchCached = getCanvasBookmarkNoteForSearchCached;
+    window.getCanvasBookmarkNoteMetaForSearchCached = getCanvasBookmarkNoteMetaForSearchCached;
+    window.doesCanvasBookmarkItemNoteMatchQuery = doesCanvasBookmarkItemNoteMatchQuery;
     window.locateCanvasElement = locateCanvasElement;
     window.locateCanvasBookmarkTreeItem = locateCanvasBookmarkTreeItem;
     window.clearCanvasSearchHighlight = clearCanvasSearchHighlight;

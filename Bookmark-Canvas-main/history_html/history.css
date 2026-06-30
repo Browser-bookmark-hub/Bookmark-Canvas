@@ -4108,8 +4108,6 @@ body.sidebar-resizing * {
     cursor: pointer;
     transition: background-color 0.12s ease, color 0.12s ease;
     user-select: none;
-    content-visibility: auto;
-    contain-intrinsic-size: auto 28px;
 }
 
 /* 永久栏目/副本/临时栏目：多行标题时仍按树行中线对齐图标 */
@@ -5880,6 +5878,107 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     word-break: break-all;
 }
 
+.info-card-muted {
+    color: var(--text-tertiary, #8e8e93);
+}
+
+.info-tag-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    min-width: 0;
+}
+
+.info-tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    padding: 2px 7px 2px 5px;
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.info-tag-chip .tag-dot {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 auto;
+}
+
+.info-note-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    --note-color: var(--tag-orange, #ff9f0a);
+}
+
+.info-note-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.info-note-color-palette {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.info-note-color-btn {
+    padding: 2px;
+    flex: 0 0 auto;
+}
+
+.info-note-color-btn .tag-dot {
+    width: 12px;
+    height: 12px;
+}
+
+.info-note-editor.note-color-red { --note-color: var(--tag-red, #ff453a); }
+.info-note-editor.note-color-orange { --note-color: var(--tag-orange, #ff9f0a); }
+.info-note-editor.note-color-yellow { --note-color: var(--tag-yellow, #ffd60a); }
+.info-note-editor.note-color-green { --note-color: var(--tag-green, #30d158); }
+.info-note-editor.note-color-blue { --note-color: var(--tag-blue, #0a84ff); }
+.info-note-editor.note-color-purple { --note-color: var(--tag-purple, #bf5af2); }
+.info-note-editor.note-color-gray { --note-color: var(--tag-gray, #8e8e93); }
+
+.info-note-color-btn.is-selected .tag-dot {
+    box-shadow: 0 0 0 2px var(--text-primary, #fff);
+    transform: scale(1.08);
+}
+
+.info-note-textarea {
+    width: 100%;
+    min-height: 76px;
+    max-height: 180px;
+    resize: vertical;
+    box-sizing: border-box;
+    border: 1px solid color-mix(in srgb, var(--note-color) 48%, var(--border-color));
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    background-image: linear-gradient(color-mix(in srgb, var(--note-color) 7%, transparent), color-mix(in srgb, var(--note-color) 7%, transparent));
+    color: var(--text-primary);
+    padding: 7px 8px;
+    font: inherit;
+    line-height: 1.45;
+    outline: none;
+}
+
+.info-note-textarea:focus {
+    border-color: var(--note-color);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--note-color) 18%, transparent);
+}
+
+.info-note-textarea:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
 .info-path-text,
 .info-path-collapsed {
     display: -webkit-box;
@@ -6275,6 +6374,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .tree-delete-icon,
 .tree-trace-icon,
+.tree-info-icon,
 .tree-item-hover-actions .tree-tip-icon {
     position: static !important;
     top: auto !important;
@@ -6315,8 +6415,15 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     font-weight: 900;
 }
 
+.tree-info-icon::before {
+    content: '\f05a';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+}
+
 .tree-delete-icon:hover,
 .tree-trace-icon:hover,
+.tree-info-icon:hover,
 .tree-item-hover-actions .tree-tip-icon:hover {
     opacity: 1 !important;
 }
@@ -6326,6 +6433,10 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .tree-trace-icon:hover {
+    color: var(--accent-primary, #1890ff) !important;
+}
+
+.tree-info-icon:hover {
     color: var(--accent-primary, #1890ff) !important;
 }
 
@@ -7745,5 +7856,3 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .revert-toast {
     animation: slideUp 0.3s ease !important;
 }
-
-

@@ -65,6 +65,116 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+function __ctxNormalizeNote(noteInput) {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (bridge && typeof bridge.normalizeNoteInput === 'function') {
+        return bridge.normalizeNoteInput(noteInput);
+    }
+    return String(noteInput == null ? '' : noteInput).replace(/\r\n?/g, '\n').trim();
+}
+
+function __ctxNormalizeNoteColor(colorInput, fallback = 'orange') {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    if (bridge && typeof bridge.normalizeNoteColorInput === 'function') {
+        return bridge.normalizeNoteColorInput(colorInput, fallback);
+    }
+    const palette = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+    const color = String(colorInput || '').trim().toLowerCase();
+    if (palette.includes(color)) return color;
+    const fallbackColor = String(fallback || '').trim().toLowerCase();
+    return palette.includes(fallbackColor) ? fallbackColor : 'orange';
+}
+
+async function __ctxEnsurePermanentMetadataLoaded() {
+    if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+        try {
+            await window.TagSystem.ensurePermTagsLoaded();
+        } catch (e) {
+            console.warn('[元数据] 加载永久标签失败:', e);
+        }
+    }
+    if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+        try {
+            await window.NoteSystem.ensurePermNotesLoaded();
+        } catch (e) {
+            console.warn('[元数据] 加载永久笔记失败:', e);
+        }
+    }
+}
+
+async function __ctxFlushPermanentMetadataUpdates(tagUpdates, noteUpdates, reason = '') {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    const tags = Array.isArray(tagUpdates) ? tagUpdates : [];
+    const notes = Array.isArray(noteUpdates) ? noteUpdates : [];
+
+    if (tags.length && bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
+        try {
+            await bridge.writePermanentNodeTagsBulk(tags);
+            const tagTargets = tags.map((u) => ({
+                kind: 'permanent',
+                chromeId: u.chromeId,
+                tags: Array.isArray(u.tags) ? u.tags : []
+            }));
+            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                await window.TagSystem.ensurePermTagsLoaded(true);
+            }
+            if (typeof window.__refreshAllTagDots === 'function') {
+                window.__refreshAllTagDots();
+            }
+            try {
+                if (typeof window.markCanvasSearchBookmarkTagDirty === 'function') {
+                    window.markCanvasSearchBookmarkTagDirty(tagTargets);
+                }
+            } catch (_) { }
+        } catch (e) {
+            console.warn('[元数据] 批量写入永久书签标签失败:', reason, e);
+        }
+    }
+
+    if (notes.length && bridge) {
+        try {
+            let writtenNotes = [];
+            if (typeof bridge.writePermanentNodeNotesBulk === 'function') {
+                const result = await bridge.writePermanentNodeNotesBulk(notes);
+                if (result && result.changed) writtenNotes = notes;
+            } else if (typeof bridge.writePermanentNodeNoteMeta === 'function') {
+                for (const update of notes) {
+                    const result = await bridge.writePermanentNodeNoteMeta(update.chromeId, update.note, update.noteColor || update.color);
+                    if (result) writtenNotes.push(update);
+                }
+            }
+            if (!writtenNotes.length) return;
+            if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+                await window.NoteSystem.ensurePermNotesLoaded(true);
+            }
+            const noteTargets = writtenNotes.map((u) => ({
+                kind: 'permanent',
+                chromeId: u.chromeId,
+                note: u.note,
+                color: u.noteColor || u.color,
+                noteColor: u.noteColor || u.color
+            }));
+            if (typeof window.__refreshNoteMarkersForTargets === 'function') {
+                window.__refreshNoteMarkersForTargets(noteTargets);
+            } else if (typeof window.__refreshAllNoteMarkers === 'function') {
+                window.__refreshAllNoteMarkers();
+            }
+            try {
+                if (typeof window.updateCanvasSearchBookmarkNotes === 'function') {
+                    window.updateCanvasSearchBookmarkNotes(noteTargets);
+                }
+            } catch (_) { }
+            try {
+                if (typeof window.markCanvasSearchBookmarkNoteDirty === 'function') {
+                    window.markCanvasSearchBookmarkNoteDirty(noteTargets);
+                }
+            } catch (_) { }
+        } catch (e) {
+            console.warn('[元数据] 批量写入永久书签笔记失败:', reason, e);
+        }
+    }
+}
+
 async function readPermanentNodeFromBcs(nodeId) {
     const id = String(nodeId || '').trim();
     if (!id) return null;
@@ -2809,7 +2919,7 @@ function initContextMenu() {
         // 如果点击的不是菜单和子菜单内部，并且不是快捷图标本身，关闭菜单
         const clickInMenu = contextMenu && contextMenu.contains(e.target);
         const clickInSubmenu = contextSubmenu && contextSubmenu.contains(e.target);
-        const clickInShortcut = (e.target && typeof e.target.closest === 'function') ? e.target.closest('.tree-trace-icon, .tree-delete-icon, .tree-confirm-icon, .tree-cancel-icon') : null;
+        const clickInShortcut = (e.target && typeof e.target.closest === 'function') ? e.target.closest('.tree-trace-icon, .tree-info-icon, .tree-delete-icon, .tree-confirm-icon, .tree-cancel-icon') : null;
         if (!clickInMenu && !clickInSubmenu && !clickInShortcut) {
             hideContextMenu();
         }
@@ -3567,6 +3677,10 @@ async function showContextMenu(e, node) {
 function renderSubmenu(context) {
     if (!contextSubmenu) return;
 
+    if (contextSubmenu.style.display === 'block') {
+        flushInfoSubmenuNoteEditor();
+    }
+    contextSubmenu.__flushInfoNoteEditor = null;
     contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu', 'is-info-submenu');
 
     if (contextSubmenu.dataset.triggerAction === 'trace-submenu-trigger') {
@@ -3694,8 +3808,22 @@ function renderSubmenu(context) {
 }
 
 // 隐藏二级菜单，并在纵向布局下重置一级菜单的位置
+function flushInfoSubmenuNoteEditor() {
+    if (!contextSubmenu || typeof contextSubmenu.__flushInfoNoteEditor !== 'function') return;
+    try {
+        const result = contextSubmenu.__flushInfoNoteEditor();
+        if (result && typeof result.catch === 'function') {
+            result.catch((err) => console.error('[Info] Failed to flush note before closing submenu:', err));
+        }
+    } catch (err) {
+        console.error('[Info] Failed to flush note before closing submenu:', err);
+    }
+}
+
 function hideSubmenu() {
     if (contextSubmenu) {
+        flushInfoSubmenuNoteEditor();
+        contextSubmenu.__flushInfoNoteEditor = null;
         contextSubmenu.style.display = 'none';
         contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu');
     }
@@ -4095,6 +4223,8 @@ function buildMenuItems(context) {
             { action: 'batch-delete', label: lang === 'zh_CN' ? '删除选中项' : 'DELETE', icon: 'trash-alt' },
             { action: 'tag-submenu-trigger', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', hasSubmenu: true },
             { action: 'batch-clear-tags', label: lang === 'zh_CN' ? '清除标签' : 'Clear Tags', icon: 'times-circle' },
+            { action: 'batch-edit-note', label: lang === 'zh_CN' ? '批量编辑笔记' : 'Batch Edit Notes', icon: 'sticky-note' },
+            { action: 'batch-clear-note', label: lang === 'zh_CN' ? '清除笔记' : 'Clear Notes', icon: 'eraser' },
             { action: 'batch-rename', label: lang === 'zh_CN' ? '批量重命名' : 'Batch Rename', icon: 'edit' },
             { separator: true },
             { action: 'batch-export-html', label: lang === 'zh_CN' ? '导出为HTML' : 'Export to HTML', icon: 'file-code' },
@@ -5120,6 +5250,69 @@ function renderInfoSubmenu(context) {
         }
     }
 
+    const normalizeInfoNote = (raw) => {
+        if (raw === undefined || raw === null) return '';
+        return String(raw).replace(/\r\n?/g, '\n').trim();
+    };
+
+    const normalizeInfoTags = (tags) => {
+        return (Array.isArray(tags) ? tags : [])
+            .map((tag) => (tag && typeof tag === 'object')
+                ? { color: String(tag.color || '').trim(), text: String(tag.text || '').trim() }
+                : null)
+            .filter((tag) => tag && tag.color);
+    };
+
+    const INFO_NOTE_COLOR_PALETTE = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+    const normalizeInfoNoteColor = (raw, fallback = 'orange') => {
+        const color = String(raw || '').trim().toLowerCase();
+        if (INFO_NOTE_COLOR_PALETTE.includes(color)) return color;
+        const fallbackColor = String(fallback || '').trim().toLowerCase();
+        return INFO_NOTE_COLOR_PALETTE.includes(fallbackColor) ? fallbackColor : 'orange';
+    };
+
+    const renderInfoTagsHtml = (tags) => {
+        const normalized = normalizeInfoTags(tags);
+        const empty = lang === 'zh_CN' ? '无' : 'None';
+        const label = lang === 'zh_CN' ? 'TAG' : 'TAGS';
+        const chips = normalized.length
+            ? normalized.map((tag) => {
+                const colorClass = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'].includes(tag.color) ? tag.color : 'gray';
+                const text = tag.text || tag.color;
+                return `<span class="info-tag-chip"><span class="tag-dot tag-dot-${escapeHtml(colorClass)}"></span><span>${escapeHtml(text)}</span></span>`;
+            }).join('')
+            : `<span class="info-card-value info-card-muted">${escapeHtml(empty)}</span>`;
+        return `
+            <div class="info-card-row info-card-tags-row">
+                <span class="info-card-label">${label}</span>
+                <div class="info-tag-chip-row">${chips}</div>
+            </div>
+        `;
+    };
+
+    const renderInfoNoteHtml = (note, noteColor) => {
+        const safeNote = normalizeInfoNote(note);
+        const safeColor = normalizeInfoNoteColor(noteColor);
+        const label = lang === 'zh_CN' ? 'NOTE' : 'NOTE';
+        const placeholder = lang === 'zh_CN' ? '添加笔记...' : 'Add note...';
+        const colorTitle = lang === 'zh_CN' ? '笔记颜色' : 'Note color';
+        return `
+            <div class="info-card-row info-card-note-row" data-note-color="${escapeHtml(safeColor)}">
+                <div class="info-note-heading">
+                    <span class="info-card-label">${label}</span>
+                    <div class="info-note-color-palette" title="${escapeHtml(colorTitle)}" aria-label="${escapeHtml(colorTitle)}">
+                        ${INFO_NOTE_COLOR_PALETTE.map((color) =>
+                            `<button class="tag-palette-btn info-note-color-btn${color === safeColor ? ' is-selected' : ''}" data-note-color="${escapeHtml(color)}" type="button" aria-label="${escapeHtml(color)}"><span class="tag-dot tag-dot-${escapeHtml(color)}"></span></button>`
+                        ).join('')}
+                    </div>
+                </div>
+                <div class="info-note-editor note-color-${escapeHtml(safeColor)}">
+                    <textarea class="info-note-textarea" rows="4" data-note-color="${escapeHtml(safeColor)}" placeholder="${escapeHtml(placeholder)}">${escapeHtml(safeNote)}</textarea>
+                </div>
+            </div>
+        `;
+    };
+
     // 显示加载状态
     contextSubmenu.innerHTML = `
         <div class="info-loading">
@@ -5217,6 +5410,8 @@ function renderInfoSubmenu(context) {
                 ${pathHtml}
                 ${urlHtml}
                 ${timesHtml}
+                ${renderInfoTagsHtml(data.tags)}
+                ${renderInfoNoteHtml(data.note, data.noteColor)}
             </div>
         `;
     };
@@ -5275,6 +5470,129 @@ function renderInfoSubmenu(context) {
         }
     };
 
+    const bindNoteEditorEvent = (data) => {
+        const textarea = contextSubmenu.querySelector('.info-note-textarea');
+        const noteRow = contextSubmenu.querySelector('.info-card-note-row');
+        const editor = contextSubmenu.querySelector('.info-note-editor');
+        if (!textarea || !data || !data.target) return;
+        let selectedColor = normalizeInfoNoteColor(data.noteColor);
+        let saveChain = Promise.resolve();
+
+        const applyColorUi = (colorInput) => {
+            selectedColor = normalizeInfoNoteColor(colorInput, selectedColor);
+            if (noteRow) noteRow.dataset.noteColor = selectedColor;
+            if (textarea) textarea.dataset.noteColor = selectedColor;
+            if (editor) {
+                INFO_NOTE_COLOR_PALETTE.forEach((color) => editor.classList.remove(`note-color-${color}`));
+                editor.classList.add(`note-color-${selectedColor}`);
+            }
+            contextSubmenu.querySelectorAll('.info-note-color-btn').forEach((btn) => {
+                btn.classList.toggle('is-selected', btn.dataset.noteColor === selectedColor);
+            });
+        };
+
+        const setBusy = (busy) => {
+            textarea.disabled = !!busy;
+            contextSubmenu.querySelectorAll('.info-note-color-btn').forEach((btn) => { btn.disabled = !!busy; });
+        };
+        const persist = async (noteInput, colorInput = selectedColor) => {
+            const note = normalizeInfoNote(noteInput);
+            const color = normalizeInfoNoteColor(colorInput);
+            const target = data.target;
+            setBusy(true);
+            try {
+                if (target.kind === 'temporary') {
+                    if (typeof setTempItemNote === 'function') {
+                        setTempItemNote(target.sectionId, target.itemId, note, { noteColor: color, skipSearchUpdate: false });
+                    } else if (window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.setNote === 'function') {
+                        window.CanvasModule.temp.setNote(target.sectionId, target.itemId, note, { noteColor: color, skipSearchUpdate: false });
+                    } else {
+                        throw new Error('Temporary note helper unavailable');
+                    }
+                    const noteTarget = { kind: 'temporary', sectionId: target.sectionId, itemId: target.itemId, note, color, noteColor: color };
+                    try { if (typeof window.__refreshNoteMarkersForTargets === 'function') window.__refreshNoteMarkersForTargets([noteTarget]); } catch (_) {}
+                } else if (target.kind === 'permanent') {
+                    const bridge = window.CanvasProtocolBridge;
+                    if (!bridge || (typeof bridge.writePermanentNodeNoteMeta !== 'function' && typeof bridge.writePermanentNodeNote !== 'function')) {
+                        throw new Error('Permanent note bridge unavailable');
+                    }
+                    let writeResult = null;
+                    if (typeof bridge.writePermanentNodeNoteMeta === 'function') {
+                        writeResult = await bridge.writePermanentNodeNoteMeta(target.chromeId, note, color);
+                    } else {
+                        writeResult = await bridge.writePermanentNodeNote(target.chromeId, note, { noteColor: color });
+                    }
+                    if (!writeResult) {
+                        throw new Error('Permanent note target not found');
+                    }
+                    try {
+                        if (window.NoteSystem && typeof window.NoteSystem.invalidatePermNotesCache === 'function') {
+                            window.NoteSystem.invalidatePermNotesCache();
+                        }
+                    } catch (_) {}
+                    try {
+                        if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+                            await window.NoteSystem.ensurePermNotesLoaded(true);
+                        }
+                    } catch (_) {}
+                    const noteTarget = { kind: 'permanent', chromeId: target.chromeId, note, color, noteColor: color };
+                    try { if (typeof window.updateCanvasSearchBookmarkNotes === 'function') window.updateCanvasSearchBookmarkNotes([noteTarget]); } catch (_) {}
+                    try { if (typeof window.markCanvasSearchBookmarkNoteDirty === 'function') window.markCanvasSearchBookmarkNoteDirty([noteTarget]); } catch (_) {}
+                    try { if (typeof window.__refreshNoteMarkersForTargets === 'function') window.__refreshNoteMarkersForTargets([noteTarget]); } catch (_) {}
+                }
+                textarea.value = note;
+                data.note = note;
+                data.noteColor = color;
+                applyColorUi(color);
+            } catch (err) {
+                console.error('[Info] Failed to save note:', err);
+                if (typeof showToast === 'function') {
+                    showToast(lang === 'zh_CN' ? '笔记保存失败' : 'Failed to save note', 'error');
+                }
+            } finally {
+                setBusy(false);
+            }
+        };
+
+        const hasUnsavedNoteChange = () => {
+            return normalizeInfoNote(textarea.value) !== normalizeInfoNote(data.note) ||
+                normalizeInfoNoteColor(selectedColor) !== normalizeInfoNoteColor(data.noteColor);
+        };
+
+        const persistIfChanged = () => {
+            if (!hasUnsavedNoteChange()) return saveChain;
+            const noteToSave = textarea.value;
+            const colorToSave = selectedColor;
+            saveChain = saveChain.then(
+                () => persist(noteToSave, colorToSave),
+                () => persist(noteToSave, colorToSave)
+            );
+            return saveChain;
+        };
+
+        contextSubmenu.__flushInfoNoteEditor = persistIfChanged;
+
+        const scheduleAutoSaveAfterFocusExit = () => {
+            setTimeout(() => {
+                const active = document.activeElement;
+                if (noteRow && active && noteRow.contains(active)) return;
+                persistIfChanged();
+            }, 0);
+        };
+
+        applyColorUi(selectedColor);
+        contextSubmenu.querySelectorAll('.info-note-color-btn').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                applyColorUi(btn.dataset.noteColor);
+            });
+        });
+        if (noteRow) noteRow.addEventListener('focusout', scheduleAutoSaveAfterFocusExit);
+        textarea.addEventListener('click', (e) => e.stopPropagation());
+        textarea.addEventListener('keydown', (e) => e.stopPropagation());
+    };
+
     if (isTemporary) {
         const manager = getTempManager();
         const entry = manager ? manager.findItem(context.sectionId, nodeId) : null;
@@ -5299,8 +5617,17 @@ function renderInfoSubmenu(context) {
         const visibleParts = needsTruncation ? pathParts.slice(-3) : pathParts;
         const pathStr = visibleParts.join(' > ');
         const path = needsTruncation ? `.../${pathStr}` : pathStr;
-
-        contextSubmenu.innerHTML = renderCard({
+        const tags = typeof getTempItemTags === 'function'
+            ? getTempItemTags(context.sectionId, nodeId)
+            : (Array.isArray(entry.item.tags) ? entry.item.tags : []);
+        const noteMeta = typeof getTempItemNoteMeta === 'function'
+            ? getTempItemNoteMeta(context.sectionId, nodeId)
+            : (window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.getNoteMeta === 'function'
+                ? window.CanvasModule.temp.getNoteMeta(context.sectionId, nodeId)
+                : { note: normalizeInfoNote(entry.item.note), color: normalizeInfoNoteColor(entry.item.noteColor) });
+        const note = normalizeInfoNote(noteMeta && noteMeta.note);
+        const noteColor = normalizeInfoNoteColor(noteMeta && (noteMeta.noteColor || noteMeta.color));
+        const cardData = {
             title: entry.item.title,
             url: entry.item.url,
             type: entry.item.type,
@@ -5308,10 +5635,17 @@ function renderInfoSubmenu(context) {
             fullPath,
             needsTruncation,
             pathStr,
-            id: entry.item.id
-        });
+            id: entry.item.id,
+            tags,
+            note,
+            noteColor,
+            target: { kind: 'temporary', sectionId: context.sectionId, itemId: nodeId }
+        };
+
+        contextSubmenu.innerHTML = renderCard(cardData);
         bindCopyEvent();
         bindPathToggleEvent();
+        bindNoteEditorEvent(cardData);
     } else {
         if (!chrome || !chrome.bookmarks) {
             contextSubmenu.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">${lang === 'zh_CN' ? '当前环境不支持书签 API' : 'Bookmarks API not supported'}</div>`;
@@ -5351,8 +5685,25 @@ function renderInfoSubmenu(context) {
             const visibleParts = needsTruncation ? pathParts.slice(-3) : pathParts;
             const pathStr = visibleParts.join(' > ');
             const path = needsTruncation ? `.../${pathStr}` : pathStr;
-
-            contextSubmenu.innerHTML = renderCard({
+            const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+            let tags = [];
+            let note = '';
+            let noteColor = 'orange';
+            try {
+                if (bridge && typeof bridge.readPermanentNodeTags === 'function') {
+                    tags = await bridge.readPermanentNodeTags(node.id);
+                }
+            } catch (_) { tags = []; }
+            try {
+                if (bridge && typeof bridge.readPermanentNodeNoteMeta === 'function') {
+                    const noteMeta = await bridge.readPermanentNodeNoteMeta(node.id);
+                    note = normalizeInfoNote(noteMeta && noteMeta.note);
+                    noteColor = normalizeInfoNoteColor(noteMeta && (noteMeta.noteColor || noteMeta.color));
+                } else if (bridge && typeof bridge.readPermanentNodeNote === 'function') {
+                    note = await bridge.readPermanentNodeNote(node.id);
+                }
+            } catch (_) { note = ''; }
+            const cardData = {
                 title: node.title,
                 url: node.url,
                 type: node.url ? 'bookmark' : 'folder',
@@ -5362,10 +5713,17 @@ function renderInfoSubmenu(context) {
                 pathStr,
                 dateAdded: node.dateAdded,
                 dateGroupModified: node.dateGroupModified,
-                id: node.id
-            });
+                id: node.id,
+                tags,
+                note,
+                noteColor,
+                target: { kind: 'permanent', chromeId: node.id }
+            };
+
+            contextSubmenu.innerHTML = renderCard(cardData);
             bindCopyEvent();
             bindPathToggleEvent();
+            bindNoteEditorEvent(cardData);
         });
     }
 }
@@ -5768,14 +6126,14 @@ document.addEventListener('click', (event) => {
     }
 }, true);
 
-// 捕获阶段的全局点击监听，用于响应临时溯源行尾快捷图标
+// 捕获阶段的全局点击监听，用于响应信息行尾快捷图标
 document.addEventListener('click', (e) => {
-    const traceIcon = e.target.closest('.tree-trace-icon');
-    if (!traceIcon) return;
+    const infoIcon = e.target.closest('.tree-info-icon');
+    if (!infoIcon) return;
     e.stopImmediatePropagation();
     e.preventDefault();
 
-    const treeItem = traceIcon.closest('.tree-item');
+    const treeItem = infoIcon.closest('.tree-item');
     if (!treeItem) return;
 
     // 获取节点的上下文
@@ -5785,9 +6143,9 @@ document.addEventListener('click', (e) => {
     // 设置当前节点
     currentContextNode = treeItem;
 
-    // 如果该节点的临时溯源子菜单已经是打开状态，则关闭它
-    if (contextSubmenu && contextSubmenu.style.display === 'block' && 
-        contextSubmenu.dataset.triggerAction === 'trace-submenu-trigger' && 
+    // 如果该节点的信息子菜单已经是打开状态，则关闭它
+    if (contextSubmenu && contextSubmenu.style.display === 'block' &&
+        contextSubmenu.dataset.triggerAction === 'info-submenu-trigger' &&
         contextSubmenu.dataset.contextNodeId === context.nodeId) {
         hideContextMenu();
         return;
@@ -5798,11 +6156,11 @@ document.addEventListener('click', (e) => {
 
     // 重新设置上下文
     currentContextNode = treeItem;
-    contextSubmenu.dataset.triggerAction = 'trace-submenu-trigger';
+    contextSubmenu.dataset.triggerAction = 'info-submenu-trigger';
     contextSubmenu.dataset.contextNodeId = context.nodeId; // 用于第二次点击时切换关闭
 
-    // 展开临时溯源面板
-    toggleSubmenu(traceIcon, context);
+    // 展开信息面板
+    toggleSubmenu(infoIcon, context);
 }, true);
 
 // 捕获阶段的全局点击监听，用于响应删除及确认二次确认快捷图标
@@ -5895,7 +6253,7 @@ document.addEventListener('click', (e) => {
 // 捕获阶段全局拦截对快捷按钮背景/间隔的点击，防止误触发文件夹的展开或折叠
 document.addEventListener('click', (e) => {
     if (e.target && typeof e.target.closest === 'function' && e.target.closest('.tree-item-hover-actions')) {
-        const button = e.target.closest('.tree-trace-icon, .tree-delete-icon, .tree-tip-icon, .tree-confirm-icon, .tree-cancel-icon');
+        const button = e.target.closest('.tree-trace-icon, .tree-info-icon, .tree-delete-icon, .tree-tip-icon, .tree-confirm-icon, .tree-cancel-icon');
         if (!button) {
             e.stopImmediatePropagation();
             e.preventDefault();
@@ -6488,13 +6846,7 @@ async function pasteIntoTemp(context, pasteBelow = false) {
             if (!payload || !payload.length) {
                 payload = [];
                 if (chrome && chrome.bookmarks && bookmarkClipboard.nodeIds) {
-                    if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-                        try {
-                            await window.TagSystem.ensurePermTagsLoaded();
-                        } catch (e) {
-                            console.warn('[粘贴] 加载永久标签失败:', e);
-                        }
-                    }
+                    await __ctxEnsurePermanentMetadataLoaded();
                     for (const id of bookmarkClipboard.nodeIds) {
                         const node = await readPermanentNodeForPayload(id);
                         if (node) {
@@ -6577,6 +6929,22 @@ function serializeBookmarkNode(node) {
         if (Array.isArray(cachedTags) && cachedTags.length) {
             out.tags = cachedTags.map(t => ({ color: t.color, text: t.text }));
         }
+    }
+    const inlineNote = __ctxNormalizeNote(node.note);
+    if (inlineNote) {
+        out.note = inlineNote;
+        out.noteColor = __ctxNormalizeNoteColor(node.noteColor);
+    } else if (node.id && window.NoteSystem) {
+        try {
+            const meta = typeof window.NoteSystem.getPermNodeNoteMetaCached === 'function'
+                ? window.NoteSystem.getPermNodeNoteMetaCached(node.id)
+                : { note: (typeof window.NoteSystem.getPermNodeNoteCached === 'function' ? window.NoteSystem.getPermNodeNoteCached(node.id) : ''), color: 'orange' };
+            const note = __ctxNormalizeNote(meta && meta.note);
+            if (note) {
+                out.note = note;
+                out.noteColor = __ctxNormalizeNoteColor(meta && (meta.noteColor || meta.color));
+            }
+        } catch (_) { }
     }
     return out;
 }
@@ -6746,6 +7114,12 @@ async function handleTempMenuAction(action, context) {
         case 'batch-clear-tags':
             await clearTagsForContext(action, context);
             break;
+        case 'batch-edit-note':
+            await editNotesForContext(action, context);
+            break;
+        case 'batch-clear-note':
+            await clearNotesForContext(action, context);
+            break;
         default:
             console.warn('[临时栏目] 未处理的菜单操作:', action);
     }
@@ -6757,6 +7131,7 @@ async function handleTempMenuAction(action, context) {
 // TagSystem module (history_html/tag_system/tag_system.js).
 function resolveTagTargetsForContext(action, context) {
     const isBatch = action === 'batch-add-tags' || action === 'batch-clear-tags' ||
+                    action === 'batch-edit-note' || action === 'batch-clear-note' ||
                     (action === 'tag-submenu-trigger' && selectedNodes && selectedNodes.size > 0 && context && selectedNodes.has(context.nodeId));
     let targets = [];
     let anchorEl = null;
@@ -6878,6 +7253,9 @@ async function clearTagsForContext(action, context) {
         try { window.__refreshTagDotsForTargets(changedTargets); } catch (_) {}
     }
     try {
+        if (typeof window.markCanvasSearchBookmarkTagDirty === 'function') {
+            window.markCanvasSearchBookmarkTagDirty(changedTargets);
+        }
         if (typeof window.updateCanvasSearchBookmarkTags === 'function') {
             window.updateCanvasSearchBookmarkTags(changedTargets);
         }
@@ -6887,6 +7265,295 @@ async function clearTagsForContext(action, context) {
             window.searchCanvasAndRender(q);
         }
     } catch (_) {}
+}
+
+function __ctxReadNoteMetaForTarget(target) {
+    if (!target) return { note: '', noteColor: 'orange' };
+    try {
+        if (typeof window !== 'undefined' && window.NoteSystem && typeof window.NoteSystem.getNoteMetaForTargetSync === 'function') {
+            const meta = window.NoteSystem.getNoteMetaForTargetSync(target) || {};
+            return {
+                note: __ctxNormalizeNote(meta.note),
+                noteColor: __ctxNormalizeNoteColor(meta.noteColor || meta.color)
+            };
+        }
+    } catch (_) { }
+    try {
+        if (target.kind === 'temporary') {
+            if (typeof getTempItemNoteMeta === 'function') {
+                const meta = getTempItemNoteMeta(target.sectionId, target.itemId) || {};
+                return {
+                    note: __ctxNormalizeNote(meta.note),
+                    noteColor: __ctxNormalizeNoteColor(meta.noteColor || meta.color)
+                };
+            }
+            if (typeof getTempItemNote === 'function') {
+                return {
+                    note: __ctxNormalizeNote(getTempItemNote(target.sectionId, target.itemId)),
+                    noteColor: 'orange'
+                };
+            }
+        } else if (target.kind === 'permanent' && typeof window !== 'undefined' && window.NoteSystem) {
+            if (typeof window.NoteSystem.getPermNodeNoteMetaCached === 'function') {
+                const meta = window.NoteSystem.getPermNodeNoteMetaCached(target.chromeId) || {};
+                return {
+                    note: __ctxNormalizeNote(meta.note),
+                    noteColor: __ctxNormalizeNoteColor(meta.noteColor || meta.color)
+                };
+            }
+            if (typeof window.NoteSystem.getPermNodeNoteCached === 'function') {
+                return {
+                    note: __ctxNormalizeNote(window.NoteSystem.getPermNodeNoteCached(target.chromeId)),
+                    noteColor: 'orange'
+                };
+            }
+        }
+    } catch (_) { }
+    return { note: '', noteColor: 'orange' };
+}
+
+function __ctxBuildBatchNoteInitialMeta(targets) {
+    const list = (Array.isArray(targets) ? targets : []).map(__ctxReadNoteMetaForTarget);
+    if (!list.length) return { note: '', noteColor: 'orange', mixed: false };
+    const first = list[0];
+    const sameNote = list.every((meta) => __ctxNormalizeNote(meta.note) === __ctxNormalizeNote(first.note));
+    const sameColor = list.every((meta) => __ctxNormalizeNoteColor(meta.noteColor) === __ctxNormalizeNoteColor(first.noteColor));
+    return {
+        note: sameNote ? first.note : '',
+        noteColor: sameColor ? first.noteColor : 'orange',
+        mixed: !sameNote
+    };
+}
+
+function showBatchNoteEditModal(targets) {
+    const lang = currentLang || 'zh_CN';
+    const initial = __ctxBuildBatchNoteInitialMeta(targets);
+    const palette = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+    const count = Array.isArray(targets) ? targets.length : 0;
+    const selectedInitial = __ctxNormalizeNoteColor(initial.noteColor);
+
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal content-center batch-note-edit-modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header compact">
+                    <h3>${escapeHtml(lang === 'zh_CN' ? `批量编辑笔记 (${count})` : `Batch Edit Notes (${count})`)}</h3>
+                    <button class="modal-close" type="button"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="info-note-heading">
+                        <span class="info-card-label">${escapeHtml(lang === 'zh_CN' ? 'NOTE' : 'NOTE')}</span>
+                        <div class="info-note-color-palette">
+                            ${palette.map((color) =>
+                                `<button class="tag-palette-btn info-note-color-btn${color === selectedInitial ? ' is-selected' : ''}" data-note-color="${escapeHtml(color)}" type="button" aria-label="${escapeHtml(color)}"><span class="tag-dot tag-dot-${escapeHtml(color)}"></span></button>`
+                            ).join('')}
+                        </div>
+                    </div>
+                    <div class="info-note-editor note-color-${escapeHtml(selectedInitial)}">
+                        <textarea class="info-note-textarea" rows="5" placeholder="${escapeHtml(lang === 'zh_CN' ? '添加笔记...' : 'Add note...')}">${escapeHtml(initial.note)}</textarea>
+                    </div>
+                    <div class="modal-actions" style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
+                        <button class="modal-btn" type="button" data-note-cancel="true">${escapeHtml(lang === 'zh_CN' ? '取消' : 'Cancel')}</button>
+                        <button class="modal-btn primary" type="button" data-note-save="true">${escapeHtml(lang === 'zh_CN' ? '保存' : 'Save')}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        let closed = false;
+        const cleanup = (value) => {
+            if (closed) return;
+            closed = true;
+            modal.classList.remove('show');
+            setTimeout(() => { try { modal.remove(); } catch (_) { } }, 120);
+            resolve(value);
+        };
+        const editor = modal.querySelector('.info-note-editor');
+        const textarea = modal.querySelector('.info-note-textarea');
+        let selectedColor = selectedInitial;
+        const applyColor = (colorInput) => {
+            selectedColor = __ctxNormalizeNoteColor(colorInput, selectedColor);
+            if (editor) {
+                palette.forEach((color) => editor.classList.remove(`note-color-${color}`));
+                editor.classList.add(`note-color-${selectedColor}`);
+            }
+            modal.querySelectorAll('.info-note-color-btn').forEach((btn) => {
+                btn.classList.toggle('is-selected', btn.dataset.noteColor === selectedColor);
+            });
+        };
+
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal || event.target.closest('.modal-close') || event.target.closest('[data-note-cancel="true"]')) {
+                cleanup(null);
+                return;
+            }
+            const colorBtn = event.target.closest('.info-note-color-btn');
+            if (colorBtn) {
+                event.preventDefault();
+                applyColor(colorBtn.dataset.noteColor);
+                return;
+            }
+            if (event.target.closest('[data-note-save="true"]')) {
+                cleanup({
+                    note: __ctxNormalizeNote(textarea ? textarea.value : ''),
+                    noteColor: selectedColor
+                });
+            }
+        });
+        modal.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') cleanup(null);
+            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                cleanup({
+                    note: __ctxNormalizeNote(textarea ? textarea.value : ''),
+                    noteColor: selectedColor
+                });
+            }
+        });
+
+        getOverlayContainer().appendChild(modal);
+        requestAnimationFrame(() => {
+            modal.classList.add('show');
+            if (textarea) textarea.focus();
+        });
+    });
+}
+
+async function writeNotesForContextTargets(targets, noteInput, colorInput, reason = '') {
+    const list = Array.isArray(targets) ? targets.filter(Boolean) : [];
+    if (!list.length) return [];
+    const note = __ctxNormalizeNote(noteInput);
+    const noteColor = __ctxNormalizeNoteColor(colorInput);
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    const permanentUpdates = [];
+    const permanentTargets = [];
+    const changedTargets = [];
+    const changedTempSectionIds = new Set();
+
+    for (const target of list) {
+        if (target.kind === 'permanent') {
+            permanentUpdates.push({ chromeId: target.chromeId, note, noteColor });
+            permanentTargets.push(target);
+        } else if (target.kind === 'temporary') {
+            let ok = false;
+            if (typeof setTempItemNote === 'function') {
+                ok = !!setTempItemNote(target.sectionId, target.itemId, note, {
+                    noteColor,
+                    skipRender: true,
+                    skipSave: true,
+                    skipSearchUpdate: true
+                });
+            } else if (window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.setNote === 'function') {
+                ok = !!window.CanvasModule.temp.setNote(target.sectionId, target.itemId, note, {
+                    noteColor,
+                    skipRender: true,
+                    skipSave: true,
+                    skipSearchUpdate: true
+                });
+            }
+            if (ok) {
+                changedTempSectionIds.add(String(target.sectionId || ''));
+                changedTargets.push(Object.assign({}, target, { note, color: noteColor, noteColor }));
+            }
+        }
+    }
+
+    if (permanentUpdates.length && bridge) {
+        if (typeof bridge.writePermanentNodeNotesBulk === 'function') {
+            const result = await bridge.writePermanentNodeNotesBulk(permanentUpdates);
+            if (result && result.changed) {
+                permanentTargets.forEach((target) => changedTargets.push(Object.assign({}, target, { note, color: noteColor, noteColor })));
+            }
+        } else if (typeof bridge.writePermanentNodeNoteMeta === 'function') {
+            for (let i = 0; i < permanentUpdates.length; i += 1) {
+                const update = permanentUpdates[i];
+                const result = await bridge.writePermanentNodeNoteMeta(update.chromeId, update.note, update.noteColor);
+                if (result) {
+                    changedTargets.push(Object.assign({}, permanentTargets[i], { note, color: noteColor, noteColor }));
+                }
+            }
+        } else if (typeof bridge.writePermanentNodeNote === 'function') {
+            for (let i = 0; i < permanentUpdates.length; i += 1) {
+                const update = permanentUpdates[i];
+                const result = await bridge.writePermanentNodeNote(update.chromeId, update.note, { noteColor: update.noteColor });
+                if (result) {
+                    changedTargets.push(Object.assign({}, permanentTargets[i], { note, color: noteColor, noteColor }));
+                }
+            }
+        } else {
+            console.warn('[元数据] 永久书签笔记写入桥接不可用:', reason);
+        }
+    }
+
+    if (changedTempSectionIds.size && window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.getSection === 'function') {
+        changedTempSectionIds.forEach((sectionId) => {
+            try {
+                const section = window.CanvasModule.temp.getSection(sectionId);
+                const refreshFn = (typeof window.refreshTempSectionTreeInPlace === 'function')
+                    ? window.refreshTempSectionTreeInPlace
+                    : (typeof refreshTempSectionTreeInPlace === 'function' ? refreshTempSectionTreeInPlace : null);
+                if (section && refreshFn) {
+                    refreshFn(section);
+                }
+            } catch (_) { }
+        });
+        try {
+            const saveFn = (typeof window.saveTempNodes === 'function')
+                ? window.saveTempNodes
+                : (typeof saveTempNodes === 'function' ? saveTempNodes : null);
+            if (saveFn) saveFn();
+        } catch (_) { }
+    }
+
+    if (!changedTargets.length) return [];
+    try {
+        if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+            await window.NoteSystem.ensurePermNotesLoaded(true);
+        }
+    } catch (_) { }
+    if (typeof window.__refreshNoteMarkersForTargets === 'function') {
+        try { window.__refreshNoteMarkersForTargets(changedTargets); } catch (_) { }
+    } else if (typeof window.__refreshAllNoteMarkers === 'function') {
+        try { window.__refreshAllNoteMarkers(); } catch (_) { }
+    }
+    try {
+        if (typeof window.updateCanvasSearchBookmarkNotes === 'function') {
+            window.updateCanvasSearchBookmarkNotes(changedTargets);
+        }
+        if (typeof window.markCanvasSearchBookmarkNoteDirty === 'function') {
+            window.markCanvasSearchBookmarkNoteDirty(changedTargets);
+        }
+        const input = document.getElementById('searchInput');
+        const q = input && typeof input.value === 'string' ? input.value.trim() : '';
+        if (q && typeof window.searchCanvasAndRender === 'function') {
+            window.searchCanvasAndRender(q);
+        }
+    } catch (_) { }
+    return changedTargets;
+}
+
+async function editNotesForContext(action, context) {
+    const { targets } = resolveTagTargetsForContext(action, context);
+    if (!targets.length) return;
+    try {
+        if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+            await window.NoteSystem.ensurePermNotesLoaded();
+        }
+    } catch (_) { }
+    const result = await showBatchNoteEditModal(targets);
+    if (!result) return;
+    await writeNotesForContextTargets(targets, result.note, result.noteColor, 'batch-edit-note');
+}
+
+async function clearNotesForContext(action, context) {
+    const { targets } = resolveTagTargetsForContext(action, context);
+    if (!targets.length) return;
+    const lang = currentLang || 'zh_CN';
+    const message = lang === 'zh_CN'
+        ? `确定清除选中 ${targets.length} 项的笔记吗？`
+        : `Clear notes from ${targets.length} selected item(s)?`;
+    if (!confirm(message)) return;
+    await writeNotesForContextTargets(targets, '', 'orange', 'batch-clear-note');
 }
 
 async function batchOpenTemp(options = {}) {
@@ -8823,6 +9490,14 @@ async function handleMenuAction(action, context) {
                 await clearTagsForContext(action, context);
                 break;
 
+            case 'batch-edit-note':
+                await editNotesForContext(action, context);
+                break;
+
+            case 'batch-clear-note':
+                await clearNotesForContext(action, context);
+                break;
+
             case 'select-item':
                 enterSelectMode();
                 // 切换当前右键点击的节点的选中状态
@@ -9963,13 +10638,7 @@ async function cutBookmark(nodeId, nodeTitle, isFolder) {
     try {
         const node = await readPermanentNodeForPayload(nodeId);
 
-        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-            try {
-                await window.TagSystem.ensurePermTagsLoaded();
-            } catch (e) {
-                console.warn('[剪切] 加载永久标签失败:', e);
-            }
-        }
+        await __ctxEnsurePermanentMetadataLoaded();
 
         bookmarkClipboard = {
             action: 'cut',
@@ -10000,13 +10669,7 @@ async function copyBookmark(nodeId, nodeTitle, isFolder) {
     try {
         const node = await readPermanentNodeForPayload(nodeId);
 
-        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-            try {
-                await window.TagSystem.ensurePermTagsLoaded();
-            } catch (e) {
-                console.warn('[复制] 加载永久标签失败:', e);
-            }
-        }
+        await __ctxEnsurePermanentMetadataLoaded();
 
         bookmarkClipboard = {
             action: 'copy',
@@ -10084,8 +10747,9 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                 const createdEvents = [];
                 try {
                     const tagUpdates = [];
+                    const noteUpdates = [];
                     for (const item of payload) {
-                        const dupOptions = { tagUpdates, createdEvents, progressTracker, loadingToast };
+                        const dupOptions = { tagUpdates, noteUpdates, createdEvents, progressTracker, loadingToast };
                         if (typeof insertIndex === 'number') {
                             dupOptions.index = insertIndex;
                         }
@@ -10094,25 +10758,10 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                             insertIndex++;
                         }
                     }
-                    if (tagUpdates.length > 0) {
-                        const bridge = window.CanvasProtocolBridge;
-                        if (bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
-                            try {
-                                await bridge.writePermanentNodeTagsBulk(tagUpdates);
-                                if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-                                    await window.TagSystem.ensurePermTagsLoaded(true);
-                                }
-                                if (typeof window.__refreshAllTagDots === 'function') {
-                                    window.__refreshAllTagDots();
-                                }
-                            } catch (e) {
-                                console.warn('[粘贴] 批量写入标签失败:', e);
-                            }
-                        }
-                    }
                     if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
                         await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'paste-temp-to-permanent');
                     }
+                    await __ctxFlushPermanentMetadataUpdates(tagUpdates, noteUpdates, 'paste-temp-to-permanent');
                 } finally {
                     if (loadingToast) loadingToast.close();
                     if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
@@ -10220,8 +10869,9 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                 const createdEvents = [];
                 try {
                     const tagUpdates = [];
+                    const noteUpdates = [];
                     for (const node of payload) {
-                        const dupOptions = { tagUpdates, createdEvents, progressTracker, loadingToast };
+                        const dupOptions = { tagUpdates, noteUpdates, createdEvents, progressTracker, loadingToast };
                         if (typeof insertIndex === 'number') {
                             dupOptions.index = insertIndex;
                         }
@@ -10230,25 +10880,10 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                             insertIndex++;
                         }
                     }
-                    if (tagUpdates.length > 0) {
-                        const bridge = window.CanvasProtocolBridge;
-                        if (bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
-                            try {
-                                await bridge.writePermanentNodeTagsBulk(tagUpdates);
-                                if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-                                    await window.TagSystem.ensurePermTagsLoaded(true);
-                                }
-                                if (typeof window.__refreshAllTagDots === 'function') {
-                                    window.__refreshAllTagDots();
-                                }
-                            } catch (e) {
-                                console.warn('[粘贴] 批量写入标签失败:', e);
-                            }
-                        }
-                    }
                     if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
                         await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'paste-permanent-copy');
                     }
+                    await __ctxFlushPermanentMetadataUpdates(tagUpdates, noteUpdates, 'paste-permanent-copy');
                 } finally {
                     if (loadingToast) loadingToast.close();
                     if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
@@ -10306,6 +10941,14 @@ async function duplicateNode(node, parentId, options = {}) {
         options.tagUpdates.push({
             chromeId: created.id,
             tags: node.tags
+        });
+    }
+    const note = __ctxNormalizeNote(node.note);
+    if (note && options.noteUpdates) {
+        options.noteUpdates.push({
+            chromeId: created.id,
+            note,
+            noteColor: __ctxNormalizeNoteColor(node.noteColor)
         });
     }
 
@@ -10725,13 +11368,7 @@ async function copySelected() {
     // 混合选择：统一用 payload（title/url/type/children）形式，便于粘贴到永久/临时
     if (tempNodes.length && permanentIds.length) {
         try {
-            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-                try {
-                    await window.TagSystem.ensurePermTagsLoaded();
-                } catch (e) {
-                    console.warn('[多选] 加载永久标签失败:', e);
-                }
-            }
+            await __ctxEnsurePermanentMetadataLoaded();
             const payload = markClipboardPayloadSource(tempPayload, 'temporary');
             for (const nodeId of permanentIds) {
                 const node = await readPermanentNodeForPayload(nodeId);
@@ -10770,13 +11407,7 @@ async function copySelected() {
     }
 
     try {
-        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-            try {
-                await window.TagSystem.ensurePermTagsLoaded();
-            } catch (e) {
-                console.warn('[多选] 加载永久标签失败:', e);
-            }
-        }
+        await __ctxEnsurePermanentMetadataLoaded();
         const payload = [];
         for (const nodeId of permanentIds) {
             const node = await readPermanentNodeForPayload(nodeId);
@@ -11165,7 +11796,9 @@ function showBatchContextMenu(e) {
                 { action: 'batch-copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy' },
                 { action: 'batch-cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', disabled: cutDisabled },
                 { action: 'batch-delete', label: lang === 'zh_CN' ? '删除' : 'DELETE', icon: 'trash-alt' },
-                { action: 'batch-rename', label: lang === 'zh_CN' ? '改名' : 'Rename', icon: 'edit', disabled: renameDisabled }
+                { action: 'batch-rename', label: lang === 'zh_CN' ? '改名' : 'Rename', icon: 'edit', disabled: renameDisabled },
+                { action: 'batch-edit-note', label: lang === 'zh_CN' ? '编辑笔记' : 'Edit Notes', icon: 'sticky-note' },
+                { action: 'batch-clear-note', label: lang === 'zh_CN' ? '清除笔记' : 'Clear Notes', icon: 'eraser' }
             ]
         },
         // 导出组
@@ -11276,6 +11909,10 @@ function showBatchContextMenu(e) {
                 await openTagPopoverForContext('batch-add-tags', null);
             } else if (action === 'batch-clear-tags') {
                 await clearTagsForContext('batch-clear-tags', null);
+            } else if (action === 'batch-edit-note') {
+                await editNotesForContext('batch-edit-note', null);
+            } else if (action === 'batch-clear-note') {
+                await clearNotesForContext('batch-clear-note', null);
             } else {
                 // 其他操作通过handleMenuAction处理（需要context）
                 await handleMenuAction(action, null, null, null, false);
@@ -12736,13 +13373,7 @@ async function batchCut() {
     const permanentIds = caps.permanentIds;
     if (!permanentIds.length) return;
     try {
-        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-            try {
-                await window.TagSystem.ensurePermTagsLoaded();
-            } catch (e) {
-                console.warn('[批量] 加载永久标签失败:', e);
-            }
-        }
+        await __ctxEnsurePermanentMetadataLoaded();
         const payload = [];
         for (const nodeId of permanentIds) {
             const node = await readPermanentNodeForPayload(nodeId);
@@ -13170,13 +13801,7 @@ async function batchExportJSON() {
     const lang = currentLang || 'zh_CN';
 
     try {
-        if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
-            try {
-                await window.TagSystem.ensurePermTagsLoaded();
-            } catch (e) {
-                console.warn('[导出] 加载永久标签失败:', e);
-            }
-        }
+        await __ctxEnsurePermanentMetadataLoaded();
 
         const payload = {
             format: 'bookmark-canvas-section',
@@ -13212,6 +13837,11 @@ async function batchExportJSON() {
             };
             if (Array.isArray(item.tags) && item.tags.length) {
                 out.tags = item.tags.map(t => ({ color: t.color, text: t.text }));
+            }
+            const note = __ctxNormalizeNote(item.note);
+            if (note) {
+                out.note = note;
+                out.noteColor = __ctxNormalizeNoteColor(item.noteColor);
             }
             return out;
         };
@@ -15202,12 +15832,21 @@ function __bookmarkTreeObjectHtmlFromItems(items) {
 
 function __serializeTempTreeItem(item) {
     if (!item) return null;
-    return {
+    const out = {
         title: item.title || '',
         url: item.url || '',
         type: item.type || (item.url ? 'bookmark' : 'folder'),
         children: (item.children || []).map(__serializeTempTreeItem).filter(Boolean)
     };
+    if (Array.isArray(item.tags) && item.tags.length) {
+        out.tags = item.tags.map((tag) => (tag && typeof tag === 'object') ? { color: tag.color, text: tag.text || '' } : null).filter(Boolean);
+    }
+    const note = __ctxNormalizeNote(item.note);
+    if (note) {
+        out.note = note;
+        out.noteColor = __ctxNormalizeNoteColor(item.noteColor);
+    }
+    return out;
 }
 
 function __buildTemporaryObjectJsonPayload(target) {

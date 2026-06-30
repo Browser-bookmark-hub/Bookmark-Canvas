@@ -58,7 +58,7 @@
     margin-left: -7px;
     border: 1.5px solid var(--bg-primary, #fff);
     box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12);
-    cursor: pointer;
+    cursor: default;
     transition: transform 0.12s ease;
 }
 .tree-item-tag-dots .tag-dot:first-child {
@@ -95,6 +95,10 @@
     transform: translate(calc(var(--tag-dot-shift-x) + var(--tag-leading-overflow-shift, 0px)), calc(-50% + var(--tag-dot-shift-y)));
 }
 
+.tree-item[data-node-type="folder"]:has(> .tree-item-note-marker.note-leading) > .tree-item-tag-dots.dots-leading {
+    left: calc(-1 * var(--tree-children-indent, 12px) - 17px);
+}
+
 /* Positioning variant: dots-trailing (for wide rows, near tip icon) */
 .tree-item-tag-dots.dots-trailing {
     position: absolute;
@@ -121,6 +125,55 @@
     right: 12px;
 }
 
+.tree-item-note-marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    color: var(--note-color, var(--tag-orange, #ff9f0a));
+    background: transparent;
+    border: none;
+    font-size: 11px;
+    line-height: 1;
+    pointer-events: auto;
+    cursor: default;
+    z-index: 2;
+    flex-shrink: 0;
+}
+
+.tree-item-note-marker.note-color-red { --note-color: var(--tag-red, #ff453a); }
+.tree-item-note-marker.note-color-orange { --note-color: var(--tag-orange, #ff9f0a); }
+.tree-item-note-marker.note-color-yellow { --note-color: var(--tag-yellow, #ffd60a); }
+.tree-item-note-marker.note-color-green { --note-color: var(--tag-green, #30d158); }
+.tree-item-note-marker.note-color-blue { --note-color: var(--tag-blue, #0a84ff); }
+.tree-item-note-marker.note-color-purple { --note-color: var(--tag-purple, #bf5af2); }
+.tree-item-note-marker.note-color-gray { --note-color: var(--tag-gray, #8e8e93); }
+
+.tree-item-note-marker.note-leading {
+    position: absolute;
+    left: calc(-1 * var(--tree-children-indent, 0px) + 17px);
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.tree-item[data-node-type="folder"] > .tree-item-note-marker.note-leading {
+    left: calc(-1 * var(--tree-children-indent, 12px) + 6px);
+}
+
+.tree-item-note-marker.note-trailing {
+    position: absolute;
+    right: -10px !important;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.permanent-bookmark-section .tree-item-note-marker.note-trailing,
+.temp-bookmark-tree .tree-item-note-marker.note-trailing,
+.temp-canvas-node .tree-item-note-marker.note-trailing {
+    right: -10px !important;
+}
+
 /* Wide-row chip: color dot + text, right-aligned. Looks like the preview pill. */
 .tree-item-tag-chip {
     display: inline-flex;
@@ -133,7 +186,7 @@
     line-height: 1.4;
     max-width: 140px;
     color: var(--text-primary, #fff);
-    cursor: pointer;
+    cursor: default;
 }
 .tree-item-tag-chip .tag-dot {
     width: 9px;
@@ -153,7 +206,7 @@
     color: var(--text-tertiary, #888);
     padding-left: 2px;
     flex-shrink: 0;
-    cursor: pointer;
+    cursor: default;
 }
 
 /* Hover bubble showing tag text */
@@ -182,6 +235,34 @@
 .tag-hover-bubble[data-color="purple"] { color: var(--tag-purple); }
 .tag-hover-bubble[data-color="gray"]   { color: var(--tag-gray); }
 .tag-hover-bubble .tag-hover-bubble-text { color: var(--text-primary, #fff); }
+
+.note-hover-bubble {
+    position: fixed;
+    background: var(--bg-secondary, #2a2a2a);
+    background-image: linear-gradient(color-mix(in srgb, var(--note-color, var(--tag-orange, #ff9f0a)) 8%, transparent), color-mix(in srgb, var(--note-color, var(--tag-orange, #ff9f0a)) 8%, transparent));
+    color: var(--text-primary, #fff);
+    border-left: 3px solid var(--note-color, var(--tag-orange, #ff9f0a));
+    padding: 7px 11px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.45;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+    pointer-events: none;
+    z-index: 99999;
+    white-space: pre-wrap;
+    max-width: min(320px, 80vw);
+    max-height: 180px;
+    overflow: auto;
+}
+
+.note-hover-bubble[data-color="red"] { --note-color: var(--tag-red, #ff453a); }
+.note-hover-bubble[data-color="orange"] { --note-color: var(--tag-orange, #ff9f0a); }
+.note-hover-bubble[data-color="yellow"] { --note-color: var(--tag-yellow, #ffd60a); }
+.note-hover-bubble[data-color="green"] { --note-color: var(--tag-green, #30d158); }
+.note-hover-bubble[data-color="blue"] { --note-color: var(--tag-blue, #0a84ff); }
+.note-hover-bubble[data-color="purple"] { --note-color: var(--tag-purple, #bf5af2); }
+.note-hover-bubble[data-color="gray"] { --note-color: var(--tag-gray, #8e8e93); }
+.note-hover-bubble-prefix { color: var(--note-color, var(--tag-orange, #ff9f0a)); }
 
 /* -----------------------------------------------------------------------------
    Tag popover (single panel):
