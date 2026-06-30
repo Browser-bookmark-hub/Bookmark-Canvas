@@ -20,6 +20,16 @@ const CARD_GROUP_DEFAULT_FILL = 'rgba(148, 163, 184, 0.06)';
 const CARD_GROUP_DEFAULT_PILL_BG = '#475569';
 const CARD_GROUP_DEFAULT_PILL_FG = '#f8fafc';
 
+function __saveCardGroupRenderCanvasManifest(options = {}) {
+    try {
+        if (typeof saveCanvasManifestOnly === 'function') {
+            saveCanvasManifestOnly(options);
+            return;
+        }
+    } catch (_) { }
+    try { if (typeof saveTempNodes === 'function') saveTempNodes(options); } catch (_) { }
+}
+
 function __cardGroupResolveColors(node) {
     let hex = (node && typeof node.colorHex === 'string') ? node.colorHex.trim() : '';
     if (!hex || !/^#[0-9a-fA-F]{3,8}$/.test(hex)) {
@@ -308,7 +318,7 @@ function __cardGroupStartRenamePill(pill, node) {
             toolbar.style.display = '';
         }
         if (save) {
-            try { saveTempNodes(); } catch (_) { }
+            __saveCardGroupRenderCanvasManifest();
         }
     };
 
@@ -521,7 +531,7 @@ function updateCardGroupLabel(node, nextLabel) {
         el.dataset.title = label;
         el.setAttribute('aria-label', label);
     }
-    try { saveTempNodes(); } catch (_) { }
+    __saveCardGroupRenderCanvasManifest();
 }
 
 function startCardGroupRename(nodeId) {

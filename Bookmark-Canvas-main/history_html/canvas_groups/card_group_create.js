@@ -12,6 +12,16 @@ const CARD_GROUP_DEFAULT_WIDTH = 480;
 const CARD_GROUP_DEFAULT_HEIGHT = 320;
 const CARD_GROUP_EMPTY_SCALE = 3;
 
+function __saveCardGroupCanvasManifest(options = {}) {
+    try {
+        if (typeof saveCanvasManifestOnly === 'function') {
+            saveCanvasManifestOnly(options);
+            return;
+        }
+    } catch (_) { }
+    try { if (typeof saveTempNodes === 'function') saveTempNodes(options); } catch (_) { }
+}
+
 function __cardGroupNewId() {
     const state = (typeof CanvasState !== 'undefined') ? CanvasState : null;
     if (!state) return `card-group-${Date.now().toString(36)}`;
@@ -86,7 +96,7 @@ function createCardGroupNode(payload) {
     } catch (_) { }
 
     try { if (typeof selectMdNode === 'function') selectMdNode(node.id); } catch (_) { }
-    try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) { }
+    __saveCardGroupCanvasManifest();
     try { if (typeof renderEdges === 'function') renderEdges(); } catch (_) { }
     try { if (typeof scheduleBoundsUpdate === 'function') scheduleBoundsUpdate(); } catch (_) { }
 

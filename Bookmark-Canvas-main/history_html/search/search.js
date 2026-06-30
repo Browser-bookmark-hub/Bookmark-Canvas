@@ -5117,13 +5117,7 @@ const SearchIndexManager = {
         const runTask = () => {
             return new Promise((resolve, reject) => {
                 const checkFull = () => {
-                    const activeCanvasState = getActiveCanvasState();
-                    const totalCards = ((activeCanvasState && Array.isArray(activeCanvasState.tempSections)) ? activeCanvasState.tempSections.length : 0) + 
-                                       ((activeCanvasState && Array.isArray(activeCanvasState.mdNodes)) ? activeCanvasState.mdNodes.length : 0);
-                    const dirtyCount = this.processingKeys ? this.processingKeys.size : this.dirtyKeys.size;
-                    const exceedsPercent = totalCards > 0 && (dirtyCount / totalCards) > 0.6;
-                    const exceedsLimit = dirtyCount > 50;
-                    return this.processingFullUpdate || this.needsFullUpdate || exceedsPercent || exceedsLimit;
+                    return this.processingFullUpdate || this.needsFullUpdate;
                 };
 
                 if (typeof window.requestIdleCallback === 'function') {
@@ -5250,18 +5244,7 @@ function handleSearchStorageChange(changes, areaName) {
     );
     if (changedKeys.length === 0) return;
     
-    let cardChangeCount = changedKeys.length;
-    const totalCards = ((activeCanvasState && Array.isArray(activeCanvasState.tempSections)) ? activeCanvasState.tempSections.length : 0) + 
-                       ((activeCanvasState && Array.isArray(activeCanvasState.mdNodes)) ? activeCanvasState.mdNodes.length : 0);
-                       
-    const exceedsPercent = totalCards > 0 && (cardChangeCount / totalCards) > 0.6;
-    const exceedsLimit = cardChangeCount > 50;
-    
-    if (exceedsPercent || exceedsLimit) {
-        SearchIndexManager.markDirty({ full: true });
-    } else {
-        SearchIndexManager.markDirty({ full: false, keys: changedKeys });
-    }
+    SearchIndexManager.markDirty({ full: false, keys: changedKeys });
 
     if (SearchIndexManager.needsFullUpdate) {
         stopListeningStorageChanges();

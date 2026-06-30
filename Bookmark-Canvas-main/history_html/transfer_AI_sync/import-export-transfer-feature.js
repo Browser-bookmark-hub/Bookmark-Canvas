@@ -21,6 +21,19 @@ function getOverlayContainer() {
     return document.body;
 }
 
+function __saveTransferImportSectionsDelta(sectionInputs, options = {}) {
+    const sections = (Array.isArray(sectionInputs) ? sectionInputs : [sectionInputs])
+        .filter((section) => section && typeof section === 'object' && section.id);
+    if (!sections.length) return;
+    try {
+        if (typeof saveCanvasSectionDelta === 'function') {
+            saveCanvasSectionDelta({ upsertSections: sections }, options);
+            return;
+        }
+    } catch (_) { }
+    try { if (typeof saveTempNodes === 'function') saveTempNodes(options); } catch (_) { }
+}
+
 function __trimImportPreviewText(value, max = 52) {
     const text = String(value || '').replace(/\u200B/g, '').replace(/\r\n?/g, '\n').trim();
     if (!text) return '';
@@ -1925,6 +1938,7 @@ async function __importBookmarkFilesBatch(type, filesInput, options = {}) {
     let importedFiles = 0;
     let failedFiles = 0;
     let totalBookmarks = 0;
+    const importedSections = [];
 
     for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
@@ -1945,6 +1959,7 @@ async function __importBookmarkFilesBatch(type, filesInput, options = {}) {
             if (result && result.ok) {
                 importedFiles += 1;
                 totalBookmarks += Number(result.count) || 0;
+                if (result.section) importedSections.push(result.section);
             } else {
                 failedFiles += 1;
             }
@@ -1955,7 +1970,11 @@ async function __importBookmarkFilesBatch(type, filesInput, options = {}) {
     }
 
     if (importedFiles > 0) {
-        try { saveTempNodes(); } catch (_) { }
+        if (importedSections.length) {
+            __saveTransferImportSectionsDelta(importedSections);
+        } else {
+            try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) { }
+        }
         showCanvasToast(
             isEn
                 ? `Successfully imported ${importedFiles} files (${totalBookmarks} bookmarks)`
@@ -2509,7 +2528,7 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
     }
 
     if (!(options && options.suppressSave)) {
-        saveTempNodes();
+        __saveTransferImportSectionsDelta(section);
     }
 
     // 添加呼吸式闪烁效果，吸引用户注意
@@ -3137,7 +3156,7 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     }
 
     if (!(options && options.suppressSave)) {
-        saveTempNodes();
+        __saveTransferImportSectionsDelta(section);
     }
 
     // 添加呼吸式闪烁效果，吸引用户注意

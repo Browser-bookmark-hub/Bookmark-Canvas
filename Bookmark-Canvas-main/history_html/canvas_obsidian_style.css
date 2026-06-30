@@ -1436,9 +1436,6 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .temp-canvas-node.dormant-content .temp-node-header,
 .temp-canvas-node.dormant-content .temp-node-description-container,
 .temp-canvas-node.dormant-content .temp-node-body,
-.temp-canvas-node.temp-tree-unloaded .temp-node-header,
-.temp-canvas-node.temp-tree-unloaded .temp-node-description-container,
-.temp-canvas-node.temp-tree-unloaded .temp-node-body,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-header,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-description-container,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-body {
@@ -1525,7 +1522,6 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 .temp-canvas-node.low-detail-active .temp-node-low-detail-overlay,
 .temp-canvas-node.dormant-content .temp-node-low-detail-overlay,
-.temp-canvas-node.temp-tree-unloaded .temp-node-low-detail-overlay,
 .permanent-bookmark-section.low-detail-active .permanent-node-low-detail-overlay,
 .permanent-bookmark-section.permanent-tree-unloaded .permanent-node-low-detail-overlay,
 .md-canvas-node.low-detail-active .temp-node-low-detail-overlay,
@@ -1549,6 +1545,44 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .md-canvas-node.low-detail-active,
 .card-group-canvas-node.low-detail-active {
     cursor: grab;
+}
+
+.temp-tree-skeleton {
+    display: none;
+    padding: 10px 12px 14px;
+    pointer-events: none;
+}
+
+.temp-canvas-node.temp-tree-unloaded:not(.low-detail-active):not(.dormant-content) .temp-tree-skeleton {
+    display: block;
+}
+
+.temp-canvas-node.temp-tree-unloaded:not(.low-detail-active):not(.dormant-content) .temp-bookmark-tree {
+    display: none !important;
+}
+
+.temp-tree-skeleton-line {
+    height: 9px;
+    margin: 9px 0;
+    border-radius: 5px;
+    background: linear-gradient(90deg, rgba(148, 163, 184, 0.16), rgba(148, 163, 184, 0.28), rgba(148, 163, 184, 0.16));
+    background-size: 180% 100%;
+    opacity: 0.82;
+    animation: tempTreeSkeletonPulse 1.4s ease-in-out infinite;
+}
+
+.temp-tree-skeleton-line:nth-child(1) { width: 72%; }
+.temp-tree-skeleton-line:nth-child(2) { width: 58%; margin-left: 18px; }
+.temp-tree-skeleton-line:nth-child(3) { width: 66%; margin-left: 18px; }
+.temp-tree-skeleton-line:nth-child(4) { width: 48%; margin-left: 36px; }
+.temp-tree-skeleton-line:nth-child(5) { width: 63%; }
+.temp-tree-skeleton-line:nth-child(6) { width: 54%; margin-left: 18px; }
+.temp-tree-skeleton-line:nth-child(7) { width: 42%; margin-left: 36px; }
+
+@keyframes tempTreeSkeletonPulse {
+    0% { background-position: 120% 0; opacity: 0.64; }
+    50% { opacity: 0.9; }
+    100% { background-position: -80% 0; opacity: 0.64; }
 }
 
 .canvas-workspace.is-dragging .temp-canvas-node.dragging,
@@ -1738,7 +1772,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 .bookmark-tree.animate-fade-in {
-    animation: fadeInContent 0.25s ease-out forwards;
+    animation: fadeInContent 0.15s ease-out forwards;
 }
 
 /* 性能管理弹窗样式 */

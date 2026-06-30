@@ -1,3 +1,26 @@
+## 0、补充执行口径：BCS 文档层与插件 UI 状态边界
+
+当前不做 `settings.json` 导入/导出，也不做“完整插件工作区备份”。因此本轮不需要做三层物理迁移，只需要守住导入、导出、备份、推送、拉取的 BCS 文档边界。
+
+核心原则：
+- BCS 存储的首要目标是服务 Obsidian JsonCanvas 对齐，以及导入、导出、备份、拉取、推送。
+- `bcs:canvas`、`bcs:section:*`、`bcs:perm:*`、`bcs:meta`、`bcs:signal` 是当前文档/同步主链路。
+- `bcs:canvas` 不是直接导出运行时对象，而是由 builder 转换成 Obsidian JsonCanvas 形态；`pinned`、`colorLocked`、Markdown 字号、放大比例、窗口状态、性能设置等不应进入 `bcs:canvas`。
+- 导出、备份、推送、拉取准备流程应先 flush 运行时状态到 BCS，再从 BCS 构建 export sandbox。懒加载/休眠只影响 DOM 或渲染树，不卸载 `CanvasState` 的核心数据。
+- 插件 UI/偏好状态继续保存在独立本地 key 中，例如 `canvas-node-ui-state-v1`、`canvas-appearance-settings-v1`、`canvas-other-settings-v1`、`canvas-node-layout-zoom-v1`、性能设置、快捷键、滚动/展开状态等；这些默认不进入导出包或备份内容本体。
+- `bcs:backup:slot`、`bcs:auto-backup:settings:v1`、`canvas-import-threshold-v1`、`bcs:legacy-temp-migrated-v1` 属于流程状态，不是 Obsidian JsonCanvas 文档内容。当前可保留命名，不做迁移。
+- `bcs:section:*` 是本插件的临时栏目 JSON 协议，可以保存恢复临时栏目内容所需的最小 `sectionMeta`，但新增字段必须判断是否服务导入、导出、备份、推送、拉取；纯 UI 偏好应放独立本地 key。
+
+临时栏目分片后的写入边界：
+- 临时栏目内容编辑：只写受影响的 `bcs:section:<sectionId>`。
+- 临时栏目创建/删除：整体写 `bcs:canvas` 清单，同时只 upsert/remove 受影响的 `bcs:section:*`，不重写无关 section。
+- 画布布局、Markdown 节点、连接线：写 `bcs:canvas` 清单，不重写所有 `bcs:section:*`。
+- 清空、覆盖恢复、迁移兜底等全局语义操作允许全量重建 BCS 文档。
+
+未来只有在明确实现 `settings.json`、完整工作区备份、跨设备同步插件偏好或正式稳定 storage 协议时，才需要把“文档数据、流程状态、插件 UI/偏好状态”做物理分层迁移。
+
+---
+
 ## 一、改插件的本地存储
 
 ### 1.1、永久栏目里面的本地存储

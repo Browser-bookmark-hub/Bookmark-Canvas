@@ -8758,7 +8758,9 @@ async function archiveAllWindowsToCardGroup(options = {}) {
                 window.CanvasModule.renderMdNode(groupNode);
             }
 
-            if (typeof saveTempNodes === 'function') {
+            if (typeof saveCanvasManifestOnly === 'function') {
+                saveCanvasManifestOnly();
+            } else if (typeof saveTempNodes === 'function') {
                 saveTempNodes();
             }
             if (typeof scheduleBoundsUpdate === 'function') {
@@ -9372,7 +9374,8 @@ async function addTabsToBlankNode(tabs, scope, options = {}) {
                 }
             }
             if (typeof renderMdNode === 'function') renderMdNode(node);
-            if (typeof saveTempNodes === 'function') saveTempNodes();
+            if (typeof saveCanvasManifestOnly === 'function') saveCanvasManifestOnly();
+            else if (typeof saveTempNodes === 'function') saveTempNodes();
             try {
                 const msg = currentLang === 'en' ? 'Added to current blank node' : '已添加到当前空白栏目';
                 showToast(msg);

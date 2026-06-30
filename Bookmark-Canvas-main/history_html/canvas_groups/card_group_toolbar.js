@@ -19,6 +19,16 @@ const CARD_GROUP_PRESET_COLORS = [
     { key: '6', hex: '#a882ff' }
 ];
 
+function __saveCardGroupToolbarCanvasManifest(options = {}) {
+    try {
+        if (typeof saveCanvasManifestOnly === 'function') {
+            saveCanvasManifestOnly(options);
+            return;
+        }
+    } catch (_) { }
+    try { if (typeof saveTempNodes === 'function') saveTempNodes(options); } catch (_) { }
+}
+
 function getOverlayContainer() {
     if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
         return window.getOverlayContainer();
@@ -188,7 +198,7 @@ function __cardGroupSetColor(node, preset, hex) {
             window.__BCSCardGroup.applyCardGroupColor(node);
         }
     } catch (_) { }
-    try { saveTempNodes(); } catch (_) { }
+    __saveCardGroupToolbarCanvasManifest();
 }
 
 function __cardGroupBindToolbarActions(element, toolbar, node, labels) {

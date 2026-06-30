@@ -7486,9 +7486,11 @@ async function writeNotesForContextTargets(targets, noteInput, colorInput, reaso
     }
 
     if (changedTempSectionIds.size && window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.getSection === 'function') {
+        const changedSections = [];
         changedTempSectionIds.forEach((sectionId) => {
             try {
                 const section = window.CanvasModule.temp.getSection(sectionId);
+                if (section) changedSections.push(section);
                 const refreshFn = (typeof window.refreshTempSectionTreeInPlace === 'function')
                     ? window.refreshTempSectionTreeInPlace
                     : (typeof refreshTempSectionTreeInPlace === 'function' ? refreshTempSectionTreeInPlace : null);
@@ -7498,10 +7500,14 @@ async function writeNotesForContextTargets(targets, noteInput, colorInput, reaso
             } catch (_) { }
         });
         try {
-            const saveFn = (typeof window.saveTempNodes === 'function')
-                ? window.saveTempNodes
-                : (typeof saveTempNodes === 'function' ? saveTempNodes : null);
-            if (saveFn) saveFn();
+            if (window.CanvasModule.temp && typeof window.CanvasModule.temp.saveSectionsPatch === 'function' && changedSections.length) {
+                window.CanvasModule.temp.saveSectionsPatch(changedSections);
+            } else {
+                const saveFn = (typeof window.saveTempNodes === 'function')
+                    ? window.saveTempNodes
+                    : (typeof saveTempNodes === 'function' ? saveTempNodes : null);
+                if (saveFn) saveFn();
+            }
         } catch (_) { }
     }
 
@@ -13645,6 +13651,7 @@ async function batchRename() {
         if (tempNodes.length) {
             const manager = ensureTempManager();
             const updatedSections = new Set();
+            const changedSections = [];
             for (const node of tempNodes) {
                 if (node.isFolder) {
                     manager.renameItem(node.sectionId, node.id, normalizedTitle, { skipRender: true, skipSave: true });
@@ -13659,8 +13666,18 @@ async function batchRename() {
             // 批量修改完成后，对所有受影响的栏目各触发一次统一重绘 and 存储保存
             updatedSections.forEach(sectionId => {
                 manager.ensureRendered(sectionId);
+                try {
+                    if (typeof manager.getSection === 'function') {
+                        const section = manager.getSection(sectionId);
+                        if (section) changedSections.push(section);
+                    }
+                } catch (_) { }
             });
-            saveTempNodes();
+            if (typeof manager.saveSectionsPatch === 'function' && changedSections.length) {
+                manager.saveSectionsPatch(changedSections);
+            } else {
+                saveTempNodes();
+            }
         }
 
         alert(lang === 'zh_CN' ? `已重命名 ${count} 项` : `Renamed ${count} items`);
