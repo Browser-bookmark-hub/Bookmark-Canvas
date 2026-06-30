@@ -2295,6 +2295,8 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     defaultEdgeDirection: 'forward', // 连接线默认方向: none / forward / both
     bookmarkTreeTagPosition: 'auto', // 书签树标签位置：left / right / auto
     bookmarkTreeTagPositionThreshold: 420, // 自动切换阈值 (px)
+    bookmarkTreeNotePosition: 'auto', // 书签树笔记标识位置：left / right / auto
+    bookmarkTreeNotePositionThreshold: 420, // 自动切换阈值 (px)
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
         p0: { x: 0, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR) },
@@ -2759,6 +2761,18 @@ function normalizeCanvasOtherSettings(input) {
         2000,
         out.bookmarkTreeTagPositionThreshold
     );
+    if (typeof input.bookmarkTreeNotePosition === 'string') {
+        const pos = input.bookmarkTreeNotePosition.toLowerCase();
+        if (pos === 'left' || pos === 'right' || pos === 'auto') {
+            out.bookmarkTreeNotePosition = pos;
+        }
+    }
+    out.bookmarkTreeNotePositionThreshold = __clampNumber(
+        input.bookmarkTreeNotePositionThreshold,
+        100,
+        2000,
+        out.bookmarkTreeNotePositionThreshold
+    );
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
     out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
     out.trackpadZoomRate = __clampNumber(input.trackpadZoomRate, TRACKPAD_ZOOM_RATE_MIN, TRACKPAD_ZOOM_RATE_MAX, out.trackpadZoomRate);
@@ -3065,6 +3079,16 @@ function __updateOtherBookmarkTagPositionMode(modal) {
     const inputs = modal.querySelector('#otherBookmarkTagPositionInputs');
     if (!inputs) return;
     const mode = __getAppearanceRadioValue(modal, 'other-bookmark-tag-position', 'auto');
+    const useAuto = mode === 'auto';
+    inputs.classList.toggle('is-disabled', !useAuto);
+    inputs.classList.toggle('is-hidden', !useAuto);
+}
+
+function __updateOtherBookmarkNotePositionMode(modal) {
+    if (!modal) return;
+    const inputs = modal.querySelector('#otherBookmarkNotePositionInputs');
+    if (!inputs) return;
+    const mode = __getAppearanceRadioValue(modal, 'other-bookmark-note-position', 'auto');
     const useAuto = mode === 'auto';
     inputs.classList.toggle('is-disabled', !useAuto);
     inputs.classList.toggle('is-hidden', !useAuto);
@@ -5149,6 +5173,14 @@ function cloneBookmarkNode(node) {
     } else {
         clone.children = [];
     }
+    if (Array.isArray(node.tags) && node.tags.length) {
+        clone.tags = node.tags.map((t) => (t && typeof t === 'object') ? { color: t.color, text: t.text } : null).filter(Boolean);
+    }
+    const note = __normalizeTempItemNoteInput(node.note);
+    if (note) {
+        clone.note = note;
+        clone.noteColor = __normalizeTempItemNoteColorInput(node.noteColor);
+    }
     return clone;
 }
 
@@ -5246,6 +5278,45 @@ function allocateTempItemId(sectionId) {
     return `temp-${sectionId}-${++CanvasState.tempItemCounter}`;
 }
 
+function __isPermanentChromeNodeId(value) {
+    const id = String(value || '').trim();
+    return !!(id && !id.startsWith('temp') && !id.startsWith('sync'));
+}
+
+function __getCachedPermanentNoteMetaForTempPayload(chromeId) {
+    if (!__isPermanentChromeNodeId(chromeId) || typeof window === 'undefined' || !window.NoteSystem) {
+        return { note: '', noteColor: 'orange', color: 'orange' };
+    }
+    try {
+        if (typeof window.NoteSystem.getPermNodeNoteMetaCached === 'function') {
+            const meta = window.NoteSystem.getPermNodeNoteMetaCached(chromeId) || {};
+            const noteColor = __normalizeTempItemNoteColorInput(meta.noteColor || meta.color);
+            return {
+                note: __normalizeTempItemNoteInput(meta.note),
+                noteColor,
+                color: noteColor
+            };
+        }
+        if (typeof window.NoteSystem.getPermNodeNoteCached === 'function') {
+            return {
+                note: __normalizeTempItemNoteInput(window.NoteSystem.getPermNodeNoteCached(chromeId)),
+                noteColor: 'orange',
+                color: 'orange'
+            };
+        }
+    } catch (_) { }
+    return { note: '', noteColor: 'orange', color: 'orange' };
+}
+
+function __applyNoteMetaToTempItem(item, noteInput, colorInput) {
+    if (!item) return false;
+    const note = __normalizeTempItemNoteInput(noteInput);
+    if (!note) return false;
+    item.note = note;
+    item.noteColor = __normalizeTempItemNoteColorInput(colorInput);
+    return true;
+}
+
 function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
     if (!node) return null;
 
@@ -5268,11 +5339,21 @@ function convertBookmarkNodeToTempItem(node, sectionId, options = {}) {
         if (!item.tags.length) delete item.tags;
     } else if (node.id && window.TagSystem && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
         const idStr = String(node.id);
-        if (!idStr.startsWith('temp') && !idStr.startsWith('sync')) {
+        if (__isPermanentChromeNodeId(idStr)) {
             const cachedTags = window.TagSystem.getPermNodeTagsCached(node.id);
             if (Array.isArray(cachedTags) && cachedTags.length) {
                 item.tags = cachedTags.map(t => ({ color: String(t.color || '').trim(), text: String(t.text || '').trim() }));
             }
+        }
+    }
+
+    const inlineNote = __normalizeTempItemNoteInput(node.note);
+    if (inlineNote) {
+        __applyNoteMetaToTempItem(item, inlineNote, node.noteColor);
+    } else if (node.id) {
+        const noteMeta = __getCachedPermanentNoteMetaForTempPayload(node.id);
+        if (noteMeta.note) {
+            __applyNoteMetaToTempItem(item, noteMeta.note, noteMeta.color);
         }
     }
 
@@ -5574,6 +5655,11 @@ function serializeTempItemForClipboard(item) {
     if (Array.isArray(item.tags) && item.tags.length) {
         out.tags = item.tags.map((t) => (t && typeof t === 'object') ? { color: t.color, text: t.text } : null).filter(Boolean);
     }
+    const note = __normalizeTempItemNoteInput(item.note);
+    if (note) {
+        out.note = note;
+        out.noteColor = __normalizeTempItemNoteColorInput(item.noteColor);
+    }
     return out;
 }
 
@@ -5598,11 +5684,21 @@ function createTempItemFromPayload(sectionId, payload, options = {}) {
         if (!item.tags.length) delete item.tags;
     } else if (payload.id && window.TagSystem && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
         const idStr = String(payload.id);
-        if (!idStr.startsWith('temp') && !idStr.startsWith('sync')) {
+        if (__isPermanentChromeNodeId(idStr)) {
             const cachedTags = window.TagSystem.getPermNodeTagsCached(payload.id);
             if (Array.isArray(cachedTags) && cachedTags.length) {
                 item.tags = cachedTags.map(t => ({ color: String(t.color || '').trim(), text: String(t.text || '').trim() }));
             }
+        }
+    }
+
+    const inlineNote = __normalizeTempItemNoteInput(payload.note);
+    if (inlineNote) {
+        __applyNoteMetaToTempItem(item, inlineNote, payload.noteColor);
+    } else if (payload.id) {
+        const noteMeta = __getCachedPermanentNoteMetaForTempPayload(payload.id);
+        if (noteMeta.note) {
+            __applyNoteMetaToTempItem(item, noteMeta.note, noteMeta.color);
         }
     }
 
@@ -5795,6 +5891,27 @@ function __tagBridge() {
     return (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
 }
 
+function __normalizeTempItemNoteInput(noteInput) {
+    const bridge = __tagBridge();
+    if (bridge && typeof bridge.normalizeNoteInput === 'function') {
+        return bridge.normalizeNoteInput(noteInput);
+    }
+    if (noteInput === undefined || noteInput === null) return '';
+    return String(noteInput).replace(/\r\n?/g, '\n').trim();
+}
+
+function __normalizeTempItemNoteColorInput(colorInput, fallback = 'orange') {
+    const bridge = __tagBridge();
+    if (bridge && typeof bridge.normalizeNoteColorInput === 'function') {
+        return bridge.normalizeNoteColorInput(colorInput, fallback);
+    }
+    const palette = new Set(['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray']);
+    const color = String(colorInput || '').trim().toLowerCase();
+    if (palette.has(color)) return color;
+    const fallbackColor = String(fallback || '').trim().toLowerCase();
+    return palette.has(fallbackColor) ? fallbackColor : 'orange';
+}
+
 function setTempItemTags(sectionId, itemId, tagsInput, options = {}) {
     const entry = findTempItemEntry(sectionId, itemId);
     if (!entry) return false;
@@ -5827,6 +5944,65 @@ function toggleTempItemTag(sectionId, itemId, tagInput, options = {}) {
     if (options.skipRender !== true) refreshTempSectionTreeInPlace(entry.section);
     if (options.skipSave !== true) saveTempNodes();
     return { action, tags: existing };
+}
+
+function getTempItemNote(sectionId, itemId) {
+    const entry = findTempItemEntry(sectionId, itemId);
+    if (!entry || !entry.item) return '';
+    return __normalizeTempItemNoteInput(entry.item.note);
+}
+
+function getTempItemNoteMeta(sectionId, itemId) {
+    const entry = findTempItemEntry(sectionId, itemId);
+    if (!entry || !entry.item) return { note: '', noteColor: 'orange', color: 'orange' };
+    const note = __normalizeTempItemNoteInput(entry.item.note);
+    const noteColor = __normalizeTempItemNoteColorInput(entry.item.noteColor);
+    return {
+        note,
+        noteColor,
+        color: noteColor
+    };
+}
+
+function setTempItemNote(sectionId, itemId, noteInput, options = {}) {
+    const entry = findTempItemEntry(sectionId, itemId);
+    if (!entry || !entry.item) return false;
+    const note = __normalizeTempItemNoteInput(noteInput);
+    const colorInput = options && Object.prototype.hasOwnProperty.call(options, 'noteColor')
+        ? options.noteColor
+        : (options && Object.prototype.hasOwnProperty.call(options, 'color') ? options.color : entry.item.noteColor);
+    const color = __normalizeTempItemNoteColorInput(colorInput);
+    if (note) {
+        entry.item.note = note;
+        entry.item.noteColor = color;
+    } else if (Object.prototype.hasOwnProperty.call(entry.item, 'note')) {
+        delete entry.item.note;
+        if (Object.prototype.hasOwnProperty.call(entry.item, 'noteColor')) delete entry.item.noteColor;
+    } else if (Object.prototype.hasOwnProperty.call(entry.item, 'noteColor')) {
+        delete entry.item.noteColor;
+    }
+
+    if (options.skipRender !== true) refreshTempSectionTreeInPlace(entry.section);
+    if (options.skipSave !== true) saveTempNodes();
+    if (options.skipSearchUpdate !== true && typeof window !== 'undefined') {
+        const target = { kind: 'temporary', sectionId, itemId, note, color };
+        try {
+            if (typeof window.updateCanvasSearchBookmarkNotes === 'function') {
+                window.updateCanvasSearchBookmarkNotes([target]);
+            }
+        } catch (_) {}
+        try {
+            if (typeof window.markCanvasSearchBookmarkNoteDirty === 'function') {
+                window.markCanvasSearchBookmarkNoteDirty([target]);
+            }
+        } catch (_) {}
+        try {
+            if (typeof window.__refreshAllNoteMarkers === 'function') {
+                window.__refreshAllNoteMarkers();
+            }
+        } catch (_) {}
+    }
+    return true;
 }
 
 function updateTempBookmark(sectionId, itemId, updates, options = {}) {
@@ -21830,6 +22006,11 @@ async function createTempNode(data, x, y) {
             await window.TagSystem.ensurePermTagsLoaded();
         } catch (_) {}
     }
+    if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+        try {
+            await window.NoteSystem.ensurePermNotesLoaded();
+        } catch (_) {}
+    }
     // Ensure new sequenceNumber continues from existing sections
     try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
     const forceSequenceLabel = !!(data && data.forceSequenceLabel);
@@ -33085,11 +33266,11 @@ function buildTempTreeNode(section, item, level, options = {}) {
     deleteIcon.setAttribute('draggable', 'false');
     deleteIcon.setAttribute('aria-label', __getLang().isEn ? 'Delete' : '删除');
 
-    const traceIcon = document.createElement('span');
-    traceIcon.className = 'tree-trace-icon';
-    traceIcon.dataset.action = 'trace-submenu-trigger';
-    traceIcon.setAttribute('draggable', 'false');
-    traceIcon.setAttribute('aria-label', __getLang().isEn ? 'Trace' : '临时溯源');
+    const infoIcon = document.createElement('span');
+    infoIcon.className = 'tree-info-icon';
+    infoIcon.dataset.action = 'info-submenu-trigger';
+    infoIcon.setAttribute('draggable', 'false');
+    infoIcon.setAttribute('aria-label', __getLang().isEn ? 'Info' : '信息');
 
     const tipIcon = document.createElement('span');
     tipIcon.className = 'tree-tip-icon';
@@ -33114,7 +33295,7 @@ function buildTempTreeNode(section, item, level, options = {}) {
     hoverActions.appendChild(confirmIcon);
     hoverActions.appendChild(cancelIcon);
     hoverActions.appendChild(deleteIcon);
-    hoverActions.appendChild(traceIcon);
+    hoverActions.appendChild(infoIcon);
     hoverActions.appendChild(tipIcon);
 
     treeItem.appendChild(toggle);
@@ -36099,8 +36280,84 @@ async function addToPermanentBookmarks(payload, parentIdOverride = null) {
         throw new Error('找不到书签栏');
     }
     const parentId = parentIdOverride || bookmarkBar.id;
+    const tagUpdates = [];
+    const noteUpdates = [];
     for (const item of items) {
-        await createBookmarkFromPayload(parentId, null, item);
+        await createBookmarkFromPayload(parentId, null, item, tagUpdates, { noteUpdates });
+    }
+    await __writePermanentMetadataUpdatesForCreatedNodes(tagUpdates, noteUpdates, 'add-to-permanent');
+}
+
+async function __writePermanentMetadataUpdatesForCreatedNodes(tagUpdates, noteUpdates, reason = '') {
+    const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+    const tags = Array.isArray(tagUpdates) ? tagUpdates : [];
+    const notes = Array.isArray(noteUpdates) ? noteUpdates : [];
+
+    if (tags.length && bridge && typeof bridge.writePermanentNodeTagsBulk === 'function') {
+        try {
+            await bridge.writePermanentNodeTagsBulk(tags);
+            const tagTargets = tags.map((u) => ({
+                kind: 'permanent',
+                chromeId: u.chromeId,
+                tags: Array.isArray(u.tags) ? u.tags : []
+            }));
+            if (window.TagSystem && typeof window.TagSystem.ensurePermTagsLoaded === 'function') {
+                await window.TagSystem.ensurePermTagsLoaded(true);
+            }
+            if (typeof window.__refreshAllTagDots === 'function') {
+                window.__refreshAllTagDots();
+            }
+            try {
+                if (typeof window.markCanvasSearchBookmarkTagDirty === 'function') {
+                    window.markCanvasSearchBookmarkTagDirty(tagTargets);
+                }
+            } catch (_) { }
+        } catch (e) {
+            console.warn('[Canvas] 批量写入永久书签标签失败:', reason, e);
+        }
+    }
+
+    if (notes.length && bridge) {
+        try {
+            let writtenNotes = [];
+            if (typeof bridge.writePermanentNodeNotesBulk === 'function') {
+                const result = await bridge.writePermanentNodeNotesBulk(notes);
+                if (result && result.changed) writtenNotes = notes;
+            } else if (typeof bridge.writePermanentNodeNoteMeta === 'function') {
+                for (const update of notes) {
+                    const result = await bridge.writePermanentNodeNoteMeta(update.chromeId, update.note, update.noteColor || update.color);
+                    if (result) writtenNotes.push(update);
+                }
+            }
+            if (!writtenNotes.length) return;
+            if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+                await window.NoteSystem.ensurePermNotesLoaded(true);
+            }
+            const noteTargets = writtenNotes.map((u) => ({
+                kind: 'permanent',
+                chromeId: u.chromeId,
+                note: u.note,
+                color: u.noteColor || u.color,
+                noteColor: u.noteColor || u.color
+            }));
+            if (typeof window.__refreshNoteMarkersForTargets === 'function') {
+                window.__refreshNoteMarkersForTargets(noteTargets);
+            } else if (typeof window.__refreshAllNoteMarkers === 'function') {
+                window.__refreshAllNoteMarkers();
+            }
+            try {
+                if (typeof window.updateCanvasSearchBookmarkNotes === 'function') {
+                    window.updateCanvasSearchBookmarkNotes(noteTargets);
+                }
+            } catch (_) { }
+            try {
+                if (typeof window.markCanvasSearchBookmarkNoteDirty === 'function') {
+                    window.markCanvasSearchBookmarkNoteDirty(noteTargets);
+                }
+            } catch (_) { }
+        } catch (e) {
+            console.warn('[Canvas] 批量写入永久书签笔记失败:', reason, e);
+        }
     }
 }
 
@@ -40688,6 +40945,10 @@ function resetCanvasCtrlState() {
 // 导出模块
 // =============================================================================
 
+window.getTempItemNote = getTempItemNote;
+window.getTempItemNoteMeta = getTempItemNoteMeta;
+window.setTempItemNote = setTempItemNote;
+
 window.CanvasModule = {
     init: initCanvasView,
     resetCanvasCtrlState: resetCanvasCtrlState,
@@ -40754,6 +41015,9 @@ window.CanvasModule = {
     temp: {
         getSection: getTempSection,
         findItem: findTempItemEntry,
+        getNote: getTempItemNote,
+        getNoteMeta: getTempItemNoteMeta,
+        setNote: setTempItemNote,
         renameItem: renameTempItem,
         updateBookmark: updateTempBookmark,
         createBookmark: createTempBookmark,
@@ -40920,6 +41184,15 @@ function openCanvasAppearanceSettingsModal() {
         otherTagThresholdInput.value = __clampNumber(otherBookmarkTagThreshold, 100, 2000, 420);
     }
     __updateOtherBookmarkTagPositionMode(modal);
+
+    const otherBookmarkNotePosition = otherSettings.bookmarkTreeNotePosition || 'auto';
+    const otherBookmarkNoteThreshold = otherSettings.bookmarkTreeNotePositionThreshold !== undefined ? otherSettings.bookmarkTreeNotePositionThreshold : 420;
+    __setAppearanceRadioGroup(modal, 'other-bookmark-note-position', otherBookmarkNotePosition);
+    const otherNoteThresholdInput = modal.querySelector('#otherBookmarkNotePositionThreshold');
+    if (otherNoteThresholdInput) {
+        otherNoteThresholdInput.value = __clampNumber(otherBookmarkNoteThreshold, 100, 2000, 420);
+    }
+    __updateOtherBookmarkNotePositionMode(modal);
 
     modal.style.display = 'flex';
 }
@@ -41264,6 +41537,31 @@ function createCanvasAppearanceSettingsModal() {
                             </div>
                         </div>
                     </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Bookmark tree note position' : '书签树笔记标识位置'}</span>
+                        </div>
+                        <div class="appearance-row-content appearance-row-content-inline">
+                            <div class="appearance-mode-toggle">
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-bookmark-note-position" value="left">
+                                    <span>${isEn ? 'Left' : '左边'}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-bookmark-note-position" value="right">
+                                    <span>${isEn ? 'Right' : '右边'}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="other-bookmark-note-position" value="auto">
+                                    <span>${isEn ? 'Auto' : '自动切换'}</span>
+                                </label>
+                            </div>
+                            <div class="appearance-size-inputs" id="otherBookmarkNotePositionInputs">
+                                <input type="number" id="otherBookmarkNotePositionThreshold" min="100" max="2000" step="10">
+                                <span>px</span>
+                            </div>
+                        </div>
+                    </div>
                     <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
                     <div class="appearance-row">
                         <div class="appearance-row-label appearance-row-label-inline">
@@ -41513,6 +41811,24 @@ function createCanvasAppearanceSettingsModal() {
         otherBookmarkTagThresholdInput.addEventListener('change', () => {
             const n = parseInt(otherBookmarkTagThresholdInput.value, 10);
             otherBookmarkTagThresholdInput.value = String(__clampNumber(n, 100, 2000, 420));
+            scheduleOtherSave();
+        });
+    }
+    const otherBookmarkNotePositionRadios = modal.querySelectorAll('input[name="other-bookmark-note-position"]');
+    if (otherBookmarkNotePositionRadios && otherBookmarkNotePositionRadios.length) {
+        otherBookmarkNotePositionRadios.forEach(radio => radio.addEventListener('change', () => {
+            __updateOtherBookmarkNotePositionMode(modal);
+            scheduleOtherSave();
+        }));
+    }
+    const otherBookmarkNoteThresholdInput = modal.querySelector('#otherBookmarkNotePositionThreshold');
+    if (otherBookmarkNoteThresholdInput) {
+        otherBookmarkNoteThresholdInput.addEventListener('input', () => {
+            scheduleOtherSave();
+        });
+        otherBookmarkNoteThresholdInput.addEventListener('change', () => {
+            const n = parseInt(otherBookmarkNoteThresholdInput.value, 10);
+            otherBookmarkNoteThresholdInput.value = String(__clampNumber(n, 100, 2000, 420));
             scheduleOtherSave();
         });
     }
@@ -41814,6 +42130,21 @@ function saveCanvasOtherSettings(options = {}) {
         bookmarkTagThresholdInput.value = String(bookmarkTagThreshold);
     }
 
+    const bookmarkNotePosition = __getAppearanceRadioValue(modal, 'other-bookmark-note-position', prevSettings.bookmarkTreeNotePosition || 'auto');
+    const bookmarkNoteThresholdInput = modal.querySelector('#otherBookmarkNotePositionThreshold');
+    const bookmarkNoteThresholdRaw = bookmarkNoteThresholdInput
+        ? parseInt(bookmarkNoteThresholdInput.value, 10)
+        : prevSettings.bookmarkTreeNotePositionThreshold;
+    const bookmarkNoteThreshold = __clampNumber(
+        bookmarkNoteThresholdRaw,
+        100,
+        2000,
+        prevSettings.bookmarkTreeNotePositionThreshold || 420
+    );
+    if (bookmarkNoteThresholdInput && document.activeElement !== bookmarkNoteThresholdInput) {
+        bookmarkNoteThresholdInput.value = String(bookmarkNoteThreshold);
+    }
+
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
         autoRecordAnchor: !!prevSettings.autoRecordAnchor,
@@ -41835,6 +42166,8 @@ function saveCanvasOtherSettings(options = {}) {
         defaultEdgeDirection: defaultEdgeDirInput ? defaultEdgeDirInput.value : prevSettings.defaultEdgeDirection,
         bookmarkTreeTagPosition: bookmarkTagPosition,
         bookmarkTreeTagPositionThreshold: bookmarkTagThreshold,
+        bookmarkTreeNotePosition: bookmarkNotePosition,
+        bookmarkTreeNotePositionThreshold: bookmarkNoteThreshold,
         useDefaultZoomCurve: useDefault,
         zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || prevSettings.zoomCurve || getCanvasZoomCurveSettings()),
         trackpadZoomRate: trackpadRatePercent / 100,
