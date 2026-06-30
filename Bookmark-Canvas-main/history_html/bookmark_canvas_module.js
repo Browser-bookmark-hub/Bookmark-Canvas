@@ -36804,6 +36804,12 @@ function __extractCanvasTempStateTimestamp(state) {
     return Number.isFinite(ts) && ts > 0 ? ts : 0;
 }
 
+function __shouldSkipCanvasTempStateSignal(state) {
+    const ts = __extractCanvasTempStateTimestamp(state);
+    if (ts <= 0) return false;
+    return ts <= __canvasTempStateLastAppliedTimestamp || ts <= __canvasTempStateLastSavedTimestamp;
+}
+
 function __hasCanvasTempStatePayloadShape(state) {
     return !!(
         state
@@ -37127,11 +37133,13 @@ function __queueCanvasTempStateRealtimeSync(state, source = 'external', options 
 
 function __consumeCanvasTempStateRealtimeSignal(rawState, source = 'external') {
     if (!rawState || typeof rawState !== 'object') return;
+    if (__shouldSkipCanvasTempStateSignal(rawState)) return;
 
     if (__isCanvasTempStateBcsMarker(rawState)) {
         __loadCanvasTempStateBundleFromBcs()
             .then((bundle) => {
                 if (!bundle || !bundle.state) return;
+                if (__shouldSkipCanvasTempStateSignal(bundle.state)) return;
                 __queueCanvasTempStateRealtimeSync(bundle.state, `${source}:bcs-marker`, {
                     bcsStorage: bundle.storage
                 });
@@ -37905,7 +37913,10 @@ function saveTempNodes(options = {}) {
         };
         CanvasState.tempStateTimestamp = state.timestamp;
         const persistedState = __buildPersistedCanvasState(state, options);
-        const persistedSignature = __buildCanvasTempStateSignature(persistedState, options);
+        const persistedSignature = __buildCanvasTempStateSignature(persistedState, {
+            ...options,
+            alreadyPersisted: true
+        });
         if (
             skipUnchangedPersist
             && persistedSignature
@@ -37924,7 +37935,8 @@ function saveTempNodes(options = {}) {
         }
         return __saveCanvasTempStateToBcsStorage(persistedState, {
             immediate,
-            ...options
+            ...options,
+            alreadyPersisted: true
         });
 
     } catch (error) {

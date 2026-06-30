@@ -6194,7 +6194,9 @@ function __buildPersistedCanvasState(state, options = {}) {
 }
 
 function __buildCanvasTempStateSignature(state, options = {}) {
-    const persistedState = __buildPersistedCanvasState(state, options);
+    const persistedState = options && options.alreadyPersisted === true
+        ? state
+        : __buildPersistedCanvasState(state, options);
     if (!persistedState || typeof persistedState !== 'object') return '';
     const comparableState = {
         ...persistedState,
@@ -7983,7 +7985,9 @@ function __buildBcsPermanentPayload(copyId = null) {
 }
 
 async function __buildBcsDocumentsFromState(stateInput, options = {}) {
-    const state = __buildPersistedCanvasState(stateInput, options);
+    const state = options && options.alreadyPersisted === true
+        ? stateInput
+        : __buildPersistedCanvasState(stateInput, options);
     if (!state || typeof state !== 'object') return null;
     const storage = options && options.storage && typeof options.storage === 'object'
         ? options.storage
@@ -8074,7 +8078,9 @@ async function __buildBcsDocumentsFromState(stateInput, options = {}) {
 
 async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
     try {
-        const state = __buildPersistedCanvasState(stateInput, options);
+        const state = options && options.alreadyPersisted === true
+            ? stateInput
+            : __buildPersistedCanvasState(stateInput, options);
         if (!state || typeof state !== 'object') return;
         const fileRefs = __collectBcsFileRefsFromState(state, {
             exportRoot: __getBcsExportRootCached(),
@@ -8090,6 +8096,7 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
         const documents = await __buildBcsDocumentsFromState(state, {
             fileRefs,
             storage,
+            alreadyPersisted: true,
             preferStoragePermanentLayout: options && options.preferStoragePermanentLayout === true
         });
         if (!documents) return;
