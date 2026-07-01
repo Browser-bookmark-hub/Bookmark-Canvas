@@ -246,6 +246,36 @@ function bindCanvasPreloadRelease() {
     }, 3200);
 }
 
+function scheduleCanvasViewportChromeStabilization(reason = '') {
+    const run = () => {
+        try {
+            if (currentView !== 'canvas') return;
+            const canvas = window.CanvasModule;
+            if (!canvas) return;
+            if (typeof canvas.scheduleMaximizedNodesRefresh === 'function') {
+                canvas.scheduleMaximizedNodesRefresh({ delayMs: 0, stabilizeDelayMs: 80 });
+            }
+            if (typeof canvas.stabilizePermanentSectionAnchors === 'function') {
+                canvas.stabilizePermanentSectionAnchors({ syncBounds: false });
+            }
+            if (typeof canvas.syncViewportVisualState === 'function') {
+                canvas.syncViewportVisualState();
+            }
+        } catch (_) { }
+    };
+
+    run();
+    try { requestAnimationFrame(run); } catch (_) { }
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 260);
+
+    try {
+        window.dispatchEvent(new CustomEvent('canvas-viewport-chrome-stabilized', {
+            detail: { reason }
+        }));
+    } catch (_) { }
+}
+
 function __shouldSuppressCanvasBootstrapRestoreInHistory(target) {
     try {
         if (currentView !== 'canvas') return false;
@@ -11051,6 +11081,12 @@ function initSidebarToggle() {
         scheduleCanvasLayoutStabilization({ syncBounds: false });
     });
 
+    window.addEventListener('header-dock-side-changed', () => {
+        syncSidebarWidth();
+        scheduleMaximizedRefresh();
+        scheduleCanvasLayoutStabilization({ syncBounds: false });
+    });
+
     window.addEventListener('header-compact-state-will-change', () => {
         headerStateChangeAnchorY = getToggleViewportCenterY();
     });
@@ -11251,6 +11287,16 @@ function initHeaderToggle() {
         }
         if (!options || options.persist !== false) {
             writeStorage(HEADER_DOCK_SIDE_KEY, nextDock);
+        }
+        if (!options || options.stabilize !== false) {
+            scheduleCanvasViewportChromeStabilization('header-dock-side');
+            if (changed) {
+                try {
+                    window.dispatchEvent(new CustomEvent('header-dock-side-changed', {
+                        detail: { dockSide: nextDock }
+                    }));
+                } catch (_) { }
+            }
         }
         updateToggleLabel(currentHeaderState);
     }

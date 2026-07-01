@@ -10593,6 +10593,20 @@ function __bindCanvasViewportVisualSyncLifecycle() {
     } catch (_) { }
 }
 
+function __scheduleCanvasPostViewportStateStabilization() {
+    const run = () => {
+        try { stabilizePermanentSectionAnchors({ syncBounds: false }); } catch (_) { }
+        try { updateCanvasScrollBounds({ recomputeBounds: true, initial: false }); } catch (_) { }
+        try { updateScrollbarThumbs(); } catch (_) { }
+        try { __forceCanvasViewportVisualSync({ forceLowDetail: false }); } catch (_) { }
+    };
+
+    run();
+    try { requestAnimationFrame(run); } catch (_) { }
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 260);
+}
+
 function getCanvasDisplayZoom() {
     const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
     const z = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
@@ -16020,6 +16034,7 @@ function loadCanvasZoom() {
 
     updateCanvasScrollBounds(true);
     updateScrollbarThumbs();
+    __scheduleCanvasPostViewportStateStabilization();
 }
 
 function savePanOffset() {
@@ -42101,6 +42116,7 @@ window.CanvasModule = {
     updateViewSyncExpandScrollButtonText: __updateViewSyncExpandScrollButtonText,
     openLastFullscreenNode: openLastMaximizedNode,
     scheduleMaximizedNodesRefresh: scheduleMaximizedNodesRefresh,
+    stabilizePermanentSectionAnchors: stabilizePermanentSectionAnchors,
     updateShortcutDisplays: updateShortcutDisplays, // 更新快捷键显示
     CanvasState: CanvasState, // 导出状态供外部访问（如指针拖拽）
     serializeMaximizedNode: __serializeMaximizedNode,
