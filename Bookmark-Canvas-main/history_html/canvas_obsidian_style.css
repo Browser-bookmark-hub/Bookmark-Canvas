@@ -2085,7 +2085,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     font-weight: 600;
 }
 
-#appearanceSpecialTempHelpPopover {
+#appearanceSpecialTempHelpPopover,
+#appearanceTempColorHelpPopover {
     width: 440px;
     max-width: calc(100vw - 48px);
 }

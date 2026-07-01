@@ -42551,7 +42551,12 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                     </div>
                     <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Temp' : '临时栏目'}</div>
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Temp' : '临时栏目'}</span>
+                            <button class="perf-help-btn" id="appearanceTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
                         <div class="appearance-row-content">
                             <div class="appearance-color-row" data-color-target="temp">
                                 <div class="appearance-color-chips">${chipsHtml}</div>
@@ -42803,6 +42808,13 @@ function createCanvasAppearanceSettingsModal() {
             : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量 / 添加 / 导入 / 任意。<br><b>提示</b>：数量很多时不建议使用自适应。'}
             </div>
         </div>
+        <div class="perf-help-popover" id="appearanceTempColorHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Note</b>: "Temp color follow" below is enabled by default. When it is enabled, temporary sections split from a permanent section prefer the parent/permanent-section color. This default color is mainly used when there is no parent color source, color follow is disabled, or the section is locked.'
+            : '<b>注意</b>：下方「临时栏目颜色跟随」默认开启。开启时，从永久栏目分裂出来的临时栏目会优先使用父级 / 永久栏目颜色；这里的默认色主要用于没有父级颜色来源、颜色跟随关闭，或栏目被锁住时。'}
+            </div>
+        </div>
         <div class="perf-help-popover" id="otherTempColorHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
@@ -42874,6 +42886,8 @@ function createCanvasAppearanceSettingsModal() {
 
     const specialTempHelpBtn = modal.querySelector('#appearanceSpecialTempHelpBtn');
     const specialTempHelpPopover = modal.querySelector('#appearanceSpecialTempHelpPopover');
+    const tempColorHelpBtn = modal.querySelector('#appearanceTempColorHelpBtn');
+    const tempColorHelpPopover = modal.querySelector('#appearanceTempColorHelpPopover');
     const showPopover = (btn, popover) => {
         modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
         const rect = btn.getBoundingClientRect();
@@ -42897,6 +42911,7 @@ function createCanvasAppearanceSettingsModal() {
         });
     };
     bindClickHelpPopover(specialTempHelpBtn, specialTempHelpPopover);
+    bindClickHelpPopover(tempColorHelpBtn, tempColorHelpPopover);
 
     const scheduleOtherSave = (() => {
         let timer = null;
