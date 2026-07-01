@@ -2510,6 +2510,23 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
     will-change: auto;
 }
 
+.canvas-node-maximized > .resize-handle,
+.canvas-node-maximized .resize-handle,
+.canvas-node-maximized .canvas-node-anchor,
+.canvas-node-maximized .canvas-anchor-zone {
+    display: none !important;
+    pointer-events: none !important;
+}
+
+.canvas-node-maximized,
+.canvas-node-maximized .permanent-section-header,
+.canvas-node-maximized .temp-node-header,
+.canvas-node-maximized .md-node-header,
+.canvas-node-maximized .card-group-header,
+.canvas-node-maximized .card-group-low-detail-overlay {
+    cursor: default !important;
+}
+
 /* Remove rounded corners when maximized to prevent empty white gaps at the screen viewport corners */
 .permanent-bookmark-section.canvas-node-maximized .permanent-section-header,
 .temp-canvas-node.canvas-node-maximized .temp-node-header {

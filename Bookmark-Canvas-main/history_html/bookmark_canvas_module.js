@@ -19984,16 +19984,22 @@ function __normalizePermanentSectionCopyStoragePayload(copy) {
 function __readPermanentViewCardStateFromDom(copyId = null) {
     const sectionEl = __resolvePermanentSectionElement(copyId);
     if (!sectionEl) return {};
-    const left = __parsePermanentViewCssPixelValue(sectionEl.style.left);
-    const top = __parsePermanentViewCssPixelValue(sectionEl.style.top);
+    const isMaximized = __isNodeMaximized(sectionEl);
+    const leftVal = isMaximized ? sectionEl.dataset.maxPrevLeft : sectionEl.style.left;
+    const topVal = isMaximized ? sectionEl.dataset.maxPrevTop : sectionEl.style.top;
+    const widthVal = isMaximized ? sectionEl.dataset.maxPrevWidth : sectionEl.style.width;
+    const heightVal = isMaximized ? sectionEl.dataset.maxPrevHeight : sectionEl.style.height;
+
+    const left = __parsePermanentViewCssPixelValue(leftVal);
+    const top = __parsePermanentViewCssPixelValue(topVal);
     if (left === null || top === null) return {};
     const fallbackWidth = Math.max(300, Math.round(sectionEl.offsetWidth || 0));
     const fallbackHeight = Math.max(200, Math.round(sectionEl.offsetHeight || 0));
     return __normalizePermanentViewCardState({
         left,
         top,
-        width: sectionEl.style.width || fallbackWidth,
-        height: sectionEl.style.height || fallbackHeight
+        width: widthVal || fallbackWidth,
+        height: heightVal || fallbackHeight
     });
 }
 
@@ -22006,6 +22012,7 @@ function makePermanentSectionResizable(element) {
         let startX, startY, startWidth, startHeight, startLeft, startTop;
 
         handle.addEventListener('mousedown', (e) => {
+            if (element && element.classList && element.classList.contains('canvas-node-maximized')) return;
             // 永久栏目不使用 node 对象；如需禁用缩放，可通过 data-locked 控制
             if (element && element.dataset && element.dataset.locked === 'true') return;
 
@@ -22163,6 +22170,7 @@ function makeTempNodeResizable(element, node) {
         let startX, startY, startWidth, startHeight, startLeft, startTop;
 
         handle.addEventListener('mousedown', (e) => {
+            if (element && element.classList && element.classList.contains('canvas-node-maximized')) return;
             // Ctrl模式下，resize由overlay接管
             if (isSectionCtrlModeEvent(e)) return;
 
@@ -22948,6 +22956,7 @@ function makeMdNodeDraggable(element, node) {
     };
 
     const onMouseDown = (e) => {
+        if (element && element.classList && element.classList.contains('canvas-node-maximized')) return;
         if (e.__mdNodeSelectionDragHandled) return;
         if (node && node.locked) return; // 锁定不允许拖动
         if (node && node.isEditing) return; // 编辑模式下不允许拖动
