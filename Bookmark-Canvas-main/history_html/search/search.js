@@ -7694,6 +7694,9 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
         const list = Array.isArray(entries) ? entries : [];
         return list.map((entry) => {
             const { item, index } = registerResultItem(entry);
+            const countHtml = Number(item.count || 0) > 0
+                ? `<span class="canvas-tag-browse-count">${escapeHtml(String(item.count))}</span>`
+                : '';
             return `
                 <div class="search-result-item canvas-tag-browse-item is-tag-row" data-index="${index}" data-id="${escapeHtml(item.id)}" data-type="${escapeHtml(item.type)}">
                     <div class="search-result-content">
@@ -7702,7 +7705,7 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
                             <span class="canvas-tag-browse-label">${escapeHtml(item.label)}</span>
                         </div>
                     </div>
-                    <span class="canvas-tag-browse-count">${escapeHtml(String(item.count))}</span>
+                    ${countHtml}
                 </div>
             `;
         }).join('');
@@ -7739,7 +7742,7 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
     others.sort(compareTagEntries);
 
     const renderBucketSection = (key, entries) => {
-        const list = Array.isArray(entries) ? entries : [];
+        const list = (Array.isArray(entries) ? entries : []).filter((entry) => Number(entry && entry.count || 0) > 0);
         if (!list.length) return '';
 
         if (!searchUiState.tagBrowseBucketLimits) {
@@ -7787,17 +7790,19 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
 
     // Collect active non-empty buckets
     const activeBuckets = [];
-    if (bucketMap.get('0-9').length) {
-        activeBuckets.push({ key: '0-9', entries: bucketMap.get('0-9') });
+    const numberBucketEntries = (bucketMap.get('0-9') || []).filter((entry) => Number(entry && entry.count || 0) > 0);
+    if (numberBucketEntries.length) {
+        activeBuckets.push({ key: '0-9', entries: numberBucketEntries });
     }
     TAG_BROWSER_ALPHA_KEYS.forEach((letter) => {
-        const entries = bucketMap.get(letter);
+        const entries = (bucketMap.get(letter) || []).filter((entry) => Number(entry && entry.count || 0) > 0);
         if (entries && entries.length) {
             activeBuckets.push({ key: letter, entries });
         }
     });
-    if (others.length) {
-        activeBuckets.push({ key: '#', entries: others });
+    const otherEntries = others.filter((entry) => Number(entry && entry.count || 0) > 0);
+    if (otherEntries.length) {
+        activeBuckets.push({ key: '#', entries: otherEntries });
     }
 
     let bucketsHtml = '';
@@ -9060,6 +9065,86 @@ function renderCanvasSearchResults(results, options = {}) {
         }
         return '';
     };
+    const renderBrowseMatchIndicatorHtml = (item) => {
+        if (!isBrowseSecondary || !item) return '';
+
+        if (isTagBrowseSecondary) {
+            const tags = getBookmarkResultTags(item);
+            const matchedTag = tags.find((tag) => tagMatchesBrowseDetail(tag, activeTagBrowseDetail));
+            if (!matchedTag) return '';
+
+            const color = normalizeTagBrowseColor(matchedTag.color) || normalizeTagBrowseColor(activeTagBrowseDetail.color) || 'gray';
+            const label = activeTagBrowseDetail.kind === 'color'
+                ? getTagBrowseColorLabel(color, isZh)
+                : (String(matchedTag.text || '').trim() || getTagBrowseColorLabel(color, isZh));
+            const titleText = isZh ? `命中: ${label}` : `Matched: ${label}`;
+            return `<div class="canvas-bookmark-browse-match-pill is-tag" title="${escapeHtml(titleText)}">
+                <span class="tag-dot tag-dot-${escapeHtml(color)}"></span>
+                <span class="canvas-bookmark-browse-match-text">${escapeHtml(label)}</span>
+            </div>`;
+        }
+
+        if (isNoteBrowseSecondary) {
+            const notes = getBookmarkResultNotes(item);
+            const collator = getTagBrowseSortCollator(isZh);
+            const matchedNote = notes.find((entry) => {
+                if (!entry || !entry.note) return false;
+                const color = normalizeNoteBrowseColor(entry.color);
+                if (activeNoteBrowseDetail.kind === 'color') {
+                    return color === normalizeNoteBrowseColor(activeNoteBrowseDetail.color);
+                }
+                if (activeNoteBrowseDetail.kind === 'bucket') {
+                    return getNoteBrowseBucketKey(getNoteBrowseLabel(entry.note), collator) === activeNoteBrowseDetail.bucket;
+                }
+                const targetColor = normalizeNoteBrowseColor(activeNoteBrowseDetail.color);
+                const targetNoteLower = String(activeNoteBrowseDetail.noteLower || '').trim().toLowerCase();
+                return color === targetColor && (!targetNoteLower || String(entry.note || '').trim().toLowerCase() === targetNoteLower);
+            });
+            if (!matchedNote) return '';
+
+            const color = activeNoteBrowseDetail.kind === 'bucket' ? normalizeNoteBrowseColor(matchedNote.color) : normalizeNoteBrowseColor(activeNoteBrowseDetail.color);
+            if (activeNoteBrowseDetail.kind === 'color') {
+                const colorLabel = getNoteBrowseColorLabel(color, isZh);
+                const titleText = isZh ? `命中: ${colorLabel}` : `Matched: ${colorLabel}`;
+                return `<div class="canvas-bookmark-browse-match-pill is-note" title="${escapeHtml(titleText)}">
+                    <i class="fas fa-pencil-alt canvas-note-browse-icon note-color-${escapeHtml(color)}"></i>
+                    <span class="canvas-bookmark-browse-match-text">${escapeHtml(colorLabel)}</span>
+                </div>`;
+            }
+
+            const label = getNoteBrowseLabel(matchedNote.note);
+            const renderNoteBrowseMatchedText = () => {
+                if (!label) return '';
+                if (activeNoteBrowseDetail.kind === 'bucket') {
+                    const firstChar = label.charAt(0);
+                    if (!firstChar) return escapeHtml(label);
+                    return `<mark>${escapeHtml(firstChar)}</mark>${escapeHtml(label.slice(firstChar.length))}`;
+                }
+                if (activeNoteBrowseDetail.kind === 'note') {
+                    const needle = getNoteBrowseLabel(activeNoteBrowseDetail.note || '');
+                    return needle ? generateSearchSnippet(label, needle) : escapeHtml(label);
+                }
+                return escapeHtml(label);
+            };
+            const titleText = isZh ? `命中: ${label}` : `Matched: ${label}`;
+            const bucketMatchClass = activeNoteBrowseDetail.kind === 'bucket' ? ' is-note-browse-bucket-match-snippet' : '';
+            return `<div class="search-result-note-snippet is-note-match-snippet${bucketMatchClass} note-color-${escapeHtml(color)}" data-note-color="${escapeHtml(color)}" title="${escapeHtml(titleText)}">
+                <i class="fas fa-pencil-alt"></i>
+                <span class="search-result-note-text">${renderNoteBrowseMatchedText()}</span>
+            </div>`;
+        }
+
+        return '';
+    };
+    const renderDetailsPreviewContextHtml = (item, preview, detailsExpanded) => {
+        const browseMatchHtml = renderBrowseMatchIndicatorHtml(item);
+        if (browseMatchHtml) {
+            return `<div class="search-result-details-preview-context is-single-line canvas-bookmark-browse-match-context" style="display: ${detailsExpanded ? 'none' : 'flex'};">${browseMatchHtml}</div>`;
+        }
+        return preview && preview.html
+            ? `<div class="search-result-details-preview-context ${preview.count === 1 ? 'is-single-line' : ''}" style="display: ${detailsExpanded ? 'none' : 'flex'};">${preview.html}</div>`
+            : '';
+    };
     const pageSize = Math.max(
         SEARCH_RESULT_MIN_PAGE_SIZE,
         Number(searchUiState.resultPageSize) || SEARCH_RESULT_MIN_PAGE_SIZE
@@ -9385,12 +9470,44 @@ function renderCanvasSearchResults(results, options = {}) {
     const renderBookmarkResultNoteSnippet = (item) => {
         const notes = getBookmarkResultNotes(item);
         if (!notes.length) return '';
-        const first = notes[0];
+        let first = notes[0];
         const note = first.note;
         const needle = getCanvasNoteSearchNeedle(queryText);
-        const snippet = needle ? generateSearchSnippet(note, needle) : escapeHtml(note);
+        let snippet = needle ? generateSearchSnippet(note, needle) : escapeHtml(note);
+        let matchClass = needle ? ' is-note-match-snippet' : '';
+
+        if (isNoteBrowseSecondary && activeNoteBrowseDetail && activeNoteBrowseDetail.kind !== 'color') {
+            const collator = getTagBrowseSortCollator(isZh);
+            const matchedNote = notes.find((entry) => {
+                if (!entry || !entry.note) return false;
+                if (activeNoteBrowseDetail.kind === 'bucket') {
+                    return getNoteBrowseBucketKey(getNoteBrowseLabel(entry.note), collator) === activeNoteBrowseDetail.bucket;
+                }
+                const color = normalizeNoteBrowseColor(entry.color);
+                const targetColor = normalizeNoteBrowseColor(activeNoteBrowseDetail.color);
+                const targetNoteLower = String(activeNoteBrowseDetail.noteLower || '').trim().toLowerCase();
+                return color === targetColor && (!targetNoteLower || String(entry.note || '').trim().toLowerCase() === targetNoteLower);
+            });
+            if (matchedNote) {
+                first = matchedNote;
+                const matchedText = getNoteBrowseLabel(matchedNote.note);
+                if (activeNoteBrowseDetail.kind === 'bucket') {
+                    const firstChar = matchedText.charAt(0);
+                    snippet = firstChar
+                        ? `<mark>${escapeHtml(firstChar)}</mark>${escapeHtml(matchedText.slice(firstChar.length))}`
+                        : escapeHtml(matchedText);
+                } else {
+                    const detailNeedle = getNoteBrowseLabel(activeNoteBrowseDetail.note || '');
+                    snippet = detailNeedle ? generateSearchSnippet(matchedText, detailNeedle) : escapeHtml(matchedText);
+                }
+                matchClass = ' is-note-match-snippet';
+                if (activeNoteBrowseDetail.kind === 'bucket') {
+                    matchClass += ' is-note-browse-bucket-match-snippet';
+                }
+            }
+        }
+
         const more = notes.length > 1 ? `<span class="search-result-note-more">+${notes.length - 1}</span>` : '';
-        const matchClass = needle ? ' is-note-match-snippet' : '';
         return `<div class="search-result-note-snippet${matchClass} note-color-${escapeHtml(first.color)}" data-note-color="${escapeHtml(first.color)}"><i class="fas fa-pencil-alt"></i><span class="search-result-note-text">${snippet}</span>${more}</div>`;
     };
     const getPermanentCopyLabelForBookmarkSearch = (copyId) => {
@@ -9520,9 +9637,7 @@ function renderCanvasSearchResults(results, options = {}) {
             { matched: hasNoteMatch, html: childNoteSnippetHtml }
         ]);
 
-        const previewContextHtml = preview.html
-            ? `<div class="search-result-details-preview-context ${preview.count === 1 ? 'is-single-line' : ''}" style="display: ${detailsExpanded ? 'none' : 'flex'};">${preview.html}</div>`
-            : '';
+        const previewContextHtml = renderDetailsPreviewContextHtml(child, preview, detailsExpanded);
 
         const infoToggleHtml = `
             <div class="canvas-bookmark-details-row">
@@ -10075,9 +10190,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 ]);
 
                 const detailsExpanded = isBookmarkDetailsExpanded(item.id);
-                const previewContextHtml = preview.html
-                    ? `<div class="search-result-details-preview-context ${preview.count === 1 ? 'is-single-line' : ''}" style="display: ${detailsExpanded ? 'none' : 'flex'};">${preview.html}</div>`
-                    : '';
+                const previewContextHtml = renderDetailsPreviewContextHtml(item, preview, detailsExpanded);
 
                 const infoToggleHtml = `
                     <div class="canvas-bookmark-details-row">
@@ -10366,9 +10479,7 @@ function renderCanvasSearchResults(results, options = {}) {
             ]);
 
             const detailsExpanded = isBookmarkDetailsExpanded(item.id);
-            const previewContextHtml = preview.html
-                ? `<div class="search-result-details-preview-context ${preview.count === 1 ? 'is-single-line' : ''}" style="display: ${detailsExpanded ? 'none' : 'flex'};">${preview.html}</div>`
-                : '';
+            const previewContextHtml = renderDetailsPreviewContextHtml(item, preview, detailsExpanded);
 
             const infoToggleHtml = `
                 <div class="canvas-bookmark-details-row">
@@ -10549,14 +10660,14 @@ function rerenderCanvasBookmarkResults(selectedIndex = 0) {
         });
         return;
     }
-    searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
+    searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
 }
 
 function appendCanvasSearchResultsPage() {
     const sourceResults = Array.isArray(searchUiState.resultSource) ? searchUiState.resultSource : [];
     const query = String(searchUiState && searchUiState.query || '').trim();
     if (!sourceResults.length) {
-        searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true });
+        searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
         return;
     }
     renderCanvasSearchResults(sourceResults, {
