@@ -2142,6 +2142,7 @@ let lastBatchSelectionInfo = null; // 最近一次选择所属栏目
 // 批量面板默认尺寸：固定，不跟随画布缩放
 const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 200;
 const BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT = 450; // 450px 静默高度
+const BATCH_PANEL_HORIZONTAL_DEFAULT_WIDTH = 860;
 
 function getBatchPanelGlobalState() {
     try {
@@ -2152,10 +2153,6 @@ function getBatchPanelGlobalState() {
                 // 如果是以前默认的 700px 高度或 null，重置为新的默认高度 450
                 if (parsed.vertical && (parsed.vertical.height === 700 || parsed.vertical.height === null)) {
                     parsed.vertical.height = BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT;
-                }
-                // 如果是以前默认的 280px 宽度，重置为新的默认值 200px
-                if (parsed.vertical && parsed.vertical.width === 280) {
-                    parsed.vertical.width = BATCH_PANEL_VERTICAL_DEFAULT_WIDTH;
                 }
                 return parsed;
             }
@@ -2172,7 +2169,7 @@ function getBatchPanelGlobalState() {
             top: null
         },
         horizontal: {
-            width: 720,
+            width: BATCH_PANEL_HORIZONTAL_DEFAULT_WIDTH,
             height: null,
             manualPosition: false,
             left: null,
@@ -7336,26 +7333,28 @@ function showBatchNoteEditModal(targets) {
         const modal = document.createElement('div');
         modal.className = 'modal content-center batch-note-edit-modal';
         modal.innerHTML = `
-            <div class="modal-content">
-                <div class="modal-header compact">
+            <div class="modal-content batch-note-edit-content">
+                <div class="modal-header compact batch-note-edit-header">
                     <h3>${escapeHtml(lang === 'zh_CN' ? `批量编辑笔记 (${count})` : `Batch Edit Notes (${count})`)}</h3>
-                    <button class="modal-close" type="button"><i class="fas fa-times"></i></button>
+                    <button class="modal-close perf-modal-close batch-note-edit-close" type="button" aria-label="${escapeHtml(lang === 'zh_CN' ? '关闭' : 'Close')}"><i class="fas fa-times"></i></button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body batch-note-edit-body">
                     <div class="info-note-heading">
                         <span class="info-card-label">${escapeHtml(lang === 'zh_CN' ? 'NOTE' : 'NOTE')}</span>
-                        <div class="info-note-color-palette">
-                            ${palette.map((color) =>
-                                `<button class="tag-palette-btn info-note-color-btn${color === selectedInitial ? ' is-selected' : ''}" data-note-color="${escapeHtml(color)}" type="button" aria-label="${escapeHtml(color)}"><span class="tag-dot tag-dot-${escapeHtml(color)}"></span></button>`
-                            ).join('')}
+                        <div class="batch-note-edit-heading-controls">
+                            <div class="info-note-color-palette">
+                                ${palette.map((color) =>
+                                    `<button class="tag-palette-btn info-note-color-btn${color === selectedInitial ? ' is-selected' : ''}" data-note-color="${escapeHtml(color)}" type="button" aria-label="${escapeHtml(color)}"><span class="tag-dot tag-dot-${escapeHtml(color)}"></span></button>`
+                                ).join('')}
+                            </div>
+                            <div class="batch-note-edit-actions">
+                                <button class="perf-btn secondary batch-note-edit-btn" type="button" data-note-cancel="true">${escapeHtml(lang === 'zh_CN' ? '取消' : 'Cancel')}</button>
+                                <button class="perf-btn primary batch-note-edit-btn" type="button" data-note-save="true">${escapeHtml(lang === 'zh_CN' ? '保存' : 'Save')}</button>
+                            </div>
                         </div>
                     </div>
                     <div class="info-note-editor note-color-${escapeHtml(selectedInitial)}">
                         <textarea class="info-note-textarea" rows="5" placeholder="${escapeHtml(lang === 'zh_CN' ? '添加笔记...' : 'Add note...')}">${escapeHtml(initial.note)}</textarea>
-                    </div>
-                    <div class="modal-actions" style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
-                        <button class="modal-btn" type="button" data-note-cancel="true">${escapeHtml(lang === 'zh_CN' ? '取消' : 'Cancel')}</button>
-                        <button class="modal-btn primary" type="button" data-note-save="true">${escapeHtml(lang === 'zh_CN' ? '保存' : 'Save')}</button>
                     </div>
                 </div>
             </div>
@@ -7501,12 +7500,12 @@ async function writeNotesForContextTargets(targets, noteInput, colorInput, reaso
         });
         try {
             if (window.CanvasModule.temp && typeof window.CanvasModule.temp.saveSectionsPatch === 'function' && changedSections.length) {
-                window.CanvasModule.temp.saveSectionsPatch(changedSections);
+                await window.CanvasModule.temp.saveSectionsPatch(changedSections);
             } else {
                 const saveFn = (typeof window.saveTempNodes === 'function')
                     ? window.saveTempNodes
                     : (typeof saveTempNodes === 'function' ? saveTempNodes : null);
-                if (saveFn) saveFn();
+                if (saveFn) await saveFn();
             }
         } catch (_) { }
     }
@@ -7619,11 +7618,6 @@ async function batchDeleteTemp() {
 async function batchRenameTemp() {
     const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
     const caps = getBatchSelectionCapabilities();
-
-    if (caps.mixedTypes) {
-        alert(lang === 'zh_CN' ? '无法对混合了书签与文件夹的选中项进行重命名' : 'Cannot rename a mixed selection of bookmarks and folders');
-        return;
-    }
 
     const tempNodes = caps.tempNodes;
     if (!tempNodes.length) return;
@@ -11772,7 +11766,6 @@ function showBatchContextMenu(e) {
     const caps = getBatchSelectionCapabilities();
     const cutDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
     const mergeDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
-    const renameDisabled = caps.mixedTypes;
 
     // 构建批量菜单 - 分组显示（简化版本）
         const itemGroups = [
@@ -11802,7 +11795,7 @@ function showBatchContextMenu(e) {
                 { action: 'batch-copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy' },
                 { action: 'batch-cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', disabled: cutDisabled },
                 { action: 'batch-delete', label: lang === 'zh_CN' ? '删除' : 'DELETE', icon: 'trash-alt' },
-                { action: 'batch-rename', label: lang === 'zh_CN' ? '改名' : 'Rename', icon: 'edit', disabled: renameDisabled },
+                { action: 'batch-rename', label: lang === 'zh_CN' ? '改名' : 'Rename', icon: 'edit' },
                 { action: 'batch-edit-note', label: lang === 'zh_CN' ? '编辑笔记' : 'Edit Notes', icon: 'sticky-note' },
                 { action: 'batch-clear-note', label: lang === 'zh_CN' ? '清除笔记' : 'Clear Notes', icon: 'eraser' }
             ]
@@ -13577,11 +13570,6 @@ async function batchRename() {
     const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
     const caps = getBatchSelectionCapabilities();
 
-    if (caps.mixedTypes) {
-        alert(lang === 'zh_CN' ? '无法对混合了书签与文件夹的选中项进行重命名' : 'Cannot rename a mixed selection of bookmarks and folders');
-        return;
-    }
-
     const permanentIds = caps.permanentIds;
     const tempNodes = caps.tempNodes;
 
@@ -13629,8 +13617,8 @@ async function batchRename() {
                     if (loadingToast) {
                         const current = progressTracker.current;
                         const msg = typeof currentLang !== 'undefined' && currentLang === 'en'
-                            ? `Renaming: ${current}/${total}`
-                            : `正在重命名: ${current}/${total}`;
+                            ? `Renaming: ${current}/${progressTracker.total}`
+                            : `正在重命名: ${current}/${progressTracker.total}`;
                         loadingToast.update(msg);
                     }
                     await updatePermanentBookmarkNode(nodeId, { title: normalizedTitle }, createOptions);
@@ -13665,18 +13653,28 @@ async function batchRename() {
             }
             // 批量修改完成后，对所有受影响的栏目各触发一次统一重绘 and 存储保存
             updatedSections.forEach(sectionId => {
-                manager.ensureRendered(sectionId);
                 try {
                     if (typeof manager.getSection === 'function') {
                         const section = manager.getSection(sectionId);
-                        if (section) changedSections.push(section);
+                        if (section) {
+                            changedSections.push(section);
+                            if (typeof manager.refreshSectionTree === 'function') {
+                                manager.refreshSectionTree(section);
+                            } else if (typeof window !== 'undefined' && typeof window.refreshTempSectionTreeInPlace === 'function') {
+                                window.refreshTempSectionTreeInPlace(section);
+                            } else if (typeof manager.ensureRendered === 'function') {
+                                manager.ensureRendered(sectionId);
+                            }
+                        } else if (typeof manager.ensureRendered === 'function') {
+                            manager.ensureRendered(sectionId);
+                        }
                     }
                 } catch (_) { }
             });
             if (typeof manager.saveSectionsPatch === 'function' && changedSections.length) {
-                manager.saveSectionsPatch(changedSections);
+                await manager.saveSectionsPatch(changedSections);
             } else {
-                saveTempNodes();
+                await saveTempNodes();
             }
         }
 
@@ -14238,7 +14236,6 @@ function updateBatchPanelCount() {
         const caps = getBatchSelectionCapabilities();
         const cutDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
         const mergeDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
-        const renameDisabled = caps.mixedTypes;
         batchPanel.querySelectorAll('.context-menu-item[data-action="batch-cut"]').forEach((el) => {
             el.classList.toggle('disabled', !!cutDisabled);
         });
@@ -14246,7 +14243,7 @@ function updateBatchPanelCount() {
             el.classList.toggle('disabled', !!mergeDisabled);
         });
         batchPanel.querySelectorAll('.context-menu-item[data-action="batch-rename"]').forEach((el) => {
-            el.classList.toggle('disabled', !!renameDisabled);
+            el.classList.remove('disabled');
         });
     } catch (_) { }
 }
@@ -14442,7 +14439,7 @@ function restoreBatchPanelState(panel, anchorInfo) {
             const storedWidth = globalState.horizontal.width;
             const storedHeight = globalState.horizontal.height;
             
-            const widthValue = Number.isFinite(storedWidth) ? clampValue(storedWidth, 320, horizontalMaxWidth) : 720;
+            const widthValue = Number.isFinite(storedWidth) ? clampValue(storedWidth, 320, horizontalMaxWidth) : BATCH_PANEL_HORIZONTAL_DEFAULT_WIDTH;
             panel.style.width = `${widthValue}px`;
             panel.style.minWidth = '320px';
             panel.style.maxWidth = `${horizontalMaxWidth}px`;
@@ -14945,7 +14942,7 @@ function saveBatchPanelState(panel, anchorInfo) {
         } else {
             const userW = panel.dataset.userWidthHorizontal ? parseFloat(panel.dataset.userWidthHorizontal) : null;
             const userH = panel.dataset.userHeightHorizontal ? parseFloat(panel.dataset.userHeightHorizontal) : null;
-            globalState.horizontal.width = Number.isFinite(userW) ? userW : (Number.isFinite(currentWidth) ? currentWidth : 720);
+            globalState.horizontal.width = Number.isFinite(userW) ? userW : (Number.isFinite(currentWidth) ? currentWidth : BATCH_PANEL_HORIZONTAL_DEFAULT_WIDTH);
             globalState.horizontal.height = Number.isFinite(userH) ? userH : null; // 不将自适应的高度误存为用户手动调整的高度
         }
         

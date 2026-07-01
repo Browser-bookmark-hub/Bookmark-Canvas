@@ -5979,6 +5979,70 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     cursor: default;
 }
 
+.batch-note-edit-modal .batch-note-edit-content {
+    width: min(520px, calc(100vw - 48px));
+    max-width: 92vw;
+    border-radius: 12px;
+}
+
+.batch-note-edit-modal .batch-note-edit-header {
+    min-height: 38px;
+    padding: 8px 14px 7px 16px;
+}
+
+.batch-note-edit-modal .batch-note-edit-header h3 {
+    font-size: 15px;
+    line-height: 1.25;
+}
+
+.batch-note-edit-modal .batch-note-edit-close {
+    flex: 0 0 auto;
+}
+
+.batch-note-edit-modal .batch-note-edit-body {
+    padding: 14px 16px 16px;
+}
+
+.batch-note-edit-modal .info-note-heading {
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.batch-note-edit-modal .batch-note-edit-heading-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+}
+
+.batch-note-edit-modal .info-note-color-palette {
+    flex: 0 0 auto;
+}
+
+.batch-note-edit-modal .batch-note-edit-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.batch-note-edit-modal .batch-note-edit-btn {
+    min-width: 64px;
+    height: 30px;
+    padding: 6px 12px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.batch-note-edit-modal .info-note-textarea {
+    min-height: 112px;
+}
+
 .info-path-text,
 .info-path-collapsed {
     display: -webkit-box;

@@ -42183,6 +42183,7 @@ window.CanvasModule = {
         moveWithin: moveTempItemsWithinSection,
         moveAcross: moveTempItemsAcrossSections,
         ensureRendered: ensureTempSectionRendered,
+        refreshSectionTree: refreshTempSectionTreeInPlace,
         saveSectionsPatch: saveTempSectionsPatch,
         saveSectionDelta: saveCanvasSectionDelta,
 
