@@ -252,7 +252,8 @@
     white-space: pre-wrap;
     max-width: min(320px, 80vw);
     max-height: 180px;
-    overflow: auto;
+    overflow: hidden;
+    overflow-y: hidden;
 }
 
 .note-hover-bubble[data-color="red"] { --note-color: var(--tag-red, #ff453a); }
