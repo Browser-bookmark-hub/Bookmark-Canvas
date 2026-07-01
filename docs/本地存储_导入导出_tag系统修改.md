@@ -117,7 +117,7 @@
    * 将书签树中所有节点及父节点的本地 `id` / `parentId` 值，翻译并替换成其对应的云端稳定 `syncId`。
    * 去除表示 Chrome 本地排序位置的 `index` 字段。
    * 导出的 JSON 树状结构中**不得出现任何 Chrome 本地数字 ID**，但必须保留 `id` 和 `parentId` 的字段名称。
-3. 沙盒中导出的 `identityMap` 必须**彻底清除 Chrome 本地 ID**，只保留 `{ "syncId": "...", "tags": [...] }` 等内容。即便节点没有扩展 tags，也必须保留 `{ "syncId": "..." }`，防止结构残缺。
+3. 沙盒中导出的 `identityMap` 必须**彻底清除 Chrome 本地 ID**，仅作为节点扩展元数据表使用：只保留带有 `tags`、`note`、`noteColor` 等扩展字段的 `{ "syncId": "...", ...extras }` 条目；没有扩展字段的节点不再单独导出 `identityMap` 条目。导出树本身的 `tree.id` / `tree.parentId` 已经使用 `syncId`，因此导入端以树结构作为 syncId 真相源，再按 `identityMap` 补回扩展元数据。
 4. **ID 体系一致性约束**：导出的二级文件（如 `.canvas` 里的 `containedTempIds`，以及导出的 markdown 格式的 `contentNodes`）在导出时也必须转换成 `syncId` 的形态输出，禁止混合输出 Chrome 本地 ID。
 
 ---
