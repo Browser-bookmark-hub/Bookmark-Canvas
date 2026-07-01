@@ -1,21 +1,58 @@
-# Bookmark Canvas Import/Export Rules
+# Bookmark Canvas AI Agent Editing Rules
 
-This file is written for AI agents that edit an exported Bookmark Canvas package. Keep edits protocol-aware and minimal.
+This file helps AI agents and coding agents edit an exported Bookmark Canvas package. Before modifying files, read and follow this protocol. Changes to bookmarks, sections, `.canvas` nodes/edges, and tag/note metadata should stay minimal and compatible with plugin import. This package is not a generic Obsidian or JSON Canvas project, so avoid rewriting it by general Canvas assumptions.
+
+## Guide Structure
+```text
+{{GUIDE_SELF_CODE}}
+├── Part A. Package & View Structure
+│   ├── A0 Basic workflow
+│   ├── A1 Generic package structure diagram example
+│   ├── A2 Mode-specific content grammar (JSON)
+│   ├── A3 Permanent section contract
+│   ├── A4 Temporary section contract
+│   ├── A5 .canvas element contract
+│   ├── A6 Tag / note metadata contract
+│   ├── A7 Import recognition priority
+│   ├── A8 Signal and relationship use
+│   └── A9 Text formatting support
+├── Part B. AI Editing Execution Rules ({{EXPORT_MODE_LABEL}})
+│   ├── S0 User intent confirmation and execution strategy
+│   ├── S1 File routing
+│   ├── S2 AI-generated bookmark routing
+│   ├── S3 Create an AI special temporary section when no target exists
+│   ├── S4 ID and numbering rules
+│   ├── S5 Color rules
+│   ├── S6 Web research capability
+│   ├── S7 Complex workflow
+│   └── S8 Taxonomy and categorization guidelines
+├── Reference
+│   ├── R1 ID and number generation rules
+│   ├── R2 Permanent main JSON example
+│   ├── R3 Permanent copy anchor example
+│   ├── R4 Regular temporary section examples
+│   ├── R5 AI special temporary section example
+│   ├── R6 .canvas example
+│   └── R7 Tag palette and note metadata
+└── Closing: Long-term Rules and Post-edit Check
+    ├── P1 SKILL and long-term preferences
+    └── P2 Minimal post-edit checklist
+```
 
 ## Part A. Package & View Structure
 
-### A0. Full Workflow Example (Export → Edit → Re-import)
-1. Export using {{EXPORT_MODE_LABEL}}.
-2. Unzip into your Obsidian vault.
-3. Open the package `.canvas` entry file in the export root. It is usually named like the folder, but use the actual `.canvas` filename if it was renamed.
-4. Edit Permanent/Temporary `.json` files only when their bookmark data is in scope; edit blank cards directly in `.canvas` text nodes.
-5. If any Permanent/Temporary `.json` file is renamed or moved, update every matching `.canvas` file path.
+### A0. Basic Workflow (Export → Edit → Re-import)
+1. Export using {{EXPORT_MODE_LABEL}}, then unzip the ZIP into your Obsidian vault.
+2. Open the `.canvas` entry file in the canvas data package root directory. It is usually named like the root directory; if renamed, use the actual `.canvas` filename. See [A1](#ref-a1) / [R6](#ref-r6).
+3. Edit Permanent/Temporary `.json` files only when their bookmark data is in scope; edit blank cards, groups, layout, and edges directly in `.canvas`. See [A3](#ref-a3) / [A4](#ref-a4) / [A5](#ref-a5) / [S1](#ref-s1).
+4. Whenever Permanent/Temporary `.json` file references are added, deleted, moved, renamed, or edited, maintain every path reference: `.canvas` node `file` values and permanent copy-anchor `inheritFrom` values. See [A5](#ref-a5) / [R6](#ref-r6).
+5. Run local checks for the touched scope, and use [P2](#ref-p2) when sync safety checks are needed.
 6. Re-import via ZIP or folder.
 
 <a id="ref-a1"></a>
-### A1. Generic Package Structure Diagram
+### A1. Generic Package Structure Diagram Example
 ```text
-<export-root>/
+<canvas-data-package-root>/
 ├── {{GUIDE_PRIMARY_NAME_PAD}}{{GUIDE_PRIMARY_NAME_ALIGN_SPACES}}(this AI editing guide)
 ├── <canvas-entry>.canvas                  (canvas entry: nodes, edges, file mappings, text cards, groups, connectors; see R6)
 ├── Permanent/                             (permanent section JSON folder; Chinese export: 永久栏目/)
@@ -28,17 +65,18 @@ This file is written for AI agents that edit an exported Bookmark Canvas package
     │   ├── A-1-1 <title>.json             (derived chain; may inherit most content from A-1; see R4/R1.4)
     │   └── B-1 <title>.json               (regular chain from permanent copy/slot B; see R4/R1.4)
     └── Special temporary/                 (special bookmark sandboxes; Chinese export: 特殊临时栏目/)
-        ├── AI <title>.json                (fallback target for AI-generated bookmark sets when no existing target is specified; see R5/R7)
+        ├── AI <title>.json                (fallback target for AI-generated bookmark sets when no existing target is specified; see R5/S3)
         └── Add/Search/Import <title>.json (other special temporary sections; see R5)
 ```
 - JSON Mode exports section files as `.json`; blank cards are `.canvas` `type: "text"` nodes, not standalone files.
-- Example index: permanent main [R2](#ref-r2); permanent copy [R3](#ref-r3); regular temporary [R4](#ref-r4); AI/special temporary [R5](#ref-r5)/[R7](#ref-r7); canvas [R6](#ref-r6); tag/note metadata [R8](#ref-r8).
+- Example index: permanent main [R2](#ref-r2); permanent copy [R3](#ref-r3); regular temporary [R4](#ref-r4); AI/special temporary [R5](#ref-r5)/[S3](#ref-s3); canvas [R6](#ref-r6); tag/note metadata [R7](#ref-r7).
 
 ### A2. Mode-specific Content Grammar
 - {{EXPORT_MODE_LABEL}} stores the bookmark tree as a single plain JSON object body (no fenced code block).
 - Permanent/temporary section imports read this JSON body directly.
 - Do not wrap section JSON in Markdown fences. Keep each section file parseable as one JSON object.
 
+<a id="ref-a3"></a>
 ### A3. Permanent Section Contract
 - Permanent sections represent the browser bookmark tree. Treat them as user data with higher risk than temporary sections.
 - Main permanent file shape: `format`, `schemaVersion`, `sectionType: "permanent"`, `slot: "A"`, `descriptionMd`, optional `identityMap`, and `tree`. See [R2](#ref-r2).
@@ -48,6 +86,7 @@ This file is written for AI agents that edit an exported Bookmark Canvas package
 - `identityMap` is exported only for extra metadata such as `tags` and `note`/`noteColor`. If present, keep entries keyed by `syncId`; do not invent Chrome local `id` values in exported packages, and do not put permanent metadata inside `tree` nodes. See [R2](#ref-r2).
 - Permanent copies are not duplicate trees. A copy file has `fileRole: "copy-anchor"`, `anchorOnly: true`, `inheritFrom`, `copyId`, its own `descriptionMd`, and view state. Do not add a `tree` to a copy anchor. See [R3](#ref-r3).
 
+<a id="ref-a4"></a>
 ### A4. Temporary Section Contract
 - Temporary sections are bookmark sandboxes. Editing them does not mean directly editing the browser bookmark tree.
 - Regular chain sections live under `Temporary/General Chain/` with labels like `A-1`, `A-1-1`, `B-1`. A derived chain may intentionally carry over many items from its parent chain. See [R4](#ref-r4).
@@ -58,21 +97,23 @@ This file is written for AI agents that edit an exported Bookmark Canvas package
 - For repeated special labels, scan existing same-label IDs and use the next suffix, for example `temp-section-AI`, then `temp-section-AI-2`. See [R1.5](#ref-r1-5).
 - Temporary item IDs use `tempId_YYYYMMDD_hash_<token7>`, where `token7` is lowercase letters/digits only. Folders use `type: "folder"` and bookmarks use `type: "bookmark"` with `url`. See [R1.1](#ref-r1-1), [R1.3](#ref-r1-3), and [R4](#ref-r4).
 
+<a id="ref-a5"></a>
 ### A5. .canvas Element Contract
 - Root keys must remain `nodes[]` and `edges[]`; the file is JSON Canvas compatible. See [R6](#ref-r6).
 - File nodes must point ONLY to Permanent/Temporary JSON files through vault-relative `file` paths. Do not connect or reference any external/third-party file nodes (such as videos, audio, images, or PDFs) in the canvas; they are prohibited.
+- Obsidian path baseline: `.canvas` `file` values and permanent copy-anchor `inheritFrom` values are vault-relative paths, not paths relative to the `.canvas` file or the current JSON file. Whenever file references are added, deleted, moved, renamed, or edited, keep the prefix style already used in the current `.canvas` and update every affected reference; follow Obsidian JSON Canvas path handling.
 - Text nodes (`type: "text"`) are blank cards and may contain prompt text; edit their `text` field directly.
 - Group nodes (`type: "group"`) are card groups. They do not store `children`; nesting and membership are inferred by geometry containment.
+- `.canvas` `x/y/width/height` values are part of the view structure, not decorative coordinates. When adding, moving, resizing, or rearranging file/text/group nodes, preserve readable spacing and avoid rectangle overlap between non-group nodes; place a node fully inside a group only when that containment is meant to express membership.
 - Edge `fromNode` / `toNode` values must reference existing node IDs. Default connectors are single-arrow lines unless the existing edge says otherwise.
 - A node already geometrically inside a group should not be connected to that same containing group just to express membership.
 - Preserve existing plugin-style IDs such as `permanent-section`, `temp-section-A-1`, `card-group-*`, `md-node-*`, and `edge-*`; do not convert them to generic 16-hex IDs. See [R1.6](#ref-r1-6).
 
 ### A6. Tag / Note Metadata Contract
-- Tags follow a macOS Finder-like model: one bookmark/folder item can have multiple colored tags, each stored as `{ "color": "<palette>", "text": "<label>" }`. See [R8](#ref-r8).
-- A note is one plain-text note on a bookmark/folder item. Each item has at most one note; store it as sibling fields `note` and `noteColor`, not as a tag object or array. See [R8](#ref-r8).
-- Tag `color` and note `noteColor` values must be lowercase palette names only: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`. Use `gray`, not `grey`; do not use hex values, `colorHex`, or canvas color preset numbers.
-- Palette display colors: red `#ff453a`, orange `#ff9f0a`, yellow `#ffd60a`, green `#30d158`, blue `#0a84ff`, purple `#bf5af2`, gray `#8e8e93`.
-- `text` is the visible tag label. If the UI user only clicks a color, the app uses the localized color name as text; AI edits should write an explicit short `text`.
+- Tags follow a macOS Finder-like model: one bookmark/folder item can have multiple colored tags, each stored as `{ "color": "<color>", "text": "<label>" }`, where `color` must be one of: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`. See [R7](#ref-r7).
+- A note is one plain-text note on a bookmark/folder item. Each item has at most one note; store it as sibling fields `note` and `noteColor` (where `noteColor` must also be one of: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`), not as a tag object or array. See [R7](#ref-r7).
+- Use `gray`, not `grey`; do not use hex values (such as `#0a84ff`), `colorHex`, or canvas color preset numbers.
+- `text` is the visible tag label and may be Chinese, English, or another custom short string. Do not confuse `text` with `color` / `noteColor`.
 - `note` is a plain-text string; it preserves line breaks and is trimmed as a whole. Empty notes should not be exported, and clearing a note also removes `noteColor`. Old data with `note` but no `noteColor` is treated as `orange`.
 - Multiple tags are allowed. Keep their order stable, remove exact duplicates by `color + text`, and preserve existing tags unless the task asks to change them. Add tags only when requested or when the item/folder is important to the task; avoid over-tagging large URL sets.
 - Add notes only when the user requests a note or when the item/folder needs explicit context. Notes are explanatory/context signals, not bulk taxonomy labels.
@@ -103,24 +144,24 @@ This file is written for AI agents that edit an exported Bookmark Canvas package
 -----------------------------------------------------------------------------
 ## Part B. AI Editing Execution Rules ({{EXPORT_MODE_LABEL}})
 
+<a id="ref-s0"></a>
 ### S0. User Intent Confirmation and Execution Strategy
 
-AI should infer the user’s real goal from the user request, current files/directories, project structure, and this protocol. This protocol constrains execution and safety boundaries after the goal is known; it must not decide the goal on the user’s behalf.
+AI should infer the user's real goal from the user request, earlier context, current files/directories, project structure, and this protocol. This protocol constrains execution and safety boundaries for confirmed tasks; it must not decide the goal on the user's behalf.
 
-When the goal, target object, and risk boundary are clear, execute directly with the minimum necessary file scope.
+Execution rules:
+- When the goal, target object, and risk boundary are clear, act directly within the minimum necessary file scope.
+- When the goal, target object, expected result, or edit scope is unclear and multiple reasonable interpretations exist, ask the user for confirmation and wait for the answer; before confirmation, do not write files or treat a safe fallback route in this protocol as the user's intent.
+- In multi-turn conversations, follow the user's latest instruction. When a new instruction changes the target object, risk boundary, target location, or long-term preference, re-check the relevant sections; when long-term personal rules, Skills, or external rules are involved, also consult [P1](#ref-p1).
+- Routing principle: respect the user-specified target for AI-added bookmarks or bookmark trees; use an AI special temporary section only when no target is specified; edit the permanent/browser bookmark tree only when the user explicitly asks for that.
 
-When the goal, target object, expected result, or edit scope is unclear and multiple reasonable interpretations exist, ask the user for confirmation and wait for the answer before writing any file.
-
-Do not treat a safe fallback route in this protocol as the default interpretation of an ambiguous request. Safe fallbacks still require a confirmed user goal.
-
-Route principle: edit the minimum file set only. Respect the user-specified target for AI-added bookmarks or bookmark trees; use an AI special temporary section only when no target is specified. Edit the permanent browser tree only when the user explicitly asks for that.
-
+<a id="ref-s1"></a>
 ### S1. File Routing (what to touch)
 - Permanent main content: edit `{{FINAL_PERMANENT_MD_REL}}` only for intentional browser-bookmark-tree changes.
 - Permanent copy content: edit optional copy anchors such as `{{PERMANENT_MD_REL_2}}` only for copy description/view state.
 - Temporary content: edit `Temporary/General Chain/*.json` or `Temporary/Special temporary/*.json`, then keep matching `.canvas` file nodes in sync.
 - Blank content: edit `.canvas` `type: "text"` nodes directly.
-- Card groups and layout: edit `.canvas` node geometry/order only.
+- Card groups and layout: edit `.canvas` node geometry/order only; whenever cards/groups are added, moved, resized, or rearranged, treat geometry containment and non-group node collisions as part of the edit scope.
 - Connector lines: edit `.canvas` `edges[]` only.
 - Unrelated files: Do NOT add, edit, or copy any external/third-party files (e.g., personal notes, non-schema JSONs, or media files) to the sync directory. Unrelated files in this directory will be permanently deleted during push sync.
 
@@ -129,10 +170,19 @@ Route principle: edit the minimum file set only. Respect the user-specified targ
 - For blank cards, edit only the `.canvas` `type: "text"` node. Do not turn blank-card notes into bookmark JSON unless the user asks for a bookmark tree.
 - Edit the permanent browser-bookmark tree only when the user explicitly asks to modify permanent/browser bookmarks.
 - When AI needs to add new bookmark suggestions or a new bookmark tree and no existing target is specified, create or update a special temporary section with `label: "AI"` and `tempKind: "special"`. See [R5](#ref-r5).
-- If no suitable temporary target exists and AI needs to add new bookmark suggestions, create the special-temporary folder/file first, then add a matching file node to `.canvas`. See [R7](#ref-r7).
+- If no suitable temporary target exists and AI needs to add new bookmark suggestions, create the special-temporary folder/file first, then add a matching file node to `.canvas`. See [S3](#ref-s3).
 - For AI-created special temporary sections, use `source: "ai-generated"` and a meaningful `descriptionMd` explaining what the generated bookmark tree contains. See [R5](#ref-r5).
 
-### S3. ID and Numbering Rules
+<a id="ref-s3"></a>
+### S3. Create an AI Special Temporary Section When No Target Exists
+- Use this only when AI must add new bookmark suggestions or a new bookmark tree and the user did not specify an existing temporary section, permanent section, or blank text node as the target.
+- Do not write these suggestions into the permanent section unless the user explicitly asks to modify browser/permanent bookmarks.
+- If `Temporary/Special temporary/` does not exist, create that folder first; reuse it if it already exists.
+- Write `AI <title>.json` in that folder using the R5 shape: `sectionType: "temporary"`, `label: "AI"`, `tempKind: "special"`, `source: "ai-generated"`, `descriptionMd`, and `items`. Use `id: "temp-section-AI"` unless it collides; then use the next same-label suffix such as `temp-section-AI-2`.
+- Add a matching file node to the entry `.canvas` `nodes[]`: use the same node `id` as the JSON section `id`, set `file` to the vault-relative path that matches the package prefix, and set `x/y/width/height/color` following the R6 example while avoiding overlap with existing nodes. If group or text nodes are added too, plan the parent group bounds first, then place child cards fully inside the group with spacing; do not let file/text nodes cover each other.
+- Add a group, text prompt node, or edge only when it is useful for the task, and keep every edge endpoint valid.
+
+### S4. ID and Numbering Rules
 - Permanent new nodes: `syncId_YYYYMMDD_hash_<token7>`; `token7` is lowercase letters/digits only, and `parentId` must point to the parent syncId. See [R1.1](#ref-r1-1) and [R1.2](#ref-r1-2).
 - Temporary new items: `tempId_YYYYMMDD_hash_<token7>`; `token7` is lowercase letters/digits only, and every nested item keeps the section ID in `sectionId`. See [R1.1](#ref-r1-1) and [R1.3](#ref-r1-3).
 - Regular temporary labels: explicit `label` wins. Only sections without an explicit label use `{Alpha}-1` from `sequenceNumber` by `toAlphaLabel()`; examples: 1 A-1, 2 B-1, 3 C-1, 27 AA-1. See [R1.4](#ref-r1-4).
@@ -140,70 +190,44 @@ Route principle: edit the minimum file set only. Respect the user-specified targ
 - Derived regular labels can extend the chain, for example `A-1-1`; preserve parent-child chain intent when editing. See [R4](#ref-r4).
 - Special temporary IDs use the label and duplicate suffixes, for example `temp-section-AI`, `temp-section-AI-2`. See [R1.5](#ref-r1-5).
 
-### S4. Color Rules
+### S5. Color Rules
 - Keep existing `color` / `colorHex` unless explicit recolor is requested.
 - Regular temp color follows chain inheritance: unlocked child follows parent, locked parent breaks inheritance below.
 - Special temp sections follow the app appearance defaults unless a task gives a color.
-- These section/canvas colors are not tag/note colors. Tag palette names and `noteColor` values are defined separately in [R8](#ref-r8).
+- These section/canvas colors are not tag/note colors. Tag palette names and `noteColor` values are defined separately in [R7](#ref-r7).
 
-### S5. Web Research Capability
-#### S5.1 Rough Screening Before Research
+### S6. Web Research Capability
+#### S6.1 Rough Screening Before Research
 - First screen targets by task relevance, importance, privacy/authentication sensitivity, cost/time, and whether the actual page substance is needed. For bookmark analysis, organization, deduplication, recommendation, or classification, do not rely only on title, URL, canvas position, folder context, or package metadata when substance matters.
 - For account dashboards, mailboxes, consoles, or other private/authenticated pages, do not attempt login or sensitive access. Classify by metadata unless the user explicitly provides a safe access method and scope.
-#### S5.2 Judgment, Plan, and User Alignment
+#### S6.2 Judgment, Plan, and User Alignment
 - If the user explicitly requests web research, or the task clearly depends on link substance, a small number of public, low-risk targets may be researched directly.
 - Ask the user before execution when the research set is large, expensive, slow, privacy-sensitive, or requires broad external access. Confirm scope, priority, sampling strategy, or whether to continue.
-#### S5.3 Execution and Constraints
+#### S6.3 Execution and Constraints
 - Use available model, tool, or API research capabilities according to their own constraints and best practices.
 - For complex or many-URL work, split research into batches on the main line, or use subagents/parallel review when the environment supports them. Split by importance, folder/topic, tag, connector, or decision risk, then merge the findings.
 - Be selective. Do not research every URL just because many are present; prioritize or sample by importance and state the coverage limits.
 - If tools or permission are unavailable, state that conclusions are based only on title, URL, canvas/package context, and mark substance-dependent decisions as uncertain.
-#### S5.4 Official Reference Sources
+#### S6.4 Official Reference Sources
 - Project open-source repository and documentation: [GitHub - Browser-bookmark-hub/Bookmark-Canvas](https://github.com/Browser-bookmark-hub/Bookmark-Canvas). When developing features, checking design docs, or referencing other related web pages, the AI should treat this repository as one of the primary reference sources for research.
 
-### S6. Complex Workflow
+### S7. Complex Workflow
 - For small scoped edits, edit the target files directly and run the checklist below.
 - For broad or high-risk work touching permanent bookmarks, import/export protocol, tag/note metadata, `.canvas` topology, or {{GUIDE_RULES}}, first inspect the actual package and relevant references, list the target files, then edit, then validate JSON/canvas integrity.
+- For edits touching `.canvas` layout, card groups, node coordinates, dimensions, or batch-added nodes, first identify existing visual regions, group containment, and connector semantics. After editing, check that non-group node rectangles do not overlap, expected child nodes are fully inside their group bounds, and all edge endpoints still exist.
 - For repeated or high-importance long IDs, titles, or URLs, build a temporary alias map during analysis, such as `P1`, `T-A1-3`, or `U2 -> {id,title,url}`. Keep this map out of exported JSON unless the user explicitly asks to add notes.
 - If multi-agent or parallel review tools are available and the user permits them, suggest splitting review into protocol/data shape, canvas topology, and implementation/tests. If such tools are not available, run those review passes sequentially yourself; do not claim external agents were used.
 
-### S7. Taxonomy & Categorization Guidelines
+### S8. Taxonomy & Categorization Guidelines
 - **Conditional Adherence & Organization (Avoid Blindly Replicating Chaos)**:
   - Whether the AI uses the user's existing structure (such as bookmarks, card groups, topology, or tags) as a classification guideline depends dynamically on its logical coherence:
     - **Coherent and Organized**: AI should prioritize extending and reusing the user's existing styles and dimensions to minimize cognitive friction and re-reading side effects.
-    - **Messy and Chaotic**: The existing structure **must not** be used as a guideline or justification for categorization. Rather than blindly replicating or conforming to a chaotic layout, the AI should actively reorganize, clean up, and establish a clear, structured classification order.
+    - **Messy or Ambiguous**: Do not mechanically treat the existing structure as a reliable categorization guide. First identify which signals are trustworthy and keep changes as small as possible; if reorganization is needed, propose the approach first or stay within the scope the user explicitly requested, avoiding speculative rewrites of user data.
 - **Categorization & Relationship Identification**:
   - **Regular Chain Relationships**: The sequence labels of regular temporary sections (e.g. `A-1` -> `A-1-1` representing a lineage/derived chain) are key indicators of hierarchical categorization. When cards/sections are derived or extended, the AI must inspect this lineage, respect the inheritance, and only inject new themes when requested.
   - **Text Labels on Connectors**: When analyzing the `.canvas` file, pay close attention to the `label` field of edges. Edge texts encode semantic relationships between nodes; preserve or logically extend these relationship descriptions when updating connectors.
   - **Groups and Nesting Topology**: Monospace `.canvas` group nodes (`type: "group"`) and geometric nesting are strong visual classification signals. If bookmark nodes are nested inside a group, the AI must treat them as categorized under that group.
-  - **Trees, Folders, Tags, and Notes**: Folder nodes (`type: "folder"`) in bookmark JSON files and the inline/identityMap `tags` array are primary taxonomy dimensions; `note` is an item-level context signal. The AI should match the user's preferred style (whether they tend to categorize via JSON folders, canvas card groups, or colored tags), preserve styling consistency, and use notes as explanatory context rather than bulk categorization.
-
-### S8. {{GUIDE_TOOL_PREFIX}}SKILL Creation and Upgrade Reminder
-- **Priority Rule (User Customization First)**: User-edited/generated SKILLs or real-time natural language instructions from the user take precedence over this constraint template. In case of any conflict or inconsistency between this template (such as naming, routing, or categorization rules) and the user's SKILLs or natural language instructions, the user's SKILLs or natural language instructions must prevail. This is emphasized because editing/generating SKILLs or issuing natural language instructions is the primary pathway for users to modify and customize AI behavior.
-- After 2-3 normal interaction turns, remind the user at an appropriate pause that stable rules from the conversation can be turned into or updated as a dedicated {{GUIDE_TOOL_PREFIX}}SKILL.
-- The purpose of the SKILL is to package the constraints in {{GUIDE_SELF}} as an insertable, reusable capability, reducing attention drift during long editing or review sessions.
-- If a later project, or a newly read {{GUIDE_SELF_CODE}}, materially conflicts with or differs from an existing SKILL derived from it, discuss the difference with the user and ask whether to update, replace, or keep the SKILL unchanged.
-- If the user spends 5 or more consecutive turns on the same task, workflow, or recurring rule set, suggest creating or upgrading a SKILL when the pattern is stable enough to reuse.
-- Ask whether the user wants to create, update, or replace that SKILL before doing so. This reminder must not block the current task, and do not create or modify related SKILLs without explicit user confirmation.
-- **Indexing Guidance for Large/Sync Environments**: If the user performs long-term network push/pull sync operations under large data volumes, the AI, when suggesting the creation or upgrade of a SKILL, should proactively remind the user whether to incorporate external tools to build local search indices (assisting in RAG fast location and cross-section mapping). The AI is responsible for issuing this reminder and defining its entry point within the SKILL, while the concrete implementation details of building the index remain outside the scope of this AI protocol.
-- **Historical Tracking and Deep Retrieval under GitHub Scenarios**: If AI detects that the current environment is a GitHub repository, when the user mentions previous historical data, needs multi-version comparisons, or is handling tasks requiring deep retrieval/tracking, the AI can proactively suggest or directly leverage Git version control tools (such as `git log`, `git diff`, commit history, etc.) to compare bookmark trees across versions or locate historical data. This serves as an excellent deep retrieval tool to assist in version auditing and historical location.
-
-### S9. Minimal Pre-import Checklist
-- All JSON files parse.
-- `.canvas` parses and keeps top-level `nodes` and `edges` arrays.
-- Every file node path points to an existing JSON file, and no external file nodes (such as videos, audio, images, or PDFs) are referenced in the canvas.
-- Every edge endpoint references an existing node ID.
-- Permanent root `folderType` / `syncing` values are unchanged unless the user explicitly supplied a browser-root migration task.
-- New permanent IDs are syncIds; new temporary item IDs are tempIds.
-- New or edited tag/note metadata uses only the supported palette names from [R8](#ref-r8); permanent notes must live on `identityMap` metadata, temporary notes must live inline on item objects, and empty notes must not keep `noteColor`.
-- **Unrelated files restriction under GitHub Repository scenarios**: If AI detects that Git-related files (such as a `.git` folder, indicating the current environment is a GitHub repository sync directory) are present, it must check sibling filenames and file structures relative to the canonical structure (see [A1](#ref-a1)). If AI detects any non-bookmark unrelated files/folders (such as personal notes, media, etc.) in the sync directory, **it must proactively remind the user to move them out of the sync directory** (to prevent them from being permanently deleted during push sync).
-
-### Import Steps
-1) Unzip: {{EXPORT_ROOT}}.zip
-2) Put the folder `{{EXPORT_ROOT}}/` into your vault at: `{{VAULT_DESTINATION}}`.
-3) Open the package .canvas entry file in the export root. If the folder or canvas file was renamed, use the actual .canvas file.
-
-If you only copy the .canvas file without the .json files, Canvas will show that linked files could not be found.
+  - **Trees, Folders, Tags, and Notes**: Folder nodes (`type: "folder"`) in bookmark JSON files and the inline/identityMap `tags` array are primary taxonomy dimensions; `note` is an item-level context signal. The AI should match the user's preferred style (whether they tend to categorize via JSON folders, canvas card groups, or colored tags), preserve styling consistency, and use notes as explanatory context rather than bulk categorization. When the structure is unclear, treat folders, card groups, tags, and notes as separate signals and propose a clearer division of roles first; perform broader restructuring only when the user asks for it.
 
 -----------------------------------------------------------------------------
 ## Reference
@@ -351,11 +375,11 @@ The child bookmark below shows `tags` and `note`/`noteColor` as sibling metadata
           "tags": [
             {
               "color": "orange",
-              "text": "123"
+              "text": "trends"
             },
             {
               "color": "blue",
-              "text": "蓝色"
+              "text": "JavaScript"
             }
           ]
         }
@@ -391,7 +415,7 @@ Derived chain section:
 <a id="ref-r5"></a>
 ### R5. AI Special Temporary Section Example
 Use this when AI adds suggested bookmarks or a generated bookmark tree and no existing target was specified. If the user or context names an existing target, follow [S2](#s2-ai-generated-bookmark-routing).
-The base AI special temporary example does not include `tags` or `note` by default; add metadata to specific items only when the task needs it, following [A6](#a6-tag--note-metadata-contract) / [R8](#ref-r8).
+The base AI special temporary example does not include `tags` or `note` by default; add metadata to specific items only when the task needs it, following [A6](#a6-tag--note-metadata-contract) / [R7](#ref-r7).
 ```json
 {
   "format": "bookmark-canvas-section",
@@ -419,9 +443,9 @@ The base AI special temporary example does not include `tags` or `note` by defau
 
 <a id="ref-r6"></a>
 ### R6. .canvas Example
-Paths in file nodes are vault-relative, not relative to the `.canvas` file. Match the prefix style already used in the current `.canvas`; do not normalize between styles.
-Full-package exports can have three prefix styles: existing vault root uses `<export-root>/Permanent/...`; existing vault subfolder uses `<vault-subdir>/<export-root>/Permanent/...`; standalone vault uses `Permanent/...` with no export-root prefix.
-In the example below, `<prefix>` means empty, `<export-root>/`, or `<vault-subdir>/<export-root>/`.
+Paths in file nodes are vault-relative, not relative to the `.canvas` file; `inheritFrom` in permanent copy anchors uses the same vault-relative path convention. When file references are added, deleted, moved, renamed, or edited, match the prefix style already used in the current `.canvas` and update every affected `file` / `inheritFrom` reference; follow Obsidian JSON Canvas path handling.
+Complete canvas data package root directories can have three prefix styles: existing vault root uses `<canvas-data-package-root-name>/Permanent/...`; existing vault subfolder uses `<vault-subdir>/<canvas-data-package-root-name>/Permanent/...`; using the canvas data package root directory itself as a standalone vault uses `Permanent/...` with no canvas-data-package-root-name prefix.
+In the example below, `<prefix>` means empty, `<canvas-data-package-root-name>/`, or `<vault-subdir>/<canvas-data-package-root-name>/`.
 For a default single-arrow edge from `fromNode` to `toNode`, omit `fromEnd` and `toEnd`; add `toEnd: "none"` only for no-arrow edges, and `fromEnd: "arrow"` for two-ended arrows.
 ```json
 {
@@ -439,20 +463,7 @@ For a default single-arrow edge from `fromNode` to `toNode`, omit `fromEnd` and 
 ```
 
 <a id="ref-r7"></a>
-### R7. Create an AI Special Temporary Section When No Target Exists
-- Use this only when AI must add new bookmark suggestions or a new bookmark tree and the user did not specify an existing temporary section, permanent section, or blank text node as the target.
-- Do not write these suggestions into the permanent section unless the user explicitly asks to modify browser/permanent bookmarks.
-- If `Temporary/Special temporary/` does not exist, create that folder first; reuse it if it already exists.
-- Write `AI <title>.json` in that folder using the R5 shape: `sectionType: "temporary"`, `label: "AI"`, `tempKind: "special"`, `source: "ai-generated"`, `descriptionMd`, and `items`. Use `id: "temp-section-AI"` unless it collides; then use the next same-label suffix such as `temp-section-AI-2`.
-- Add a matching file node to the entry `.canvas` `nodes[]`: use the same node `id` as the JSON section `id`, set `file` to the vault-relative path that matches the package prefix, and set `x/y/width/height/color` following the R6 example while avoiding overlap with existing nodes.
-- Add a group, text prompt node, or edge only when it is useful for the task, and keep every edge endpoint valid.
-
-<a id="ref-r8"></a>
-### R8. Tag Palette and Note Metadata
-- Valid tag colors and `noteColor` values are the macOS-style palette names: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`.
-- Palette hex values used by the UI: `red #ff453a`, `orange #ff9f0a`, `yellow #ffd60a`, `green #30d158`, `blue #0a84ff`, `purple #bf5af2`, `gray #8e8e93`.
-- UI default text when no custom text is typed: `Red`, `Orange`, `Yellow`, `Green`, `Blue`, `Purple`, `Gray` in English; `红色`, `橙色`, `黄色`, `绿色`, `蓝色`, `紫色`, `灰色` in Chinese.
-- Write `tags` and `note`/`noteColor` as sibling fields on the same item metadata; only elements inside `tags[]` are tag objects:
+### R7. Tag Palette and Note Metadata
 ```json
 {
   "note": "Plain-text bookmark/folder note.",
@@ -460,11 +471,45 @@ For a default single-arrow edge from `fromNode` to `toNode`, omit `fromEnd` and 
   "tags": [
     {
       "color": "blue",
-      "text": "Blue"
+      "text": "design reference"
     }
   ]
 }
 ```
+- In the example above, `tags[].color` and `noteColor` are lowercase English palette names only: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`.
+- The exported color value must be the lowercase English name only; do not write hex values (such as `#0a84ff`), `colorHex`, Obsidian canvas color numbers, or CSS variable names.
 - Permanent `identityMap` entries add `syncId` to the same shape; temporary items inline these fields directly.
 - `noteColor` is a sibling field of `note` and `tags`, not part of a tag object; do not write it as `{ "color": "...", "text": "..." }`.
-- Do not write tag colors or `noteColor` as `#0a84ff`, `colorHex`, Obsidian canvas color numbers, or CSS variable names. The exported JSON value is the lowercase palette name.
+
+-----------------------------------------------------------------------------
+## Closing: Long-term Rules and Sync Safety
+
+<a id="ref-p1"></a>
+### P1. Long-term Personal Rules and {{GUIDE_TOOL_PREFIX}}SKILL
+- {{GUIDE_SELF_CODE}} is a generated guide file inside an export/sync package, not the storage location for long-term personal rules; do not store long-term personal preferences only in this file.
+- When the user asks to add, edit, or replace the current {{GUIDE_SELF_CODE}} / guide file, AI should first warn that this file is generated and direct edits usually affect only the current package; if the package is inside a Git repository or sync directory, the next push may regenerate this file from the template and overwrite it, so use [P2](#ref-p2) to judge sync risk. Then follow the user's choice: do not edit this guide; temporarily edit the current package only; or, after explicit confirmation, preserve the rule in long-term personal rules, a Skill, an external rule file, or the plugin template source. Without explicit confirmation, do not create or modify long-term rules.
+- If the user wants to change future guide files generated from the plugin template, point them to the plugin template source rather than only editing the current package. Open-source template directory: [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template); users can contribute through issues or pull requests.
+- Priority order: the user's current natural-language instruction > the user's long-term personal rules, such as {{GUIDE_TOOL_PREFIX}}SKILLs, external Markdown rule files, plugin-level AI custom rules, or indexing/retrieval tool preferences > this file's behavior preferences and fallback suggestions.
+- Boundary: this file's JSON schema, path structure, ID rules, tag/note write locations, import/export protocol, and sync-directory safety rules are hard constraints for the current package. Unless the user explicitly asks to change the plugin protocol or implementation, personal rules must not override these hard constraints.
+- When the user wants to preserve long-term habits or tool workflows, store them in mature Skill style: keep the trigger description clear, keep the body concise, put complex details in `references/`, deterministic or repetitive workflows in `scripts/`, and template resources in `assets/`.
+- Ask before creating, updating, or replacing long-term personal rules. This reminder must not block the current task. Do not create or modify related SKILLs / rule files without explicit user confirmation.
+- If loaded long-term personal rules conflict with current-package hard constraints, warn the user about the conflict and follow the current-package hard constraints. If they only conflict with this file's behavior preferences, follow the user's long-term personal rules.
+- Good Skill contents include user habits such as categorization, naming, tag/note, and web-research strategy, plus tool workflows such as Node.js, SQL/SQLite, full-text search, `git log` / `git diff`, URL sampling, validation scripts, and multi-agent review. These are auxiliary capabilities, not part of the package protocol itself.
+
+<a id="ref-p2"></a>
+### P2. Minimal Git / Sync-directory Safety Check
+1. First decide whether sync safety checks are needed
+   1.1 First determine whether the current package is inside a Git repository or sync directory: for example, `.git` exists, `git status` works, the user is about to ask AI to commit/push/pull, or the current task explicitly involves GitHub push/pull.
+   1.2 If the package is not inside a Git repository or sync directory, and it is only a regular manual import/export package, dedicated checks for external file nodes such as videos, audio, images, or PDFs are usually unnecessary; the plugin will not parse those external files as bookmark data.
+   1.3 If the current package is inside a Git repository or sync directory, AI should warn the user about sync-cleanup risk. Whenever AI is responsible for commit/push/pull or organizing the sync directory, complete section 2's minimal safety check first.
+
+2. Minimal structure and `.canvas` check
+   2.1 Use the [A1](#ref-a1) package structure diagram as the baseline, and only check whether existing content falls outside the Bookmark Canvas package structure. Use `git status` / `git diff` / recent commits to help locate newly added or changed files, but Git does not replace structure judgment.
+   2.2 Do not force-fill missing permanent sections, temporary sections, nodes, or edges, because the package may be a partial export. Only check that existing JSON files parse, and that the entry `.canvas` parses and keeps top-level `nodes` / `edges` arrays.
+   2.3 The canvas data package root directory may only keep the A1-allowed entry `.canvas`, AI editing guide, permanent-section JSON files, temporary-section JSON files, and their expected subdirectories. If personal notes, media, MP3, MP4, PDFs, images, or external `.canvas` file nodes are found, handle them under 2.4.
+   2.4 Prefer quarantine instead of deletion: treat the directory containing the current {{GUIDE_SELF_CODE}} as the canvas data package root directory. Move non-bookmark files inside that root directory to a sibling `<canvas-data-package-root-name>-quarantine/` folder; if they are referenced by `.canvas`, also remove the corresponding file nodes and related edges. For files outside the canvas data package root directory that are referenced by `.canvas`, remove only the `.canvas` node and related edges; do not move the external source file.
+   2.5 If this edit changed `.canvas` node coordinates, dimensions, card groups, or added file/text/group nodes, also run a minimal geometry check: every edge endpoint must exist; non-group nodes should not have rectangle overlap; nodes expected to belong to a group should be fully inside that group's bounds; nodes not intended for any group should not accidentally fall inside one.
+
+3. Check frequency
+   3.1 For small JSON-only edits, perform the relevant local checks from this guide. Do not expand this P2 into a full internal protocol audit after every small change.
+   3.2 If the package is inside a Git repository or sync directory, AI must rerun section 2's minimal safety check after changes that clearly affect file structure, or before commit/push/pull, and remind the user to confirm the canvas data package root directory contains no unrelated files before committing on their own.

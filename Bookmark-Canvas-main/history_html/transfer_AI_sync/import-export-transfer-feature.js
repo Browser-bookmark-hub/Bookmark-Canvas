@@ -3561,12 +3561,9 @@ async function __exportCanvasSubsetPackage(rawMembers, options = {}) {
     pushFile(`${exportRoot}/${canvasFileName}`, __formatObsidianCanvasJson(canvasData));
 
     const guideNames = __getExportGuideNamesFromStorage();
-    const exportedAt = new Date().toISOString();
     const guide = await __buildExportGuide(
         guideNames,
-        'groupExportGuide',
         isEn,
-        exportedAt,
         exportRoot,
         '',
         permanentMdRel,
@@ -3969,7 +3966,7 @@ function __getExportGuideNamesFromStorage() {
 }
 
 
-async function __buildExportGuide(guideNames, source, isEn, exportedAt, exportRoot, vaultPrefix, permanentMdRel, exportFormat) {
+async function __buildExportGuide(guideNames, isEn, exportRoot, vaultPrefix, permanentMdRel, exportFormat) {
     const finalPermanentMdRel = permanentMdRel || __buildPermanentSectionMarkdownRelativePath(1, isEn, exportFormat);
     const guidePrimaryName = guideNames[0];
     const __isAgentsGuide = guidePrimaryName === 'AGENTS.md';
@@ -4022,13 +4019,7 @@ async function __buildExportGuide(guideNames, source, isEn, exportedAt, exportRo
         .replace(/{{EXPORT_ROOT}}/g, exportRoot)
         .replace(/{{VAULT_DESTINATION}}/g, isEn ? vaultDestEn : vaultDestZh);
 
-    const frontmatterStr = __frontmatter({
-        exportedAt,
-        source,
-        title: isEn ? 'Obsidian Import Rules' : 'Obsidian 导入规则'
-    });
-
-    return frontmatterStr + '\n' + body;
+    return body;
 }
 
 async function exportCanvasPackage(options = {}) {
@@ -4065,7 +4056,6 @@ async function exportCanvasPackage(options = {}) {
     const now = new Date();
     const ymd = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`;
 
-    const exportedAt = new Date().toISOString();
     // zip 保存到浏览器默认下载目录下的统一父目录（根据语言动态选择）
     // 需求：不同日期的 zip 都归档在同一个文件夹下
     const downloadFolder = typeof getCanvasExportDownloadFolder === 'function'
@@ -4723,9 +4713,7 @@ async function exportCanvasPackage(options = {}) {
 
     const guide = await __buildExportGuide(
         guideNames,
-        'exportGuide',
         isEn,
-        exportedAt,
         exportRoot,
         vaultPrefix,
         permanentMdRel,
@@ -5346,9 +5334,7 @@ async function buildFullCanvasPackageFromCurrent(options = {}) {
         : permanentPath;
     const guide = await __buildExportGuide(
         guideNames,
-        'githubPushGuide',
         isEn,
-        new Date().toISOString(),
         exportRoot,
         __normalizeTransferExportRoot(options && options.vaultPrefix) || exportRoot,
         permanentMdRel,

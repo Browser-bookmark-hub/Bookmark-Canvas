@@ -5291,11 +5291,33 @@ function renderInfoSubmenu(context) {
     };
 
     const INFO_NOTE_COLOR_PALETTE = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+    const INFO_NOTE_LAST_COLOR_STORAGE_KEY = 'infoNoteLastColor';
     const normalizeInfoNoteColor = (raw, fallback = 'orange') => {
         const color = String(raw || '').trim().toLowerCase();
         if (INFO_NOTE_COLOR_PALETTE.includes(color)) return color;
         const fallbackColor = String(fallback || '').trim().toLowerCase();
         return INFO_NOTE_COLOR_PALETTE.includes(fallbackColor) ? fallbackColor : 'orange';
+    };
+
+    const getLastInfoNoteColor = () => {
+        try {
+            return normalizeInfoNoteColor(localStorage.getItem(INFO_NOTE_LAST_COLOR_STORAGE_KEY));
+        } catch (_) {
+            return 'orange';
+        }
+    };
+
+    const setLastInfoNoteColor = (colorInput) => {
+        const color = normalizeInfoNoteColor(colorInput);
+        try {
+            localStorage.setItem(INFO_NOTE_LAST_COLOR_STORAGE_KEY, color);
+        } catch (_) { }
+        try {
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.set({ [INFO_NOTE_LAST_COLOR_STORAGE_KEY]: color });
+            }
+        } catch (_) { }
+        return color;
     };
 
     const renderInfoTagsHtml = (tags) => {
@@ -5319,7 +5341,7 @@ function renderInfoSubmenu(context) {
 
     const renderInfoNoteHtml = (note, noteColor) => {
         const safeNote = normalizeInfoNote(note);
-        const safeColor = normalizeInfoNoteColor(noteColor);
+        const safeColor = safeNote ? normalizeInfoNoteColor(noteColor) : getLastInfoNoteColor();
         const label = lang === 'zh_CN' ? '笔记' : 'NOTE';
         const placeholder = lang === 'zh_CN' ? '添加笔记...' : 'Add note...';
         const colorTitle = lang === 'zh_CN' ? '笔记颜色' : 'Note color';
@@ -5502,7 +5524,7 @@ function renderInfoSubmenu(context) {
         const noteRow = contextSubmenu.querySelector('.info-card-note-row');
         const editor = contextSubmenu.querySelector('.info-note-editor');
         if (!textarea || !data || !data.target) return;
-        let selectedColor = normalizeInfoNoteColor(data.noteColor);
+        let selectedColor = normalizeInfoNote(data.note) ? normalizeInfoNoteColor(data.noteColor) : getLastInfoNoteColor();
         let saveChain = Promise.resolve();
 
         const applyColorUi = (colorInput) => {
@@ -5612,7 +5634,7 @@ function renderInfoSubmenu(context) {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                applyColorUi(btn.dataset.noteColor);
+                applyColorUi(setLastInfoNoteColor(btn.dataset.noteColor));
             });
         });
         if (noteRow) noteRow.addEventListener('focusout', scheduleAutoSaveAfterFocusExit);
