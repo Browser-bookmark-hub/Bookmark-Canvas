@@ -1475,7 +1475,9 @@ async function showBackupDialog() {
                     parsedPrimaryState: null,
                     importFileName: 'backup-slot',
                     threshold: 0, // force overwrite branch
-                    skipBackupWrite: true // doc §2.6 step 3: don't overwrite the slot we're restoring from
+                    skipBackupWrite: true, // doc §2.6 step 3: don't overwrite the slot we're restoring from
+                    deferRuntimeApply: true,
+                    willReloadAfterImport: true
                 });
                 setTimeout(() => {
                     window.location.reload();

@@ -5373,10 +5373,13 @@ function __rebuildPermanentViewShellSnapshotFromSyncFolderFiles(filesByPath) {
  * @param {string} [importFileName] - 导入的文件名
  * @param {Object} [importMeta] - 审计上下文（source/trigger）
  */
-function __processImportedPackage(tempState, storage, primaryState, importFileName = '', importMeta = null) {
+function __processImportedPackage(tempState, storage, primaryState, importFileName = '', importMeta = null, importOptions = {}) {
     const { isEn } = __getLang();
     const importMode = __getCanvasImportRuntimeMode();
     const normalizedImportMeta = (importMeta && typeof importMeta === 'object') ? importMeta : {};
+    const normalizedImportOptions = (importOptions && typeof importOptions === 'object') ? importOptions : {};
+    const deferRuntimeRender = normalizedImportOptions.deferRuntimeRender === true
+        || normalizedImportOptions.willReloadAfterImport === true;
     try {
         if (__isCanonicalImportShadowAuditEnabled()) {
             __runCanonicalImportShadowAudit('manual-import', tempState, storage, primaryState, {
@@ -5604,26 +5607,48 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     });
 
     // 8. Render & Persistence
-    // 只渲染本次导入新增的节点（避免每次导入都重建全量 DOM）
-    const useVirtual = isCanvasVirtualizationEnabled();
-    remappedNodes.tempSections.forEach(s => {
-        try { renderTempNode(s, useVirtual ? { skipTree: true } : {}); } catch (_) { }
-    });
-    if (!useExplicitContainerGroup) {
-        try { renderMdNode(containerNode); } catch (_) { }
+    // 只渲染本次导入新增的节点（避免每次导入都重建全量 DOM）。
+    // GitHub pull 等导入完成后会刷新页面的路径，不在刷新前做这批 DOM 重画。
+    if (!deferRuntimeRender) {
+        const useVirtual = isCanvasVirtualizationEnabled();
+        remappedNodes.tempSections.forEach(s => {
+            try { renderTempNode(s, useVirtual ? { skipTree: true } : {}); } catch (_) { }
+        });
+        if (!useExplicitContainerGroup) {
+            try { renderMdNode(containerNode); } catch (_) { }
+        }
+        remappedNodes.mdNodes.forEach(n => {
+            try { renderMdNode(n); } catch (_) { }
+        });
     }
-    remappedNodes.mdNodes.forEach(n => {
-        try { renderMdNode(n); } catch (_) { }
-    });
 
     // 导入属于正式内容，必须立即持久化，避免用户导入后立刻刷新导致丢失。
     // 新增内容只 upsert 本次导入的 section；bcs:canvas 仍作为 JsonCanvas 清单整体写入。
+    let persistResult = null;
     if (Array.isArray(remappedNodes.tempSections) && remappedNodes.tempSections.length && typeof saveCanvasSectionDelta === 'function') {
-        saveCanvasSectionDelta({ upsertSections: remappedNodes.tempSections }, { immediate: true, skipValidation: true });
+        persistResult = saveCanvasSectionDelta({ upsertSections: remappedNodes.tempSections }, { immediate: true, skipValidation: true });
     } else if (typeof saveCanvasManifestOnly === 'function') {
-        saveCanvasManifestOnly({ immediate: true, skipValidation: true });
+        persistResult = saveCanvasManifestOnly({ immediate: true, skipValidation: true });
     } else {
-        saveTempNodes({ immediate: true, skipValidation: true });
+        persistResult = saveTempNodes({ immediate: true, skipValidation: true });
+    }
+
+    if (deferRuntimeRender) {
+        // 保留快照导入后的镜头定位，但不做边、bounds、metadata 等刷新前可丢弃的 UI 工作。
+        try {
+            const cx = containerNode.x + containerNode.width / 2;
+            const cy = containerNode.y + containerNode.height / 2;
+            const fitZoom = Math.min(1, (window.innerWidth - 100) / containerNode.width);
+            const z = Math.max(0.2, Math.min(1, fitZoom));
+            if (typeof setCanvasZoom === 'function') {
+                setCanvasZoom(z, cx, cy, { recomputeBounds: false });
+            }
+            CanvasState.panOffsetX = (window.innerWidth / 2) - (cx * z);
+            CanvasState.panOffsetY = (window.innerHeight / 2) - (cy * z);
+            if (typeof savePanOffsetThrottled === 'function') savePanOffsetThrottled();
+        } catch (_) { }
+        __setCanvasImportRuntimeMode('permanent');
+        return persistResult;
     }
 
     // 边：大数据/极限模式下延后或跳过，优先保证交互流畅
