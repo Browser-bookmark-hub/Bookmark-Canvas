@@ -1433,6 +1433,15 @@
         return { note: __normalizeNote(raw), noteColor: NOTE_COLOR_DEFAULT, color: NOTE_COLOR_DEFAULT };
     }
 
+    function __getNoteMarkerSignature(note) {
+        const text = __normalizeNote(note);
+        let hash = 0;
+        for (let i = 0; i < text.length; i += 1) {
+            hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+        }
+        return `${text.length}:${(hash >>> 0).toString(36)}`;
+    }
+
     function __getTempNoteOverlayKey(target) {
         if (!target || target.kind !== 'temporary' || !target.sectionId || !target.itemId) return '';
         return `${String(target.sectionId)}::${String(target.itemId)}`;
@@ -1570,12 +1579,11 @@
         return layoutWidth >= threshold;
     }
 
-    function __buildNoteMarker(note, color, wide, noteKey) {
+    function __buildNoteMarker(color, wide, noteKey) {
         const marker = document.createElement('span');
         const safeColor = __normalizeNoteColor(color);
         marker.className = `tree-item-note-marker note-color-${safeColor} ` + (wide ? 'note-trailing' : 'note-leading');
         marker.dataset.role = 'note-marker';
-        marker.dataset.note = note;
         marker.dataset.color = safeColor;
         marker.dataset.noteKey = noteKey;
         marker.setAttribute('aria-label', __lang() === 'en' ? 'Note' : '笔记');
@@ -1625,14 +1633,14 @@
         const currentMode = existing
             ? (existing.classList.contains('note-trailing') ? 'note-trailing' : 'note-leading')
             : null;
-        const noteKey = `${noteColor}:${note}`;
+        const noteKey = `${noteColor}:${__getNoteMarkerSignature(note)}`;
 
         if (existing && existing.dataset.noteKey === noteKey && currentMode === nextMode) {
             __placeNoteMarker(treeItem, existing, wide);
             return;
         }
 
-        const next = __buildNoteMarker(note, noteColor, wide, noteKey);
+        const next = __buildNoteMarker(noteColor, wide, noteKey);
         if (existing) existing.replaceWith(next);
         __placeNoteMarker(treeItem, next, wide);
     }
@@ -1681,7 +1689,7 @@
                 const currentMode = existing
                     ? (existing.classList.contains('note-trailing') ? 'note-trailing' : 'note-leading')
                     : null;
-                const noteKey = `${noteColor}:${note}`;
+                const noteKey = `${noteColor}:${__getNoteMarkerSignature(note)}`;
 
                 if (existing && existing.dataset.noteKey === noteKey && currentMode === nextMode) {
                     updates.push({ action: 'place', treeItem, existing, wide });
@@ -1691,7 +1699,6 @@
                     action: existing ? 'replace' : 'insert',
                     treeItem,
                     existing,
-                    note,
                     noteColor,
                     wide,
                     noteKey
@@ -1708,7 +1715,7 @@
                     __placeNoteMarker(up.treeItem, up.existing, up.wide);
                     return;
                 }
-                const next = __buildNoteMarker(up.note, up.noteColor, up.wide, up.noteKey);
+                const next = __buildNoteMarker(up.noteColor, up.wide, up.noteKey);
                 if (up.existing) up.existing.replaceWith(next);
                 __placeNoteMarker(up.treeItem, next, up.wide);
             });
@@ -1727,14 +1734,16 @@
     }
 
     function __showNoteHoverBubble(marker) {
-        const note = __normalizeNote(marker && marker.dataset ? marker.dataset.note : '');
+        const treeItem = marker && marker.closest ? marker.closest('.tree-item') : null;
+        const noteMeta = __getNoteMetaForTreeItemSync(treeItem);
+        const note = __normalizeNote(noteMeta && noteMeta.note);
         if (!note) return;
         const bubble = __ensureNoteHoverBubble();
         const targetParent = getOverlayContainer();
         if (bubble.parentElement !== targetParent) targetParent.appendChild(bubble);
 
         const prefix = __lang() === 'en' ? 'Note: ' : '笔记: ';
-        const color = __normalizeNoteColor(marker && marker.dataset ? marker.dataset.color : '');
+        const color = __normalizeNoteColor((noteMeta && (noteMeta.color || noteMeta.noteColor)) || (marker && marker.dataset ? marker.dataset.color : ''));
         const safeNote = typeof escapeHtml === 'function'
             ? escapeHtml(note)
             : note.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
