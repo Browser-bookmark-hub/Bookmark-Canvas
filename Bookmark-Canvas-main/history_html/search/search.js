@@ -1095,7 +1095,8 @@ function handleSearchResultsPanelClick(e) {
                 }
                 const currentLimit = searchUiState.noteBrowseBucketLimits[bucketKey] || 5;
                 searchUiState.noteBrowseBucketLimits[bucketKey] = currentLimit + 5;
-                const rootModel = buildCanvasNoteBrowseRootModel(sourceIndex);
+                const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
+                const rootModel = buildCanvasNoteBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
                 renderCanvasNoteBrowseRootPanel(rootModel, { query: searchUiState.query });
             } else {
                 if (!searchUiState.tagBrowseBucketLimits) {
@@ -1103,7 +1104,8 @@ function handleSearchResultsPanelClick(e) {
                 }
                 const currentLimit = searchUiState.tagBrowseBucketLimits[bucketKey] || 5;
                 searchUiState.tagBrowseBucketLimits[bucketKey] = currentLimit + 5;
-                const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
+                const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
+                const rootModel = buildCanvasTagBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
                 renderCanvasTagBrowseRootPanel(rootModel, { query: searchUiState.query });
             }
         }
@@ -1126,14 +1128,16 @@ function handleSearchResultsPanelClick(e) {
                     searchUiState.noteBrowseBucketLimits = {};
                 }
                 searchUiState.noteBrowseBucketLimits[bucketKey] = 5;
-                const rootModel = buildCanvasNoteBrowseRootModel(sourceIndex);
+                const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
+                const rootModel = buildCanvasNoteBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
                 renderCanvasNoteBrowseRootPanel(rootModel, { query: searchUiState.query });
             } else {
                 if (!searchUiState.tagBrowseBucketLimits) {
                     searchUiState.tagBrowseBucketLimits = {};
                 }
                 searchUiState.tagBrowseBucketLimits[bucketKey] = 5;
-                const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
+                const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
+                const rootModel = buildCanvasTagBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
                 renderCanvasTagBrowseRootPanel(rootModel, { query: searchUiState.query });
             }
         }
@@ -2636,6 +2640,75 @@ function isItemInAreaSearchScope(item, scope) {
     }
 
     return false;
+}
+
+function getCanvasBookmarkBrowseScopeForFiltering() {
+    if (searchUiState && searchUiState.areaSearchScope) {
+        return {
+            source: 'area',
+            scope: searchUiState.areaSearchScope
+        };
+    }
+    const fullscreenScope = getActiveFullscreenSearchScopeForFiltering();
+    if (fullscreenScope) {
+        return {
+            source: 'fullscreen',
+            scope: fullscreenScope
+        };
+    }
+    return {
+        source: 'global',
+        scope: null
+    };
+}
+
+function getCanvasBookmarkBrowseScopeCacheKey(scopeInfo) {
+    const source = scopeInfo && scopeInfo.source ? String(scopeInfo.source) : 'global';
+    const scope = scopeInfo && scopeInfo.scope && typeof scopeInfo.scope === 'object' ? scopeInfo.scope : null;
+    if (!scope) return `${source}:global`;
+    const kind = String(scope.kind || '').trim();
+    const id = String(scope.id || '').trim();
+    const copyId = String(scope.copyId || '').trim();
+    const memberIds = Array.isArray(scope.memberIds)
+        ? scope.memberIds.map(idValue => String(idValue || '').trim()).filter(Boolean).join(',')
+        : '';
+    return [source, kind, id, copyId, memberIds].join(':');
+}
+
+function doesBookmarkItemMatchFullscreenBrowseScope(item, scope) {
+    if (!item || item.type !== 'bookmark-item' || !scope) return false;
+    const scopeKind = String(scope.kind || '').trim();
+    if (scopeKind === 'temp') {
+        const targetSectionId = String(scope.id || '').trim();
+        return item.source === 'temporary' && String(item.sectionId || '') === targetSectionId;
+    }
+    if (scopeKind === 'permanent') {
+        return item.source === 'permanent';
+    }
+    if (scopeKind === 'blank') {
+        return false;
+    }
+    return true;
+}
+
+function getCanvasBookmarkBrowseScopedSource(sourceIndex) {
+    const list = Array.isArray(sourceIndex) ? sourceIndex : [];
+    const scopeInfo = getCanvasBookmarkBrowseScopeForFiltering();
+    const scope = scopeInfo.scope;
+    const cacheKey = getCanvasBookmarkBrowseScopeCacheKey(scopeInfo);
+    if (!scope) {
+        return { sourceIndex: list, cacheKey };
+    }
+    if (scopeInfo.source === 'area') {
+        return {
+            sourceIndex: list.filter(item => isItemInAreaSearchScope(item, scope)),
+            cacheKey
+        };
+    }
+    return {
+        sourceIndex: list.filter(item => doesBookmarkItemMatchFullscreenBrowseScope(item, scope)),
+        cacheKey
+    };
 }
 
 function triggerAreaSearch(scope, options = {}) {
@@ -7121,14 +7194,15 @@ function getNoteBrowseBucketKey(label, collator = null) {
     return '#';
 }
 
-function buildCanvasNoteBrowseRootModel(sourceIndex) {
+function buildCanvasNoteBrowseRootModel(sourceIndex, scopeCacheKey = '') {
     const isZh = currentLang === 'zh_CN';
     const list = Array.isArray(sourceIndex) ? sourceIndex : [];
     const cacheKey = [
         canvasSearchDb && canvasSearchDb.signature ? canvasSearchDb.signature : '',
         canvasNoteSearchCacheRevision,
         isZh ? 'zh_CN' : 'en',
-        list.length
+        list.length,
+        String(scopeCacheKey || 'global')
     ].join('::');
     if (canvasNoteBrowseRootCache && canvasNoteBrowseRootCache.key === cacheKey) {
         return canvasNoteBrowseRootCache.model;
@@ -7466,14 +7540,15 @@ function getTagBrowseBucketKey(label, collator = null) {
     return '#';
 }
 
-function buildCanvasTagBrowseRootModel(sourceIndex) {
+function buildCanvasTagBrowseRootModel(sourceIndex, scopeCacheKey = '') {
     const isZh = currentLang === 'zh_CN';
     const list = Array.isArray(sourceIndex) ? sourceIndex : [];
     const cacheKey = [
         canvasSearchDb && canvasSearchDb.signature ? canvasSearchDb.signature : '',
         canvasTagSearchCacheRevision,
         isZh ? 'zh_CN' : 'en',
-        list.length
+        list.length,
+        String(scopeCacheKey || 'global')
     ].join('::');
     if (canvasTagBrowseRootCache && canvasTagBrowseRootCache.key === cacheKey) {
         return canvasTagBrowseRootCache.model;
@@ -7977,7 +8052,8 @@ function searchCanvasAndRender(query, options = {}) {
     if (mode === 'bookmark' && isTagBrowseRootQuery(trimmedQuery)) {
         const detail = searchUiState && searchUiState.tagBrowseDetail ? searchUiState.tagBrowseDetail : null;
         if (!detail || detail.active !== true || (detail.kind === 'color' && !detail.showBookmarks)) {
-            const rootModel = buildCanvasTagBrowseRootModel(sourceIndex);
+            const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
+            const rootModel = buildCanvasTagBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
             renderCanvasTagBrowseRootPanel(rootModel, { query: trimmedQuery });
             return;
         }
@@ -7985,7 +8061,8 @@ function searchCanvasAndRender(query, options = {}) {
     if (mode === 'bookmark' && isNoteBrowseRootQuery(trimmedQuery)) {
         const detail = searchUiState && searchUiState.noteBrowseDetail ? searchUiState.noteBrowseDetail : null;
         if (!detail || detail.active !== true) {
-            const rootModel = buildCanvasNoteBrowseRootModel(sourceIndex);
+            const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
+            const rootModel = buildCanvasNoteBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
             renderCanvasNoteBrowseRootPanel(rootModel, { query: trimmedQuery });
             return;
         }
