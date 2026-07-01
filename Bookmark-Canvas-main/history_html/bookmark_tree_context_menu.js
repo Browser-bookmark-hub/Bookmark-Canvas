@@ -16,6 +16,22 @@ let contextSubmenu = null;
 let tagSubmenuCtx = null;
 let currentContextNode = null;
 let bookmarkClipboard = null; // 剪贴板 { action: 'cut'|'copy', nodeId, nodeData }
+let infoNoteTextareaExternalCloseGuardUntil = 0;
+
+function isInfoNoteTextareaExternalCloseGuardActive() {
+    return Date.now() < infoNoteTextareaExternalCloseGuardUntil;
+}
+
+function armInfoNoteTextareaExternalCloseGuard() {
+    infoNoteTextareaExternalCloseGuardUntil = Date.now() + 1200;
+    const releaseGuard = () => {
+        infoNoteTextareaExternalCloseGuardUntil = Date.now() + 220;
+        window.removeEventListener('mouseup', releaseGuard, true);
+        window.removeEventListener('pointerup', releaseGuard, true);
+    };
+    window.addEventListener('mouseup', releaseGuard, true);
+    window.addEventListener('pointerup', releaseGuard, true);
+}
 
 function getOverlayContainer() {
     if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
@@ -2881,7 +2897,13 @@ function initContextMenu() {
 
     // 【修复】添加滚轮事件监听器，允许在菜单上滚动栏目
     // 当鼠标在菜单上滚动时，将事件传递给滚动容器
+    const isInfoNoteTextareaWheelTarget = (event) => {
+        const target = event && event.target;
+        return !!(target && target.closest && target.closest('.info-note-textarea'));
+    };
+
     contextMenu.addEventListener('wheel', (e) => {
+        if (isInfoNoteTextareaWheelTarget(e)) return;
         // 查找最近的滚动容器
         const scrollContainer = currentContextNode ? currentContextNode.closest('.permanent-section-body, .temp-node-body') : null;
         if (scrollContainer) {
@@ -2902,6 +2924,7 @@ function initContextMenu() {
 
     // 监听子菜单的滚轮，如果子菜单滚动，也隐藏或者直接滚动（由于子菜单是 fixed，这里可以同样处理滚动）
     contextSubmenu.addEventListener('wheel', (e) => {
+        if (isInfoNoteTextareaWheelTarget(e)) return;
         const scrollContainer = currentContextNode ? currentContextNode.closest('.permanent-section-body, .temp-node-body') : null;
         if (scrollContainer) {
             e.preventDefault();
@@ -2913,6 +2936,7 @@ function initContextMenu() {
 
     // 点击其他地方关闭菜单（使用捕获阶段，优先处理）
     document.addEventListener('click', (e) => {
+        if (isInfoNoteTextareaExternalCloseGuardActive()) return;
         // 如果点击的不是菜单和子菜单内部，并且不是快捷图标本身，关闭菜单
         const clickInMenu = contextMenu && contextMenu.contains(e.target);
         const clickInSubmenu = contextSubmenu && contextSubmenu.contains(e.target);
@@ -5594,6 +5618,9 @@ function renderInfoSubmenu(context) {
         if (noteRow) noteRow.addEventListener('focusout', scheduleAutoSaveAfterFocusExit);
         textarea.addEventListener('click', (e) => e.stopPropagation());
         textarea.addEventListener('keydown', (e) => e.stopPropagation());
+        textarea.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+        textarea.addEventListener('mousedown', armInfoNoteTextareaExternalCloseGuard);
+        textarea.addEventListener('pointerdown', armInfoNoteTextareaExternalCloseGuard);
     };
 
     if (isTemporary) {
@@ -7391,6 +7418,7 @@ function showBatchNoteEditModal(targets) {
         };
 
         modal.addEventListener('click', (event) => {
+            if (isInfoNoteTextareaExternalCloseGuardActive() && event.target === modal) return;
             if (event.target === modal || event.target.closest('.modal-close') || event.target.closest('[data-note-cancel="true"]')) {
                 cleanup(null);
                 return;
@@ -7417,6 +7445,11 @@ function showBatchNoteEditModal(targets) {
                 });
             }
         });
+        if (textarea) {
+            textarea.addEventListener('wheel', (event) => event.stopPropagation(), { passive: true });
+            textarea.addEventListener('mousedown', armInfoNoteTextareaExternalCloseGuard);
+            textarea.addEventListener('pointerdown', armInfoNoteTextareaExternalCloseGuard);
+        }
 
         getOverlayContainer().appendChild(modal);
         requestAnimationFrame(() => {
