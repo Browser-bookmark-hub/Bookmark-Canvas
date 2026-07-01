@@ -1130,9 +1130,13 @@ async function __recreateChromeBookmarkTreeFromImport(importTreeRoot, syncIdToCh
     }
 }
 
-async function __applyOverwriteImportedCanvasState(parsedTempState, bridge, parsedStorage = null) {
+async function __applyOverwriteImportedCanvasState(parsedTempState, bridge, parsedStorage = null, options = {}) {
     if (!parsedTempState || typeof parsedTempState !== 'object') return false;
     let persisted = false;
+    const deferRuntimeApply = options && (
+        options.deferRuntimeApply === true
+        || options.willReloadAfterImport === true
+    );
     const cloneJson = (value) => {
         try {
             if (typeof structuredClone === 'function') return structuredClone(value);
@@ -1194,6 +1198,10 @@ async function __applyOverwriteImportedCanvasState(parsedTempState, bridge, pars
             try { chrome.storage.local.set({ 'bcs:temp-state-snapshot': stateForOverwrite }, () => resolve()); }
             catch (_) { resolve(); }
         });
+    }
+
+    if (deferRuntimeApply) {
+        return persisted;
     }
 
     // 同步当前运行态，避免用户覆盖导入后不刷新页面就再次导出时，
@@ -1265,6 +1273,10 @@ async function __performOverwriteImport(payload) {
     const __parsedThreshold = parseInt(payload && payload.threshold, 10);
     const threshold = Number.isFinite(__parsedThreshold) ? Math.max(0, __parsedThreshold) : 500;
     const skipBackupWrite = !!(payload && payload.skipBackupWrite === true);
+    const deferRuntimeApply = !!(payload && (
+        payload.deferRuntimeApply === true
+        || payload.willReloadAfterImport === true
+    ));
     const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
     if (!bridge) throw new Error('Storage bridge unavailable.');
 
@@ -1813,7 +1825,10 @@ async function __performOverwriteImport(payload) {
 
         // 5. Overwrite non-Chrome state directly (temp sections, mdNodes, edges, canvas state, copies).
         try {
-            await __applyOverwriteImportedCanvasState(parsedTempState, bridge, parsedStorage);
+            await __applyOverwriteImportedCanvasState(parsedTempState, bridge, parsedStorage, {
+                deferRuntimeApply,
+                willReloadAfterImport: deferRuntimeApply
+            });
             for (const key of Object.keys(parsedStorage || {})) {
                 if (typeof key !== 'string') continue;
                 if (key.startsWith('bcs:perm:copy-')) {
@@ -1861,14 +1876,16 @@ async function __performOverwriteImport(payload) {
         throw mainErr;
     } finally {
         if (muteSession && muteSession.active && typeof window.endBookmarkBulkMute === 'function') {
-            await window.endBookmarkBulkMute('overwrite-import', { refreshTree: true });
+            await window.endBookmarkBulkMute('overwrite-import', { refreshTree: !deferRuntimeApply });
         }
     }
 
     if (success) {
-        await refreshTagUiAfterImport();
-        const msg = isEn ? 'Full overwrite complete. Undo via Backup.' : '全量覆盖完成。可通过「备份」撤销。';
-        try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'success', 4000) : alert(msg); } catch (_) { alert(msg); }
+        if (!deferRuntimeApply) {
+            await refreshTagUiAfterImport();
+            const msg = isEn ? 'Full overwrite complete. Undo via Backup.' : '全量覆盖完成。可通过「备份」撤销。';
+            try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'success', 4000) : alert(msg); } catch (_) { alert(msg); }
+        }
     }
 }
 
@@ -2199,10 +2216,13 @@ async function handleFileImport(e) {
 
             if (forceSnapshotImport) {
                 __setCanvasImportRuntimeMode('permanent');
-                __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
+                await __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
                     source: 'zip',
                     trigger: importOptions.trigger || 'canvas-position-import',
                     canvasPosition
+                }, {
+                    deferRuntimeRender: true,
+                    willReloadAfterImport: true
                 });
                 const activeDialog = document.getElementById('canvasImportDialog');
                 if (activeDialog) activeDialog.remove();
@@ -2240,7 +2260,9 @@ async function handleFileImport(e) {
                         importFileName: file && file.name ? file.name : '',
                         // doc 第三轮修复 §2.4: 与 __performOverwriteImport 入口的 Number.isFinite 语义对齐，
                         // 避免 0 被静默吞成 300（未来 dialog 若放开 0=强制覆盖时也不会被劫持）。
-                        threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 500
+                        threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 500,
+                        deferRuntimeApply: true,
+                        willReloadAfterImport: true
                     });
                     setTimeout(() => {
                         window.location.reload();
@@ -2253,10 +2275,13 @@ async function handleFileImport(e) {
             }
             __setCanvasImportRuntimeMode(mode);
 
-            __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
+            await __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
                 source: type === 'package-archive' ? 'zip' : 'json',
                 trigger: canvasPosition ? 'canvas-position-import' : 'manual-file-import',
                 canvasPosition
+            }, {
+                deferRuntimeRender: true,
+                willReloadAfterImport: true
             });
             setTimeout(() => {
                 window.location.reload();
@@ -2327,10 +2352,13 @@ async function handleFolderImport(e) {
         const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName);
         if (forceSnapshotImport) {
             __setCanvasImportRuntimeMode('permanent');
-            __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
+            await __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
                 source: 'folder',
                 trigger: importOptions.trigger || 'canvas-position-import',
                 canvasPosition
+            }, {
+                deferRuntimeRender: true,
+                willReloadAfterImport: true
             });
             const activeDialog = document.getElementById('canvasImportDialog');
             if (activeDialog) activeDialog.remove();
@@ -2367,7 +2395,9 @@ async function handleFolderImport(e) {
                     parsedPrimaryState: overwriteParsed.primaryState || parsed.primaryState,
                     importFileName: folderName,
                     // doc 第三轮修复 §2.4: 同上，使用 Number.isFinite 而非 ||。
-                    threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 300
+                    threshold: Number.isFinite(overwriteThreshold) ? overwriteThreshold : 300,
+                    deferRuntimeApply: true,
+                    willReloadAfterImport: true
                 });
                 setTimeout(() => {
                     window.location.reload();
@@ -2380,10 +2410,13 @@ async function handleFolderImport(e) {
         }
         __setCanvasImportRuntimeMode(mode);
 
-        __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
+        await __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
             source: 'folder',
             trigger: canvasPosition ? 'canvas-position-import' : 'manual-folder-import',
             canvasPosition
+        }, {
+            deferRuntimeRender: true,
+            willReloadAfterImport: true
         });
 
         const activeDialog = document.getElementById('canvasImportDialog');
@@ -5360,12 +5393,14 @@ async function importParsedCanvasPackageForTransfer(parsed, options = {}) {
             parsedStorage: safeParsed.storage,
             parsedPrimaryState: safeParsed.primaryState,
             importFileName,
-            threshold: Number.isFinite(Number(options && options.threshold)) ? Number(options.threshold) : 300
+            threshold: Number.isFinite(Number(options && options.threshold)) ? Number(options.threshold) : 300,
+            deferRuntimeApply: !!(options && options.deferRuntimeApply === true),
+            willReloadAfterImport: !!(options && options.willReloadAfterImport === true)
         });
         return { success: true, mode: 'overwrite' };
     }
 
-    __processImportedPackage(
+    const processResult = __processImportedPackage(
         safeParsed.tempState,
         safeParsed.storage,
         safeParsed.primaryState,
@@ -5373,8 +5408,15 @@ async function importParsedCanvasPackageForTransfer(parsed, options = {}) {
         options && options.importMeta ? options.importMeta : {
             source: 'github',
             trigger: 'github-pull-snapshot'
+        },
+        {
+            deferRuntimeRender: !!(options && options.deferRuntimeRender === true),
+            willReloadAfterImport: !!(options && options.willReloadAfterImport === true)
         }
     );
+    if (processResult && typeof processResult.then === 'function') {
+        await processResult;
+    }
     return { success: true, mode: 'snapshot' };
 }
 

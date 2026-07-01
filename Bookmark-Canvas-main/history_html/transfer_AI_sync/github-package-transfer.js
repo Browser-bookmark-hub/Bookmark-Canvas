@@ -2404,7 +2404,10 @@
             updateProgress(80, mode === 'overwrite' ? t('正在覆盖导入...', 'Importing with overwrite...') : t('正在快照导入...', 'Importing snapshot...'));
             await importFn(folderFiles, getPathLeaf(config.remoteRoot), {
                 importMode: mode,
-                threshold: config.overwriteThreshold
+                threshold: config.overwriteThreshold,
+                willReloadAfterImport: true,
+                deferRuntimeApply: true,
+                deferRuntimeRender: true
             });
             const note = mode === 'overwrite'
                 ? t('已完成 GitHub 拉取：覆盖导入。', 'GitHub pull complete: overwrite import.')
