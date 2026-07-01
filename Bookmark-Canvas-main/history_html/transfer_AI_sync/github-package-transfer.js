@@ -570,25 +570,10 @@
                  请确保在 Obsidian 中使用 ${hl('「打开本地仓库」')} 打开您从 GitHub 克隆（拉取）到本地的 ${hl(repoName)} 文件夹（即Repo名字的文件夹）。
                </div>`;
 
-        const targetPath = getRemoteRootPath(config) || getDefaultRemoteRoot();
-        const targetFolderLeaf = getPathLeaf(targetPath);
-        const warningDesc = isEn()
-            ? `<div style="margin-top: 12px; line-height: 1.6; padding: 10px; border-radius: 6px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: var(--tag-red, #cf222e); font-size: 11px;">
-                 <strong>⚠️ Warning (Important):</strong><br>
-                 1. External file nodes (videos, audio, images, PDFs, etc.) are prohibited in the canvas.<br>
-                 2. Pushing will automatically clean up the remote directory. Do NOT store any unrelated files (e.g. personal notes, media files) inside the sync directory ${hl(targetPath)} (the ${hl(targetFolderLeaf)} folder), otherwise they will be deleted!
-               </div>`
-            : `<div style="margin-top: 12px; line-height: 1.6; padding: 10px; border-radius: 6px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: var(--tag-red, #cf222e); font-size: 11px;">
-                 <strong>⚠️ 安全警示 (切记)：</strong><br>
-                 1. 画布中禁止接入任何外部 file 节点（如视频、音频、图片、PDF 等）。<br>
-                 2. 推送时同步机制会清理远端目录。请勿在同步目录 ${hl(targetPath)}（即 ${hl(targetFolderLeaf)} 文件夹）下存放任何无关文件（如个人笔记、多媒体等），否则它们将被<strong>彻底删除</strong>！
-               </div>`;
-
-        return `
+                return `
             <div class="github-path-help-notes">
                 ${pathRelationHtml}
                 ${mainDesc}
-                ${warningDesc}
             </div>
         `;
     }
@@ -761,6 +746,75 @@
         });
     }
 
+    function showWarningDialog(configInput) {
+        if (activeConfirmDialog) {
+            try { activeConfirmDialog.remove(); } catch (_) { }
+            activeConfirmDialog = null;
+        }
+        const config = configInput && typeof configInput === 'object' ? configInput : {};
+        const targetPath = getRemoteRootPath(config) || getDefaultRemoteRoot();
+        const targetFolderLeaf = getPathLeaf(targetPath);
+        
+        const isDark = (() => {
+            try { return (document.documentElement.getAttribute('data-theme') || '') === 'dark'; } catch (_) { return false; }
+        })();
+
+        const hl = (value) => {
+            const style = isDark
+                ? 'color:#fde68a;background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.35);padding:0 4px;border-radius:6px;font-weight:700;'
+                : 'color:#92400e;background:rgba(245,158,11,0.22);border:1px solid rgba(245,158,11,0.38);padding:0 4px;border-radius:6px;font-weight:700;';
+            return `<span style="${style}">${escapeHtml(value)}</span>`;
+        };
+
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog github-path-help-dialog';
+        dialog.innerHTML = `
+            <div class="import-dialog-content github-path-help-content" style="width: min(92vw, 500px);">
+                <div class="import-dialog-header" style="padding-left: 14px; padding-right: 14px;">
+                    <h3>${escapeHtml(t('安全警示', 'Safety Warning'))}</h3>
+                    <button class="import-dialog-close" id="githubWarningClose" type="button">&times;</button>
+                </div>
+                <div class="import-dialog-body github-confirm-body" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">
+                    <div style="line-height: 1.6; padding: 12px; border-radius: 6px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: var(--text-primary); text-align: left; word-break: break-all;">
+${isEn()
+    ? `<strong style="font-size: 14px; display: block; margin-bottom: 8px; color: var(--tag-red, #cf222e);">⚠️ Warning (Important):</strong>
+       <div style="margin-bottom: 6px;">1. .canvas files are prohibited from containing any external <span style="color: var(--tag-red, #cf222e); font-weight: bold;">file node cards</span> (such as .mp4, .mp3, .png, .pdf, etc.).</div>
+       <div>2. <span style="color: var(--tag-red, #cf222e); font-weight: bold;">Pushing will automatically clean up the remote directory.</span> Do NOT store any unrelated files (e.g. personal notes, media files) inside the sync directory ${hl(targetPath)} (the ${hl(targetFolderLeaf)} folder), otherwise they will be <strong style="color: var(--tag-red, #cf222e);">completely deleted</strong>!</div>`
+    : `<strong style="font-size: 14px; display: block; margin-bottom: 8px; color: var(--tag-red, #cf222e);">⚠️ 安全警示 (切记)：</strong>
+       <div style="margin-bottom: 6px;">1. .canvas画布文件中禁止接入任何外部 <span style="color: var(--tag-red, #cf222e); font-weight: bold;">file 节点卡片</span>（如.mp4、.mp3、.png、.pdf等）。</div>
+       <div>2. <span style="color: var(--tag-red, #cf222e); font-weight: bold;">推送时同步机制会清理远端目录。</span>请勿在同步目录 ${hl(targetPath)}（即 ${hl(targetFolderLeaf)} 文件夹）下存放任何无关文件（如个人笔记、多媒体等），否则它们将被<strong style="color: var(--tag-red, #cf222e);">彻底删除</strong>！</div>`}
+                    </div>
+                    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+                        <button id="githubWarningOk" type="button" class="import-mode-btn github-danger-btn" style="min-width: 80px;">${escapeHtml(t('关闭', 'Close'))}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        getOverlayContainer().appendChild(dialog);
+        activeConfirmDialog = dialog;
+
+        return new Promise((resolve) => {
+            const cleanup = () => {
+                try { dialog.remove(); } catch (_) { }
+                if (activeConfirmDialog === dialog) activeConfirmDialog = null;
+                resolve();
+            };
+            const closeBtn = dialog.querySelector('#githubWarningClose');
+            const okBtn = dialog.querySelector('#githubWarningOk');
+            if (closeBtn) closeBtn.addEventListener('click', cleanup);
+            if (okBtn) okBtn.addEventListener('click', cleanup);
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' || event.key === 'Enter') {
+                    event.preventDefault();
+                    cleanup();
+                }
+            });
+            dialog.addEventListener('click', (event) => {
+                if (event.target === dialog) cleanup();
+            });
+        });
+    }
+
     async function showConfigDialog(options = {}) {
         if (activeConfigDialog) {
             try { activeConfigDialog.remove(); } catch (_) { }
@@ -884,7 +938,10 @@
                             </div>
                             <div class="github-config-divider-micro"></div>
                             <label class="github-config-field github-config-remote-field">
-                                <span>${escapeHtml(t('2.1.3、「.canvas」内部路径', '2.1.3 ".canvas" Internal Path'))}</span>
+                                <span style="display: inline-flex; align-items: center; gap: 8px; user-select: none;">
+                                    <span>${escapeHtml(t('2.1.3、「.canvas」内部路径', '2.1.3 ".canvas" Internal Path'))}</span>
+                                    <button id="githubPathWarningBtn" type="button" class="import-option-btn github-path-detail-btn github-path-warning-btn" style="margin: 0; min-height: 20px !important; height: 20px; font-size: 11px !important; padding: 0 6px !important; border-radius: 5px !important;">⚠️ ${escapeHtml(t('警示', 'Warning'))}</button>
+                                </span>
                                 <div class="github-path-input-row">
                                     <div class="github-path-input-wrapper">
                                         ${config.basePath ? `<span class="github-path-prefix" title="${escapeHtml(config.basePath)}/">${escapeHtml(config.basePath)}/</span>` : ''}
@@ -1088,6 +1145,17 @@
                     if (!remoteInput) return;
                     remoteInput.value = normalizeRepoPath(result.path) || getDefaultRemoteRoot();
                     remoteInput.dispatchEvent(new Event('input', { bubbles: true }));
+                });
+            }
+
+            const pathWarningBtn = dialog.querySelector('#githubPathWarningBtn');
+            if (pathWarningBtn) {
+                pathWarningBtn.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const nextConfig = Object.assign({}, lastSavedConfig || config, collectDialogConfig(dialog));
+                    nextConfig.lastPullRemotePath = (lastSavedConfig && lastSavedConfig.lastPullRemotePath) || config.lastPullRemotePath || null;
+                    await showWarningDialog(nextConfig);
                 });
             }
 

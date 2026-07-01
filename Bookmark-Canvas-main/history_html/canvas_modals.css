@@ -4125,12 +4125,16 @@ body.canvas-popover-active .md-align-popover {
     display: inline-flex;
     align-items: center;
     white-space: nowrap;
-    max-width: 140px;
+    max-width: calc(100% - 80px);
     overflow: hidden;
     text-overflow: ellipsis;
+    flex-shrink: 1;
+    min-width: 0;
 }
 
 .github-path-input-wrapper input {
+    flex: 1 !important;
+    min-width: 80px !important;
     border: none !important;
     border-radius: 0 !important;
     background: transparent !important;
@@ -4149,10 +4153,14 @@ body.canvas-popover-active .md-align-popover {
     padding: 7px 10px;
     border-right-color: #d0d7de;
     font-size: 13px;
-    max-width: 180px;
+    max-width: calc(100% - 100px);
+    flex-shrink: 1;
+    min-width: 0;
 }
 
 .github-path-detail-input-row .github-path-input-wrapper input {
+    flex: 1 !important;
+    min-width: 100px !important;
     padding: 7px 10px !important;
     min-height: 32px !important;
 }
@@ -4290,6 +4298,19 @@ body.canvas-popover-active .md-align-popover {
     font-size: 12px !important;
     line-height: 1 !important;
 }
+
+.github-path-warning-btn {
+    border: 1px solid var(--tag-red, #cf222e) !important;
+    color: var(--tag-red, #cf222e) !important;
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+}
+
+.github-path-warning-btn:hover {
+    background: rgba(239, 68, 68, 0.08) !important;
+}
+
 
 .github-config-last-content {
     width: min(100%, var(--github-config-control-width));
