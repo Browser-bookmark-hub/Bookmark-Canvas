@@ -3845,13 +3845,13 @@ function getQuickActionPopoverScale(anchor) {
             }
         }
     } catch (_) { }
-    return null;
+    return BASE;
 }
 
 function getContextSubmenuScale(triggerItem, triggerAction) {
     const action = String(triggerAction || '');
     const fromQuickAction = !!(triggerItem && triggerItem.closest && triggerItem.closest('.tree-item-hover-actions'));
-    if (fromQuickAction && action === 'trace-submenu-trigger') {
+    if (fromQuickAction && (action === 'trace-submenu-trigger' || action === 'info-submenu-trigger')) {
         const quickScale = getQuickActionPopoverScale(triggerItem);
         if (Number.isFinite(quickScale) && quickScale > 0) return quickScale;
     }
@@ -3949,32 +3949,38 @@ function updateSubmenuPosition() {
         // 边界防护
         left = Math.max(8, left);
     } else if (!contextMenu || contextMenu.style.display === 'none') {
-        // 当主菜单未显示时（通过快捷按钮直接触发），直接在快捷按钮左侧或右侧定位二级子菜单
-        transformOriginY = 'center';
-        const rightFits = (triggerRect.right + 4 + visualWidth <= viewportWidth - 8);
-        const leftFits = (triggerRect.left - 4 - visualWidth >= 8);
+        // 当主菜单未显示时（通过快捷按钮直接触发），学习 Tag 系统 popover 的优秀定位逻辑
+        const preferLeft = !!(triggerItem && triggerItem.closest && triggerItem.closest('.canvas-fullscreen-active, .canvas-fullscreen-node, .canvas-content, .canvas-workspace, .search-results-panel'));
+        
+        // 始终采用 left top 作为缩放原点，以精确对齐视觉 top-left 坐标
+        transformOriginX = 'left';
+        transformOriginY = 'top';
 
-        if (rightFits) {
-            left = triggerRect.right + 4;
-            transformOriginX = 'left';
-        } else if (leftFits) {
-            left = triggerRect.left - submenuWidth - 4;
-            transformOriginX = 'right';
+        if (preferLeft) {
+            left = triggerRect.left - visualWidth - 6;
+            if (left < 8) {
+                // 左侧放不下，尝试放在右侧
+                left = triggerRect.right + 6;
+                if (left + visualWidth > viewportWidth - 8) {
+                    left = Math.max(8, viewportWidth - visualWidth - 8);
+                }
+            }
         } else {
-            left = Math.max(8, viewportWidth - submenuWidth - 8);
-            transformOriginX = 'center';
+            left = triggerRect.right + 6;
+            if (left + visualWidth > viewportWidth - 8) {
+                // 右侧放不下，尝试放在左侧
+                left = triggerRect.left - visualWidth - 6;
+                if (left < 8) {
+                    left = Math.max(8, viewportWidth - visualWidth - 8);
+                }
+            }
         }
 
-        // 垂直定位：中心位置与 trigger 按钮 Y 轴中心对齐
-        let visualCenterY = triggerRect.top + triggerRect.height / 2;
-        const visualHalfHeight = visualHeight / 2;
-        if (visualCenterY - visualHalfHeight < 8) {
-            visualCenterY = 8 + visualHalfHeight;
+        // 垂直定位：顶端与触发按钮顶端对齐，并防止超出视口安全区域
+        top = triggerRect.top;
+        if (top + visualHeight > viewportHeight - 8) {
+            top = Math.max(8, viewportHeight - visualHeight - 8);
         }
-        if (visualCenterY + visualHalfHeight > viewportHeight - 8) {
-            visualCenterY = viewportHeight - 8 - visualHalfHeight;
-        }
-        top = visualCenterY - submenuHeight / 2;
     } else {
         // 纵向布局下：始终显示在右侧或左侧 (与默认打开方式、溯源面板一致)
         const primaryRect = contextMenu.getBoundingClientRect();
@@ -5271,7 +5277,7 @@ function renderInfoSubmenu(context) {
     const renderInfoTagsHtml = (tags) => {
         const normalized = normalizeInfoTags(tags);
         const empty = lang === 'zh_CN' ? '无' : 'None';
-        const label = lang === 'zh_CN' ? 'TAG' : 'TAGS';
+        const label = lang === 'zh_CN' ? '标签' : 'TAGS';
         const chips = normalized.length
             ? normalized.map((tag) => {
                 const colorClass = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'].includes(tag.color) ? tag.color : 'gray';
@@ -5290,7 +5296,7 @@ function renderInfoSubmenu(context) {
     const renderInfoNoteHtml = (note, noteColor) => {
         const safeNote = normalizeInfoNote(note);
         const safeColor = normalizeInfoNoteColor(noteColor);
-        const label = lang === 'zh_CN' ? 'NOTE' : 'NOTE';
+        const label = lang === 'zh_CN' ? '笔记' : 'NOTE';
         const placeholder = lang === 'zh_CN' ? '添加笔记...' : 'Add note...';
         const colorTitle = lang === 'zh_CN' ? '笔记颜色' : 'Note color';
         return `
@@ -5304,7 +5310,7 @@ function renderInfoSubmenu(context) {
                     </div>
                 </div>
                 <div class="info-note-editor note-color-${escapeHtml(safeColor)}">
-                    <textarea class="info-note-textarea" rows="4" data-note-color="${escapeHtml(safeColor)}" placeholder="${escapeHtml(placeholder)}">${escapeHtml(safeNote)}</textarea>
+                    <textarea class="info-note-textarea" rows="3" data-note-color="${escapeHtml(safeColor)}" placeholder="${escapeHtml(placeholder)}">${escapeHtml(safeNote)}</textarea>
                 </div>
             </div>
         `;
@@ -5643,6 +5649,7 @@ function renderInfoSubmenu(context) {
         bindCopyEvent();
         bindPathToggleEvent();
         bindNoteEditorEvent(cardData);
+        repositionSubmenu();
     } else {
         if (!chrome || !chrome.bookmarks) {
             contextSubmenu.innerHTML = `<div style="padding: 12px; color: var(--accent-red);">${lang === 'zh_CN' ? '当前环境不支持书签 API' : 'Bookmarks API not supported'}</div>`;
@@ -5721,6 +5728,7 @@ function renderInfoSubmenu(context) {
             bindCopyEvent();
             bindPathToggleEvent();
             bindNoteEditorEvent(cardData);
+            repositionSubmenu();
         });
     }
 }
