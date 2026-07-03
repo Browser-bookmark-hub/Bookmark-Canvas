@@ -801,6 +801,47 @@
         }
     }
 
+    async function getRepoFileLatestCommit({ token, owner, repo, branch, path, signal }) {
+        const authHeader = buildGitHubAuthHeader(token);
+        if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
+        const trimmedOwner = String(owner || '').trim();
+        const trimmedRepo = String(repo || '').trim();
+        const trimmedPath = normalizeRepoPath(path);
+        if (!trimmedOwner || !trimmedRepo) return { success: false, error: '仓库未配置', repoNotConfigured: true };
+        if (!trimmedPath) return { success: false, error: '缺少文件路径' };
+
+        const params = new URLSearchParams();
+        const trimmedBranch = String(branch || '').trim();
+        if (trimmedBranch) params.set('sha', trimmedBranch);
+        params.set('path', trimmedPath);
+        params.set('per_page', '1');
+
+        const url = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}/commits?${params.toString()}`;
+        try {
+            const commits = await githubRequestJson(url, {
+                headers: { Authorization: authHeader },
+                signal
+            });
+            const commitJson = Array.isArray(commits) && commits.length ? commits[0] : null;
+            if (!commitJson) {
+                return { success: true, path: trimmedPath, sha: '', message: '', authorName: '', date: '' };
+            }
+            const fullMessage = commitJson.commit && commitJson.commit.message ? commitJson.commit.message : '';
+            const msgLines = fullMessage.split('\n');
+            return {
+                success: true,
+                path: trimmedPath,
+                sha: commitJson.sha || '',
+                message: String(msgLines[0] || '').trim(),
+                authorName: commitJson.commit && commitJson.commit.author && commitJson.commit.author.name ? commitJson.commit.author.name : '',
+                date: commitJson.commit && commitJson.commit.author && commitJson.commit.author.date ? commitJson.commit.author.date : ''
+            };
+        } catch (error) {
+            if (error && (error.code === 'GITHUB_OPERATION_CANCELLED' || error.name === 'AbortError')) throw error;
+            return { success: false, path: trimmedPath, error: normalizeGitHubError(error) };
+        }
+    }
+
     async function getRepoFile({ token, owner, repo, branch, path, signal }) {
         const authHeader = buildGitHubAuthHeader(token);
         if (!authHeader) return { success: false, error: 'GitHub Token 未配置', repoNotConfigured: true };
@@ -1332,6 +1373,7 @@
         getRepoFile,
         getRepoZipball,
         getRepoCommit,
+        getRepoFileLatestCommit,
         applyRepoFilesBatch
     };
 })(window);

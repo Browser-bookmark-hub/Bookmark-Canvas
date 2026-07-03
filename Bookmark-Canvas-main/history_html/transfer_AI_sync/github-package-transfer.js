@@ -128,7 +128,9 @@
     }
 
     function normalizePullMode(value) {
-        return value === 'overwrite' ? 'overwrite' : 'snapshot';
+        if (value === 'overwrite') return 'overwrite';
+        if (value === 'selective') return 'selective';
+        return 'snapshot';
     }
 
     function normalizeThreshold(value) {
@@ -277,6 +279,10 @@
         };
         await storageSet(safe);
         return await loadConfig();
+    }
+
+    async function saveDefaultPullMode(mode) {
+        await storageSet({ githubDefaultPullMode: normalizePullMode(mode) });
     }
 
     async function saveLastOperation(operation) {
@@ -979,6 +985,7 @@ ${isEn()
                                     <select id="githubConfigDefaultPullMode">
                                         <option value="snapshot"${config.defaultPullMode === 'snapshot' ? ' selected' : ''}>${escapeHtml(t('快照包导入', 'Snapshot import'))}</option>
                                         <option value="overwrite"${config.defaultPullMode === 'overwrite' ? ' selected' : ''}>${escapeHtml(t('全量覆盖', 'Full Overwrite'))}</option>
+                                        <option value="selective"${config.defaultPullMode === 'selective' ? ' selected' : ''}>${escapeHtml(t('选择拉取', 'Selective Pull'))}</option>
                                     </select>
                                 </label>
                                 <label class="github-config-field github-config-threshold-field">
@@ -2176,6 +2183,556 @@ ${isEn()
         return folderFiles;
     }
 
+    function formatGithubDateTime(isoString) {
+        if (!isoString) return '';
+        try {
+            const date = new Date(isoString);
+            if (isNaN(date.getTime())) return isoString;
+            const pad2 = (n) => String(n).padStart(2, '0');
+            return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+        } catch (_) {
+            return isoString;
+        }
+    }
+
+    function getRepoPathDir(path) {
+        const normalized = normalizeRepoPath(path);
+        const slashIndex = normalized.lastIndexOf('/');
+        return slashIndex >= 0 ? normalized.slice(0, slashIndex) : '';
+    }
+
+    function getRepoPathBaseName(path) {
+        return (normalizeRepoPath(path).split('/').pop() || '').trim();
+    }
+
+    function isPermanentCanvasFileNode(node, filePath) {
+        const nodeId = String(node && node.id || '').trim();
+        if (nodeId === 'permanent-section' || nodeId.startsWith('permanent-section-copy-')) return true;
+        const normalized = normalizeRepoPath(filePath);
+        if (/(^|\/)(永久栏目|Permanent)(\/|$)/i.test(normalized)) return true;
+        if (/Permanent\s*Sections/i.test(normalized)) return true;
+        if (/Permanent\s*Bookmarks/i.test(normalized)) return true;
+        if (/(^|\/)永久书签(\/|$)/.test(normalized)) return true;
+        return false;
+    }
+
+    function isTemporaryCanvasFilePath(filePath) {
+        const normalized = normalizeRepoPath(filePath);
+        return normalized.includes('Temporary/')
+            || normalized.includes('Temporary Sections/')
+            || normalized.includes('临时栏目/');
+    }
+
+    function isSpecialTemporaryPath(filePath) {
+        const normalized = normalizeRepoPath(filePath);
+        return /(^|\/)(特殊临时栏目|Special Temporary|Special Temp)(\/|$)/i.test(normalized);
+    }
+
+    function resolveCanvasNodeRepoPath(nodeFile, canvasPath, remoteFiles, rootPath) {
+        const normalizedFile = normalizeRepoPath(nodeFile);
+        if (!normalizedFile) return '';
+        const byPath = new Map();
+        (Array.isArray(remoteFiles) ? remoteFiles : []).forEach((file) => {
+            const path = normalizeRepoPath(file && file.path);
+            if (path && !byPath.has(path)) byPath.set(path, file);
+        });
+        if (byPath.has(normalizedFile)) return normalizedFile;
+
+        const canvasDir = getRepoPathDir(canvasPath);
+        const root = normalizeRepoPath(rootPath);
+        const rootLeaf = getPathLeaf(root, '');
+        const candidates = [
+            joinRepoPath(canvasDir, normalizedFile),
+            root ? joinRepoPath(root, normalizedFile) : '',
+            root && rootLeaf && normalizedFile.startsWith(`${rootLeaf}/`)
+                ? joinRepoPath(root, normalizedFile.slice(rootLeaf.length + 1))
+                : ''
+        ].map(normalizeRepoPath).filter(Boolean);
+
+        for (const candidate of candidates) {
+            if (byPath.has(candidate)) return candidate;
+        }
+
+        let best = '';
+        for (const path of byPath.keys()) {
+            if (path.endsWith(`/${normalizedFile}`) || path === normalizedFile) {
+                if (!best || path.length < best.length) best = path;
+                continue;
+            }
+            if (rootLeaf && normalizedFile.startsWith(`${rootLeaf}/`)) {
+                const suffix = normalizedFile.slice(rootLeaf.length + 1);
+                if (suffix && path.endsWith(`/${suffix}`)) {
+                    if (!best || path.length < best.length) best = path;
+                }
+            }
+        }
+        return best;
+    }
+
+    function getSelectivePullKind(node, filePath) {
+        const nodeId = String(node && node.id || '').trim();
+        if (nodeId === 'permanent-section') return 'permanent-main';
+        if (nodeId.startsWith('permanent-section-copy-')) return 'permanent-copy';
+        if (isTemporaryCanvasFilePath(filePath)) return 'temp';
+        if (isPermanentCanvasFileNode(node, filePath)) return 'permanent-main';
+        return '';
+    }
+
+    function getSelectivePullKindLabel(kind) {
+        if (kind === 'permanent-main') return t('永久栏目主体', 'Permanent Main');
+        if (kind === 'permanent-copy') return t('永久栏目副本', 'Permanent Copy');
+        return t('临时栏目', 'Temporary Section');
+    }
+
+    const SELECTIVE_SPECIAL_TEMP_SOURCE_SET = new Set([
+        'browser-drop',
+        'search-result',
+        'batch',
+        'quick-add',
+        'file-import',
+        'import-html-bookmarks',
+        'import-json-bookmarks'
+    ]);
+
+    function parseJsonObjectFromText(text) {
+        const raw = String(text || '').trim();
+        if (!raw) return null;
+        try {
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (_) { }
+        const fenceRe = /```(?:json|bookmark-canvas|canvas-section)?\s*([\s\S]*?)```/gi;
+        let match = null;
+        while ((match = fenceRe.exec(raw))) {
+            const body = String(match[1] || '').trim();
+            if (!body) continue;
+            try {
+                const parsed = JSON.parse(body);
+                if (parsed && typeof parsed === 'object') return parsed;
+            } catch (_) { }
+        }
+        return null;
+    }
+
+    function parseCanvasSectionProtocolFromBytes(bytes) {
+        if (!(bytes instanceof Uint8Array)) return null;
+        let text = '';
+        try {
+            text = new TextDecoder('utf-8').decode(bytes);
+        } catch (_) {
+            return null;
+        }
+        try {
+            if (typeof __parseCanvasMarkdownPayload === 'function') {
+                const parsedMarkdown = __parseCanvasMarkdownPayload(text);
+                if (parsedMarkdown && parsedMarkdown.jsonProtocol && typeof parsedMarkdown.jsonProtocol === 'object') {
+                    return parsedMarkdown.jsonProtocol;
+                }
+            }
+        } catch (_) { }
+        return parseJsonObjectFromText(text);
+    }
+
+    function applySelectivePullItemMetadata(item, bytes) {
+        if (!item || typeof item !== 'object') return;
+        if (bytes instanceof Uint8Array) item.contentBytes = bytes;
+        const protocol = parseCanvasSectionProtocolFromBytes(bytes);
+        if (!protocol || typeof protocol !== 'object') return;
+        if (item.kind === 'temp') {
+            const tempKind = String(protocol.tempKind || '').trim().toLowerCase();
+            const source = String(protocol.source || '').trim().toLowerCase();
+            item.tempKind = tempKind;
+            item.source = source;
+            item.isSpecialTemp = tempKind === 'special' || SELECTIVE_SPECIAL_TEMP_SOURCE_SET.has(source);
+        }
+    }
+
+    function getSelectivePullTypeLabel(item) {
+        const kind = String(item && item.kind || '');
+        if (kind === 'temp' && item && item.isSpecialTemp) return t('特殊临时栏目', 'Special Temporary Section');
+        return getSelectivePullKindLabel(kind);
+    }
+
+    function getSelectivePullSortName(item) {
+        return String(item && (item.name || item.path) || '');
+    }
+
+    function buildSelectivePullCandidates(canvasData, canvasPath, remoteFiles, rootPath) {
+        const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
+        const byNodeId = new Map();
+        const out = [];
+        nodes.forEach((node) => {
+            if (!node || node.type !== 'file') return;
+            const nodeId = String(node.id || '').trim();
+            const rawFile = normalizeRepoPath(node.file);
+            if (!nodeId || !rawFile || !/\.(md|json)$/i.test(rawFile)) return;
+            const repoPath = resolveCanvasNodeRepoPath(rawFile, canvasPath, remoteFiles, rootPath);
+            if (!repoPath) return;
+            const kind = getSelectivePullKind(node, rawFile);
+            if (!kind) return;
+            if (byNodeId.has(nodeId)) return;
+            const name = getRepoPathBaseName(rawFile) || nodeId;
+            const item = {
+                id: nodeId,
+                kind,
+                name,
+                path: repoPath,
+                nodeFile: rawFile,
+                node,
+                isSpecialTemp: kind === 'temp' && isSpecialTemporaryPath(rawFile)
+            };
+            byNodeId.set(nodeId, item);
+            out.push(item);
+        });
+        return out;
+    }
+
+    async function attachSelectivePullCommitInfo({ api, config, branch, items, signal }) {
+        const list = Array.isArray(items) ? items : [];
+        if (!list.length || typeof api.getRepoFileLatestCommit !== 'function') return list;
+        const concurrency = Math.max(1, Math.min(4, list.length));
+        let nextIndex = 0;
+        let completedCount = 0;
+        const worker = async () => {
+            while (nextIndex < list.length) {
+                if (signal && signal.aborted) {
+                    const err = new Error('GitHub operation cancelled');
+                    err.code = 'GITHUB_OPERATION_CANCELLED';
+                    throw err;
+                }
+                const item = list[nextIndex];
+                nextIndex += 1;
+                try {
+                    const result = await api.getRepoFileLatestCommit({
+                        token: config.token,
+                        owner: config.owner,
+                        repo: config.repo,
+                        branch,
+                        path: item.path,
+                        signal
+                    });
+                    if (result && result.success === true) {
+                        item.commitSha = result.sha || '';
+                        item.commitMessage = result.message || '';
+                        item.commitAuthor = result.authorName || '';
+                        item.commitDate = result.date || '';
+                    } else {
+                        item.commitError = result && result.error ? result.error : '';
+                    }
+                } finally {
+                    completedCount += 1;
+                    updateProgress(35 + Math.round((completedCount / (list.length || 1)) * 30), t(`正在读取文件提交时间 (${completedCount}/${list.length})...`, `Reading file commit times (${completedCount}/${list.length})...`));
+                }
+            }
+        };
+        const workers = [];
+        for (let i = 0; i < concurrency; i += 1) workers.push(worker());
+        await Promise.all(workers);
+        return list;
+    }
+
+    async function attachSelectivePullFileMetadata({ api, config, branch, items, signal }) {
+        const list = Array.isArray(items) ? items : [];
+        if (!list.length) return list;
+        const concurrency = Math.max(1, Math.min(4, list.length));
+        let nextIndex = 0;
+        let completedCount = 0;
+        const worker = async () => {
+            while (nextIndex < list.length) {
+                if (signal && signal.aborted) {
+                    const err = new Error('GitHub operation cancelled');
+                    err.code = 'GITHUB_OPERATION_CANCELLED';
+                    throw err;
+                }
+                const item = list[nextIndex];
+                nextIndex += 1;
+                try {
+                    let fileResult = null;
+                    if (typeof api.getRepoFileRaw === 'function') {
+                        fileResult = await api.getRepoFileRaw({
+                            token: config.token,
+                            owner: config.owner,
+                            repo: config.repo,
+                            branch,
+                            path: item.path,
+                            signal
+                        });
+                    }
+                    if (!fileResult || fileResult.success !== true) {
+                        fileResult = await api.getRepoFile({
+                            token: config.token,
+                            owner: config.owner,
+                            repo: config.repo,
+                            branch,
+                            path: item.path,
+                            signal
+                        });
+                    }
+                    if (fileResult && fileResult.success === true) {
+                        applySelectivePullItemMetadata(item, fileResult.contentBytes || new Uint8Array());
+                    }
+                } finally {
+                    completedCount += 1;
+                    updateProgress(65 + Math.round((completedCount / (list.length || 1)) * 13), t(`正在读取栏目名称 (${completedCount}/${list.length})...`, `Reading section names (${completedCount}/${list.length})...`));
+                }
+            }
+        };
+        const workers = [];
+        for (let i = 0; i < concurrency; i += 1) workers.push(worker());
+        await Promise.all(workers);
+        return list;
+    }
+
+    function buildFilteredSelectiveCanvasData(canvasData, selectedItems) {
+        const selectedIds = new Set((Array.isArray(selectedItems) ? selectedItems : [])
+            .map((item) => String(item && item.id || '').trim())
+            .filter(Boolean));
+        const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
+        const keptNodeIds = new Set(selectedIds);
+        const filteredNodes = nodes.filter((node) => {
+            if (!node || !node.id) return false;
+            const id = String(node.id || '').trim();
+            return selectedIds.has(id);
+        }).map((node) => ({ ...node }));
+        filteredNodes.forEach((node) => {
+            const id = String(node && node.id || '').trim();
+            if (id) keptNodeIds.add(id);
+        });
+        const filteredEdges = (Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : [])
+            .filter((edge) => {
+                if (!edge || !edge.id) return false;
+                const fromId = String(edge.fromNode || '').trim();
+                const toId = String(edge.toNode || '').trim();
+                return !!(fromId && toId && keptNodeIds.has(fromId) && keptNodeIds.has(toId));
+            })
+            .map((edge) => ({ ...edge }));
+        return {
+            ...(canvasData && typeof canvasData === 'object' ? canvasData : {}),
+            nodes: filteredNodes,
+            edges: filteredEdges
+        };
+    }
+
+    function encodeUtf8Text(text) {
+        return new TextEncoder().encode(String(text == null ? '' : text));
+    }
+
+    function getCanvasJsonText(canvasData) {
+        try {
+            if (typeof __formatObsidianCanvasJson === 'function') return __formatObsidianCanvasJson(canvasData);
+        } catch (_) { }
+        return JSON.stringify(canvasData, null, 2);
+    }
+
+    async function prepareSelectivePullPlan({ api, config, branch, classification, rootPath, signal }) {
+        const canvasFile = classification && Array.isArray(classification.canvasFiles) ? classification.canvasFiles[0] : null;
+        const canvasPath = normalizeRepoPath(canvasFile && canvasFile.path);
+        if (!canvasPath) throw new Error(t('远端 .canvas 文件不存在。', 'Remote .canvas file is missing.'));
+        updateProgress(18, t('正在读取远端 .canvas 索引...', 'Reading remote .canvas index...'));
+        const canvasMap = await downloadRemoteFilesToFolderMap({
+            api,
+            config,
+            branch,
+            files: [{ path: canvasPath }],
+            signal
+        });
+        const canvasBytes = canvasMap.get(canvasPath);
+        if (!canvasBytes) throw new Error(t('读取远端 .canvas 文件失败。', 'Failed to read remote .canvas file.'));
+        let canvasData = null;
+        try {
+            canvasData = JSON.parse(new TextDecoder('utf-8').decode(canvasBytes));
+        } catch (error) {
+            throw new Error(t('远端 .canvas 文件解析失败。', 'Failed to parse remote .canvas file.'));
+        }
+        const items = buildSelectivePullCandidates(canvasData, canvasPath, classification.files, rootPath);
+        if (!items.length) {
+            throw new Error(t('远端 .canvas 中没有可选择的永久栏目/临时栏目文件。', 'No selectable permanent/temporary section files were found in the remote .canvas.'));
+        }
+        updateProgress(35, t('正在读取文件提交时间...', 'Reading file commit times...'));
+        await attachSelectivePullCommitInfo({ api, config, branch, items, signal });
+        updateProgress(65, t('正在读取栏目名称...', 'Reading section names...'));
+        await attachSelectivePullFileMetadata({ api, config, branch, items, signal });
+        items.sort((a, b) => {
+            const at = Date.parse(a.commitDate || '') || 0;
+            const bt = Date.parse(b.commitDate || '') || 0;
+            if (bt !== at) return bt - at;
+            return getSelectivePullSortName(a).localeCompare(getSelectivePullSortName(b), undefined, { numeric: true });
+        });
+        return { canvasPath, canvasData, items };
+    }
+
+    function showSelectivePullDialog(plan, rootPath) {
+        const items = Array.isArray(plan && plan.items) ? plan.items : [];
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog github-selective-pull-dialog';
+        dialog.innerHTML = `
+            <div class="import-dialog-content github-confirm-content" style="max-width: 780px;">
+                <div class="import-dialog-header">
+                    <h3>${escapeHtml(t('选择拉取', 'Selective Pull'))}</h3>
+                    <button class="import-dialog-close" id="githubSelectivePullClose" type="button">&times;</button>
+                </div>
+                <div class="import-dialog-body github-confirm-body">
+                    <div class="github-confirm-message github-pull-mode-message">
+                        ${buildOperationNoticeHtml({
+                            title: t('选择远端指定栏目文件', 'Select specific remote section files'),
+                            description: t('将按「导入快照包」方式导入已勾选项目。', 'Checked items will be imported with the snapshot package algorithm.'),
+                            pathLabel: t('远端路径', 'Remote path'),
+                            path: rootPath || getDefaultRemoteRoot(),
+                            metaHtml: `<span>${escapeHtml(t('可选文件数', 'Selectable files'))}</span><strong>${items.length}</strong>`
+                        })}
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                            <button id="githubSelectiveAll" type="button" class="import-mode-btn import-mode-btn-secondary" style="min-height: 28px; padding: 5px 9px;">${escapeHtml(t('全选', 'Select All'))}</button>
+                            <button id="githubSelectiveNone" type="button" class="import-mode-btn import-mode-btn-secondary" style="min-height: 28px; padding: 5px 9px;">${escapeHtml(t('全不选', 'Select None'))}</button>
+                        </div>
+                        <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">
+                            <span>${escapeHtml(t('排序', 'Sort'))}</span>
+                            <select id="githubSelectiveSort" style="height: 28px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary);">
+                                <option value="commit-desc">${escapeHtml(t('提交时间：新到旧', 'Commit time: newest first'))}</option>
+                                <option value="commit-asc">${escapeHtml(t('提交时间：旧到新', 'Commit time: oldest first'))}</option>
+                                <option value="name-asc">${escapeHtml(t('名字：A 到 Z', 'Name: A to Z'))}</option>
+                                <option value="name-desc">${escapeHtml(t('名字：Z 到 A', 'Name: Z to A'))}</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div id="githubSelectiveList" style="margin-top: 10px; max-height: min(52vh, 440px); overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary);"></div>
+                    <div class="github-pull-mode-footer">
+                        <button id="githubSelectiveCancel" type="button" class="import-mode-btn import-mode-btn-cancel">${escapeHtml(t('取消', 'Cancel'))}</button>
+                        <button id="githubSelectiveConfirm" type="button" class="import-mode-btn import-mode-btn-confirm">${escapeHtml(t('拉取所选', 'Pull Selected'))}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        getOverlayContainer().appendChild(dialog);
+        return new Promise((resolve) => {
+            const selectedIds = new Set();
+            let sortMode = 'commit-desc';
+            const closeBtn = dialog.querySelector('#githubSelectivePullClose');
+            const cancelBtn = dialog.querySelector('#githubSelectiveCancel');
+            const confirmBtn = dialog.querySelector('#githubSelectiveConfirm');
+            const allBtn = dialog.querySelector('#githubSelectiveAll');
+            const noneBtn = dialog.querySelector('#githubSelectiveNone');
+            const sortSelect = dialog.querySelector('#githubSelectiveSort');
+            const listEl = dialog.querySelector('#githubSelectiveList');
+            const cleanup = (value) => {
+                try { dialog.remove(); } catch (_) { }
+                resolve(value);
+            };
+            const sortedItems = () => {
+                const list = items.slice();
+                list.sort((a, b) => {
+                    const an = getSelectivePullSortName(a);
+                    const bn = getSelectivePullSortName(b);
+                    const at = Date.parse(a.commitDate || '') || 0;
+                    const bt = Date.parse(b.commitDate || '') || 0;
+                    if (sortMode === 'commit-asc') return (at - bt) || an.localeCompare(bn, undefined, { numeric: true });
+                    if (sortMode === 'name-asc') return an.localeCompare(bn, undefined, { numeric: true }) || (bt - at);
+                    if (sortMode === 'name-desc') return bn.localeCompare(an, undefined, { numeric: true }) || (bt - at);
+                    return (bt - at) || an.localeCompare(bn, undefined, { numeric: true });
+                });
+                return list;
+            };
+            const updateConfirmState = () => {
+                if (confirmBtn) confirmBtn.disabled = selectedIds.size === 0;
+            };
+            const renderList = () => {
+                if (!listEl) return;
+                listEl.innerHTML = sortedItems().map((item, index) => {
+                    const checked = selectedIds.has(item.id) ? ' checked' : '';
+                    const dateText = formatGithubDateTime(item.commitDate) || t('无提交时间', 'No commit time');
+                    const msgText = item.commitMessage || item.commitError || t('无 commit 名字', 'No commit name');
+                    const displayName = getSelectivePullSortName(item);
+                    return `
+                        <label class="github-selective-pull-row" style="display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 4px; row-gap: 0; align-items: center; padding: 9px 10px; border-bottom: 1px solid var(--border-color); cursor: pointer;">
+                            <input type="checkbox" data-id="${escapeHtml(item.id)}"${checked} style="margin: 0;">
+                            <span style="font-size: 12px; color: var(--text-secondary); line-height: 16px; min-width: 18px; text-align: left;">${index + 1}.</span>
+                            <span style="min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+                                <span style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: baseline; min-width: 0;">
+                                    <strong style="font-size: 13px; color: var(--text-primary); word-break: break-word;">${escapeHtml(displayName)}</strong>
+                                    <span style="font-size: 11px; color: var(--accent-primary); white-space: nowrap; text-align: right;">${escapeHtml(getSelectivePullTypeLabel(item))}</span>
+                                </span>
+                                <span style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><strong>${escapeHtml(t('提交时间', 'Commit time'))}:</strong> ${escapeHtml(dateText)}</span>
+                                <span style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><strong>${escapeHtml(t('提交信息', 'Commit message'))}:</strong> ${escapeHtml(msgText)}</span>
+                            </span>
+                        </label>
+                    `;
+                }).join('');
+                listEl.querySelectorAll('input[type="checkbox"][data-id]').forEach((input) => {
+                    input.addEventListener('change', () => {
+                        const id = String(input.getAttribute('data-id') || '').trim();
+                        if (!id) return;
+                        if (input.checked) selectedIds.add(id);
+                        else selectedIds.delete(id);
+                        updateConfirmState();
+                    });
+                });
+                updateConfirmState();
+            };
+            if (closeBtn) closeBtn.addEventListener('click', () => cleanup(null));
+            if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
+            if (confirmBtn) confirmBtn.addEventListener('click', () => {
+                if (!selectedIds.size) return;
+                cleanup(items.filter((item) => selectedIds.has(item.id)));
+            });
+            if (allBtn) allBtn.addEventListener('click', () => {
+                items.forEach((item) => selectedIds.add(item.id));
+                renderList();
+            });
+            if (noneBtn) noneBtn.addEventListener('click', () => {
+                selectedIds.clear();
+                renderList();
+            });
+            if (sortSelect) sortSelect.addEventListener('change', () => {
+                sortMode = String(sortSelect.value || 'commit-desc');
+                renderList();
+            });
+            dialog.addEventListener('click', (event) => {
+                if (event.target === dialog) cleanup(null);
+            });
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cleanup(null);
+                }
+            });
+            renderList();
+        });
+    }
+
+    async function buildSelectivePullFolderMap({ api, config, branch, plan, selectedItems, signal }) {
+        const selectedList = Array.isArray(selectedItems) ? selectedItems : [];
+        const folderFiles = new Map();
+        const missingFiles = [];
+        selectedList.forEach((item) => {
+            const path = normalizeRepoPath(item && item.path);
+            if (!path) return;
+            if (item.contentBytes instanceof Uint8Array) {
+                folderFiles.set(path, item.contentBytes);
+            } else {
+                missingFiles.push({ path });
+            }
+        });
+        if (!folderFiles.size && !missingFiles.length) {
+            throw new Error(t('未选择任何可拉取文件。', 'No files selected to pull.'));
+        }
+        if (missingFiles.length) {
+            const missingMap = await downloadRemoteFilesToFolderMap({
+                api,
+                config,
+                branch,
+                files: missingFiles,
+                signal
+            });
+            missingMap.forEach((bytes, path) => {
+                folderFiles.set(path, bytes);
+            });
+        }
+        const filteredCanvas = buildFilteredSelectiveCanvasData(plan.canvasData, selectedItems);
+        folderFiles.set(plan.canvasPath, encodeUtf8Text(getCanvasJsonText(filteredCanvas)));
+        return folderFiles;
+    }
+
     async function choosePullMode(config, rootPath, fileCount, commitInfo = null) {
         const defaultMode = normalizePullMode(config.defaultPullMode);
 
@@ -2255,10 +2812,17 @@ ${isEn()
                                 <span class="import-mode-option-desc">${escapeHtml(t('清空本地目标，写入导入包内容。可通过「备份」撤销。', 'Clears current local target and writes the imported package in. Undo via Backup.'))}</span>
                             </span>
                         </button>
-                    </div>
-                    <div class="github-pull-mode-footer">
-                        <button id="githubPullCancel" type="button" class="import-mode-btn import-mode-btn-cancel">${escapeHtml(t('取消', 'Cancel'))}</button>
-                        <button id="githubPullConfirm" type="button" class="import-mode-btn import-mode-btn-confirm">${escapeHtml(t('确定', 'OK'))}</button>
+                        <button id="githubPullSelective" type="button" class="import-mode-option github-pull-mode-option${defaultMode === 'selective' ? ' is-selected' : ''}">
+                            <span class="import-mode-radio" aria-hidden="true"></span>
+                            <span class="import-mode-option-main">
+                                <span class="import-mode-option-title">${escapeHtml(t('选择拉取', 'Selective Pull'))}</span>
+                                <span class="import-mode-option-desc">${escapeHtml(t('选择拉取指定的永久栏目/临时栏目文件进行导入。', 'Select specific permanent/temporary section files from remote and import them.'))}</span>
+                            </span>
+                        </button>
+                        <div class="github-pull-mode-footer">
+                            <button id="githubPullCancel" type="button" class="import-mode-btn import-mode-btn-cancel">${escapeHtml(t('取消', 'Cancel'))}</button>
+                            <button id="githubPullConfirm" type="button" class="import-mode-btn import-mode-btn-confirm">${escapeHtml(t('确定', 'OK'))}</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2273,16 +2837,20 @@ ${isEn()
             const closeBtn = dialog.querySelector('#githubPullModeClose');
             const snapshotBtn = dialog.querySelector('#githubPullSnapshot');
             const overwriteBtn = dialog.querySelector('#githubPullOverwrite');
+            const selectiveBtn = dialog.querySelector('#githubPullSelective');
             const cancelBtn = dialog.querySelector('#githubPullCancel');
             const confirmBtn = dialog.querySelector('#githubPullConfirm');
             const setSelectedMode = (mode) => {
-                selectedMode = mode === 'overwrite' ? 'overwrite' : 'snapshot';
+                selectedMode = mode === 'overwrite' || mode === 'selective' ? mode : 'snapshot';
                 if (snapshotBtn) snapshotBtn.classList.toggle('is-selected', selectedMode === 'snapshot');
                 if (overwriteBtn) overwriteBtn.classList.toggle('is-selected', selectedMode === 'overwrite');
+                if (selectiveBtn) selectiveBtn.classList.toggle('is-selected', selectedMode === 'selective');
             };
+            setSelectedMode(defaultMode);
             if (closeBtn) closeBtn.addEventListener('click', () => cleanup(null));
             if (snapshotBtn) snapshotBtn.addEventListener('click', () => setSelectedMode('snapshot'));
             if (overwriteBtn) overwriteBtn.addEventListener('click', () => setSelectedMode('overwrite'));
+            if (selectiveBtn) selectiveBtn.addEventListener('click', () => setSelectedMode('selective'));
             if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
             if (confirmBtn) confirmBtn.addEventListener('click', () => cleanup(selectedMode));
             dialog.addEventListener('click', (event) => {
@@ -2401,14 +2969,51 @@ ${isEn()
             if (!mode) {
                 return;
             }
-
-            showProgressDialog(t('GitHub 拉取中...', 'GitHub Pull...'));
-            updateProgress(10, t('正在下载远端文件...', 'Downloading remote files...'));
+            try {
+                await saveDefaultPullMode(mode);
+            } catch (saveModeError) {
+                console.warn('[Pull] Failed to save default pull mode:', saveModeError);
+            }
 
             let folderFiles = null;
+            let importMode = mode;
+            let selectedPullCount = 0;
+
+            if (mode === 'selective') {
+                showProgressDialog(t('GitHub 选择拉取...', 'GitHub Selective Pull...'));
+                updateProgress(10, t('正在准备远端选择列表...', 'Preparing remote selection list...'));
+                const selectivePlan = await prepareSelectivePullPlan({
+                    api,
+                    config,
+                    branch: connection.resolvedBranch || config.branch,
+                    classification,
+                    rootPath,
+                    signal
+                });
+                await closeProgressDialog(0, false);
+                const selectedItems = await showSelectivePullDialog(selectivePlan, rootPath);
+                if (!selectedItems || !selectedItems.length) {
+                    return;
+                }
+                selectedPullCount = selectedItems.length;
+                showProgressDialog(t('GitHub 拉取中...', 'GitHub Pull...'));
+                updateProgress(10, t('正在下载所选远端文件...', 'Downloading selected remote files...'));
+                folderFiles = await buildSelectivePullFolderMap({
+                    api,
+                    config,
+                    branch: connection.resolvedBranch || config.branch,
+                    plan: selectivePlan,
+                    selectedItems,
+                    signal
+                });
+                importMode = 'snapshot';
+            } else {
+                showProgressDialog(t('GitHub 拉取中...', 'GitHub Pull...'));
+                updateProgress(10, t('正在下载远端文件...', 'Downloading remote files...'));
+            }
 
             // Attempt to pull via ZIPball first to optimize network requests (unless targeted pull is explicitly configured)
-            if (config.pullMethod !== 'targeted' && typeof api.getRepoZipball === 'function' && typeof __unzipStore === 'function') {
+            if (mode !== 'selective' && config.pullMethod !== 'targeted' && typeof api.getRepoZipball === 'function' && typeof __unzipStore === 'function') {
                 try {
                     updateProgress(15, t('正在获取远端 ZIP 压缩包...', 'Requesting remote ZIP archive...'));
                     const zipResult = await api.getRepoZipball({
@@ -2469,9 +3074,9 @@ ${isEn()
                 (global.BookmarkCanvasPackageTransferBridge && global.BookmarkCanvasPackageTransferBridge.importCanvasGithubFolderPackage);
             if (typeof importFn !== 'function') throw new Error('Canvas import package bridge unavailable.');
             
-            updateProgress(80, mode === 'overwrite' ? t('正在覆盖导入...', 'Importing with overwrite...') : t('正在快照导入...', 'Importing snapshot...'));
+            updateProgress(80, importMode === 'overwrite' ? t('正在覆盖导入...', 'Importing with overwrite...') : t('正在快照导入...', 'Importing snapshot...'));
             await importFn(folderFiles, getPathLeaf(config.remoteRoot), {
-                importMode: mode,
+                importMode,
                 threshold: config.overwriteThreshold,
                 willReloadAfterImport: true,
                 deferRuntimeApply: true,
@@ -2479,7 +3084,9 @@ ${isEn()
             });
             const note = mode === 'overwrite'
                 ? t('已完成 GitHub 拉取：覆盖导入。', 'GitHub pull complete: overwrite import.')
-                : t('已完成 GitHub 拉取：快照包导入。', 'GitHub pull complete: snapshot import.');
+                : (mode === 'selective'
+                    ? t(`已完成 GitHub 选择拉取：${selectedPullCount} 个文件。`, `GitHub selective pull complete: ${selectedPullCount} files.`)
+                    : t('已完成 GitHub 拉取：快照包导入。', 'GitHub pull complete: snapshot import.'));
             
             const pulledSha = (commitInfo && commitInfo.sha) || connection.branchHeadSha || null;
             const pulledCommitMessage = (commitInfo && commitInfo.message) || '';
