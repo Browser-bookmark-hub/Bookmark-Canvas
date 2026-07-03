@@ -1456,8 +1456,8 @@ async function showBackupDialog() {
     const backupFileNamePreview = `${isEn ? 'bookmark-canvas-backup' : '书签画布-备份'}-${savedStamp}.zip`;
     const backupFileNamePreviewLabel = isEn ? `Backup filename: ${backupFileNamePreview}` : `备份文件名：${backupFileNamePreview}`;
     const backupHintLine1 = isEn
-        ? 'Saves a backup during "Export", and the backup file automatically overwrites the previous one. ("Push" does not back up as GitHub is already a version control tool)'
-        : '「导出」时顺带保存一次备份，备份文件自动覆盖上一次文件。<br>（「推送」不做备份，因GitHub已是版本管理工具）';
+        ? 'A safety backup is saved before local overwrite import and Git pull overwrite import.'
+        : '本地「覆盖导入」与从 Git 拉取的「覆盖导入」前会做一次备份，作为安全备份。';
     const autoBackupHintLine = isEn
         ? 'Runs on page/panel open when due by open-day interval.'
         : '按“打开天数”间隔触发：到期后首次打开页面/侧边栏时自动备份。';
@@ -1552,9 +1552,9 @@ async function showBackupDialog() {
             );
             if (autoBackupIntervalInput) autoBackupIntervalInput.value = String(intervalDays);
             await __writeAutoBackupSettings({
+                ...await __readAutoBackupSettings(),
                 enabled,
-                intervalDays,
-                lastAutoBackupAt: autoBackupSettings.lastAutoBackupAt
+                intervalDays
             });
             applyAutoBackupPanelEnabledState(enabled);
         };

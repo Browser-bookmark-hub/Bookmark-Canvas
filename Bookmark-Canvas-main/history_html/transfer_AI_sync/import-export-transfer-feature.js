@@ -1980,6 +1980,9 @@ function showImportDialog(options = {}) {
         <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
             💡 <strong>Import Here Tip</strong>: You can right-click any blank canvas area and select <span style="color: #f97316; font-weight: 600;">"Import Here"</span> to import files at the clicked coordinates without affecting your current canvas layout.
         </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
+            💡 A safety backup is saved before local overwrite import and Git pull overwrite import. See <button type="button" id="importBackupJumpBtn" style="border: 0; background: transparent; padding: 0; color: #2563eb; text-decoration: underline; cursor: pointer; font: inherit;">Backup</button> for details.
+        </div>
         `
         : `
         <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent-primary, #7c3aed); font-size: 13px;">导入功能说明</div>
@@ -1993,6 +1996,9 @@ function showImportDialog(options = {}) {
         </div>
         <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
             💡 <strong>此位置导入提示</strong>：您也可以在画布空白处右键并选择<span style="color: #f97316; font-weight: 600;">「此位置导入」</span>，即可在鼠标指定的坐标处导入书签文件，以防意外破坏您当前的画布布局。
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
+            💡 本地「覆盖导入」与从 Git 拉取的「覆盖导入」前会做一次备份，作为安全备份。具体参考<button type="button" id="importBackupJumpBtn" style="border: 0; background: transparent; padding: 0; color: #2563eb; text-decoration: underline; cursor: pointer; font: inherit;">「备份」</button>位置。
         </div>
         `;
 
@@ -2053,6 +2059,16 @@ function showImportDialog(options = {}) {
             e.stopPropagation();
             const visible = importInfoPopover.style.display === 'block';
             importInfoPopover.style.display = visible ? 'none' : 'block';
+        });
+    }
+
+    const importBackupJumpBtn = dialog.querySelector('#importBackupJumpBtn');
+    if (importBackupJumpBtn) {
+        importBackupJumpBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dialog.remove();
+            try { showBackupDialog(); } catch (err) { console.warn(err); }
         });
     }
 
@@ -3609,9 +3625,6 @@ function showExportModeDialog(options = {}) {
                 <li>Card groups (nested groups / temporary box selection groups)</li>
             </ul>
         </div>
-        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
-            💡 <span style="color: #f97316; font-weight: 600;">Exporting automatically creates a backup</span>. See <button type="button" id="exportBackupJumpBtn" style="border: 0; background: transparent; padding: 0; color: #2563eb; text-decoration: underline; cursor: pointer; font: inherit;">Backup</button> for details.
-        </div>
         `
         : `
         <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent-primary, #7c3aed); font-size: 13px;">导出功能说明</div>
@@ -3626,9 +3639,6 @@ function showExportModeDialog(options = {}) {
                 <li>临时栏目</li>
                 <li>卡片组（嵌套组 / 临时左键框选组）</li>
             </ul>
-        </div>
-        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
-            💡 <span style="color: #f97316; font-weight: 600;">导出时会进行自动备份</span>，具体参考<button type="button" id="exportBackupJumpBtn" style="border: 0; background: transparent; padding: 0; color: #2563eb; text-decoration: underline; cursor: pointer; font: inherit;">「备份」</button>位置。
         </div>
         `;
 
@@ -3839,16 +3849,6 @@ function showExportModeDialog(options = {}) {
         dialog.remove();
     });
 
-    const backupJumpBtn = document.getElementById('exportBackupJumpBtn');
-    if (backupJumpBtn) {
-        backupJumpBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            dialog.remove();
-            try { showBackupDialog(); } catch (err) { console.warn(err); }
-        });
-    }
-
     document.getElementById('exportModeA').addEventListener('click', () => {
         let guideNames = ['AGENTS.md'];
         try {
@@ -3995,9 +3995,8 @@ async function exportCanvasPackage(options = {}) {
     try { saveTempNodes(); } catch (_) { }
     try { savePermanentSectionPosition(); } catch (_) { }
 
-    // Build an in-memory sandbox first, run the syncId/identityMap pipeline against the
-    // clone, and persist the same processed shape into the single-slot backup. The live
-    // chrome.storage.local data is not touched.
+    // Build an in-memory sandbox first and run the syncId/identityMap pipeline against the
+    // clone. The live chrome.storage.local data is not touched.
     let __exportSandbox = null;
     try {
         const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
@@ -4005,7 +4004,6 @@ async function exportCanvasPackage(options = {}) {
             __exportSandbox = await bridge.buildExportSandbox({ reason: 'export' });
             if (__exportSandbox) {
                 bridge.processExportSandboxForExport(__exportSandbox);
-                try { await bridge.writeBackupSlotFromSandbox(__exportSandbox); } catch (_) {}
             }
         }
     } catch (e) {
@@ -5340,6 +5338,7 @@ async function importParsedCanvasPackageForTransfer(parsed, options = {}) {
             parsedPrimaryState: safeParsed.primaryState,
             importFileName,
             threshold: Number.isFinite(Number(options && options.threshold)) ? Number(options.threshold) : 300,
+            skipBackupWrite: !!(options && options.skipBackupWrite === true),
             deferRuntimeApply: !!(options && options.deferRuntimeApply === true),
             willReloadAfterImport: !!(options && options.willReloadAfterImport === true)
         });
