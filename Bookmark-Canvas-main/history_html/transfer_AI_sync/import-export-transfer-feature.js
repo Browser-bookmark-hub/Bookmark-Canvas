@@ -521,104 +521,6 @@ function __buildImportPreviewDataFromTempState(tempState, options = {}) {
     };
 }
 
-function showImportStructurePreviewDialog(options = {}) {
-    const { isEn } = __getLang();
-    const sourceLabel = String((options && options.sourceLabel) || '').trim();
-    const mode = (options && options.mode === 'overwrite') ? 'overwrite' : 'permanent';
-    const previewData = (options && options.previewData && typeof options.previewData === 'object') ? options.previewData : null;
-    const previewTempState = (options && options.previewTempState && typeof options.previewTempState === 'object') ? options.previewTempState : null;
-    const previewStorage = (options && options.previewStorage && typeof options.previewStorage === 'object') ? options.previewStorage : null;
-
-    return new Promise((resolve) => {
-        const dialog = document.createElement('div');
-        dialog.className = 'import-dialog import-preview-dialog';
-        dialog.id = 'canvasImportPreviewDialog';
-
-        const title = isEn ? 'Import Structure Preview' : '导入结构预览';
-        const closeText = isEn ? 'Close' : '关闭';
-        const modeBadge = mode === 'overwrite'
-            ? (isEn ? 'Full Overwrite' : '全量覆盖')
-            : (isEn ? 'Snapshot Package Import' : '导入快照包');
-        const sourceText = sourceLabel
-            ? (isEn ? `Source: ${sourceLabel}` : `来源：${sourceLabel}`)
-            : '';
-
-        const note = previewData && previewData.hasContent
-            ? (isEn
-                ? (mode === 'overwrite'
-                    ? 'Shows the final directory after full overwrite: local target is cleared and replaced by package content.'
-                    : 'Imported content is treated as an incremental snapshot package and wrapped in a group frame for safer compare/manage.')
-                : (mode === 'overwrite'
-                    ? '展示全量覆盖后的最终目录：本地目标会被清空并替换为导入包内容。'
-                    : '导入内容按增量快照包处理，并自动放入分组框，便于对比与管理。'))
-            : (isEn ? 'No parse result yet. Confirm this mode first, then preview imported structure.' : '当前尚无解析结果，请先选定模式后再预览导入结构。');
-
-        dialog.innerHTML = `
-            <div class="import-dialog-content import-preview-dialog-content">
-                <div class="import-dialog-header">
-                    <h3>${title}</h3>
-                    <button class="import-dialog-close" id="closeImportPreviewDialog">&times;</button>
-                </div>
-                <div class="import-dialog-body import-preview-dialog-body">
-                    <div class="import-preview-meta">
-                        <span class="import-preview-mode-badge ${mode === 'overwrite' ? 'is-overwrite' : 'is-permanent'}">${modeBadge}</span>
-                        ${sourceText ? `<span class="import-preview-source">${sourceText}</span>` : ''}
-                    </div>
-                    <div class="import-preview-note">${note}</div>
-                    <div class="import-preview-tree canvas-directory-tree" id="canvasImportPreviewTree"></div>
-                    <div class="import-mode-actions import-preview-actions">
-                        <button type="button" class="import-mode-btn" id="importPreviewCloseBtn">${closeText}</button>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        getOverlayContainer().appendChild(dialog);
-
-        try {
-            const previewTree = document.getElementById('canvasImportPreviewTree');
-            if (previewTree && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.renderPreviewDirectory === 'function') {
-                const previewState = __convertPreviewTempStateToDirectoryState(previewTempState || {});
-                window.CanvasSidebarDirectory.renderPreviewDirectory(previewTree, previewState, {
-                    storage: previewStorage,
-                    groupName: sourceLabel,
-                    mode
-                });
-            }
-        } catch (err) {
-            console.warn('[Canvas] Failed to render preview directory with shared renderer:', err);
-        }
-
-        const cleanup = () => {
-            try { dialog.remove(); } catch (_) { }
-            resolve();
-        };
-
-        const closeBtn = document.getElementById('closeImportPreviewDialog');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', cleanup);
-        }
-
-        const footerCloseBtn = document.getElementById('importPreviewCloseBtn');
-        if (footerCloseBtn) {
-            footerCloseBtn.addEventListener('click', cleanup);
-        }
-
-        dialog.addEventListener('click', (event) => {
-            if (event.target === dialog) {
-                cleanup();
-            }
-        });
-
-        dialog.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                cleanup();
-            }
-        });
-    });
-}
-
 function showImportModeConfirmDialog(options = {}) {
     const { isEn } = __getLang();
     const defaultMode = (options && options.defaultMode === 'overwrite') ? 'overwrite' : 'permanent';
@@ -645,7 +547,6 @@ function showImportModeConfirmDialog(options = {}) {
             ? 'Clears current local target and writes the imported package in. Undo via Backup.'
             : '清空本地目标，写入导入包内容。可通过「备份」撤销。';
 
-        const previewText = isEn ? 'Preview Directory' : '预览目录';
         const confirmText = isEn ? 'Import' : '导入';
         const cancelText = isEn ? 'Cancel' : '取消';
         const thresholdLabel = isEn ? 'Diff threshold (entries)' : '差异阈值（条目数）';
@@ -685,7 +586,6 @@ function showImportModeConfirmDialog(options = {}) {
                         <div style="font-size: 11px; opacity: 0.7; margin-top: 4px;">${thresholdHint}</div>
                     </div>
                     <div class="import-mode-actions">
-                        <button type="button" class="import-mode-btn import-mode-btn-preview" id="importModePreviewBtn">${previewText}</button>
                         <div class="import-mode-actions-right">
                             <button type="button" class="import-mode-btn import-mode-btn-cancel" id="importModeCancelBtn">${cancelText}</button>
                             <button type="button" class="import-mode-btn import-mode-btn-confirm" id="importModeConfirmBtn">${confirmText}</button>
@@ -744,20 +644,6 @@ function showImportModeConfirmDialog(options = {}) {
                 event.preventDefault();
                 const mode = String(btn.dataset.mode || '').toLowerCase();
                 pickMode(mode);
-            });
-        }
-
-        const previewBtn = document.getElementById('importModePreviewBtn');
-        if (previewBtn) {
-            previewBtn.addEventListener('click', async (event) => {
-                event.preventDefault();
-                await showImportStructurePreviewDialog({
-                    sourceLabel,
-                    mode: selectedMode,
-                    previewData,
-                    previewTempState: (previewData && previewData.__rawTempState) ? previewData.__rawTempState : null,
-                    previewStorage: (previewData && previewData.__rawStorage) ? previewData.__rawStorage : null
-                });
             });
         }
 
