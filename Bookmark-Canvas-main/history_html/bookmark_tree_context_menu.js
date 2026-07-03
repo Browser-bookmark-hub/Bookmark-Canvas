@@ -5450,11 +5450,16 @@ function renderInfoSubmenu(context) {
             }
         }
 
+        const closeLabel = lang === 'zh_CN' ? '关闭' : 'Close';
+
         return `
             <div class="info-card-container">
                 <div class="info-card-title-row">
                     ${titleIconHtml}
                     <span class="info-card-title-text" title="${escapeHtml(data.title)}">${escapeHtml(data.title)}</span>
+                    <button class="tag-popover-close info-card-close-btn" data-role="close-info-popover" type="button" title="${escapeHtml(closeLabel)}" aria-label="${escapeHtml(closeLabel)}">
+                        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.2 3 8 6.8 11.8 3 13 4.2 9.2 8l3.8 3.8-1.2 1.2L8 9.2 4.2 13 3 11.8 6.8 8 3 4.2z"/></svg>
+                    </button>
                 </div>
                 ${pathHtml}
                 ${urlHtml}
@@ -5517,6 +5522,16 @@ function renderInfoSubmenu(context) {
                 collapsedSpan.style.display = '';
             });
         }
+    };
+
+    const bindInfoCloseEvent = () => {
+        const closeBtn = contextSubmenu.querySelector('[data-role="close-info-popover"]');
+        if (!closeBtn) return;
+        closeBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            hideContextMenu();
+        });
     };
 
     const bindNoteEditorEvent = (data) => {
@@ -5695,6 +5710,7 @@ function renderInfoSubmenu(context) {
         };
 
         contextSubmenu.innerHTML = renderCard(cardData);
+        bindInfoCloseEvent();
         bindCopyEvent();
         bindPathToggleEvent();
         bindNoteEditorEvent(cardData);
@@ -5774,6 +5790,7 @@ function renderInfoSubmenu(context) {
             };
 
             contextSubmenu.innerHTML = renderCard(cardData);
+            bindInfoCloseEvent();
             bindCopyEvent();
             bindPathToggleEvent();
             bindNoteEditorEvent(cardData);

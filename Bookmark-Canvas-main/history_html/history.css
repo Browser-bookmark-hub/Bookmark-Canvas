@@ -5811,17 +5811,17 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .bookmark-context-submenu.is-info-submenu {
-    min-width: 240px !important;
-    max-width: 300px !important;
+    min-width: 235px !important;
+    max-width: 295px !important;
     padding: 10px 12px !important;
 }
 
 .info-card-container {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    font-size: 12.5px;
-    line-height: 1.4;
+    gap: 9px;
+    font-size: 11.25px;
+    line-height: 1.45;
     text-align: left;
 }
 
@@ -5830,24 +5830,32 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     align-items: center;
     gap: 8px;
     font-weight: 600;
-    font-size: 13.5px;
+    font-size: 12.25px;
     color: var(--text-primary);
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 6px;
-    margin-bottom: 2px;
+    margin-bottom: 1px;
+}
+
+.info-card-close-btn {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    margin-left: auto;
 }
 
 .info-card-title-row i {
-    font-size: 14px;
+    font-size: 13px;
     flex-shrink: 0;
     color: var(--text-secondary);
 }
 
 .info-card-title-text {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    width: 100%;
 }
 
 .info-card-row {
@@ -5869,11 +5877,11 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .info-card-times-row .info-card-value {
-    font-size: 11px;
+    font-size: 10px;
 }
 
 .info-card-label {
-    font-size: 10.5px;
+    font-size: 9.5px;
     color: var(--text-tertiary, #8e8e93);
     font-weight: 600;
 }
@@ -5903,13 +5911,13 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     border-radius: 10px;
     background: var(--bg-secondary);
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 10px;
     line-height: 1.35;
 }
 
 .info-tag-chip .tag-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     flex: 0 0 auto;
 }
 
@@ -5928,20 +5936,35 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     gap: 8px;
 }
 
-.info-note-color-palette {
+.bookmark-context-submenu.is-info-submenu .info-note-color-palette {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
+    padding: 2px 3px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+    line-height: 0;
 }
 
-.info-note-color-btn {
-    padding: 2px;
+.bookmark-context-submenu.is-info-submenu .info-note-color-btn {
     flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    box-sizing: border-box;
+    border-radius: 999px;
+    background: transparent;
 }
 
-.info-note-color-btn .tag-dot {
-    width: 12px;
-    height: 12px;
+.bookmark-context-submenu.is-info-submenu .info-note-color-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+}
+
+.bookmark-context-submenu.is-info-submenu .info-note-color-btn .tag-dot {
+    width: 10px;
+    height: 10px;
+    border-width: 1px;
 }
 
 .info-note-editor.note-color-red { --note-color: var(--tag-red, #ff453a); }
@@ -5952,15 +5975,15 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 .info-note-editor.note-color-purple { --note-color: var(--tag-purple, #bf5af2); }
 .info-note-editor.note-color-gray { --note-color: var(--tag-gray, #8e8e93); }
 
-.info-note-color-btn.is-selected .tag-dot {
-    box-shadow: 0 0 0 2px var(--text-primary, #fff);
+.bookmark-context-submenu.is-info-submenu .info-note-color-btn.is-selected .tag-dot {
+    box-shadow: 0 0 0 1.5px var(--text-primary, #fff);
     transform: scale(1.08);
 }
 
 .info-note-textarea {
     width: 100%;
-    min-height: 76px;
-    max-height: 180px;
+    min-height: 66px;
+    max-height: 150px;
     resize: vertical;
     box-sizing: border-box;
     border: 1px solid color-mix(in srgb, var(--note-color) 48%, var(--border-color));
@@ -5970,6 +5993,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     color: var(--text-primary);
     padding: 7px 8px;
     font: inherit;
+    font-size: 11px;
     line-height: 1.45;
     outline: none;
 }
@@ -6056,14 +6080,14 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     overflow: hidden;
     text-overflow: ellipsis;
     word-break: break-all;
-    font-size: 12px;
-    line-height: 1.35;
+    font-size: 10.75px;
+    line-height: 1.4;
 }
 
 .info-path-expanded {
     display: block;
-    font-size: 12px;
-    line-height: 1.35;
+    font-size: 10.75px;
+    line-height: 1.4;
     word-break: break-all;
 }
 
@@ -6121,7 +6145,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .info-url-text {
     font-family: monospace;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--accent-primary, #007aff);
     overflow: hidden;
     text-overflow: ellipsis;

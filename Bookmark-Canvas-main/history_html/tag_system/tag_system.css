@@ -364,9 +364,9 @@
     transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 .tag-popover-close:hover {
-    background: rgba(255, 69, 58, 0.08);
-    border-color: rgba(255, 69, 58, 0.45);
-    color: var(--tag-red, #ff453a);
+    background: rgba(10, 132, 255, 0.08);
+    border-color: rgba(10, 132, 255, 0.45);
+    color: var(--accent-blue, #0a84ff);
 }
 .tag-popover-close:active {
     transform: scale(0.95);
@@ -755,8 +755,8 @@
 }
 
 .tag-popover-sub-close:hover {
-    background: rgba(255, 69, 58, 0.08);
-    color: var(--tag-red, #ff453a);
+    background: rgba(10, 132, 255, 0.08);
+    color: var(--accent-blue, #0a84ff);
 }
 
 .tag-popover-sub-content {
