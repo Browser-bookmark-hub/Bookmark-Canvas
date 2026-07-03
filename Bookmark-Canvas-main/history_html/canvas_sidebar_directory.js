@@ -3345,9 +3345,37 @@
       return;
     }
 
-    if (!request || request.target !== 'permanent-main') return;
+    if (!request || (request.target !== 'permanent-main' && request.target !== 'snapshot-card-group')) return;
     const requestedAt = Number(request.requestedAt) || 0;
     if (requestedAt && Date.now() - requestedAt > 5 * 60 * 1000) return;
+
+    if (request.target === 'snapshot-card-group') {
+      const rawRect = request.rect && typeof request.rect === 'object' ? request.rect : null;
+      const rect = rawRect ? {
+        x: Number(rawRect.x) || 0,
+        y: Number(rawRect.y) || 0,
+        w: Math.max(1, Number(rawRect.w || rawRect.width) || 1),
+        h: Math.max(1, Number(rawRect.h || rawRect.height) || 1)
+      } : null;
+      const target = {
+        kind: 'md-node',
+        subtype: 'card-group',
+        nodeId: normalizeText(request.nodeId),
+        title: normalizeText(request.title),
+        rect
+      };
+      let attempts = 0;
+      const tryLocateSnapshotGroup = () => {
+        attempts += 1;
+        const module = getCanvasModule();
+        if (locateMdNodeTarget(module, target, 'fit')) return;
+        if (attempts < 32) {
+          global.setTimeout(tryLocateSnapshotGroup, 250);
+        }
+      };
+      global.setTimeout(tryLocateSnapshotGroup, 450);
+      return;
+    }
 
     let attempts = 0;
     const tryLocate = () => {

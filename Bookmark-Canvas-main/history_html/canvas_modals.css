@@ -4578,6 +4578,13 @@ body.canvas-popover-active .md-align-popover {
     padding: 9px 11px;
 }
 
+.github-pull-mode-dialog .github-pull-mode-footer {
+    align-items: center;
+    align-self: end;
+    justify-content: flex-end;
+    margin-top: 0;
+}
+
 .github-path-help-notes {
     color: #57606a;
     font-size: 12px;
@@ -4740,6 +4747,10 @@ html[data-theme="dark"] .github-confirm-message code {
 
     .github-pull-mode-actions {
         grid-template-columns: 1fr;
+    }
+
+    .github-pull-mode-dialog .github-pull-mode-footer {
+        margin-top: 2px;
     }
 
     .github-confirm-actions {

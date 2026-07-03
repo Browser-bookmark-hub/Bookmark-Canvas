@@ -5634,6 +5634,23 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     }
 
     if (deferRuntimeRender) {
+        if (normalizedImportOptions.willReloadAfterImport === true) {
+            try {
+                localStorage.setItem('bcs:post-reload-locate', JSON.stringify({
+                    target: 'snapshot-card-group',
+                    reason: 'snapshot-import',
+                    nodeId: String(containerNode && containerNode.id || ''),
+                    title: String(containerNode && containerNode.label || ''),
+                    rect: {
+                        x: Number(containerNode && containerNode.x) || 0,
+                        y: Number(containerNode && containerNode.y) || 0,
+                        w: Number(containerNode && containerNode.width) || 1,
+                        h: Number(containerNode && containerNode.height) || 1
+                    },
+                    requestedAt: Date.now()
+                }));
+            } catch (_) { }
+        }
         // 保留快照导入后的镜头定位，但不做边、bounds、metadata 等刷新前可丢弃的 UI 工作。
         try {
             const cx = containerNode.x + containerNode.width / 2;
