@@ -21,7 +21,7 @@ if (typeof window !== 'undefined') window.__hoverExpandState = __hoverExpandStat
 var HOVER_EXPAND_RESET_THRESHOLD = 5000; // 5秒不拖动则重置
 
 function getOverlayContainer() {
-    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function' && window.getOverlayContainer !== getOverlayContainer) {
         return window.getOverlayContainer();
     }
     const container = document.querySelector('.canvas-main-container');

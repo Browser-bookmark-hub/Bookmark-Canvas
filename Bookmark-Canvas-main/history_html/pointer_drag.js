@@ -4,7 +4,7 @@
 // =============================================================================
 
 function getOverlayContainer() {
-    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function' && window.getOverlayContainer !== getOverlayContainer) {
         return window.getOverlayContainer();
     }
     const container = document.querySelector('.canvas-main-container');
