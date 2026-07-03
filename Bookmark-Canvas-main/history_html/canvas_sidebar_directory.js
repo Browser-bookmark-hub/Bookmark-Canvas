@@ -3333,6 +3333,26 @@
     }
   }
 
+  function notifyPostReloadLocateComplete(request, status) {
+    try {
+      global.dispatchEvent(new CustomEvent('bcs:post-reload-locate-complete', {
+        detail: {
+          request: request || null,
+          status: status || 'complete'
+        }
+      }));
+    } catch (_) {
+      try {
+        const event = document.createEvent('CustomEvent');
+        event.initCustomEvent('bcs:post-reload-locate-complete', false, false, {
+          request: request || null,
+          status: status || 'complete'
+        });
+        global.dispatchEvent(event);
+      } catch (_) {}
+    }
+  }
+
   function consumePostReloadLocateRequest() {
     let request = null;
     try {
@@ -3367,10 +3387,18 @@
       let attempts = 0;
       const tryLocateSnapshotGroup = () => {
         attempts += 1;
+        if (attempts === 1) {
+          notifyPostReloadLocateComplete(request, 'started');
+        }
         const module = getCanvasModule();
-        if (locateMdNodeTarget(module, target, 'fit')) return;
+        if (locateMdNodeTarget(module, target, 'fit')) {
+          notifyPostReloadLocateComplete(request, 'located');
+          return;
+        }
         if (attempts < 32) {
           global.setTimeout(tryLocateSnapshotGroup, 250);
+        } else {
+          notifyPostReloadLocateComplete(request, 'timeout');
         }
       };
       global.setTimeout(tryLocateSnapshotGroup, 450);
@@ -3380,16 +3408,22 @@
     let attempts = 0;
     const tryLocate = () => {
       attempts += 1;
+      if (attempts === 1) {
+        notifyPostReloadLocateComplete(request, 'started');
+      }
       const module = getCanvasModule();
       const sectionEl = resolvePermanentSectionElement(null);
       if (module && typeof module.locatePermanent === 'function' && sectionEl) {
         try {
           module.locatePermanent();
+          notifyPostReloadLocateComplete(request, 'located');
           return;
         } catch (_) { }
       }
       if (attempts < 32) {
         global.setTimeout(tryLocate, 250);
+      } else {
+        notifyPostReloadLocateComplete(request, 'timeout');
       }
     };
 

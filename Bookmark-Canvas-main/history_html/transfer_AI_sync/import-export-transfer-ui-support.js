@@ -12,7 +12,7 @@
 
 
 function getOverlayContainer() {
-    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function' && window.getOverlayContainer !== getOverlayContainer) {
         return window.getOverlayContainer();
     }
     const container = document.querySelector('.canvas-main-container');
@@ -23,6 +23,183 @@ function getOverlayContainer() {
         return container;
     }
     return document.body;
+}
+
+const __GITHUB_RELOAD_PROGRESS_KEY = 'bcs:github-reload-progress';
+let __githubReloadProgressDialog = null;
+let __githubReloadProgressTimer = null;
+
+function __githubReloadProgressIsEn() {
+    try {
+        if (typeof __getLang === 'function') return !!__getLang().isEn;
+    } catch (_) { }
+    try {
+        return String(localStorage.getItem('language') || '').toLowerCase().startsWith('en');
+    } catch (_) { }
+    return false;
+}
+
+function __githubReloadProgressText(zh, en) {
+    return __githubReloadProgressIsEn() ? en : zh;
+}
+
+function __readGithubReloadProgressState() {
+    try {
+        const raw = localStorage.getItem(__GITHUB_RELOAD_PROGRESS_KEY);
+        if (!raw) return null;
+        const state = JSON.parse(raw);
+        const requestedAt = Number(state && state.requestedAt) || 0;
+        if (!requestedAt || Date.now() - requestedAt > 2 * 60 * 1000) {
+            localStorage.removeItem(__GITHUB_RELOAD_PROGRESS_KEY);
+            return null;
+        }
+        return state && typeof state === 'object' ? state : null;
+    } catch (_) {
+        try { localStorage.removeItem(__GITHUB_RELOAD_PROGRESS_KEY); } catch (_) { }
+        return null;
+    }
+}
+
+function __persistGithubReloadProgressState(state = {}) {
+    try {
+        localStorage.setItem(__GITHUB_RELOAD_PROGRESS_KEY, JSON.stringify({
+            operation: state.operation || 'reload',
+            requestedAt: Date.now()
+        }));
+    } catch (_) { }
+}
+
+function __clearGithubReloadProgressState() {
+    if (__githubReloadProgressTimer) {
+        clearTimeout(__githubReloadProgressTimer);
+        __githubReloadProgressTimer = null;
+    }
+    try { localStorage.removeItem(__GITHUB_RELOAD_PROGRESS_KEY); } catch (_) { }
+}
+
+function __setGithubReloadProgressStatus(options = {}) {
+    if (!__githubReloadProgressDialog) return;
+    const titleEl = __githubReloadProgressDialog.querySelector('.github-progress-title');
+    const textEl = __githubReloadProgressDialog.querySelector('.github-progress-text');
+    const bar = __githubReloadProgressDialog.querySelector('.github-progress-bar');
+    const pctEl = __githubReloadProgressDialog.querySelector('.github-progress-percentage');
+    const iconContainer = __githubReloadProgressDialog.querySelector('.github-progress-icon-container');
+    const title = String(options.title || '');
+    const text = String(options.text || '');
+    const percent = Math.max(0, Math.min(100, Number(options.percent) || 100));
+    if (titleEl && title) titleEl.textContent = title;
+    if (textEl && text) textEl.textContent = text;
+    if (bar) bar.style.width = `${percent}%`;
+    if (pctEl) pctEl.textContent = `${percent}%`;
+    if (iconContainer && options.success === true) {
+        iconContainer.innerHTML = '<span class="github-progress-success-icon"><i class="fas fa-check-circle"></i></span>';
+    } else if (iconContainer) {
+        iconContainer.innerHTML = '<span class="github-progress-spinner"></span>';
+    }
+}
+
+function __getGithubReloadProgressOverlayContainer() {
+    const container = document.querySelector('.canvas-main-container');
+    if (container && (document.fullscreenElement === container ||
+                      document.webkitFullscreenElement === container ||
+                      document.mozFullScreenElement === container ||
+                      document.msFullscreenElement === container)) {
+        return container;
+    }
+    return document.body || document.documentElement;
+}
+
+function __showGithubReloadProgressDialog() {
+    if (__githubReloadProgressDialog) return;
+    const dialog = document.createElement('div');
+    dialog.className = 'github-progress-dialog';
+    dialog.innerHTML = `
+        <div class="github-progress-content">
+            <div class="github-progress-body">
+                <div class="github-progress-icon-container">
+                    <span class="github-progress-spinner"></span>
+                </div>
+                <div class="github-progress-title">${__escapeHtml(__githubReloadProgressText('正在恢复画布...', 'Restoring canvas...'))}</div>
+                <div class="github-progress-text">${__escapeHtml(__githubReloadProgressText('刷新完成，正在定位导入内容...', 'Refresh complete. Locating imported content...'))}</div>
+                <div class="github-progress-bar-container">
+                    <div class="github-progress-bar" style="width: 100%"></div>
+                </div>
+                <div class="github-progress-percentage">100%</div>
+            </div>
+        </div>
+    `;
+    __getGithubReloadProgressOverlayContainer().appendChild(dialog);
+    __githubReloadProgressDialog = dialog;
+}
+
+function __finishGithubReloadProgress(text) {
+    __clearGithubReloadProgressState();
+    if (!__githubReloadProgressDialog) return;
+    __setGithubReloadProgressStatus({
+        title: __githubReloadProgressText('刷新完成', 'Refresh complete'),
+        text: text || __githubReloadProgressText('已完成刷新和定位。', 'Refresh and location complete.'),
+        percent: 100,
+        success: true
+    });
+    setTimeout(() => {
+        const dialog = __githubReloadProgressDialog;
+        __githubReloadProgressDialog = null;
+        try { if (dialog) dialog.remove(); } catch (_) { }
+    }, 650);
+}
+
+function __restoreGithubReloadProgressDialog() {
+    const state = __readGithubReloadProgressState();
+    if (!state) return;
+    __showGithubReloadProgressDialog();
+    __githubReloadProgressTimer = setTimeout(() => {
+        __finishGithubReloadProgress(__githubReloadProgressText('画布已恢复。', 'Canvas restored.'));
+    }, 4000);
+}
+
+function __showCanvasReloadProgressBeforeNavigation(options = {}) {
+    const operation = String(options.operation || 'reload');
+    if (options.persist !== false) {
+        __persistGithubReloadProgressState({ operation });
+    }
+    __showGithubReloadProgressDialog();
+    __setGithubReloadProgressStatus({
+        title: String(options.title || __githubReloadProgressText('正在刷新画布...', 'Refreshing canvas...')),
+        text: String(options.text || __githubReloadProgressText('内容已写入，正在刷新并准备定位...', 'Content is saved. Refreshing and preparing to locate...')),
+        percent: 100
+    });
+}
+
+function __hideCanvasReloadProgressPanel(options = {}) {
+    if (options.clearState !== false) {
+        __clearGithubReloadProgressState();
+    } else if (__githubReloadProgressTimer) {
+        clearTimeout(__githubReloadProgressTimer);
+        __githubReloadProgressTimer = null;
+    }
+    const dialog = __githubReloadProgressDialog;
+    __githubReloadProgressDialog = null;
+    try { if (dialog) dialog.remove(); } catch (_) { }
+}
+
+function __scheduleGithubReloadProgressRestore() {
+    const run = () => __restoreGithubReloadProgressDialog();
+    if (document.body) {
+        run();
+    } else if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', run, { once: true });
+    } else {
+        setTimeout(run, 0);
+    }
+    window.addEventListener('bcs:post-reload-locate-complete', () => {
+        __finishGithubReloadProgress(__githubReloadProgressText('已完成刷新和定位。', 'Refresh and location complete.'));
+    });
+}
+
+__scheduleGithubReloadProgressRestore();
+if (typeof window !== 'undefined') {
+    window.__showCanvasReloadProgressBeforeNavigation = __showCanvasReloadProgressBeforeNavigation;
+    window.__hideCanvasReloadProgressPanel = __hideCanvasReloadProgressPanel;
 }
 
 function __saveImportedTempSectionsDelta(sectionInputs, options = {}) {
@@ -1469,6 +1646,12 @@ async function showBackupDialog() {
                 if (sandbox.permCopies && typeof sandbox.permCopies === 'object') {
                     for (const k of Object.keys(sandbox.permCopies)) parsedStorage[k] = sandbox.permCopies[k];
                 }
+                __showCanvasReloadProgressBeforeNavigation({
+                    operation: 'backup-restore',
+                    persist: false,
+                    title: isEn ? 'Restoring backup...' : '正在恢复备份...',
+                    text: isEn ? 'Writing backup into local data...' : '正在将备份写入本地数据...'
+                });
                 await __performOverwriteImport({
                     parsedTempState: sandbox.tempState,
                     parsedStorage,
@@ -1479,10 +1662,16 @@ async function showBackupDialog() {
                     deferRuntimeApply: true,
                     willReloadAfterImport: true
                 });
+                __showCanvasReloadProgressBeforeNavigation({
+                    operation: 'backup-restore',
+                    title: isEn ? 'Refreshing canvas...' : '正在刷新画布...',
+                    text: isEn ? 'Backup restore is saved. Refreshing and preparing to locate...' : '备份恢复已写入，正在刷新并准备定位...'
+                });
                 setTimeout(() => {
                     window.location.reload();
                 }, 1500);
             } catch (e) {
+                __hideCanvasReloadProgressPanel();
                 console.error('[Backup] restore failed:', e);
                 alert(isEn ? `Restore failed: ${e.message}` : `恢复失败：${e.message}`);
             }

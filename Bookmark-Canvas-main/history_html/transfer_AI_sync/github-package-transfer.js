@@ -8,6 +8,7 @@
     const DEFAULT_OVERWRITE_THRESHOLD = 500;
     const DEFAULT_COMMIT_MSG_TEMPLATE = 'Bookmark Canvas: push package {path} {time}';
     const DEFAULT_COMMIT_DESC_TEMPLATE = 'Updated: {updated} files, Deleted: {deleted} files';
+    const RELOAD_PROGRESS_KEY = 'bcs:github-reload-progress';
     const STORAGE_KEYS = [
         'githubRepoToken',
         'githubRepoOwner',
@@ -28,7 +29,7 @@
     ];
 
     function getOverlayContainer() {
-        if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+        if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function' && window.getOverlayContainer !== getOverlayContainer) {
             return window.getOverlayContainer();
         }
         const container = document.querySelector('.canvas-main-container');
@@ -1435,6 +1436,50 @@ ${isEn()
                 titleEl.textContent = originalProgressTitle;
             }
         }
+    }
+
+    function setProgressDialogStatus({ title, text, percent = 100, hideCancel = false, success = false, spinner = false } = {}) {
+        if (!activeProgressDialog) return;
+        const bar = activeProgressDialog.querySelector('.github-progress-bar');
+        const textEl = activeProgressDialog.querySelector('.github-progress-text');
+        const pctEl = activeProgressDialog.querySelector('.github-progress-percentage');
+        const titleEl = activeProgressDialog.querySelector('.github-progress-title');
+        const cancelBtn = activeProgressDialog.querySelector('#githubProgressCancel');
+        const iconContainer = activeProgressDialog.querySelector('.github-progress-icon-container');
+        const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+        if (bar) bar.style.width = `${clamped}%`;
+        if (pctEl) pctEl.textContent = `${clamped}%`;
+        if (titleEl && title) titleEl.textContent = title;
+        if (textEl && text) textEl.textContent = text;
+        if (cancelBtn && hideCancel) cancelBtn.style.display = 'none';
+        if (iconContainer && success) {
+            iconContainer.innerHTML = `<span class="github-progress-success-icon"><i class="fas fa-check-circle"></i></span>`;
+        } else if (iconContainer && spinner) {
+            iconContainer.innerHTML = `<span class="github-progress-spinner"></span>`;
+        }
+    }
+
+    function persistReloadProgressState(state) {
+        try {
+            localStorage.setItem(RELOAD_PROGRESS_KEY, JSON.stringify({
+                operation: state && state.operation ? state.operation : 'pull',
+                requestedAt: Date.now()
+            }));
+        } catch (_) { }
+    }
+
+    function showReloadProgressBeforeNavigation(operation = 'pull') {
+        persistReloadProgressState({ operation });
+        if (!activeProgressDialog) {
+            showProgressDialog(t('正在刷新画布...', 'Refreshing canvas...'));
+        }
+        setProgressDialogStatus({
+            title: t('正在刷新画布...', 'Refreshing canvas...'),
+            text: t('拉取内容已写入，正在刷新并准备定位...', 'Pulled content is saved. Refreshing and preparing to locate...'),
+            percent: 100,
+            hideCancel: true,
+            spinner: true
+        });
     }
 
     function closeProgressDialog(delay = 0, isSuccess = true) {
@@ -3110,7 +3155,7 @@ ${isEn()
                 commitMessage: pulledCommitMessage,
                 commitDescription: pulledCommitDescription
             });
-            await closeProgressDialog(800, true);
+            showReloadProgressBeforeNavigation('pull');
             showToast(note, 'success', 5000);
             setTimeout(() => {
                 window.location.reload();

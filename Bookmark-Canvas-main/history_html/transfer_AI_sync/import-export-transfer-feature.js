@@ -8,7 +8,7 @@
  */
 
 function getOverlayContainer() {
-    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
+    if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function' && window.getOverlayContainer !== getOverlayContainer) {
         return window.getOverlayContainer();
     }
     const container = document.querySelector('.canvas-main-container');
@@ -1803,6 +1803,43 @@ function __normalizeCanvasImportPosition(positionInput) {
     return { left, top };
 }
 
+function __showImportReloadProgress(importMode = 'snapshot', phase = 'reload') {
+    try {
+        if (typeof window === 'undefined' || typeof window.__showCanvasReloadProgressBeforeNavigation !== 'function') return;
+        const { isEn } = __getLang();
+        const isOverwrite = importMode === 'overwrite';
+        const isBookmarks = importMode === 'bookmarks';
+        const isProcessing = phase === 'processing';
+        const processingTitle = isOverwrite
+            ? (isEn ? 'Importing with overwrite...' : '正在覆盖导入...')
+            : (isEn ? 'Importing...' : '正在导入...');
+        const processingText = isOverwrite
+            ? (isEn ? 'Writing imported package to local data...' : '正在将导入包写入本地数据...')
+            : (isBookmarks
+                ? (isEn ? 'Importing bookmark files...' : '正在导入书签文件...')
+                : (isEn ? 'Importing snapshot package...' : '正在导入快照包...'));
+        window.__showCanvasReloadProgressBeforeNavigation({
+            operation: isOverwrite ? 'import-overwrite' : (isBookmarks ? 'import-bookmarks' : 'import-snapshot'),
+            persist: !isProcessing,
+            title: isProcessing ? processingTitle : (isEn ? 'Refreshing canvas...' : '正在刷新画布...'),
+            text: isProcessing ? processingText : (isOverwrite
+                ? (isEn ? 'Overwrite import is saved. Refreshing and preparing to locate...' : '覆盖导入已写入，正在刷新并准备定位...')
+                : (isBookmarks
+                    ? (isEn ? 'Bookmark import is saved. Refreshing canvas...' : '书签导入已写入，正在刷新画布...')
+                : (isEn ? 'Snapshot package is imported. Refreshing and preparing to locate...' : '快照包已导入，正在刷新并准备定位...')
+                ))
+        });
+    } catch (_) { }
+}
+
+function __hideImportReloadProgress() {
+    try {
+        if (typeof window !== 'undefined' && typeof window.__hideCanvasReloadProgressPanel === 'function') {
+            window.__hideCanvasReloadProgressPanel();
+        }
+    } catch (_) { }
+}
+
 function __resolveCanvasImportPlacement(width, height, options = {}) {
     const explicitPosition = __normalizeCanvasImportPosition(options && options.canvasPosition);
     if (explicitPosition) {
@@ -2117,6 +2154,7 @@ async function handleFileImport(e) {
 
             if (forceSnapshotImport) {
                 __setCanvasImportRuntimeMode('permanent');
+                __showImportReloadProgress('snapshot', 'processing');
                 await __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
                     source: 'zip',
                     trigger: importOptions.trigger || 'canvas-position-import',
@@ -2129,6 +2167,7 @@ async function handleFileImport(e) {
                 if (activeDialog) activeDialog.remove();
                 e.target.value = '';
                 e.target.__canvasImportOptions = null;
+                __showImportReloadProgress('snapshot');
                 setTimeout(() => {
                     window.location.reload();
                 }, 1500);
@@ -2153,6 +2192,7 @@ async function handleFileImport(e) {
             }
             if (mode === 'overwrite') {
                 try {
+                    __showImportReloadProgress('overwrite', 'processing');
                     const overwriteParsed = await parseCanvasPackageFromZipFile(file, { importMode: 'overwrite' });
                     await __performOverwriteImport({
                         parsedTempState: overwriteParsed.tempState,
@@ -2165,16 +2205,21 @@ async function handleFileImport(e) {
                         deferRuntimeApply: true,
                         willReloadAfterImport: true
                     });
+                    const activeDialog = document.getElementById('canvasImportDialog');
+                    if (activeDialog) activeDialog.remove();
+                    __showImportReloadProgress('overwrite');
                     setTimeout(() => {
                         window.location.reload();
                     }, 1500);
                 } catch (err) {
+                    __hideImportReloadProgress();
                     console.error('[Overwrite Import] failed:', err);
                     alert(isEn ? `Full overwrite failed: ${err.message}` : `全量覆盖失败：${err.message}`);
                 }
                 return;
             }
             __setCanvasImportRuntimeMode(mode);
+            __showImportReloadProgress('snapshot', 'processing');
 
             await __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
                 source: type === 'package-archive' ? 'zip' : 'json',
@@ -2184,14 +2229,17 @@ async function handleFileImport(e) {
                 deferRuntimeRender: true,
                 willReloadAfterImport: true
             });
+            __showImportReloadProgress('snapshot');
             setTimeout(() => {
                 window.location.reload();
             }, 1500);
         } else if (type === 'html' || type === 'json') {
             if (files.length > 1) {
+                __showImportReloadProgress('bookmarks', 'processing');
                 await __importBookmarkFilesBatch(type, files, {
                     canvasPosition
                 });
+                __showImportReloadProgress('bookmarks');
                 setTimeout(() => {
                     window.location.reload();
                 }, 1500);
@@ -2213,6 +2261,7 @@ async function handleFileImport(e) {
         if (activeDialog) activeDialog.remove();
         // 成功提示已在各导入函数中显示，这里不再重复
     } catch (error) {
+        __hideImportReloadProgress();
         console.error('[Canvas] 导入失败:', error);
         const { isEn } = __getLang();
         showCanvasToast((isEn ? 'Import failed: ' : '导入失败: ') + (error && error.message ? error.message : error), 'error');
@@ -2253,6 +2302,7 @@ async function handleFolderImport(e) {
         const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName);
         if (forceSnapshotImport) {
             __setCanvasImportRuntimeMode('permanent');
+            __showImportReloadProgress('snapshot', 'processing');
             await __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
                 source: 'folder',
                 trigger: importOptions.trigger || 'canvas-position-import',
@@ -2265,6 +2315,7 @@ async function handleFolderImport(e) {
             if (activeDialog) activeDialog.remove();
             e.target.value = '';
             e.target.__canvasImportOptions = null;
+            __showImportReloadProgress('snapshot');
             setTimeout(() => {
                 window.location.reload();
             }, 1500);
@@ -2289,6 +2340,7 @@ async function handleFolderImport(e) {
         }
         if (mode === 'overwrite') {
             try {
+                __showImportReloadProgress('overwrite', 'processing');
                 const overwriteParsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName, { importMode: 'overwrite' });
                 await __performOverwriteImport({
                     parsedTempState: overwriteParsed.tempState,
@@ -2300,16 +2352,21 @@ async function handleFolderImport(e) {
                     deferRuntimeApply: true,
                     willReloadAfterImport: true
                 });
+                const activeDialog = document.getElementById('canvasImportDialog');
+                if (activeDialog) activeDialog.remove();
+                __showImportReloadProgress('overwrite');
                 setTimeout(() => {
                     window.location.reload();
                 }, 1500);
             } catch (err) {
+                __hideImportReloadProgress();
                 console.error('[Overwrite Import] failed:', err);
                 alert(isEn ? `Full overwrite failed: ${err.message}` : `全量覆盖失败：${err.message}`);
             }
             return;
         }
         __setCanvasImportRuntimeMode(mode);
+        __showImportReloadProgress('snapshot', 'processing');
 
         await __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
             source: 'folder',
@@ -2322,10 +2379,12 @@ async function handleFolderImport(e) {
 
         const activeDialog = document.getElementById('canvasImportDialog');
         if (activeDialog) activeDialog.remove();
+        __showImportReloadProgress('snapshot');
         setTimeout(() => {
             window.location.reload();
         }, 1500);
     } catch (error) {
+        __hideImportReloadProgress();
         console.error('[Canvas] 文件夹导入失败:', error);
         showCanvasToast((isEn ? 'Import failed: ' : '导入失败: ') + (error && error.message ? error.message : error), 'error');
     }
