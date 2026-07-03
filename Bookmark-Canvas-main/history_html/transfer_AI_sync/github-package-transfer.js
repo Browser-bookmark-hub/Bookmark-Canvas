@@ -2854,7 +2854,10 @@ ${isEn()
                             <span class="import-mode-radio" aria-hidden="true"></span>
                             <span class="import-mode-option-main">
                                 <span class="import-mode-option-title">${escapeHtml(t('全量覆盖', 'Full Overwrite'))}</span>
-                                <span class="import-mode-option-desc">${escapeHtml(t('清空本地目标，写入导入包内容。可通过「备份」撤销。', 'Clears current local target and writes the imported package in. Undo via Backup.'))}</span>
+                                <span class="import-mode-option-desc">${t(
+                                    '清空本地目标，写入导入包内容。可通过<span id="githubPullBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">「备份」</span>撤销。',
+                                    'Clears current local target and writes the imported package in. Undo via <span id="githubPullBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">Backup</span>.'
+                                )}</span>
                             </span>
                         </button>
                         <button id="githubPullSelective" type="button" class="import-mode-option github-pull-mode-option${defaultMode === 'selective' ? ' is-selected' : ''}">
@@ -2885,6 +2888,7 @@ ${isEn()
             const selectiveBtn = dialog.querySelector('#githubPullSelective');
             const cancelBtn = dialog.querySelector('#githubPullCancel');
             const confirmBtn = dialog.querySelector('#githubPullConfirm');
+            const backupJumpLink = dialog.querySelector('#githubPullBackupJump');
             const setSelectedMode = (mode) => {
                 selectedMode = mode === 'overwrite' || mode === 'selective' ? mode : 'snapshot';
                 if (snapshotBtn) snapshotBtn.classList.toggle('is-selected', selectedMode === 'snapshot');
@@ -2898,6 +2902,17 @@ ${isEn()
             if (selectiveBtn) selectiveBtn.addEventListener('click', () => setSelectedMode('selective'));
             if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
             if (confirmBtn) confirmBtn.addEventListener('click', () => cleanup(selectedMode));
+            if (backupJumpLink) {
+                const openBackupDialog = (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    try { showBackupDialog(); } catch (err) { console.warn(err); }
+                };
+                backupJumpLink.addEventListener('click', openBackupDialog);
+                backupJumpLink.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') openBackupDialog(event);
+                });
+            }
             dialog.addEventListener('click', (event) => {
                 if (event.target === dialog) cleanup(null);
             });
