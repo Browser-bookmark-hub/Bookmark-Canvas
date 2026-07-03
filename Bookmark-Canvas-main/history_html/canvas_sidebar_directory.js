@@ -36,7 +36,7 @@
       return node.open;
     }
     const key = node.key || '';
-    if (key === 'folder-card-groups' || key === 'folder-permanent' || key === 'folder-temporary') {
+    if (key === 'folder-card-groups' || key === 'folder-permanent') {
       return true;
     }
     return false;
