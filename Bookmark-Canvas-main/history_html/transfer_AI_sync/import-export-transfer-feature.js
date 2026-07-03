@@ -556,8 +556,8 @@ function showImportModeConfirmDialog(options = {}) {
             : '相当于增量式导入：按快照包导入，并用分组框包裹（默认）。';
         const overwriteTitle = isEn ? 'Full Overwrite' : '全量覆盖';
         const overwriteDesc = isEn
-            ? 'Clears current local target and writes the imported package in. Undo via Backup.'
-            : '清空本地目标，写入导入包内容。可通过「备份」撤销。';
+            ? 'Clears current local target and writes the imported package in. Undo via <span id="importModeBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">Backup</span>.'
+            : '清空本地目标，写入导入包内容。可通过<span id="importModeBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">「备份」</span>撤销。';
 
         const confirmText = isEn ? 'Import' : '导入';
         const cancelText = isEn ? 'Cancel' : '取消';
@@ -656,6 +656,19 @@ function showImportModeConfirmDialog(options = {}) {
                 event.preventDefault();
                 const mode = String(btn.dataset.mode || '').toLowerCase();
                 pickMode(mode);
+            });
+        }
+
+        const backupJumpLink = dialog.querySelector('#importModeBackupJump');
+        if (backupJumpLink) {
+            const openBackupDialog = (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                try { showBackupDialog(); } catch (err) { console.warn(err); }
+            };
+            backupJumpLink.addEventListener('click', openBackupDialog);
+            backupJumpLink.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') openBackupDialog(event);
             });
         }
 
