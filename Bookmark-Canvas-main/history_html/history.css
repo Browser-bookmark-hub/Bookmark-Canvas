@@ -4068,7 +4068,7 @@ body.sidebar-resizing * {
     outline: 3px solid var(--accent-primary, #2196F3) !important;
     outline-offset: 3px !important;
     box-shadow: 0 0 15px 6px color-mix(in srgb, var(--accent-primary, #2196F3) 60%, transparent) !important;
-    animation: locate-pulse-effect 1.25s ease-in-out infinite !important;
+    animation: locate-pulse-effect 0.62s ease-in-out 1 !important;
     transition: outline 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease !important;
 }
 

@@ -77,7 +77,7 @@
     /* 使用 visible 允许 resize handle 显示在外部 */
     overflow: visible;
     z-index: 100;
-    transition: border-color 0.18s ease, outline-color 0.18s ease;
+    transition: opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1), transform 0.32s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s ease, outline-color 0.18s ease;
     cursor: default;
     will-change: auto;
     /* 默认关闭，拖拽时动态启用，减少内存占用 */
@@ -703,7 +703,7 @@
     border: 3px solid var(--section-color, #2563eb);
     border-radius: 12px;
     box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.08);
-    transition: opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s ease, outline-color 0.18s ease;
+    transition: opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1), transform 0.32s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s ease, outline-color 0.18s ease;
     z-index: 10;
     will-change: auto;
     /* 默认关闭，拖拽时动态启用，减少内存占用 */
@@ -1640,14 +1640,18 @@
     margin-bottom: 8px;
 }
 
-.temp-canvas-node.temp-node-enter {
-    opacity: 0;
-    transform: translateY(18px) scale(0.82);
+.temp-canvas-node.temp-node-enter,
+.permanent-bookmark-section.temp-node-enter,
+.md-canvas-node.temp-node-enter {
+    opacity: 0 !important;
+    transform: translateY(18px) scale(0.82) !important;
 }
 
-[data-theme="dark"] .temp-canvas-node.temp-node-enter {
-    opacity: 0;
-    transform: translateY(18px) scale(0.82);
+[data-theme="dark"] .temp-canvas-node.temp-node-enter,
+[data-theme="dark"] .permanent-bookmark-section.temp-node-enter,
+[data-theme="dark"] .md-canvas-node.temp-node-enter {
+    opacity: 0 !important;
+    transform: translateY(18px) scale(0.82) !important;
 }
 
 /* Canvas中的书签项样式 */
@@ -2485,6 +2489,7 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
     /* 确保高度约束生效 */
     flex-shrink: 0;
     flex-basis: auto;
+    transition: opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1), transform 0.32s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s ease, outline-color 0.18s ease;
 }
 
 [data-theme="dark"] .md-canvas-node {

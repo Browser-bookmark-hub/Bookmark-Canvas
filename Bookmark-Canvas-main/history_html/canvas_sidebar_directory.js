@@ -592,6 +592,99 @@
     return { x, y, w, h };
   }
 
+  function getRectCenter(rect) {
+    if (!rect) return null;
+    const x = Number(rect.x);
+    const y = Number(rect.y);
+    const w = Number(rect.w);
+    const h = Number(rect.h);
+    if (![x, y, w, h].every(v => Number.isFinite(v))) return null;
+    return {
+      x: x + (w / 2),
+      y: y + (h / 2)
+    };
+  }
+
+  function readCanvasElementRect(element) {
+    if (!element || !element.style) return null;
+    const x = Number.parseFloat(element.style.left);
+    const y = Number.parseFloat(element.style.top);
+    const w = Number.parseFloat(element.style.width);
+    const h = Number.parseFloat(element.style.height);
+    if (![x, y, w, h].every(v => Number.isFinite(v))) return null;
+    return { x, y, w, h };
+  }
+
+  function rectFromPermanentCopy(copy) {
+    if (!copy || typeof copy !== 'object') return null;
+    const cardState = (copy.cardState && typeof copy.cardState === 'object') ? copy.cardState : copy;
+    const x = Number.parseFloat(cardState.left != null ? cardState.left : cardState.x);
+    const y = Number.parseFloat(cardState.top != null ? cardState.top : cardState.y);
+    const w = Number.parseFloat(cardState.width != null ? cardState.width : cardState.w);
+    const h = Number.parseFloat(cardState.height != null ? cardState.height : cardState.h);
+    if (![x, y, w, h].every(v => Number.isFinite(v))) return null;
+    return { x, y, w, h };
+  }
+
+  function makeTempSectionTarget(section) {
+    const sectionId = normalizeText(section && section.id);
+    if (!sectionId) return null;
+    return {
+      kind: 'temp-section',
+      sectionId,
+      rect: __sidebarRectOf(section)
+    };
+  }
+
+  function makeMdNodeTarget(node, extras = {}) {
+    const nodeId = normalizeText(node && node.id);
+    if (!nodeId) return null;
+    return {
+      kind: 'md-node',
+      nodeId,
+      subtype: normalizeText(node && node.subtype),
+      rect: __sidebarRectOf(node),
+      ...extras
+    };
+  }
+
+  function makeCardGroupTarget(node, title) {
+    return makeMdNodeTarget(node, {
+      subtype: 'card-group',
+      title: normalizeText(title)
+    });
+  }
+
+  function makePermanentMainTarget(rect = null) {
+    return {
+      kind: 'permanent-main',
+      rect: rect || null
+    };
+  }
+
+  function makePermanentCopyTarget(copy) {
+    const copyId = normalizeText(copy && copy.id);
+    if (!copyId) return null;
+    return {
+      kind: 'permanent-copy',
+      copyId,
+      rect: rectFromPermanentCopy(copy)
+    };
+  }
+
+  function makeEdgeTarget(edge, rect = null) {
+    const edgeId = normalizeText(edge && edge.id);
+    const fromNode = normalizeText(edge && edge.fromNode);
+    const toNode = normalizeText(edge && edge.toNode);
+    return {
+      kind: 'edge',
+      edgeId,
+      fromNode,
+      toNode,
+      rect: rect || null
+    };
+  }
+
   function __sidebarRectFullyInside(inner, outer, margin) {
     if (!inner || !outer) return false;
     const m = (typeof margin === 'number' && isFinite(margin)) ? margin : 0;
@@ -928,7 +1021,7 @@
 
     const toNode = (entry) => {
       const section = entry.section;
-      const target = { kind: 'temp-section', sectionId: section.id };
+      const target = makeTempSectionTarget(section);
       const preview = getTempSectionDescription(section);
       const title = getTempSectionDisplayText(section);
       const key = `${keyPrefix}${section.id}`;
@@ -1429,7 +1522,7 @@
               currentTitle: t('仅删除框体', 'Delete frame only'),
               allTitle: t('删除框体及成员', 'Delete frame and members')
             },
-            target: { kind: 'md-node', nodeId: node.id },
+            target: makeMdNodeTarget(node),
             preview: ''
           }),
           folderColor,
@@ -1545,7 +1638,7 @@
               kind: 'edge',
               edgeId
             },
-            target: { kind: 'edge', edgeId, fromNode, toNode },
+            target: makeEdgeTarget(edge),
             preview
           });
         };
@@ -1635,6 +1728,7 @@
     const regularMdNodes = mdNodes.slice();
 
     const regularEdges = edges.slice();
+    const permanentMainRect = getGeometricRect(null, 'permanent-main');
 
     const permanentChildren = [
       makeItemNode({
@@ -1646,7 +1740,7 @@
         icon: 'fas fa-thumbtack',
         iconText: '#',
         iconTone: 'hash',
-        target: { kind: 'permanent-main' },
+        target: makePermanentMainTarget(permanentMainRect),
         preview: getPermanentDescription(null)
       })
     ];
@@ -1668,7 +1762,7 @@
           kind: 'permanent-copy',
           copyId
         },
-        target: { kind: 'permanent-copy', copyId },
+        target: makePermanentCopyTarget(copy),
         preview: getPermanentDescription(copyId)
       }));
     });
@@ -1716,10 +1810,10 @@
       if (type === 'permanent-main') {
         const mainShell = getPermanentMainShell();
         if (mainShell && mainShell.cardState) {
-          const x = Number(mainShell.cardState.left);
-          const y = Number(mainShell.cardState.top);
-          const w = Number(mainShell.cardState.width);
-          const h = Number(mainShell.cardState.height);
+          const x = Number.parseFloat(mainShell.cardState.left);
+          const y = Number.parseFloat(mainShell.cardState.top);
+          const w = Number.parseFloat(mainShell.cardState.width);
+          const h = Number.parseFloat(mainShell.cardState.height);
           if ([x, y, w, h].every(v => Number.isFinite(v))) return { x, y, w, h };
         }
         const el = document.getElementById('permanentSection');
@@ -1922,7 +2016,7 @@
           color: colorTokens.permanent,
           defaultColor: colorTokens.permanent,
           showIcon: false, // "永久栏目前面不需要图标"
-          target: { kind: 'permanent-main' },
+          target: makePermanentMainTarget(permanentMainRect),
           preview: getPermanentDescription(null)
         }));
       }
@@ -1942,7 +2036,7 @@
             kind: 'permanent-copy',
             copyId
           },
-          target: { kind: 'permanent-copy', copyId },
+          target: makePermanentCopyTarget(copy),
           preview: getPermanentDescription(copyId)
         }));
       });
@@ -2013,7 +2107,7 @@
               nodeId: n.id,
               scopeOptions: false
             },
-            target: { kind: 'md-node', nodeId: n.id },
+            target: makeMdNodeTarget(n),
             preview: ''
           });
         },
@@ -2097,7 +2191,7 @@
               kind: 'edge',
               edgeId
             },
-            target: { kind: 'edge', edgeId, fromNode, toNode },
+            target: makeEdgeTarget(edge),
             preview
           });
         };
@@ -2196,6 +2290,7 @@
       const labelRaw = normalizeText(stripInlineMarkdown(stripHtml((node && node.label) || ''))) || (
         isEnglish() ? 'Card Group' : '卡片组'
       );
+      const target = makeCardGroupTarget(node, labelRaw);
 
       const geo = getDirectGroupChildren(node, tempSections, mdNodes, copies, edges);
       const children = buildGroupChildrenDirectoryNodes(geo, instanceSafeId, visited, depth);
@@ -2221,7 +2316,7 @@
           currentTitle: t('仅删除框体', 'Delete frame only'),
           allTitle: t('删除框体及成员', 'Delete frame and members')
         },
-        target: { kind: 'md-node', nodeId: safeId },
+        target,
         open: false,
         count: children.length,
         children: children
@@ -2338,6 +2433,17 @@
       code: node.code,
       title: node.title,
       preview: node.preview || '',
+      target: node.target ? {
+        kind: node.target.kind || '',
+        nodeId: node.target.nodeId || '',
+        sectionId: node.target.sectionId || '',
+        copyId: node.target.copyId || '',
+        edgeId: node.target.edgeId || '',
+        fromNode: node.target.fromNode || '',
+        toNode: node.target.toNode || '',
+        subtype: node.target.subtype || '',
+        rect: node.target.rect || null
+      } : null,
       count: node.count || 0,
       children: serializeNodesForFingerprint(node.children || [])
     }));
@@ -2707,18 +2813,37 @@
   function highlightLocatedElement(element) {
     if (!element) return;
     const highlightClass = 'canvas-locate-highlight';
+    const enterClass = 'temp-node-enter';
 
-    // If the element is already highlighted, clear its previous timeout first
+    // If the animation is already active, don't restart it to avoid double-triggering/glitches
     if (element.dataset.locateHighlightTimeoutId) {
-      global.clearTimeout(parseInt(element.dataset.locateHighlightTimeoutId, 10));
-    } else {
-      // Save original zIndex if not already saved
-      element.dataset.originalZIndex = element.style.zIndex || '';
+      return;
     }
 
+    // Save original zIndex if not already saved
+    element.dataset.originalZIndex = element.style.zIndex || '';
+
+    // Elevate z-index to show on top during transition
     element.style.zIndex = '99999';
+
+    // Temporarily disable transition to snap to initial state
+    const origTransition = element.style.transition;
+    element.style.transition = 'none';
+    element.classList.add(enterClass);
+
+    // Force reflow
+    element.offsetHeight;
+
+    // Restore transition
+    element.style.transition = origTransition;
     element.classList.add(highlightClass);
 
+    // Trigger transition in the next frame
+    global.requestAnimationFrame(() => {
+      element.classList.remove(enterClass);
+    });
+
+    // Restore z-index after the border pulse has had time to complete.
     const timeoutId = global.setTimeout(() => {
       element.classList.remove(highlightClass);
       const origZIndex = element.dataset.originalZIndex;
@@ -2731,7 +2856,7 @@
       }
       delete element.dataset.originalZIndex;
       delete element.dataset.locateHighlightTimeoutId;
-    }, 1250);
+    }, 650);
 
     element.dataset.locateHighlightTimeoutId = String(timeoutId);
   }
@@ -2825,13 +2950,320 @@
     return false;
   }
 
+  function getPermanentMainRectFromState() {
+    const mainShell = getPermanentMainShell();
+    if (mainShell && mainShell.cardState) {
+      const x = Number.parseFloat(mainShell.cardState.left);
+      const y = Number.parseFloat(mainShell.cardState.top);
+      const w = Number.parseFloat(mainShell.cardState.width);
+      const h = Number.parseFloat(mainShell.cardState.height);
+      if ([x, y, w, h].every(v => Number.isFinite(v))) return { x, y, w, h };
+    }
+    const el = document.getElementById('permanentSection');
+    return readCanvasElementRect(el);
+  }
+
+  function getPermanentCopyRectFromState(copyId) {
+    const safeCopyId = normalizeText(copyId);
+    if (!safeCopyId) return null;
+
+    const state = getCanvasState();
+    const copyStateById = state && state.permanentLayout && state.permanentLayout.copiesById && typeof state.permanentLayout.copiesById === 'object'
+      ? state.permanentLayout.copiesById
+      : null;
+    if (copyStateById && copyStateById[safeCopyId]) {
+      const rect = rectFromPermanentCopy(copyStateById[safeCopyId]);
+      if (rect) return rect;
+    }
+
+    const shell = getPermanentCopyShells().find((view) => normalizeText(view && view.copyId) === safeCopyId);
+    if (shell) {
+      const rect = rectFromPermanentCopy(shell.cardState || shell);
+      if (rect) return rect;
+    }
+
+    const copies = readPermanentCopies();
+    const copy = copies.find((item) => normalizeText(item && item.id) === safeCopyId);
+    if (copy) {
+      const rect = rectFromPermanentCopy(copy);
+      if (rect) return rect;
+    }
+
+    const el = resolvePermanentSectionElement(safeCopyId);
+    return readCanvasElementRect(el);
+  }
+
+  function getCanvasNodeRectFromState(nodeId) {
+    const id = normalizeText(nodeId);
+    if (!id) return null;
+
+    if (id === 'permanentSection' || id === 'permanent-section') return getPermanentMainRectFromState();
+    if (id.startsWith('permanent-section-copy-')) return getPermanentCopyRectFromState(id.slice('permanent-section-copy-'.length));
+
+    const state = getCanvasState();
+    const tempSections = Array.isArray(state && state.tempSections) ? state.tempSections : [];
+    const temp = tempSections.find((section) => section && normalizeText(section.id) === id);
+    if (temp) return __sidebarRectOf(temp);
+
+    const mdNodes = Array.isArray(state && state.mdNodes) ? state.mdNodes : [];
+    const md = mdNodes.find((node) => node && normalizeText(node.id) === id);
+    if (md) return __sidebarRectOf(md);
+
+    const el = document.getElementById(id);
+    return readCanvasElementRect(el);
+  }
+
+  function getEdgeRectFromState(target) {
+    if (!target || typeof target !== 'object') return null;
+    const edgeId = normalizeText(target.edgeId);
+    const state = getCanvasState();
+    const edges = Array.isArray(state && state.edges) ? state.edges : [];
+    const edge = edgeId ? edges.find((item) => item && normalizeText(item.id) === edgeId) : null;
+    const fromNode = normalizeText((edge && edge.fromNode) || target.fromNode);
+    const toNode = normalizeText((edge && edge.toNode) || target.toNode);
+    const fromRect = getCanvasNodeRectFromState(fromNode);
+    const toRect = getCanvasNodeRectFromState(toNode);
+    const fromCenter = getRectCenter(fromRect);
+    const toCenter = getRectCenter(toRect);
+    if (fromCenter && toCenter) {
+      const minX = Math.min(fromCenter.x, toCenter.x);
+      const minY = Math.min(fromCenter.y, toCenter.y);
+      return {
+        x: minX,
+        y: minY,
+        w: Math.max(1, Math.abs(fromCenter.x - toCenter.x)),
+        h: Math.max(1, Math.abs(fromCenter.y - toCenter.y))
+      };
+    }
+    return fromRect || toRect || null;
+  }
+
+  function getCanvasRectForDirectoryTarget(target) {
+    if (!target || typeof target !== 'object') return null;
+    if (target.rect) return target.rect;
+    switch (normalizeText(target.kind)) {
+      case 'permanent-main':
+        return getPermanentMainRectFromState();
+      case 'permanent-copy':
+        return getPermanentCopyRectFromState(target.copyId);
+      case 'temp-section':
+        return getCanvasNodeRectFromState(target.sectionId);
+      case 'md-node':
+        return getCanvasNodeRectFromState(target.nodeId);
+      case 'edge':
+        return getEdgeRectFromState(target);
+      default:
+        return null;
+    }
+  }
+
+  function resolveDirectoryTargetElement(target) {
+    if (!target || typeof target !== 'object') return null;
+    switch (normalizeText(target.kind)) {
+      case 'permanent-main':
+        return resolvePermanentSectionElement(null);
+      case 'permanent-copy':
+        return resolvePermanentSectionElement(target.copyId);
+      case 'temp-section': {
+        const id = normalizeText(target.sectionId);
+        if (!id) return null;
+        const escaped = escapeSelector(id);
+        return document.getElementById(id)
+          || (escaped ? document.querySelector(`.temp-canvas-node[data-section-id="${escaped}"]`) : null);
+      }
+      case 'md-node':
+        return document.getElementById(normalizeText(target.nodeId));
+      default:
+        return null;
+    }
+  }
+
+  function resolveDirectoryLocateZoom(rect, zoom = null) {
+    if (zoom === 'fit' && rect) {
+      const workspace = document.getElementById('canvasWorkspace');
+      const wsW = (workspace && workspace.clientWidth) || global.innerWidth || 800;
+      const wsH = (workspace && workspace.clientHeight) || global.innerHeight || 600;
+      const padding = 60;
+      const fitW = Math.max(0.1, (wsW - padding) / Math.max(1, Number(rect.w) || 1));
+      const fitH = Math.max(0.1, (wsH - padding) / Math.max(1, Number(rect.h) || 1));
+      return Math.min(1.0, fitW, fitH);
+    }
+    const requested = Number(zoom);
+    if (Number.isFinite(requested) && requested > 0) return requested;
+    const state = getCanvasState();
+    const baseZoom = Number(state && state.baseZoom);
+    return Number.isFinite(baseZoom) && baseZoom > 0 ? baseZoom : 1;
+  }
+
+  function scheduleDirectoryTargetWake(target) {
+    const module = getCanvasModule();
+    if (!module || !target) return;
+    const kind = normalizeText(target.kind);
+    const wake = () => {
+      try {
+        const el = resolveDirectoryTargetElement(target);
+        if (el && typeof module.wakeCanvasNodeFromLazyState === 'function') {
+          module.wakeCanvasNodeFromLazyState(el);
+        }
+        if (kind === 'temp-section' && typeof module.forceWakeAndRender === 'function') {
+          module.forceWakeAndRender(normalizeText(target.sectionId));
+        }
+        if (kind === 'md-node' && typeof module.materializeMaximizedNodeFromDescriptor === 'function') {
+          module.materializeMaximizedNodeFromDescriptor({ type: 'md-node', id: normalizeText(target.nodeId) });
+        }
+      } catch (_) { }
+    };
+    wake();
+    global.setTimeout(wake, 80);
+    global.setTimeout(wake, 260);
+  }
+
+  function scheduleDirectoryTargetHighlight(target) {
+    const highlight = () => {
+      const el = resolveDirectoryTargetElement(target);
+      if (el) highlightLocatedElement(el);
+    };
+    highlight();
+    global.setTimeout(highlight, 120);
+    global.setTimeout(highlight, 360);
+  }
+
+  function locateDirectoryTargetFromRect(module, target, zoom = null) {
+    const rect = getCanvasRectForDirectoryTarget(target);
+    const center = getRectCenter(rect);
+    if (!rect || !center) return false;
+
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return false;
+    const state = getCanvasState();
+    if (!state) return false;
+
+    const targetZoom = resolveDirectoryLocateZoom(rect, zoom);
+    const workspaceWidth = workspace.clientWidth || global.innerWidth || 800;
+    const workspaceHeight = workspace.clientHeight || global.innerHeight || 600;
+    const panX = workspaceWidth / 2 - center.x * targetZoom;
+    const panY = workspaceHeight / 2 - center.y * targetZoom;
+
+    let navigated = false;
+    if (module && typeof module.navigateToViewport === 'function') {
+      try {
+        navigated = module.navigateToViewport({ x: panX, y: panY, zoom: targetZoom }) !== false;
+      } catch (_) {
+        navigated = false;
+      }
+    }
+
+    if (!navigated) {
+      state.zoom = targetZoom;
+      state.panOffsetX = panX;
+      state.panOffsetY = panY;
+
+      const content = document.getElementById(CANVAS_CONTENT_ID);
+      if (content) {
+        if (typeof global.applyCanvasContentTransform === 'function') {
+          try { global.applyCanvasContentTransform(content, panX, panY, targetZoom); } catch (_) { }
+        } else {
+          content.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${targetZoom})`;
+        }
+      }
+      const container = document.querySelector('.canvas-main-container');
+      if (container && container.style) {
+        container.style.setProperty('--canvas-scale', String(targetZoom));
+        container.style.setProperty('--canvas-pan-x', `${panX}px`);
+        container.style.setProperty('--canvas-pan-y', `${panY}px`);
+      }
+      if (typeof global.updateCanvasTransform === 'function') {
+        try { global.requestAnimationFrame(() => global.updateCanvasTransform(false)); } catch (_) { }
+      }
+    }
+
+    scheduleDirectoryTargetWake(target);
+    scheduleDirectoryTargetHighlight(target);
+    return true;
+  }
+
+  function locateCardGroupByCanvasRect(module, target, zoom = null) {
+    if (!target || typeof target !== 'object') return false;
+    const targetRect = target.rect || null;
+    const targetCenter = getRectCenter(targetRect);
+    if (!targetCenter) return false;
+
+    const targetId = normalizeText(target.nodeId);
+    const targetTitle = normalizeText(target.title);
+    let candidates = [];
+    try {
+      candidates = Array.from(document.querySelectorAll('.card-group-canvas-node'));
+    } catch (_) {
+      candidates = [];
+    }
+    if (!candidates.length) return false;
+
+    let best = null;
+    let bestScore = Infinity;
+    candidates.forEach((element) => {
+      if (!element) return;
+      const rect = readCanvasElementRect(element);
+      const center = getRectCenter(rect);
+      if (!center) return;
+
+      const elementId = normalizeText(element.id);
+      const elementTitle = normalizeText(
+        (element.dataset && element.dataset.title)
+        || element.getAttribute('aria-label')
+        || ''
+      );
+      const idMatches = !!targetId && elementId === targetId;
+      const titleMatches = !!targetTitle && elementTitle === targetTitle;
+      if (!idMatches && targetTitle && elementTitle && !titleMatches) return;
+
+      const dx = center.x - targetCenter.x;
+      const dy = center.y - targetCenter.y;
+      const sizePenalty = rect && targetRect
+        ? Math.abs(Number(rect.w) - Number(targetRect.w)) + Math.abs(Number(rect.h) - Number(targetRect.h))
+        : 0;
+      const mismatchPenalty = idMatches ? 0 : (titleMatches ? 0.25 : 1);
+      const score = (dx * dx) + (dy * dy) + sizePenalty + mismatchPenalty;
+      if (score < bestScore) {
+        bestScore = score;
+        best = element;
+      }
+    });
+
+    if (!best) return false;
+
+    const bestRect = readCanvasElementRect(best);
+    const bestCenter = getRectCenter(bestRect);
+    if (!bestCenter) return false;
+    const centerDistance = Math.hypot(bestCenter.x - targetCenter.x, bestCenter.y - targetCenter.y);
+    const targetSize = Math.max(Number(targetRect.w) || 0, Number(targetRect.h) || 0, 1);
+    if (centerDistance > Math.max(12, targetSize * 0.03)) return false;
+
+    if (module && typeof module.selectMdNode === 'function') {
+      try { module.selectMdNode(best.id || targetId); } catch (_) {}
+    }
+    return locateElement(module, best, zoom);
+  }
+
+  function locateMdNodeTarget(module, target, zoom = null) {
+    if (!target || typeof target !== 'object') return false;
+    if (normalizeText(target.subtype) === 'card-group') {
+      if (locateCardGroupByCanvasRect(module, target, zoom)) return true;
+    }
+    if (locateByNodeId(module, target.nodeId, zoom)) return true;
+    return locateDirectoryTargetFromRect(module, target, zoom);
+  }
+
   function highlightEdge(edgeId) {
     const id = normalizeText(edgeId);
     if (!id) return;
     const escaped = escapeSelector(id);
     if (!escaped) return;
 
-    const targets = document.querySelectorAll(`[data-edge-id=\"${escaped}\"]`);
+    const targets = document.querySelectorAll([
+      `.canvas-edge[data-edge-id="${escaped}"]`,
+      `.canvas-edge-hit-area[data-edge-id="${escaped}"]`,
+      `path[data-edge-id="${escaped}"]`
+    ].join(','));
     if (!targets.length) return;
 
     targets.forEach((el) => {
@@ -2851,28 +3283,49 @@
     const module = getCanvasModule();
     switch (target.kind) {
       case 'permanent-main':
-        locatePermanentMain(module, zoom);
+        if (!locatePermanentMain(module, zoom)) locateDirectoryTargetFromRect(module, target, zoom);
         break;
       case 'permanent-copy':
-        locatePermanentCopy(module, target.copyId, zoom);
+        if (!locatePermanentCopy(module, target.copyId, zoom)) locateDirectoryTargetFromRect(module, target, zoom);
         break;
       case 'temp-section':
-        if (module && typeof module.locateSection === 'function') {
-          try {
-            module.locateSection(target.sectionId, zoom);
-            highlightLocatedElement(document.getElementById(target.sectionId));
-            return;
-          } catch (_) { }
+        {
+          let located = false;
+          if (module && typeof module.locateSection === 'function') {
+            try {
+              module.locateSection(target.sectionId, zoom);
+              const tempEl = resolveDirectoryTargetElement(target);
+              if (tempEl) {
+                highlightLocatedElement(tempEl);
+                located = true;
+              }
+            } catch (_) { }
+          }
+          if (!located && !locateByNodeId(module, target.sectionId, zoom)) {
+            locateDirectoryTargetFromRect(module, target, zoom);
+          }
         }
-        locateByNodeId(module, target.sectionId, zoom);
         break;
       case 'md-node':
-        locateByNodeId(module, target.nodeId, zoom);
+        locateMdNodeTarget(module, target, zoom);
         break;
       case 'edge':
-        highlightEdge(target.edgeId);
-        if (locateByNodeId(module, target.fromNode, zoom)) return;
-        locateByNodeId(module, target.toNode, zoom);
+        {
+          let located = false;
+          if (module && typeof module.locateEdge === 'function') {
+            try {
+              module.locateEdge(target.edgeId, zoom);
+              located = true;
+            } catch (_) { }
+          }
+          highlightEdge(target.edgeId);
+          if (!located && !locateDirectoryTargetFromRect(module, target, zoom)) {
+            if (locateByNodeId(module, target.fromNode, zoom)) return;
+            locateByNodeId(module, target.toNode, zoom);
+          }
+          global.setTimeout(() => highlightEdge(target.edgeId), 120);
+          global.setTimeout(() => highlightEdge(target.edgeId), 360);
+        }
         break;
       default:
         break;
@@ -3105,7 +3558,7 @@
             if (module && typeof module.selectMdNode === 'function') {
               try { module.selectMdNode(target.nodeId); } catch (_) {}
             }
-            locateByNodeId(module, target.nodeId, 'fit');
+            locateMdNodeTarget(module, target, 'fit');
           } else {
             locateTarget(target, 'fit');
           }
@@ -3237,6 +3690,12 @@
     if (targetEl.classList.contains('canvas-dir-folder-summary-btn')) {
       const isTitleClick = !!event.target.closest('.canvas-dir-title');
       if (isTitleClick) {
+        const folderEl = targetEl.closest('.canvas-dir-folder');
+        const isCardGroupFolder = !!(folderEl && folderEl.dataset && folderEl.dataset.nodeVariant === 'card-group-item');
+        if (isCardGroupFolder) {
+          return;
+        }
+
         event.preventDefault();
         event.stopPropagation();
 
