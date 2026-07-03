@@ -12,6 +12,7 @@
   const PERMANENT_MAIN_TIP_STORAGE_KEY = 'bcs:perm:tip-main';
   const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
   const FOLDER_OPEN_STATES_KEY = 'bcs:sidebar:folder_open_states';
+  const POST_RELOAD_LOCATE_KEY = 'bcs:post-reload-locate';
 
   function getFolderOpenStates() {
     try {
@@ -3332,6 +3333,41 @@
     }
   }
 
+  function consumePostReloadLocateRequest() {
+    let request = null;
+    try {
+      const raw = localStorage.getItem(POST_RELOAD_LOCATE_KEY);
+      if (!raw) return;
+      localStorage.removeItem(POST_RELOAD_LOCATE_KEY);
+      request = parseJSON(raw, null);
+    } catch (_) {
+      try { localStorage.removeItem(POST_RELOAD_LOCATE_KEY); } catch (_) {}
+      return;
+    }
+
+    if (!request || request.target !== 'permanent-main') return;
+    const requestedAt = Number(request.requestedAt) || 0;
+    if (requestedAt && Date.now() - requestedAt > 5 * 60 * 1000) return;
+
+    let attempts = 0;
+    const tryLocate = () => {
+      attempts += 1;
+      const module = getCanvasModule();
+      const sectionEl = resolvePermanentSectionElement(null);
+      if (module && typeof module.locatePermanent === 'function' && sectionEl) {
+        try {
+          module.locatePermanent();
+          return;
+        } catch (_) { }
+      }
+      if (attempts < 32) {
+        global.setTimeout(tryLocate, 250);
+      }
+    };
+
+    global.setTimeout(tryLocate, 450);
+  }
+
   function resolveTargetElementForFullscreenSwitch(target) {
     if (!target || typeof target !== 'object') return null;
 
@@ -5065,6 +5101,7 @@
     initialized = true;
     ensureCanvasObserver();
     queueRefresh({ force: true });
+    consumePostReloadLocateRequest();
     global.addEventListener('pointerdown', handleGlobalPointerDown, true);
 
     try { setupSidebarTabs(); } catch (_) {}

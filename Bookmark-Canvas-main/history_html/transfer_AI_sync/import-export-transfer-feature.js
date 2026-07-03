@@ -21,6 +21,18 @@ function getOverlayContainer() {
     return document.body;
 }
 
+var CANVAS_POST_RELOAD_LOCATE_KEY = 'bcs:post-reload-locate';
+
+function __requestPostReloadLocatePermanentMain(reason = '') {
+    try {
+        localStorage.setItem(CANVAS_POST_RELOAD_LOCATE_KEY, JSON.stringify({
+            target: 'permanent-main',
+            reason: String(reason || ''),
+            requestedAt: Date.now()
+        }));
+    } catch (_) { }
+}
+
 function __saveTransferImportSectionsDelta(sectionInputs, options = {}) {
     const sections = (Array.isArray(sectionInputs) ? sectionInputs : [sectionInputs])
         .filter((section) => section && typeof section === 'object' && section.id);
@@ -1767,6 +1779,9 @@ async function __performOverwriteImport(payload) {
     }
 
     if (success) {
+        if (payload && payload.willReloadAfterImport === true) {
+            __requestPostReloadLocatePermanentMain(importFileName ? `overwrite:${importFileName}` : 'overwrite');
+        }
         if (!deferRuntimeApply) {
             await refreshTagUiAfterImport();
             const msg = isEn ? 'Full overwrite complete. Undo via Backup.' : '全量覆盖完成。可通过「备份」撤销。';
