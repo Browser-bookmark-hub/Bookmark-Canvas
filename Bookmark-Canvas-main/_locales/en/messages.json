@@ -4,7 +4,7 @@
     "description": "Extension name"
   },
   "extensionDescription": {
-    "message": "Bookmark Canvas: visualize and organize bookmarks with links and notes, with search and export.",
+    "message": "Bookmark Canvas: a bookmark manager with sandboxing, JSON Canvas, card-chain splits, and Git sync.",
     "description": "Extension description"
   },
   "actionTitle": {

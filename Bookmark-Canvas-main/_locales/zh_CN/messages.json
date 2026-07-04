@@ -4,7 +4,7 @@
     "description": "插件名称"
   },
   "extensionDescription": {
-    "message": "书签画布：可视化整理书签、连接与说明，支持搜索与导出。",
+    "message": "书签画布：支持沙盒、JSON Canvas、卡片链分裂与 Git 同步的书签管理器。",
     "description": "插件描述"
   },
   "actionTitle": {
