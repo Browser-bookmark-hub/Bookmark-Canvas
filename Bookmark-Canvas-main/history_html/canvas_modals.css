@@ -563,6 +563,12 @@ html[lang="en"] .canvas-manage-modal {
     width: min(420px, calc(100vw - 16px));
 }
 
+html[lang="en"] #canvasManageModal.canvas-manage-modal {
+    min-width: 360px;
+    width: min(372px, calc(100vw - 16px));
+    transform: translate(-4px, -4px);
+}
+
 #canvasShortcutsModal.canvas-manage-modal,
 #canvasOpenSourceModal.canvas-manage-modal {
     min-width: 440px;
@@ -634,6 +640,22 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     gap: 8px;
 }
 
+html[lang="en"] #canvasManageModal .canvas-manage-modal-header {
+    padding: 10px 12px;
+}
+
+html[lang="en"] #canvasManageModal .canvas-manage-modal-header h4 {
+    font-size: 13px;
+}
+
+html[lang="en"] #canvasManageModal .canvas-manage-modal-body {
+    padding: 10px;
+}
+
+html[lang="en"] #canvasManageModal .canvas-manage-actions {
+    gap: 6px;
+}
+
 .canvas-manage-section-title {
     display: flex;
     align-items: center;
@@ -662,6 +684,15 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     color: var(--text-tertiary);
     letter-spacing: 0.2px;
     white-space: nowrap;
+}
+
+html[lang="en"] #canvasManageModal .canvas-manage-section-title {
+    gap: 6px;
+    margin: 1px 2px 0;
+}
+
+html[lang="en"] #canvasManageModal .canvas-manage-section-title span {
+    font-size: 10px;
 }
 
 .canvas-shortcuts-panel {
@@ -697,6 +728,13 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     transition: all 0.15s ease;
 }
 
+html[lang="en"] #canvasManageModal .canvas-manage-btn {
+    min-height: 34px;
+    padding: 8px 9px;
+    gap: 6px;
+    font-size: 12px;
+}
+
 .canvas-manage-btn:hover {
     background: var(--bg-tertiary);
     border-color: var(--accent-primary) !important;
@@ -710,6 +748,11 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     width: 20px;
     text-align: center;
     flex-shrink: 0;
+}
+
+html[lang="en"] #canvasManageModal .canvas-manage-btn i {
+    width: 17px;
+    font-size: 13px;
 }
 
 .canvas-manage-btn span {
@@ -734,12 +777,35 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     gap: 8px !important;
 }
 
+html[lang="en"] #canvasManageModal .canvas-manage-split-group {
+    gap: 5px;
+}
+
+html[lang="en"] #canvasManageModal .canvas-manage-split-group.canvas-manage-horizontal-row {
+    gap: 6px !important;
+}
+
 .canvas-manage-split-group.canvas-manage-horizontal-row .canvas-manage-btn,
 .canvas-manage-split-group.canvas-manage-horizontal-row .canvas-clear-dropdown {
     flex: 1;
     min-width: 0;
     padding: 8px 4px;
     justify-content: center;
+}
+
+html[lang="en"] #canvasManageModal .canvas-manage-split-group.canvas-manage-horizontal-row .canvas-manage-btn,
+html[lang="en"] #canvasManageModal .canvas-manage-split-group.canvas-manage-horizontal-row .canvas-clear-dropdown {
+    height: 34px;
+    min-height: 34px;
+    padding: 0 3px;
+    box-sizing: border-box;
+}
+
+html[lang="en"] #canvasManageModal .canvas-manage-split-group.canvas-manage-horizontal-row .canvas-manage-btn span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .canvas-manage-split-group.canvas-manage-horizontal-row .canvas-clear-dropdown {
