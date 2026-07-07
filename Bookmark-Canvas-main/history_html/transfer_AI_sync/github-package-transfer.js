@@ -9,6 +9,8 @@
     const DEFAULT_COMMIT_MSG_TEMPLATE = 'Bookmark Canvas: push package {path} {time}';
     const DEFAULT_COMMIT_DESC_TEMPLATE = 'Updated: {updated} files, Deleted: {deleted} files';
     const RELOAD_PROGRESS_KEY = 'bcs:github-reload-progress';
+    const AI_GUIDE_TEMPLATE_URL = 'https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template';
+    const AI_GUIDE_PR_URL = 'https://github.com/Browser-bookmark-hub/Bookmark-Canvas/pulls';
     const STORAGE_KEYS = [
         'githubRepoToken',
         'githubRepoOwner',
@@ -66,6 +68,73 @@
 
     function t(zh, en) {
         return isEn() ? en : zh;
+    }
+
+    function buildAiGuideCollaborationHtml() {
+        const linkStyle = 'color: #0969da; text-decoration: underline; text-underline-offset: 2px;';
+        const label = t('文档共建：', 'Docs collaboration: ');
+        const templateText = t('默认指南模板', 'Default guide templates');
+        const prText = t('PR', 'PRs');
+        const middle = t('，或参与其他功能 ', ', or join other feature ');
+        return `${label}<a href="${AI_GUIDE_TEMPLATE_URL}" target="_blank" rel="noopener noreferrer" style="${linkStyle}">${templateText}</a>${middle}<a href="${AI_GUIDE_PR_URL}" target="_blank" rel="noopener noreferrer" style="${linkStyle}">${prText}</a>${t('。', '.')}`;
+    }
+
+    function buildPushAiGuideInfoHtml() {
+        return `
+            <div style="font-size: 13px; color: var(--text-primary);">${escapeHtml(t(
+                '该文件用于提供约束、介绍及规范，以在 AI 编辑推送包时引导其行为。',
+                'This file provides constraints, introductions, and rules to guide AI behavior when editing the push package.'
+            ))}</div>
+            <div style="font-size: 13px; margin-top: 5px;">${buildAiGuideCollaborationHtml()}</div>
+        `;
+    }
+
+    function showAiGuideHelpDialog() {
+        if (activeConfirmDialog) {
+            try { activeConfirmDialog.remove(); } catch (_) { }
+            activeConfirmDialog = null;
+        }
+        const dialog = document.createElement('div');
+        dialog.className = 'import-dialog github-path-help-dialog';
+        dialog.innerHTML = `
+            <div class="import-dialog-content github-path-help-content" style="width: min(92vw, 500px);">
+                <div class="import-dialog-header" style="padding-left: 14px; padding-right: 14px;">
+                    <h3>${escapeHtml(t('AI 指南文件说明', 'AI Guide File'))}</h3>
+                    <button class="import-dialog-close" id="githubAiGuideHelpClose" type="button">&times;</button>
+                </div>
+                <div class="import-dialog-body github-confirm-body" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">
+                    <div style="color: var(--text-secondary); line-height: 1.65; padding: 10px; border-radius: 6px; background: var(--bg-secondary, rgba(0, 0, 0, 0.03)); border: 1px dashed var(--border-color, rgba(0, 0, 0, 0.15)); text-align: left;">
+                        ${buildPushAiGuideInfoHtml()}
+                    </div>
+                    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+                        <button id="githubAiGuideHelpOk" type="button" class="import-mode-btn import-mode-btn-confirm" style="min-width: 80px;">${escapeHtml(t('关闭', 'Close'))}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        getOverlayContainer().appendChild(dialog);
+        activeConfirmDialog = dialog;
+
+        return new Promise((resolve) => {
+            const cleanup = () => {
+                try { dialog.remove(); } catch (_) { }
+                if (activeConfirmDialog === dialog) activeConfirmDialog = null;
+                resolve();
+            };
+            const closeBtn = dialog.querySelector('#githubAiGuideHelpClose');
+            const okBtn = dialog.querySelector('#githubAiGuideHelpOk');
+            if (closeBtn) closeBtn.addEventListener('click', cleanup);
+            if (okBtn) okBtn.addEventListener('click', cleanup);
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' || event.key === 'Enter') {
+                    event.preventDefault();
+                    cleanup();
+                }
+            });
+            dialog.addEventListener('click', (event) => {
+                if (event.target === dialog) cleanup();
+            });
+        });
     }
 
     function showToast(message, type = 'info', duration = 3200) {
@@ -917,7 +986,10 @@ ${isEn()
                             </div>
                             <div class="github-config-divider-micro"></div>
                             <div class="github-config-guide-container" style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
-                                <span style="font-size: 12px; font-weight: 700; color: var(--text-primary);">${escapeHtml(t('2.1.2、AI 指南文件名', '2.1.2 AI Guide Filename'))}</span>
+                                <span style="font-size: 12px; font-weight: 700; color: var(--text-primary); display: inline-flex; align-items: center; gap: 4px; user-select: none;">
+                                    ${escapeHtml(t('2.1.2、AI 指南文件名', '2.1.2 AI Guide Filename'))}
+                                    <span class="github-config-info-trigger" id="githubAiGuideHelpBtn" style="cursor: pointer;">?</span>
+                                </span>
                                 <div class="github-config-guide-rows" style="display: flex; flex-direction: column; gap: 8px;">
                                     <div class="github-config-guide-row-1" style="display: flex; align-items: center; gap: 16px;">
                                         <label class="github-config-guide-option" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary);">
@@ -1139,6 +1211,15 @@ ${isEn()
 
             const guideBtn = dialog.querySelector('#githubConfigGuideBtn');
             if (guideBtn) guideBtn.addEventListener('click', openTokenGuide);
+
+            const aiGuideHelpBtn = dialog.querySelector('#githubAiGuideHelpBtn');
+            if (aiGuideHelpBtn) {
+                aiGuideHelpBtn.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    await showAiGuideHelpDialog();
+                });
+            }
 
             const pathHelpBtn = dialog.querySelector('#githubPathHelpBtn');
             if (pathHelpBtn) {

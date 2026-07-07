@@ -21,6 +21,18 @@ function getOverlayContainer() {
     return document.body;
 }
 
+const AI_GUIDE_TEMPLATE_URL = 'https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template';
+const AI_GUIDE_PR_URL = 'https://github.com/Browser-bookmark-hub/Bookmark-Canvas/pulls';
+const AI_GUIDE_LINK_STYLE = 'color: #0969da; text-decoration: underline; text-underline-offset: 2px;';
+
+function __buildAiGuideCollaborationHtml(isEn) {
+    const label = isEn ? 'Docs collaboration: ' : '文档共建：';
+    const templateText = isEn ? 'Default guide templates' : '默认指南模板';
+    const prText = isEn ? 'PRs' : 'PR';
+    const middle = isEn ? ', or join other feature ' : '，或参与其他功能 ';
+    return `${label}<a href="${AI_GUIDE_TEMPLATE_URL}" target="_blank" rel="noopener noreferrer" style="${AI_GUIDE_LINK_STYLE}">${templateText}</a>${middle}<a href="${AI_GUIDE_PR_URL}" target="_blank" rel="noopener noreferrer" style="${AI_GUIDE_LINK_STYLE}">${prText}</a>${isEn ? '.' : '。'}`;
+}
+
 var CANVAS_POST_RELOAD_LOCATE_KEY = 'bcs:post-reload-locate';
 
 function __requestPostReloadLocatePermanentMain(reason = '') {
@@ -3698,6 +3710,9 @@ function showExportModeDialog(options = {}) {
                             ${isEn 
                                 ? 'This file is used to provide constraints, introductions, and rules to guide AI behaviors when editing the exported package. The exports of nested Card Groups / Temporary Groups are also based on this selection.'
                                 : '该文件用于提供约束、介绍及规范，以在 AI 编辑导出包时引导其行为。嵌套卡片组 / 临时组 的导出也依据这个勾选。'}
+                        </div>
+                        <div style="margin-top: 6px;">
+                            ${__buildAiGuideCollaborationHtml(isEn)}
                         </div>
                     </div>
                     <label class="canvas-export-guide-name-row">
