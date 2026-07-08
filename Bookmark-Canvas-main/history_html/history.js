@@ -1,3 +1,25 @@
+// =================================================================================
+// TABLE OF CONTENTS (目录索引)
+// =================================================================================
+// I.     GLOBAL CONSTANTS & VIEW BOOTSTRAP (全局常量与视图启动状态)
+// II.    BOOKMARK BULK MODE, CACHE & FAVICON SERVICES (批量书签、缓存与 Favicon 服务)
+// III.   CANVAS VIEW SURFACE, PERMANENT COPIES & VIEW-STATE STORAGE (Canvas 视图分区、永久栏目副本与视图状态存储)
+// IV.    URL HELPERS, FAVICON BINDINGS & I18N TEXTS (URL/Favicon 辅助函数与国际化文本)
+// V.     DOMCONTENTLOADED INITIALIZATION FLOW (DOMContentLoaded 初始化流程)
+// VI.    USER SETTINGS, THEME/LANGUAGE, UI CONTROLS & QUICK ADD ACTIONS (用户设置、主题语言、UI 控件与快速添加)
+// VII.   DATA LOADING, FAVICON PRELOAD & CHANGE SUMMARIES (数据加载、图标预热与变更摘要)
+// VIII.  SIDEBAR, HEADER & FLOATING LAYOUT CONTROLS (侧边栏、标题栏与浮动布局控制)
+// IX.    VIEW SWITCHING & LINK-CLICK ROUTING NOTES (视图切换与链接点击路由说明)
+// X.     BOOKMARK TREE VIEW, LAZY LOADING & CHANGE RENDERING (书签树视图、懒加载与变更渲染)
+// XI.    SEARCH BRIDGE (搜索桥接)
+// XII.   REALTIME UPDATES, BOOKMARK API & MESSAGE LISTENERS (实时更新、书签 API 与消息监听)
+// XIII.  GENERAL UTILITIES & TOASTS (通用工具函数与提示)
+// =================================================================================
+
+// =================================================================================
+// I. GLOBAL CONSTANTS & VIEW BOOTSTRAP (全局常量与视图启动状态)
+// =================================================================================
+
 // =============================================================================
 // 全局变量和常量
 // =============================================================================
@@ -67,34 +89,6 @@ try {
     }
 } catch (_) { }
 
-const SIDE_PANEL_FLOATING_TOOLS_MODE_KEY = 'sidepanelFloatingToolsMode';
-const CANVAS_FLOATING_TOOLS_MODE_KEY = 'canvasFloatingToolsMode';
-const HEADER_LAYOUT_STORAGE_KEYS = isSidePanelMode
-    ? {
-        collapseState: 'sidepanelHeaderCollapseState',
-        dockSide: 'sidepanelHeaderDockSide',
-        compactLeftTop: 'sidepanelHeaderCompactToggleLeftTop',
-        compactLeftBottom: 'sidepanelHeaderCompactToggleLeftBottom',
-        compactLeftLegacy: 'sidepanelHeaderCompactToggleLeft',
-        compactLeftMovedTop: 'sidepanelHeaderCompactToggleLeftMovedTop',
-        compactLeftMovedBottom: 'sidepanelHeaderCompactToggleLeftMovedBottom'
-    }
-    : {
-        collapseState: 'headerCollapseState',
-        dockSide: 'headerDockSide',
-        compactLeftTop: 'headerCompactToggleLeftTop',
-        compactLeftBottom: 'headerCompactToggleLeftBottom',
-        compactLeftLegacy: 'headerCompactToggleLeft',
-        compactLeftMovedTop: 'headerCompactToggleLeftMovedTop',
-        compactLeftMovedBottom: 'headerCompactToggleLeftMovedBottom'
-    };
-const HEADER_COLLAPSE_STATE_KEY = HEADER_LAYOUT_STORAGE_KEYS.collapseState;
-const HEADER_DOCK_SIDE_KEY = HEADER_LAYOUT_STORAGE_KEYS.dockSide;
-const HEADER_COMPACT_LEFT_TOP_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftTop;
-const HEADER_COMPACT_LEFT_BOTTOM_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftBottom;
-const HEADER_COMPACT_LEFT_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftLegacy;
-const HEADER_COMPACT_LEFT_MOVED_TOP_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftMovedTop;
-const HEADER_COMPACT_LEFT_MOVED_BOTTOM_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftMovedBottom;
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_ACTION = 'triggerCanvasPageFullscreenByTabId';
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY = 'canvas_page_fullscreen_bridge_request_v1';
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS = 30000;
@@ -111,1079 +105,10 @@ const QUICK_ADD_WINDOW_FOLDER_OPTION_STORAGE_KEY = 'quickAddWindowAsFolderV1';
 const QUICK_ADD_BLANK_HEADING_OPTION_STORAGE_KEY = 'quickAddBlankHeadingV1';
 const QUICK_ADD_INLINE_OPTION_STATES_STORAGE_KEY = 'quickAddInlineOptionStatesV1';
 const CANVAS_LAST_MAXIMIZED_UPDATED_EVENT = 'canvas-last-maximized-node-updated';
-const CANVAS_FLOATING_TOOLS_DOCK_KEY = isSidePanelMode
-    ? 'sidepanelFloatingToolsDockV1'
-    : 'canvasFloatingToolsDockV1';
-const SIDE_PANEL_FLOATING_TOOLS_MODES = {
-    NONE: 'none',
-    HIDDEN: 'hidden',
-    SHOWN: 'shown'
-};
-const CANVAS_FLOATING_DOCK_EDGES = ['left', 'right', 'top', 'bottom'];
-const CANVAS_FLOATING_EDGE_MARGIN_PX = 10;
-const CANVAS_FLOATING_EDGE_TRACK_INSET_PX = 120;
-const CANVAS_FLOATING_DEFAULT_DOCK_EDGE = 'top';
-const CANVAS_FLOATING_DEFAULT_DOCK_RATIO = 0;
-const CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD = 8;
-const CANVAS_FLOATING_HINT_HOLD_DELAY_MS = 160;
-const CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD = 42;
-const CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD = 0.08;
 
-let canvasFloatingToolsDockStateCache = null;
-let canvasFloatingToolsDragSession = null;
-let canvasFloatingToolsHintHoldTimer = null;
-let suppressCanvasFloatingToolsToggleClick = false;
-let canvasFloatingToolsResizeBound = false;
-
-let currentHeaderState = 'expanded';
-let currentHeaderDockSide = isSidePanelMode ? 'bottom' : 'top';
-const LAYOUT_PRELOAD_CLASSES = [
-    'layout-preload-active',
-    'layout-preload-sidebar-compact',
-    'layout-preload-sidebar-right',
-    'layout-preload-header-compact',
-    'layout-preload-header-dock-bottom',
-    'layout-preload-node-maximized-active',
-    'layout-preload-floating-hidden',
-    'layout-preload-canvas-scrollbar-vertical-hidden',
-    'layout-preload-canvas-scrollbar-horizontal-hidden'
-];
-let layoutPreloadCleared = false;
-
-function clearLayoutPreloadState() {
-    if (layoutPreloadCleared) return;
-    try {
-        if (currentView === 'canvas') {
-            try {
-                updateSidePanelFloatingToolsDisplay();
-            } catch (_) { }
-        }
-        const root = document.documentElement;
-        if (!root) return;
-        LAYOUT_PRELOAD_CLASSES.forEach((name) => root.classList.remove(name));
-    } catch (_) { }
-    layoutPreloadCleared = true;
-}
-
-let canvasPreloadReleaseBound = false;
-function bindCanvasPreloadRelease() {
-    if (canvasPreloadReleaseBound) return;
-    canvasPreloadReleaseBound = true;
-
-    const releaseCanvasPreloadWhenReady = () => {
-        const root = document.documentElement;
-        if (!root || !root.classList.contains('layout-preload-node-maximized-active')) {
-            window.setTimeout(() => {
-                clearLayoutPreloadState();
-            }, 80);
-            return;
-        }
-
-        const startedAt = Date.now();
-        let finished = false;
-
-        const finish = (delayMs = 0) => {
-            if (finished) return;
-            finished = true;
-            window.setTimeout(() => {
-                clearLayoutPreloadState();
-            }, delayMs);
-        };
-
-        const hasReadyMaximizedNode = () => {
-            try {
-                return !!document.querySelector('.canvas-node-maximized[data-fullscreen-preload-ready="true"][data-fullscreen-body-ready="true"]');
-            } catch (_) {
-                return !!document.querySelector('.canvas-node-maximized');
-            }
-        };
-
-        const restorePendingMaximizedNode = () => {
-            try {
-                if (typeof window.__tryRestoreMaximizedNode === 'function') {
-                    window.__tryRestoreMaximizedNode({ clearIfMissing: false });
-                }
-            } catch (_) { }
-        };
-
-        const tick = () => {
-            if (finished) return;
-            if (hasReadyMaximizedNode()) {
-                finish(12);
-                return;
-            }
-
-            restorePendingMaximizedNode();
-
-            if (hasReadyMaximizedNode()) {
-                finish(12);
-                return;
-            }
-
-            if (Date.now() - startedAt >= 1400) {
-                finish(0);
-                return;
-            }
-
-            window.setTimeout(tick, 24);
-        };
-
-        window.addEventListener('canvas-maximized-node-ready', () => {
-            if (!hasReadyMaximizedNode()) return;
-            finish(12);
-        }, { once: true });
-
-        tick();
-    };
-
-    window.addEventListener('canvas-initial-layout-ready', () => {
-        releaseCanvasPreloadWhenReady();
-    }, { once: true });
-
-    // 兜底：避免异常路径导致预置状态长期不释放
-    window.setTimeout(() => {
-        clearLayoutPreloadState();
-    }, 3200);
-}
-
-function scheduleCanvasViewportChromeStabilization(reason = '') {
-    const run = () => {
-        try {
-            if (currentView !== 'canvas') return;
-            const canvas = window.CanvasModule;
-            if (!canvas) return;
-            if (typeof canvas.scheduleMaximizedNodesRefresh === 'function') {
-                canvas.scheduleMaximizedNodesRefresh({ delayMs: 0, stabilizeDelayMs: 80 });
-            }
-            if (typeof canvas.stabilizePermanentSectionAnchors === 'function') {
-                canvas.stabilizePermanentSectionAnchors({ syncBounds: false });
-            }
-            if (typeof canvas.syncViewportVisualState === 'function') {
-                canvas.syncViewportVisualState();
-            }
-        } catch (_) { }
-    };
-
-    run();
-    try { requestAnimationFrame(run); } catch (_) { }
-    window.setTimeout(run, 80);
-    window.setTimeout(run, 260);
-
-    try {
-        window.dispatchEvent(new CustomEvent('canvas-viewport-chrome-stabilized', {
-            detail: { reason }
-        }));
-    } catch (_) { }
-}
-
-function __shouldSuppressCanvasBootstrapRestoreInHistory(target) {
-    try {
-        if (currentView !== 'canvas') return false;
-        return !!(typeof window.__shouldSuppressCanvasBootstrapRestore === 'function'
-            && window.__shouldSuppressCanvasBootstrapRestore(target));
-    } catch (_) {
-        return false;
-    }
-}
-
-function __isCanvasBodyScrollRestoreBlocked(body) {
-    if (!body) return false;
-    try {
-        const until = parseInt(body.dataset && body.dataset.scrollRestoreBlockUntil ? body.dataset.scrollRestoreBlockUntil : '0', 10) || 0;
-        if (until && Date.now() < until) return true;
-    } catch (_) { }
-    return __shouldSuppressCanvasBootstrapRestoreInHistory(body);
-}
-window.__isCanvasBodyScrollRestoreBlocked = __isCanvasBodyScrollRestoreBlocked;
-
-function __scheduleCanvasBodyScrollRestoreInHistory(body, payload, options = {}) {
-    if (!body || !payload || typeof payload !== 'object') return false;
-
-    const target = options && options.target ? options.target : body;
-    const suppressBootstrapRestore = __shouldSuppressCanvasBootstrapRestoreInHistory(target);
-
-    if (typeof window.__scheduleCanvasBodyScrollRestore === 'function') {
-        return !!window.__scheduleCanvasBodyScrollRestore(body, payload, Object.assign({}, options, {
-            target,
-            suppressBootstrapRestore
-        }));
-    }
-
-    if (typeof payload.top === 'number') body.scrollTop = payload.top || 0;
-    if (typeof payload.left === 'number') body.scrollLeft = payload.left || 0;
-    return true;
-}
-
-function normalizeSidePanelFloatingToolsMode(mode) {
-    return mode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE
-        || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
-        || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN
-        ? mode
-        : SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
-}
-
-function getSidePanelFloatingToolsMode() {
-    try {
-        if (isSidePanelMode) {
-            const savedMode = localStorage.getItem(SIDE_PANEL_FLOATING_TOOLS_MODE_KEY);
-            if (savedMode) return normalizeSidePanelFloatingToolsMode(savedMode);
-            return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
-        }
-
-        const canvasMode = localStorage.getItem(CANVAS_FLOATING_TOOLS_MODE_KEY);
-        if (canvasMode) return normalizeSidePanelFloatingToolsMode(canvasMode);
-        return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
-    } catch (_) {
-        return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
-    }
-}
-
-function setSidePanelFloatingToolsMode(mode) {
-    let normalizedMode = normalizeSidePanelFloatingToolsMode(mode);
-    if (!isSidePanelMode && normalizedMode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE) {
-        normalizedMode = SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
-    }
-
-    try {
-        if (isSidePanelMode) {
-            __saveLocalStorageRaw(SIDE_PANEL_FLOATING_TOOLS_MODE_KEY, normalizedMode);
-        } else {
-            __saveLocalStorageRaw(CANVAS_FLOATING_TOOLS_MODE_KEY, normalizedMode);
-        }
-    } catch (_) { }
-}
-
-function applySidePanelFloatingToolsMode(mode) {
-    const normalizedMode = normalizeSidePanelFloatingToolsMode(mode);
-    setSidePanelFloatingToolsMode(normalizedMode);
-    updateSidePanelFloatingToolsDisplay();
-}
-
-function updateFloatingToolsModeControlState() {
-    const mode = getSidePanelFloatingToolsMode();
-    document.querySelectorAll('.floating-tools-mode-switch').forEach((switchEl) => {
-        switchEl.querySelectorAll('.floating-tools-mode-btn').forEach((btn) => {
-            const isActive = btn.dataset.mode === mode;
-            btn.classList.toggle('active', isActive);
-            btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-        });
-    });
-}
-
-function isSidePanelFloatingToolsVisible() {
-    return getSidePanelFloatingToolsMode() === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
-}
-
-function setSidePanelFloatingToolsVisible(visible) {
-    setSidePanelFloatingToolsMode(
-        visible ? SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN : SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
-    );
-}
-
-function clampCanvasFloatingValue(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-}
-
-function normalizeCanvasFloatingDockEdge(edge) {
-    const value = String(edge || '').toLowerCase();
-    return CANVAS_FLOATING_DOCK_EDGES.includes(value) ? value : 'top';
-}
-
-function normalizeCanvasFloatingDockRatio(ratio) {
-    const value = Number(ratio);
-    if (!Number.isFinite(value)) return 0;
-    return clampCanvasFloatingValue(value, 0, 1);
-}
-
-function readCanvasFloatingToolsDockState() {
-    if (canvasFloatingToolsDockStateCache) {
-        return {
-            edge: canvasFloatingToolsDockStateCache.edge,
-            ratio: canvasFloatingToolsDockStateCache.ratio
-        };
-    }
-
-    let parsed = null;
-    try {
-        const raw = localStorage.getItem(CANVAS_FLOATING_TOOLS_DOCK_KEY);
-        if (raw) {
-            parsed = JSON.parse(raw);
-        }
-    } catch (_) { }
-
-    const hasParsedRatio = parsed && Number.isFinite(Number(parsed.ratio));
-    const state = {
-        edge: normalizeCanvasFloatingDockEdge(parsed && parsed.edge),
-        ratio: hasParsedRatio
-            ? normalizeCanvasFloatingDockRatio(parsed && parsed.ratio)
-            : CANVAS_FLOATING_DEFAULT_DOCK_RATIO
-    };
-
-    if (!parsed || !parsed.edge) {
-        state.edge = CANVAS_FLOATING_DEFAULT_DOCK_EDGE;
-    }
-
-    canvasFloatingToolsDockStateCache = state;
-    return { edge: state.edge, ratio: state.ratio };
-}
-
-function writeCanvasFloatingToolsDockState(state) {
-    const normalized = {
-        edge: normalizeCanvasFloatingDockEdge(state && state.edge),
-        ratio: normalizeCanvasFloatingDockRatio(state && state.ratio)
-    };
-
-    canvasFloatingToolsDockStateCache = normalized;
-    try {
-        __saveLocalStorageJSON(CANVAS_FLOATING_TOOLS_DOCK_KEY, normalized);
-    } catch (_) { }
-    return { edge: normalized.edge, ratio: normalized.ratio };
-}
-
-function cacheCanvasFloatingToolsDockState(state) {
-    const normalized = {
-        edge: normalizeCanvasFloatingDockEdge(state && state.edge),
-        ratio: normalizeCanvasFloatingDockRatio(state && state.ratio)
-    };
-    canvasFloatingToolsDockStateCache = normalized;
-    return { edge: normalized.edge, ratio: normalized.ratio };
-}
-
-function getCanvasFloatingToolsWorkspaceRect() {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return null;
-    const rect = workspace.getBoundingClientRect();
-    if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {
-        return null;
-    }
-    return rect;
-}
-
-function getCanvasFloatingToolsIndicatorSize(mode) {
-    const zoomIndicator = document.getElementById('canvasZoomIndicator');
-    const miniToggle = document.getElementById('canvasFloatingToggleMini');
-    if (!zoomIndicator) {
-        return {
-            width: 0,
-            height: 0
-        };
-    }
-
-    if (mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN) {
-        if (miniToggle) {
-            const rect = miniToggle.getBoundingClientRect();
-            if (rect && Number.isFinite(rect.width) && rect.width > 0 && Number.isFinite(rect.height) && rect.height > 0) {
-                return {
-                    width: rect.width,
-                    height: rect.height
-                };
-            }
-        }
-        return {
-            width: 24,
-            height: 32
-        };
-    }
-
-    const rect = zoomIndicator.getBoundingClientRect();
-    const width = rect && Number.isFinite(rect.width) && rect.width > 0 ? rect.width : 250;
-    const height = rect && Number.isFinite(rect.height) && rect.height > 0 ? rect.height : 84;
-    return { width, height };
-}
-
-function buildCanvasFloatingHorizontalTrack(minX, maxX, restrictMiddle) {
-    const safeMin = Math.min(minX, maxX);
-    const safeMax = Math.max(minX, maxX);
-    const available = Math.max(0, safeMax - safeMin);
-
-    if (!restrictMiddle || available <= 0) {
-        return {
-            segmented: false,
-            minX: safeMin,
-            maxX: safeMax,
-            available
-        };
-    }
-
-    const segmentLength = Math.min(CANVAS_FLOATING_EDGE_TRACK_INSET_PX, available / 2);
-    if (segmentLength <= 0) {
-        return {
-            segmented: false,
-            minX: safeMin,
-            maxX: safeMax,
-            available
-        };
-    }
-
-    const leftEnd = safeMin + segmentLength;
-    const rightStart = safeMax - segmentLength;
-    if (rightStart <= leftEnd) {
-        return {
-            segmented: false,
-            minX: safeMin,
-            maxX: safeMax,
-            available
-        };
-    }
-
-    return {
-        segmented: true,
-        minX: safeMin,
-        maxX: safeMax,
-        available,
-        segmentLength,
-        leftEnd,
-        rightStart,
-        totalLength: segmentLength * 2
-    };
-}
-
-function getCanvasFloatingTrackXByRatio(track, ratio) {
-    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
-    if (!track.segmented) {
-        if (track.available <= 0) return track.minX;
-        return track.minX + (track.available * safeRatio);
-    }
-
-    const totalLength = track.totalLength;
-    if (!Number.isFinite(totalLength) || totalLength <= 0) {
-        return track.minX;
-    }
-
-    const progress = safeRatio * totalLength;
-    if (progress <= track.segmentLength) {
-        return track.minX + progress;
-    }
-
-    return track.rightStart + (progress - track.segmentLength);
-}
-
-function getCanvasFloatingTrackRatioByX(track, x) {
-    if (!track.segmented) {
-        if (track.available <= 0) return 0;
-        const clampedX = clampCanvasFloatingValue(x, track.minX, track.maxX);
-        return normalizeCanvasFloatingDockRatio((clampedX - track.minX) / track.available);
-    }
-
-    const xSafe = Number.isFinite(x) ? x : track.minX;
-    const leftDistance = xSafe < track.minX
-        ? (track.minX - xSafe)
-        : (xSafe > track.leftEnd ? (xSafe - track.leftEnd) : 0);
-    const rightDistance = xSafe < track.rightStart
-        ? (track.rightStart - xSafe)
-        : (xSafe > track.maxX ? (xSafe - track.maxX) : 0);
-
-    const pickLeft = leftDistance <= rightDistance;
-    let progress = 0;
-
-    if (pickLeft) {
-        const leftX = clampCanvasFloatingValue(xSafe, track.minX, track.leftEnd);
-        progress = leftX - track.minX;
-    } else {
-        const rightX = clampCanvasFloatingValue(xSafe, track.rightStart, track.maxX);
-        progress = track.segmentLength + (rightX - track.rightStart);
-    }
-
-    if (!Number.isFinite(track.totalLength) || track.totalLength <= 0) return 0;
-    return normalizeCanvasFloatingDockRatio(progress / track.totalLength);
-}
-
-function resolveCanvasFloatingIndicatorPosition(state, options = {}) {
-    const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
-    const dock = {
-        edge: normalizeCanvasFloatingDockEdge(state && state.edge),
-        ratio: normalizeCanvasFloatingDockRatio(state && state.ratio)
-    };
-
-    const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
-    if (!workspaceRect) return null;
-
-    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
-    const margin = CANVAS_FLOATING_EDGE_MARGIN_PX;
-    const maxLeft = Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
-    const minLeft = margin;
-    const maxTop = Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
-    const minTop = margin;
-
-    let left = minLeft;
-    let top = minTop;
-
-    if (dock.edge === 'left') {
-        left = minLeft;
-        top = minTop + ((maxTop - minTop) * dock.ratio);
-    } else if (dock.edge === 'right') {
-        left = maxLeft;
-        top = minTop + ((maxTop - minTop) * dock.ratio);
-    } else if (dock.edge === 'top' || dock.edge === 'bottom') {
-        const track = buildCanvasFloatingHorizontalTrack(minLeft, maxLeft, false);
-        left = getCanvasFloatingTrackXByRatio(track, dock.ratio);
-        top = dock.edge === 'top' ? minTop : maxTop;
-    }
-
-    return {
-        edge: dock.edge,
-        ratio: dock.ratio,
-        left: clampCanvasFloatingValue(left, minLeft, maxLeft),
-        top: clampCanvasFloatingValue(top, minTop, maxTop)
-    };
-}
-
-function applyCanvasFloatingToolsDockState(state, options = {}) {
-    const zoomIndicator = document.getElementById('canvasZoomIndicator');
-    if (!zoomIndicator) {
-        if (options && options.persist === true) {
-            return writeCanvasFloatingToolsDockState(state);
-        }
-        return cacheCanvasFloatingToolsDockState(state);
-    }
-
-    const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
-    const position = resolveCanvasFloatingIndicatorPosition(state, { mode });
-    const normalized = {
-        edge: normalizeCanvasFloatingDockEdge(position ? position.edge : (state && state.edge)),
-        ratio: normalizeCanvasFloatingDockRatio(position ? position.ratio : (state && state.ratio))
-    };
-
-    if (position) {
-        zoomIndicator.style.left = `${position.left}px`;
-        zoomIndicator.style.top = `${position.top}px`;
-    }
-    zoomIndicator.dataset.dockEdge = normalized.edge;
-
-    if (options && options.persist === true) {
-        return writeCanvasFloatingToolsDockState(normalized);
-    }
-    return cacheCanvasFloatingToolsDockState(normalized);
-}
-
-function resolveCanvasFloatingDockStateFromPointer(clientX, clientY, options = {}) {
-    const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
-    const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
-    if (!workspaceRect) return null;
-
-    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
-    const margin = CANVAS_FLOATING_EDGE_MARGIN_PX;
-    const maxLeft = Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
-    const minLeft = margin;
-    const maxTop = Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
-    const minTop = margin;
-
-    const localX = clampCanvasFloatingValue(clientX - workspaceRect.left, 0, workspaceRect.width);
-    const localY = clampCanvasFloatingValue(clientY - workspaceRect.top, 0, workspaceRect.height);
-
-    const edgeDistances = [
-        { edge: 'left', distance: localX },
-        { edge: 'right', distance: Math.abs(workspaceRect.width - localX) },
-        { edge: 'top', distance: localY },
-        { edge: 'bottom', distance: Math.abs(workspaceRect.height - localY) }
-    ];
-    edgeDistances.sort((a, b) => a.distance - b.distance);
-
-    let edge = normalizeCanvasFloatingDockEdge(options.forcedEdge || '');
-    if (!options.forcedEdge) {
-        edge = edgeDistances[0].edge;
-        const preferredEdge = normalizeCanvasFloatingDockEdge(options.currentEdge);
-        const preferredMatch = edgeDistances.find(item => item.edge === preferredEdge);
-        if (preferredMatch && (preferredMatch.distance - edgeDistances[0].distance) <= 10) {
-            edge = preferredEdge;
-        }
-    }
-
-    let ratio = 0;
-    if (edge === 'left' || edge === 'right') {
-        const trackHeight = Math.max(0, maxTop - minTop);
-        if (trackHeight > 0) {
-            ratio = normalizeCanvasFloatingDockRatio((clampCanvasFloatingValue(localY, minTop, maxTop) - minTop) / trackHeight);
-        }
-    } else {
-        const track = buildCanvasFloatingHorizontalTrack(minLeft, maxLeft, false);
-        ratio = getCanvasFloatingTrackRatioByX(track, localX);
-    }
-
-    return {
-        edge,
-        ratio
-    };
-}
-
-function isCanvasFloatingNearTopOrBottomCorner(edge, ratio) {
-    const safeEdge = normalizeCanvasFloatingDockEdge(edge);
-    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
-    if (safeEdge !== 'left' && safeEdge !== 'right') return false;
-    const thresholdRatio = normalizeCanvasFloatingDockRatio(CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD);
-    return safeRatio <= thresholdRatio || safeRatio >= (1 - thresholdRatio);
-}
-
-function isCanvasFloatingNearLeftOrRightCorner(edge, ratio) {
-    const safeEdge = normalizeCanvasFloatingDockEdge(edge);
-    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
-    if (safeEdge !== 'top' && safeEdge !== 'bottom') return false;
-    const thresholdRatio = normalizeCanvasFloatingDockRatio(CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD);
-    return safeRatio <= thresholdRatio || safeRatio >= (1 - thresholdRatio);
-}
-
-function getCanvasFloatingDragButtons() {
-    const miniToggle = document.getElementById('canvasFloatingToggleMini');
-    const inlineToggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
-    return [miniToggle, inlineToggleBtn].filter(Boolean);
-}
-
-function ensureCanvasFloatingDragHints(btn) {
-    if (!btn) return;
-    const hintDefs = [
-        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-up', selector: '.canvas-floating-drag-hint-up' },
-        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-down', selector: '.canvas-floating-drag-hint-down' },
-        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-left', selector: '.canvas-floating-drag-hint-left' },
-        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-right', selector: '.canvas-floating-drag-hint-right' }
-    ];
-
-    hintDefs.forEach((def) => {
-        let hint = btn.querySelector(def.selector);
-        if (!hint) {
-            hint = document.createElement('span');
-            hint.className = def.className;
-            hint.setAttribute('aria-hidden', 'true');
-            btn.appendChild(hint);
-        }
-    });
-}
-
-function clearCanvasFloatingHintHoldTimer() {
-    if (canvasFloatingToolsHintHoldTimer == null) return;
-    window.clearTimeout(canvasFloatingToolsHintHoldTimer);
-    canvasFloatingToolsHintHoldTimer = null;
-}
-
-function setCanvasFloatingDragGuide(edge) {
-    const normalized = edge === 'up' || edge === 'down' || edge === 'left' || edge === 'right'
-        ? edge
-        : '';
-    const buttons = getCanvasFloatingDragButtons();
-    buttons.forEach((btn) => {
-        if (!btn) return;
-        if (canvasFloatingToolsDragSession && btn === canvasFloatingToolsDragSession.sourceBtn && normalized) {
-            btn.dataset.dragGuide = normalized;
-        } else {
-            delete btn.dataset.dragGuide;
-        }
-    });
-}
-
-function getCanvasFloatingAllowedDragDirections(edge) {
-    return new Set(['left', 'right', 'up', 'down']);
-}
-
-function getCanvasFloatingDragGuideDirection(dx, dy, edge) {
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-    if (absDx < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD && absDy < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
-        return null;
-    }
-
-    const primary = absDx >= absDy
-        ? (dx >= 0 ? 'right' : 'left')
-        : (dy >= 0 ? 'down' : 'up');
-
-    const allowed = getCanvasFloatingAllowedDragDirections(edge);
-    if (allowed.has(primary)) return primary;
-    return null;
-}
-
-function getCanvasFloatingGuideDirectionAtCurrentDock(dx, dy, dockState) {
-    const edge = normalizeCanvasFloatingDockEdge(dockState && dockState.edge);
-    const ratio = normalizeCanvasFloatingDockRatio(dockState && dockState.ratio);
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-    if (absDx < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD && absDy < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
-        return null;
-    }
-
-    if (edge === 'left' || edge === 'right') {
-        const movingHorizontal = absDx >= absDy && absDx >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD;
-        if (movingHorizontal) {
-            return dx >= 0 ? 'right' : 'left';
-        }
-        return dy >= 0 ? 'down' : 'up';
-    }
-
-    if (edge === 'top' || edge === 'bottom') {
-        const movingVertical = absDy > absDx && absDy >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD;
-        if (movingVertical) {
-            return dy >= 0 ? 'down' : 'up';
-        }
-        return dx >= 0 ? 'right' : 'left';
-    }
-
-    return getCanvasFloatingDragGuideDirection(dx, dy, edge);
-}
-
-function resolveCanvasFloatingAdjacentEdgeFromCorner(currentEdge, ratio, dx, dy) {
-    const edge = normalizeCanvasFloatingDockEdge(currentEdge);
-    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
-    const nearStart = safeRatio <= CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD;
-    const nearEnd = safeRatio >= (1 - CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD);
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-
-    if (edge === 'left' || edge === 'right') {
-        const towardInner = edge === 'left' ? dx > 0 : dx < 0;
-
-        // Allow sliding along perimeter (up/down past corners)
-        if (nearStart && dy < -CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'top';
-        if (nearEnd && dy > CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'bottom';
-
-        if (!towardInner || absDx < CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD || absDx < absDy) return null;
-        if (nearStart) return 'top';
-        if (nearEnd) return 'bottom';
-        return null;
-    }
-
-    if (edge === 'top' || edge === 'bottom') {
-        const towardInner = edge === 'top' ? dy > 0 : dy < 0;
-
-        // Allow sliding along perimeter (left/right past corners)
-        if (nearStart && dx < -CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'left';
-        if (nearEnd && dx > CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'right';
-
-        if (!towardInner || absDy < CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD || absDy <= absDx) return null;
-        if (nearStart) return 'left';
-        if (nearEnd) return 'right';
-        return null;
-    }
-
-    return null;
-}
-
-function resolveCanvasFloatingFinalEdgeFromRelease(edge, dx, dy) {
-    const currentEdge = normalizeCanvasFloatingDockEdge(edge);
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-    const horizontalDominant = absDx >= absDy;
-
-    // Only switch if dragging AWAY from the current edge.
-    // If we have already moved dragging to the new edge (e.g. Left -> Right),
-    // currentEdge will be 'right', and dx will be positive. We should NOT switch back to left.
-
-    if (currentEdge === 'left') {
-        if (horizontalDominant && dx >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'right';
-        return 'left';
-    }
-    if (currentEdge === 'right') {
-        if (horizontalDominant && dx <= -CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'left';
-        return 'right';
-    }
-    if (currentEdge === 'top') {
-        if (!horizontalDominant && dy >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'bottom';
-        return 'top';
-    }
-    if (currentEdge === 'bottom') {
-        if (!horizontalDominant && dy <= -CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'top';
-        return 'bottom';
-    }
-
-    return currentEdge;
-}
-
-function resolveCanvasFloatingFinalDockStateOnRelease(event, dragSession, dx, dy) {
-    const current = dragSession && dragSession.currentDockState
-        ? dragSession.currentDockState
-        : { edge: 'top', ratio: 0 };
-    const targetEdge = resolveCanvasFloatingFinalEdgeFromRelease(current.edge, dx, dy);
-    const targetX = event.clientX - (dragSession.dragOffsetX || 0);
-    const targetY = event.clientY - (dragSession.dragOffsetY || 0);
-
-    const next = resolveCanvasFloatingDockStateFromPointer(targetX, targetY, {
-        mode: dragSession ? dragSession.mode : undefined,
-        currentEdge: targetEdge,
-        forcedEdge: targetEdge
-    });
-    if (!next) {
-        return {
-            edge: normalizeCanvasFloatingDockEdge(targetEdge),
-            ratio: normalizeCanvasFloatingDockRatio(current.ratio)
-        };
-    }
-    return next;
-}
-
-function resolveCanvasFloatingDockStateDuringDrag(event, dragSession, dx, dy) {
-    const current = dragSession && dragSession.currentDockState
-        ? dragSession.currentDockState
-        : { edge: 'top', ratio: 0 };
-    const edge = normalizeCanvasFloatingDockEdge(current.edge);
-    const ratio = normalizeCanvasFloatingDockRatio(current.ratio);
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-
-    let forcedEdge = edge;
-    const adjacent = resolveCanvasFloatingAdjacentEdgeFromCorner(edge, ratio, dx, dy);
-    if (adjacent) {
-        forcedEdge = adjacent;
-    }
-
-    const targetX = event.clientX - (dragSession.dragOffsetX || 0);
-    const targetY = event.clientY - (dragSession.dragOffsetY || 0);
-
-    const next = resolveCanvasFloatingDockStateFromPointer(targetX, targetY, {
-        mode: dragSession ? dragSession.mode : undefined,
-        currentEdge: forcedEdge,
-        forcedEdge
-    });
-
-    if (!next) {
-        return {
-            edge: forcedEdge,
-            ratio
-        };
-    }
-    return next;
-}
-
-function setCanvasFloatingHoldVisualActive(active) {
-    if (!canvasFloatingToolsDragSession || !canvasFloatingToolsDragSession.sourceBtn) return;
-    canvasFloatingToolsDragSession.sourceBtn.classList.toggle('canvas-floating-hold-active', active === true);
-}
-
-function scheduleCanvasFloatingHintReveal() {
-    clearCanvasFloatingHintHoldTimer();
-    canvasFloatingToolsHintHoldTimer = window.setTimeout(() => {
-        canvasFloatingToolsHintHoldTimer = null;
-        if (!canvasFloatingToolsDragSession || !canvasFloatingToolsDragSession.sourceBtn) return;
-        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-show-hints');
-        setCanvasFloatingHoldVisualActive(true);
-    }, CANVAS_FLOATING_HINT_HOLD_DELAY_MS);
-}
-
-function clearCanvasFloatingDragVisualState() {
-    const buttons = getCanvasFloatingDragButtons();
-    buttons.forEach((btn) => {
-        if (!btn) return;
-        btn.classList.remove('canvas-floating-show-hints');
-        btn.classList.remove('canvas-floating-hold-active');
-        btn.classList.remove('canvas-floating-dragging');
-        delete btn.dataset.dragGuide;
-    });
-
-    const zoomIndicator = document.getElementById('canvasZoomIndicator');
-    if (zoomIndicator) {
-        zoomIndicator.classList.remove('canvas-floating-dragging');
-    }
-}
-
-function clearCanvasFloatingToolsDragSession() {
-    clearCanvasFloatingHintHoldTimer();
-    if (!canvasFloatingToolsDragSession) {
-        clearCanvasFloatingDragVisualState();
-        return;
-    }
-
-    const { sourceBtn, pointerId } = canvasFloatingToolsDragSession;
-    try {
-        if (sourceBtn && sourceBtn.hasPointerCapture(pointerId)) {
-            sourceBtn.releasePointerCapture(pointerId);
-        }
-    } catch (_) { }
-
-    canvasFloatingToolsDragSession = null;
-    clearCanvasFloatingDragVisualState();
-}
-
-function beginCanvasFloatingToolsDrag(event, sourceBtn, mode) {
-    if (!sourceBtn) return;
-    if (event.button !== 0) return;
-
-    clearCanvasFloatingToolsDragSession();
-    ensureCanvasFloatingDragHints(sourceBtn);
-
-    const initialState = readCanvasFloatingToolsDockState();
-    canvasFloatingToolsDragSession = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        moved: false,
-        sourceBtn,
-        mode,
-        currentDockState: {
-            edge: initialState.edge,
-            ratio: initialState.ratio
-        }
-    };
-    sourceBtn.dataset.dockEdge = initialState.edge;
-
-    let dragOffsetX = 0;
-    let dragOffsetY = 0;
-    try {
-        const zoomIndicator = document.getElementById('canvasZoomIndicator');
-        if (zoomIndicator) {
-            const rect = zoomIndicator.getBoundingClientRect();
-            dragOffsetX = event.clientX - rect.left;
-            dragOffsetY = event.clientY - rect.top;
-        } else {
-            // Fallback to button if indicator not found (unlikely)
-            const rect = sourceBtn.getBoundingClientRect();
-            dragOffsetX = event.clientX - rect.left;
-            dragOffsetY = event.clientY - rect.top;
-        }
-    } catch (_) { }
-
-    canvasFloatingToolsDragSession.dragOffsetX = dragOffsetX;
-    canvasFloatingToolsDragSession.dragOffsetY = dragOffsetY;
-
-    try {
-        sourceBtn.setPointerCapture(event.pointerId);
-    } catch (_) { }
-
-    sourceBtn.classList.remove('canvas-floating-show-hints');
-    sourceBtn.classList.remove('canvas-floating-hold-active');
-    sourceBtn.classList.remove('canvas-floating-dragging');
-    setCanvasFloatingDragGuide(null);
-    scheduleCanvasFloatingHintReveal();
-    event.preventDefault();
-}
-
-function handleCanvasFloatingToolsDragMove(event) {
-    if (!canvasFloatingToolsDragSession || event.pointerId !== canvasFloatingToolsDragSession.pointerId) return;
-
-    const dx = event.clientX - canvasFloatingToolsDragSession.startX;
-    const dy = event.clientY - canvasFloatingToolsDragSession.startY;
-    const dragDistance = Math.hypot(dx, dy);
-
-    if (!canvasFloatingToolsDragSession.moved && dragDistance >= CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
-        canvasFloatingToolsDragSession.moved = true;
-        clearCanvasFloatingHintHoldTimer();
-        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-show-hints');
-        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-hold-active');
-        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-dragging');
-        const zoomIndicator = document.getElementById('canvasZoomIndicator');
-        if (zoomIndicator) {
-            zoomIndicator.classList.add('canvas-floating-dragging');
-        }
-    }
-
-    if (!canvasFloatingToolsDragSession.moved) return;
-
-    const nextState = resolveCanvasFloatingDockStateDuringDrag(
-        event,
-        canvasFloatingToolsDragSession,
-        dx,
-        dy
-    );
-
-    if (nextState) {
-        const applied = applyCanvasFloatingToolsDockState(nextState, {
-            persist: false,
-            mode: canvasFloatingToolsDragSession.mode
-        });
-        canvasFloatingToolsDragSession.currentDockState = {
-            edge: applied.edge,
-            ratio: applied.ratio
-        };
-        canvasFloatingToolsDragSession.sourceBtn.dataset.dockEdge = applied.edge;
-        setCanvasFloatingDragGuide(getCanvasFloatingGuideDirectionAtCurrentDock(dx, dy, applied));
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-}
-
-function finishCanvasFloatingToolsDrag(event, canceled) {
-    if (!canvasFloatingToolsDragSession || event.pointerId !== canvasFloatingToolsDragSession.pointerId) return;
-
-    const dx = event.clientX - canvasFloatingToolsDragSession.startX;
-    const dy = event.clientY - canvasFloatingToolsDragSession.startY;
-    const dragDistance = Math.hypot(dx, dy);
-    const moved = canvasFloatingToolsDragSession.moved || dragDistance >= CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD;
-    let consumed = false;
-
-    if (!canceled && moved) {
-        const finalState = resolveCanvasFloatingFinalDockStateOnRelease(
-            event,
-            canvasFloatingToolsDragSession,
-            dx,
-            dy
-        );
-
-        if (finalState) {
-            applyCanvasFloatingToolsDockState(finalState, {
-                persist: true,
-                mode: canvasFloatingToolsDragSession.mode
-            });
-            consumed = true;
-        }
-    }
-
-    clearCanvasFloatingToolsDragSession();
-
-    if (consumed) {
-        suppressCanvasFloatingToolsToggleClick = true;
-        window.setTimeout(() => {
-            suppressCanvasFloatingToolsToggleClick = false;
-        }, 0);
-    }
-}
-
-function bindCanvasFloatingToolsGlobalDragEvents() {
-    if (document.documentElement.hasAttribute('data-canvas-floating-global-drag-bound')) return;
-    document.documentElement.setAttribute('data-canvas-floating-global-drag-bound', 'true');
-
-    document.addEventListener('pointermove', handleCanvasFloatingToolsDragMove, true);
-    document.addEventListener('pointerup', (event) => {
-        finishCanvasFloatingToolsDrag(event, false);
-    }, true);
-    document.addEventListener('pointercancel', (event) => {
-        finishCanvasFloatingToolsDrag(event, true);
-    }, true);
-}
-
-function bindCanvasFloatingToolsResizeHandler() {
-    if (canvasFloatingToolsResizeBound) return;
-    canvasFloatingToolsResizeBound = true;
-    window.addEventListener('resize', () => {
-        if (currentView !== 'canvas') return;
-        applyCanvasFloatingToolsDockState(readCanvasFloatingToolsDockState(), { persist: false });
-    });
-}
-
-function updateSidePanelFloatingToolsDisplay() {
-    const zoomIndicator = document.getElementById('canvasZoomIndicator');
-    const miniToggle = document.getElementById('canvasFloatingToggleMini');
-    const inlinePanel = document.getElementById('canvasFloatingToolsPanel');
-    const inlineToggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
-    const mode = getSidePanelFloatingToolsMode();
-    const inCanvasView = currentView === 'canvas';
-
-    if (zoomIndicator) {
-        const shouldShowMain = inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE;
-        zoomIndicator.style.display = shouldShowMain ? 'block' : 'none';
-        zoomIndicator.classList.toggle('floating-tools-collapsed', mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN);
-        zoomIndicator.dataset.floatingMode = mode;
-    }
-
-    if (miniToggle) {
-        const shouldAttachMini = inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE;
-        miniToggle.style.display = shouldAttachMini ? 'inline-flex' : 'none';
-    }
-
-    if ((!inCanvasView || mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN) && inlinePanel && !inlinePanel.hasAttribute('hidden')) {
-        inlinePanel.setAttribute('hidden', '');
-    }
-    if (inlineToggleBtn && (!inCanvasView || mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN)) {
-        inlineToggleBtn.setAttribute('aria-expanded', 'false');
-    }
-
-    if (inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE) {
-        applyCanvasFloatingToolsDockState(readCanvasFloatingToolsDockState(), {
-            persist: false,
-            mode
-        });
-    }
-
-    if ((!inCanvasView || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE) && canvasFloatingToolsDragSession) {
-        clearCanvasFloatingToolsDragSession();
-    }
-
-    updateFloatingToolsModeControlState();
-}
+// =================================================================================
+// II. BOOKMARK BULK MODE, CACHE & FAVICON SERVICES (批量书签、缓存与 Favicon 服务)
+// =================================================================================
 
 // 用于避免重复在一次快照后多次重置（基于最近一条记录的指纹或时间）
 window.__lastResetFingerprint = window.__lastResetFingerprint || null;
@@ -2864,6 +1789,258 @@ const FaviconCache = {
     }
 };
 
+// =============================================================================
+// 书签缓存读写与 URL 索引
+// =============================================================================
+
+function readCachedValue(key) {
+    return new Promise((resolve) => {
+        const storageArea = getCacheStorageArea();
+        if (storageArea) {
+            storageArea.get([key], (result) => {
+                if (browserAPI.runtime && browserAPI.runtime.lastError) {
+                    console.warn('[Cache] 读取失败:', browserAPI.runtime.lastError.message);
+                    resolve(null);
+                    return;
+                }
+                resolve(result ? result[key] : null);
+            });
+            return;
+        }
+
+        try {
+            const raw = localStorage.getItem(key);
+            resolve(raw ? JSON.parse(raw) : null);
+        } catch (error) {
+            console.warn('[Cache] 读取 localStorage 失败:', error);
+            resolve(null);
+        }
+    });
+}
+
+function writeCachedValue(key, value) {
+    return new Promise((resolve) => {
+        const storageArea = getCacheStorageArea();
+        if (storageArea) {
+            storageArea.set({ [key]: value }, () => {
+                if (browserAPI.runtime && browserAPI.runtime.lastError) {
+                    console.warn('[Cache] 写入失败:', browserAPI.runtime.lastError.message);
+                }
+                resolve();
+            });
+            return;
+        }
+
+        try {
+            __saveLocalStorageJSON(key, value);
+        } catch (error) {
+            console.warn('[Cache] 写入 localStorage 失败:', error);
+        }
+        resolve();
+    });
+}
+
+function normalizeBookmarkCacheEntry(entry) {
+    if (!entry || !entry.url) return null;
+    const timestamp = typeof entry.dateAdded === 'number'
+        ? entry.dateAdded
+        : (entry.dateAdded instanceof Date ? entry.dateAdded.getTime() : Date.now());
+    return {
+        id: entry.id,
+        title: entry.title || entry.url || '',
+        url: entry.url || '',
+        dateAdded: timestamp,
+        parentId: entry.parentId || '',
+        path: entry.path || ''
+    };
+}
+
+async function ensureBookmarkCacheLoaded(skipRender) {
+    if (bookmarkCacheRestored || allBookmarks.length > 0) {
+        return;
+    }
+    try {
+        const cached = await readCachedValue(DATA_CACHE_KEYS.bookmarks);
+        if (cached && Array.isArray(cached.bookmarks)) {
+            allBookmarks = cached.bookmarks
+                .map(normalizeBookmarkCacheEntry)
+                .filter(Boolean);
+            bookmarkCacheRestored = true;
+            rebuildBookmarkUrlSet();
+            ;
+            if (!skipRender) {
+            }
+        }
+    } catch (error) {
+        console.warn('[BookmarkCache] 恢复失败:', error);
+    }
+}
+
+async function persistBookmarkCache() {
+    try {
+        const payload = {
+            timestamp: Date.now(),
+            bookmarks: allBookmarks.map(normalizeBookmarkCacheEntry).filter(Boolean)
+        };
+        await writeCachedValue(DATA_CACHE_KEYS.bookmarks, payload);
+        ;
+    } catch (error) {
+        console.warn('[BookmarkCache] 保存失败:', error);
+    }
+}
+
+function scheduleBookmarkCacheSave() {
+    if (saveBookmarkCacheTimer) {
+        clearTimeout(saveBookmarkCacheTimer);
+    }
+    saveBookmarkCacheTimer = setTimeout(() => {
+        saveBookmarkCacheTimer = null;
+        persistBookmarkCache();
+    }, 600);
+}
+
+function handleBookmarkCacheMutation(forceRender = true) {
+    bookmarkCacheRestored = true;
+    scheduleBookmarkCacheSave();
+}
+
+function addBookmarkToCache(bookmark) {
+    const normalized = normalizeBookmarkCacheEntry(bookmark);
+    if (!normalized) return;
+    allBookmarks.push(normalized);
+    addUrlToBookmarkSet(normalized.url);
+    const normalizedTitle = normalizeBookmarkTitle(normalized.title);
+    if (normalizedTitle) {
+        bookmarkTitleSet.add(normalizedTitle);
+    }
+    handleBookmarkCacheMutation(true);
+}
+
+function removeBookmarkFromCache(bookmarkId, removeInfo = null) {
+    if (!bookmarkId) return;
+    const descendants = new Set([String(bookmarkId)]);
+    const removedNode = removeInfo && (removeInfo.node || removeInfo.bookmark);
+    if (removedNode && Array.isArray(removedNode.children)) {
+        const stack = [...removedNode.children];
+        while (stack.length) {
+            const child = stack.pop();
+            if (child) {
+                if (child.id) descendants.add(String(child.id));
+                if (Array.isArray(child.children)) stack.push(...child.children);
+            }
+        }
+    }
+
+    // Pre-collect all URLs of bookmarks that are NOT being deleted to make check O(1)
+    const remainingUrls = new Set();
+    for (const item of allBookmarks) {
+        if (!descendants.has(String(item.id))) {
+            remainingUrls.add(item.url);
+        }
+    }
+
+    let changed = false;
+    allBookmarks = allBookmarks.filter(item => {
+        if (descendants.has(String(item.id))) {
+            if (!remainingUrls.has(item.url)) {
+                removeUrlFromBookmarkSet(item.url);
+            }
+            changed = true;
+            return false;
+        }
+        return true;
+    });
+
+    if (changed) {
+        handleBookmarkCacheMutation(true);
+    }
+}
+
+function updateBookmarkInCache(bookmarkId, changeInfo = {}) {
+    if (!bookmarkId) return;
+    const target = allBookmarks.find(item => item.id === bookmarkId);
+    if (!target) return;
+    const prevUrl = target.url;
+    if (typeof changeInfo.title !== 'undefined') {
+        target.title = changeInfo.title;
+        const normalizedTitle = normalizeBookmarkTitle(changeInfo.title);
+        if (normalizedTitle) {
+            bookmarkTitleSet.add(normalizedTitle);
+        }
+    }
+    if (typeof changeInfo.url !== 'undefined') {
+        target.url = changeInfo.url;
+        const isUrlShared = allBookmarks.some(item => item.id !== bookmarkId && item.url === prevUrl);
+        if (!isUrlShared) {
+            removeUrlFromBookmarkSet(prevUrl);
+        }
+        addUrlToBookmarkSet(changeInfo.url);
+    }
+    handleBookmarkCacheMutation(true);
+}
+
+function moveBookmarkInCache(bookmarkId, moveInfo = {}) {
+    if (!bookmarkId) return;
+    const target = allBookmarks.find(item => item.id === bookmarkId);
+    if (!target) return;
+    if (typeof moveInfo.parentId !== 'undefined') {
+        target.parentId = moveInfo.parentId;
+    }
+    handleBookmarkCacheMutation(false);
+}
+
+function normalizeBookmarkTitle(title) {
+    if (!title || typeof title !== 'string') return null;
+    const trimmed = title.trim();
+    return trimmed || null;
+}
+
+function normalizeBookmarkUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        return null;
+    }
+    return url.trim();
+}
+
+function rebuildBookmarkUrlSet() {
+    bookmarkUrlSet.clear();
+    bookmarkTitleSet.clear();
+    allBookmarks.forEach(item => {
+        const normalized = normalizeBookmarkUrl(item.url);
+        if (normalized) {
+            bookmarkUrlSet.add(normalized);
+        }
+        const normalizedTitle = normalizeBookmarkTitle(item.title);
+        if (normalizedTitle) {
+            bookmarkTitleSet.add(normalizedTitle);
+        }
+    });
+}
+
+function addUrlToBookmarkSet(url) {
+    const normalized = normalizeBookmarkUrl(url);
+    if (normalized) {
+        bookmarkUrlSet.add(normalized);
+    }
+}
+
+function removeUrlFromBookmarkSet(url) {
+    const normalized = normalizeBookmarkUrl(url);
+    if (normalized) {
+        bookmarkUrlSet.delete(normalized);
+    }
+}
+
+
+// =================================================================================
+// III. CANVAS VIEW SURFACE, PERMANENT COPIES & VIEW-STATE STORAGE (Canvas 视图分区、永久栏目副本与视图状态存储)
+// =================================================================================
+
+// =============================================================================
+// 浏览器 API 与 Canvas 视图分区
+// =============================================================================
+
 // 浏览器 API 兼容性
 const browserAPI = (typeof chrome !== 'undefined') ? chrome : browser;
 
@@ -2974,6 +2151,7 @@ function getCacheStorageArea() {
     }
     return null;
 }
+
 
 // =============================================================================
 // Canvas 永久栏目副本：渲染同步（主永久栏目 -> 所有副本）
@@ -3107,7 +2285,7 @@ function schedulePermanentTreeSharedMutationRefresh(reason = '') {
     if (normalizedReason) {
         pendingPermanentTreeSharedMutationRefreshReasons.add(normalizedReason);
     }
-    
+
     if (pendingPermanentTreeSharedMutationRefreshHandle !== null) {
         try { clearTimeout(pendingPermanentTreeSharedMutationRefreshHandle); } catch (_) { }
     }
@@ -3220,11 +2398,9 @@ function __ensureTreeRootExpanded(tree) {
     } catch (_) { }
 }
 
-// NOTE: bookmark_canvas_module.js already defines global PERMANENT_SECTION_EXPANDED_KEY.
-// We must NOT redeclare it here (global const redeclare throws SyntaxError).
-const __PERMANENT_SECTION_EXPANDED_KEY = (typeof PERMANENT_SECTION_EXPANDED_KEY !== 'undefined')
-    ? PERMANENT_SECTION_EXPANDED_KEY
-    : 'permanent-section-expanded';
+// Keep this local key literal in sync with bookmark_canvas_module.js.
+// Referencing the cross-script const directly can hit TDZ when script order changes.
+const __PERMANENT_SECTION_EXPANDED_KEY = 'permanent-section-expanded';
 
 const __CANVAS_VIEW_STATE_STORAGE_NS = 'canvas:view:v1';
 
@@ -3901,253 +3077,9 @@ function __debugPermanentCopyStates() {
 }
 window.__debugPermanentCopyStates = __debugPermanentCopyStates;
 
-function readCachedValue(key) {
-    return new Promise((resolve) => {
-        const storageArea = getCacheStorageArea();
-        if (storageArea) {
-            storageArea.get([key], (result) => {
-                if (browserAPI.runtime && browserAPI.runtime.lastError) {
-                    console.warn('[Cache] 读取失败:', browserAPI.runtime.lastError.message);
-                    resolve(null);
-                    return;
-                }
-                resolve(result ? result[key] : null);
-            });
-            return;
-        }
-
-        try {
-            const raw = localStorage.getItem(key);
-            resolve(raw ? JSON.parse(raw) : null);
-        } catch (error) {
-            console.warn('[Cache] 读取 localStorage 失败:', error);
-            resolve(null);
-        }
-    });
-}
-
-function writeCachedValue(key, value) {
-    return new Promise((resolve) => {
-        const storageArea = getCacheStorageArea();
-        if (storageArea) {
-            storageArea.set({ [key]: value }, () => {
-                if (browserAPI.runtime && browserAPI.runtime.lastError) {
-                    console.warn('[Cache] 写入失败:', browserAPI.runtime.lastError.message);
-                }
-                resolve();
-            });
-            return;
-        }
-
-        try {
-            __saveLocalStorageJSON(key, value);
-        } catch (error) {
-            console.warn('[Cache] 写入 localStorage 失败:', error);
-        }
-        resolve();
-    });
-}
-
-function normalizeBookmarkCacheEntry(entry) {
-    if (!entry || !entry.url) return null;
-    const timestamp = typeof entry.dateAdded === 'number'
-        ? entry.dateAdded
-        : (entry.dateAdded instanceof Date ? entry.dateAdded.getTime() : Date.now());
-    return {
-        id: entry.id,
-        title: entry.title || entry.url || '',
-        url: entry.url || '',
-        dateAdded: timestamp,
-        parentId: entry.parentId || '',
-        path: entry.path || ''
-    };
-}
-
-async function ensureBookmarkCacheLoaded(skipRender) {
-    if (bookmarkCacheRestored || allBookmarks.length > 0) {
-        return;
-    }
-    try {
-        const cached = await readCachedValue(DATA_CACHE_KEYS.bookmarks);
-        if (cached && Array.isArray(cached.bookmarks)) {
-            allBookmarks = cached.bookmarks
-                .map(normalizeBookmarkCacheEntry)
-                .filter(Boolean);
-            bookmarkCacheRestored = true;
-            rebuildBookmarkUrlSet();
-            ;
-            if (!skipRender) {
-            }
-        }
-    } catch (error) {
-        console.warn('[BookmarkCache] 恢复失败:', error);
-    }
-}
-
-async function persistBookmarkCache() {
-    try {
-        const payload = {
-            timestamp: Date.now(),
-            bookmarks: allBookmarks.map(normalizeBookmarkCacheEntry).filter(Boolean)
-        };
-        await writeCachedValue(DATA_CACHE_KEYS.bookmarks, payload);
-        ;
-    } catch (error) {
-        console.warn('[BookmarkCache] 保存失败:', error);
-    }
-}
-
-function scheduleBookmarkCacheSave() {
-    if (saveBookmarkCacheTimer) {
-        clearTimeout(saveBookmarkCacheTimer);
-    }
-    saveBookmarkCacheTimer = setTimeout(() => {
-        saveBookmarkCacheTimer = null;
-        persistBookmarkCache();
-    }, 600);
-}
-
-function handleBookmarkCacheMutation(forceRender = true) {
-    bookmarkCacheRestored = true;
-    scheduleBookmarkCacheSave();
-}
-
-function addBookmarkToCache(bookmark) {
-    const normalized = normalizeBookmarkCacheEntry(bookmark);
-    if (!normalized) return;
-    allBookmarks.push(normalized);
-    addUrlToBookmarkSet(normalized.url);
-    const normalizedTitle = normalizeBookmarkTitle(normalized.title);
-    if (normalizedTitle) {
-        bookmarkTitleSet.add(normalizedTitle);
-    }
-    handleBookmarkCacheMutation(true);
-}
-
-function removeBookmarkFromCache(bookmarkId, removeInfo = null) {
-    if (!bookmarkId) return;
-    const descendants = new Set([String(bookmarkId)]);
-    const removedNode = removeInfo && (removeInfo.node || removeInfo.bookmark);
-    if (removedNode && Array.isArray(removedNode.children)) {
-        const stack = [...removedNode.children];
-        while (stack.length) {
-            const child = stack.pop();
-            if (child) {
-                if (child.id) descendants.add(String(child.id));
-                if (Array.isArray(child.children)) stack.push(...child.children);
-            }
-        }
-    }
-
-    // Pre-collect all URLs of bookmarks that are NOT being deleted to make check O(1)
-    const remainingUrls = new Set();
-    for (const item of allBookmarks) {
-        if (!descendants.has(String(item.id))) {
-            remainingUrls.add(item.url);
-        }
-    }
-
-    let changed = false;
-    allBookmarks = allBookmarks.filter(item => {
-        if (descendants.has(String(item.id))) {
-            if (!remainingUrls.has(item.url)) {
-                removeUrlFromBookmarkSet(item.url);
-            }
-            changed = true;
-            return false;
-        }
-        return true;
-    });
-
-    if (changed) {
-        handleBookmarkCacheMutation(true);
-    }
-}
-
-function updateBookmarkInCache(bookmarkId, changeInfo = {}) {
-    if (!bookmarkId) return;
-    const target = allBookmarks.find(item => item.id === bookmarkId);
-    if (!target) return;
-    const prevUrl = target.url;
-    if (typeof changeInfo.title !== 'undefined') {
-        target.title = changeInfo.title;
-        const normalizedTitle = normalizeBookmarkTitle(changeInfo.title);
-        if (normalizedTitle) {
-            bookmarkTitleSet.add(normalizedTitle);
-        }
-    }
-    if (typeof changeInfo.url !== 'undefined') {
-        target.url = changeInfo.url;
-        const isUrlShared = allBookmarks.some(item => item.id !== bookmarkId && item.url === prevUrl);
-        if (!isUrlShared) {
-            removeUrlFromBookmarkSet(prevUrl);
-        }
-        addUrlToBookmarkSet(changeInfo.url);
-    }
-    handleBookmarkCacheMutation(true);
-}
-
-function moveBookmarkInCache(bookmarkId, moveInfo = {}) {
-    if (!bookmarkId) return;
-    const target = allBookmarks.find(item => item.id === bookmarkId);
-    if (!target) return;
-    if (typeof moveInfo.parentId !== 'undefined') {
-        target.parentId = moveInfo.parentId;
-    }
-    handleBookmarkCacheMutation(false);
-}
-
-function normalizeBookmarkTitle(title) {
-    if (!title || typeof title !== 'string') return null;
-    const trimmed = title.trim();
-    return trimmed || null;
-}
-
-function normalizeBookmarkUrl(url) {
-    if (!url || typeof url !== 'string') return null;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        return null;
-    }
-    return url.trim();
-}
-
-function rebuildBookmarkUrlSet() {
-    bookmarkUrlSet.clear();
-    bookmarkTitleSet.clear();
-    allBookmarks.forEach(item => {
-        const normalized = normalizeBookmarkUrl(item.url);
-        if (normalized) {
-            bookmarkUrlSet.add(normalized);
-        }
-        const normalizedTitle = normalizeBookmarkTitle(item.title);
-        if (normalizedTitle) {
-            bookmarkTitleSet.add(normalizedTitle);
-        }
-    });
-}
-
-function addUrlToBookmarkSet(url) {
-    const normalized = normalizeBookmarkUrl(url);
-    if (normalized) {
-        bookmarkUrlSet.add(normalized);
-    }
-}
-
-function removeUrlFromBookmarkSet(url) {
-    const normalized = normalizeBookmarkUrl(url);
-    if (normalized) {
-        bookmarkUrlSet.delete(normalized);
-    }
-}
-
-// 实时更新状态控制
-let messageListenerRegistered = false;
-let canvasFullscreenBridgeStorageListenerBound = false;
-let lastHandledCanvasFullscreenBridgeNonce = null;
-let sidePanelMirroredCanvasFullscreen = false;
-let pendingCanvasFullscreenBridgeNonces = new Set();
-// 显式移动集合（基于 onMoved 事件），用于同级移动标识，设置短期有效期
-// 页面刷新/重新打开时，恢复“显式移动”标记
+// =================================================================================
+// IV. URL HELPERS, FAVICON BINDINGS & I18N TEXTS (URL/Favicon 辅助函数与国际化文本)
+// =================================================================================
 
 // =============================================================================
 // 辅助函数 - URL 处理
@@ -5259,6 +4191,10 @@ const i18n = {
 };
 window.i18n = i18n; // 暴露给其他模块使用
 
+// =================================================================================
+// V. DOMCONTENTLOADED INITIALIZATION FLOW (DOMContentLoaded 初始化流程)
+// =================================================================================
+
 // =============================================================================
 // 初始化
 // =============================================================================
@@ -5505,6 +4441,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     ;
 });
+
+// =================================================================================
+// VI. USER SETTINGS, THEME/LANGUAGE, UI CONTROLS & QUICK ADD ACTIONS (用户设置、主题语言、UI 控件与快速添加)
+// =================================================================================
 
 // =============================================================================
 // 用户设置
@@ -6192,6 +5132,196 @@ function applyLanguage() {
 
 }
 // =============================================================================
+// 主题和语言切换
+// =============================================================================
+
+// 主题和语言切换 - 独立设置，主UI优先
+// 设置覆盖后会显示重置按钮
+
+function toggleTheme() {
+    currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+    if (currentTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    else document.documentElement.removeAttribute('data-theme');
+
+    // 主题切换后立即刷新画布连接线标签背景色
+    try {
+        if (currentView === 'canvas' && typeof renderEdges === 'function') {
+            renderEdges();
+        }
+    } catch (_) { }
+
+    // Sync with main UI:
+    // - theme.js uses localStorage.themePreference
+    // - History Viewer follows chrome.storage.local.currentTheme
+    try {
+        __saveLocalStorageRaw('themePreference', currentTheme);
+        __removeLocalStorageKey('historyViewerHasCustomTheme');
+        __removeLocalStorageKey('historyViewerCustomTheme');
+    } catch (_) { }
+    try {
+        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
+            browserAPI.storage.local.set({ currentTheme }, () => { });
+        }
+    } catch (_) { }
+
+    // 更新图标
+    const icon = document.querySelector('#themeToggle i');
+    if (icon) {
+        icon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+    const settingsIcon = document.querySelector('#settingsMenu [data-action="toggle-theme"] i');
+    if (settingsIcon) {
+        settingsIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+}
+
+function toggleLanguage() {
+    currentLang = currentLang === 'zh_CN' ? 'en' : 'zh_CN';
+    window.currentLang = currentLang; // 同步到 window
+
+    // Sync language preference in current page and extension storage.
+    try {
+        __saveLocalStorageRaw('preferredLang', currentLang);
+        __removeLocalStorageKey('historyViewerHasCustomLang');
+        __removeLocalStorageKey('historyViewerCustomLang');
+    } catch (_) { }
+    try {
+        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
+            browserAPI.storage.local.set({ preferredLang: currentLang }, () => { });
+        }
+    } catch (_) { }
+
+    applyLanguage();
+
+    // 只更新界面文字，不重新渲染内容（避免图标重新加载）
+    // renderCurrentView();
+
+    // 手动更新需要多语言的UI元素（不涉及书签树内容）
+    updateLanguageDependentUI();
+
+    // [User Request] 更新搜索组件语言
+    if (typeof window.updateSearchUILanguage === 'function') {
+        window.updateSearchUILanguage();
+    }
+
+    // Canvas-only：不涉及热力图/关联记录
+}
+
+// 更新依赖语言的UI元素（不重新渲染内容，避免图标重新加载）
+function updateLanguageDependentUI() {
+    const isEn = currentLang === 'en';
+
+    // 更新加载文本（如果存在）
+    const loadingTexts = document.querySelectorAll('.loading');
+    loadingTexts.forEach(el => {
+        if (el.textContent.includes('Loading') || el.textContent.includes('加载中')) {
+            el.textContent = i18n.loading[currentLang];
+        }
+    });
+
+    // 更新空状态文本
+    const emptyStates = document.querySelectorAll('.empty-state');
+    emptyStates.forEach(el => {
+        if (el.textContent.includes('No') || el.textContent.includes('没有')) {
+            el.textContent = isEn ? 'No data' : '没有数据';
+        }
+    });
+
+    // ===== 更新临时栏目相关的多语言元素 =====
+
+    // 1. 更新临时栏目的按钮tooltip
+    document.querySelectorAll('.temp-node-rename-btn').forEach(btn => {
+        const label = isEn ? 'Rename section' : '重命名栏目';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    });
+
+    document.querySelectorAll('.temp-node-color-btn, .temp-node-color-input').forEach(btn => {
+        const label = isEn ? 'Change color' : '调整栏目颜色';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    });
+
+    document.querySelectorAll('.temp-color-lock-btn').forEach(btn => {
+        const locked = btn.classList.contains('locked');
+        const label = locked
+            ? (isEn ? 'Unlock color' : '解除锁定')
+            : (isEn ? 'Lock color' : '锁定颜色');
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    });
+
+    document.querySelectorAll('.temp-node-close').forEach(btn => {
+        const label = isEn ? 'Remove section' : '删除临时栏目';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    });
+
+    // 2. 更新临时栏目说明（现为 WYSIWYG editor）
+    document.querySelectorAll('.temp-node-description').forEach(descEl => {
+        const placeholder = isEn ? 'Click to add description...' : '点击添加说明...';
+        try {
+            descEl.setAttribute('data-placeholder', placeholder);
+            descEl.setAttribute('aria-label', placeholder);
+        } catch (_) { }
+
+        const text = (descEl.textContent || '').replace(/\u200B/g, '').trim();
+        const hasNonText = !!descEl.querySelector('hr, input[type="checkbox"], ul, ol, blockquote, h1, h2, h3, h4, h5, h6');
+        const hasContent = Boolean(text) || hasNonText;
+        descEl.title = hasContent
+            ? (isEn ? 'Click to edit' : '点击编辑说明')
+            : (isEn ? 'Click to add description' : '点击添加说明');
+    });
+
+    // 3. 更新说明编辑按钮的tooltip
+    document.querySelectorAll('.temp-node-desc-edit-btn').forEach(btn => {
+        btn.title = isEn ? 'Edit description' : '编辑说明';
+    });
+
+    document.querySelectorAll('.temp-node-desc-format-btn').forEach(btn => {
+        btn.title = isEn ? 'Format toolbar' : '格式工具栏';
+    });
+
+    document.querySelectorAll('.temp-node-desc-delete-btn').forEach(btn => {
+        btn.title = isEn ? 'Clear input' : '清空输入框';
+    });
+
+    // 3.5. Update Permanent Section Titles (Copies)
+    const pTitle = i18n.permanentSectionTitle[currentLang];
+    document.querySelectorAll('.permanent-section-copy .permanent-section-title h3').forEach(el => {
+        el.textContent = pTitle;
+    });
+
+    // 4. 更新永久栏目的说明提示 (Including Copies)
+    document.querySelectorAll('.permanent-section-tip-collapsed span').forEach(el => {
+        const text = isEn ? 'Click to add description...' : '点击添加说明...';
+        el.textContent = text;
+    });
+
+    document.querySelectorAll('.permanent-section-tip').forEach(tip => {
+        const placeholder = isEn ? 'Click to add description...' : '点击添加说明...';
+        try {
+            tip.setAttribute('data-placeholder', placeholder);
+            tip.setAttribute('aria-label', placeholder);
+        } catch (_) { }
+
+        const text = (tip.textContent || '').replace(/\u200B/g, '').trim();
+        const hasNonText = !!tip.querySelector('hr, input[type="checkbox"], ul, ol, blockquote, h1, h2, h3, h4, h5, h6');
+        const hasContent = Boolean(text) || hasNonText;
+        tip.title = hasContent
+            ? (isEn ? 'Click to edit' : '点击编辑说明')
+            : (isEn ? 'Click to add description' : '点击添加说明');
+    });
+
+    document.querySelectorAll('.permanent-section-tip-format-btn').forEach(btn => {
+        btn.title = isEn ? 'Format toolbar' : '格式工具栏';
+    });
+
+    ;
+}
+
+
+// =============================================================================
 // UI 初始化
 // =============================================================================
 
@@ -6659,7 +5789,7 @@ function getCanvasContainerFullscreenState() {
             || document.webkitFullscreenElement
             || document.mozFullScreenElement
             || document.msFullscreenElement;
-        
+
         let isNowFullscreen = false;
         if (window.CanvasModule && window.CanvasModule.CanvasState && typeof window.CanvasModule.CanvasState.isFullscreen === 'boolean') {
             isNowFullscreen = window.CanvasModule.CanvasState.isFullscreen;
@@ -6678,9 +5808,9 @@ function getCanvasContainerFullscreenState() {
 
 window.getOverlayContainer = function() {
     const container = document.querySelector('.canvas-main-container');
-    if (container && (document.fullscreenElement === container || 
-                      document.webkitFullscreenElement === container || 
-                      document.mozFullScreenElement === container || 
+    if (container && (document.fullscreenElement === container ||
+                      document.webkitFullscreenElement === container ||
+                      document.mozFullScreenElement === container ||
                       document.msFullscreenElement === container)) {
         return container;
     }
@@ -9567,7 +8697,7 @@ async function addTabsToPermanent(tabs, scope, options = {}) {
         const msg = currentLang === 'en' ? `Adding ${bookmarkCount} pages...` : `正在添加 ${bookmarkCount} 个页面...`;
         loadingToast = window.showLoadingToast(msg);
     }
-    
+
     const createdEvents = [];
     const createOptions = { createdEvents };
     try {
@@ -9675,6 +8805,10 @@ function initializeUI() {
 
     ;
 }
+
+// =================================================================================
+// VII. DATA LOADING, FAVICON PRELOAD & CHANGE SUMMARIES (数据加载、图标预热与变更摘要)
+// =================================================================================
 
 // =============================================================================
 // 数据加载
@@ -9842,8 +8976,8 @@ function flattenBookmarkTree(node, parentPath = '') {
 }
 
 // =============================================================================
-
-
+// 数据差异摘要
+// =============================================================================
 
 function buildChangeSummary(diffMeta, stats, lang) {
     const effectiveLang = lang === 'en' ? 'en' : 'zh_CN';
@@ -9977,6 +9111,1117 @@ function buildChangeSummary(diffMeta, stats, lang) {
 
     return summary;
 }
+
+// =================================================================================
+// VIII. SIDEBAR, HEADER & FLOATING LAYOUT CONTROLS (侧边栏、标题栏与浮动布局控制)
+// =================================================================================
+
+// =============================================================================
+// Canvas 浮动工具与布局预加载
+// =============================================================================
+
+const SIDE_PANEL_FLOATING_TOOLS_MODE_KEY = 'sidepanelFloatingToolsMode';
+const CANVAS_FLOATING_TOOLS_MODE_KEY = 'canvasFloatingToolsMode';
+const HEADER_LAYOUT_STORAGE_KEYS = isSidePanelMode
+    ? {
+        collapseState: 'sidepanelHeaderCollapseState',
+        dockSide: 'sidepanelHeaderDockSide',
+        compactLeftTop: 'sidepanelHeaderCompactToggleLeftTop',
+        compactLeftBottom: 'sidepanelHeaderCompactToggleLeftBottom',
+        compactLeftLegacy: 'sidepanelHeaderCompactToggleLeft',
+        compactLeftMovedTop: 'sidepanelHeaderCompactToggleLeftMovedTop',
+        compactLeftMovedBottom: 'sidepanelHeaderCompactToggleLeftMovedBottom'
+    }
+    : {
+        collapseState: 'headerCollapseState',
+        dockSide: 'headerDockSide',
+        compactLeftTop: 'headerCompactToggleLeftTop',
+        compactLeftBottom: 'headerCompactToggleLeftBottom',
+        compactLeftLegacy: 'headerCompactToggleLeft',
+        compactLeftMovedTop: 'headerCompactToggleLeftMovedTop',
+        compactLeftMovedBottom: 'headerCompactToggleLeftMovedBottom'
+    };
+const HEADER_COLLAPSE_STATE_KEY = HEADER_LAYOUT_STORAGE_KEYS.collapseState;
+const HEADER_DOCK_SIDE_KEY = HEADER_LAYOUT_STORAGE_KEYS.dockSide;
+const HEADER_COMPACT_LEFT_TOP_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftTop;
+const HEADER_COMPACT_LEFT_BOTTOM_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftBottom;
+const HEADER_COMPACT_LEFT_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftLegacy;
+const HEADER_COMPACT_LEFT_MOVED_TOP_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftMovedTop;
+const HEADER_COMPACT_LEFT_MOVED_BOTTOM_KEY = HEADER_LAYOUT_STORAGE_KEYS.compactLeftMovedBottom;
+const CANVAS_FLOATING_TOOLS_DOCK_KEY = isSidePanelMode
+    ? 'sidepanelFloatingToolsDockV1'
+    : 'canvasFloatingToolsDockV1';
+const SIDE_PANEL_FLOATING_TOOLS_MODES = {
+    NONE: 'none',
+    HIDDEN: 'hidden',
+    SHOWN: 'shown'
+};
+const CANVAS_FLOATING_DOCK_EDGES = ['left', 'right', 'top', 'bottom'];
+const CANVAS_FLOATING_EDGE_MARGIN_PX = 10;
+const CANVAS_FLOATING_EDGE_TRACK_INSET_PX = 120;
+const CANVAS_FLOATING_DEFAULT_DOCK_EDGE = 'top';
+const CANVAS_FLOATING_DEFAULT_DOCK_RATIO = 0;
+const CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD = 8;
+const CANVAS_FLOATING_HINT_HOLD_DELAY_MS = 160;
+const CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD = 42;
+const CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD = 0.08;
+
+let canvasFloatingToolsDockStateCache = null;
+let canvasFloatingToolsDragSession = null;
+let canvasFloatingToolsHintHoldTimer = null;
+let suppressCanvasFloatingToolsToggleClick = false;
+let canvasFloatingToolsResizeBound = false;
+
+let currentHeaderState = 'expanded';
+let currentHeaderDockSide = isSidePanelMode ? 'bottom' : 'top';
+const LAYOUT_PRELOAD_CLASSES = [
+    'layout-preload-active',
+    'layout-preload-sidebar-compact',
+    'layout-preload-sidebar-right',
+    'layout-preload-header-compact',
+    'layout-preload-header-dock-bottom',
+    'layout-preload-node-maximized-active',
+    'layout-preload-floating-hidden',
+    'layout-preload-canvas-scrollbar-vertical-hidden',
+    'layout-preload-canvas-scrollbar-horizontal-hidden'
+];
+let layoutPreloadCleared = false;
+
+function clearLayoutPreloadState() {
+    if (layoutPreloadCleared) return;
+    try {
+        if (currentView === 'canvas') {
+            try {
+                updateSidePanelFloatingToolsDisplay();
+            } catch (_) { }
+        }
+        const root = document.documentElement;
+        if (!root) return;
+        LAYOUT_PRELOAD_CLASSES.forEach((name) => root.classList.remove(name));
+    } catch (_) { }
+    layoutPreloadCleared = true;
+}
+
+let canvasPreloadReleaseBound = false;
+function bindCanvasPreloadRelease() {
+    if (canvasPreloadReleaseBound) return;
+    canvasPreloadReleaseBound = true;
+
+    const releaseCanvasPreloadWhenReady = () => {
+        const root = document.documentElement;
+        if (!root || !root.classList.contains('layout-preload-node-maximized-active')) {
+            window.setTimeout(() => {
+                clearLayoutPreloadState();
+            }, 80);
+            return;
+        }
+
+        const startedAt = Date.now();
+        let finished = false;
+
+        const finish = (delayMs = 0) => {
+            if (finished) return;
+            finished = true;
+            window.setTimeout(() => {
+                clearLayoutPreloadState();
+            }, delayMs);
+        };
+
+        const hasReadyMaximizedNode = () => {
+            try {
+                return !!document.querySelector('.canvas-node-maximized[data-fullscreen-preload-ready="true"][data-fullscreen-body-ready="true"]');
+            } catch (_) {
+                return !!document.querySelector('.canvas-node-maximized');
+            }
+        };
+
+        const restorePendingMaximizedNode = () => {
+            try {
+                if (typeof window.__tryRestoreMaximizedNode === 'function') {
+                    window.__tryRestoreMaximizedNode({ clearIfMissing: false });
+                }
+            } catch (_) { }
+        };
+
+        const tick = () => {
+            if (finished) return;
+            if (hasReadyMaximizedNode()) {
+                finish(12);
+                return;
+            }
+
+            restorePendingMaximizedNode();
+
+            if (hasReadyMaximizedNode()) {
+                finish(12);
+                return;
+            }
+
+            if (Date.now() - startedAt >= 1400) {
+                finish(0);
+                return;
+            }
+
+            window.setTimeout(tick, 24);
+        };
+
+        window.addEventListener('canvas-maximized-node-ready', () => {
+            if (!hasReadyMaximizedNode()) return;
+            finish(12);
+        }, { once: true });
+
+        tick();
+    };
+
+    window.addEventListener('canvas-initial-layout-ready', () => {
+        releaseCanvasPreloadWhenReady();
+    }, { once: true });
+
+    // 兜底：避免异常路径导致预置状态长期不释放
+    window.setTimeout(() => {
+        clearLayoutPreloadState();
+    }, 3200);
+}
+
+function scheduleCanvasViewportChromeStabilization(reason = '') {
+    const run = () => {
+        try {
+            if (currentView !== 'canvas') return;
+            const canvas = window.CanvasModule;
+            if (!canvas) return;
+            if (typeof canvas.scheduleMaximizedNodesRefresh === 'function') {
+                canvas.scheduleMaximizedNodesRefresh({ delayMs: 0, stabilizeDelayMs: 80 });
+            }
+            if (typeof canvas.stabilizePermanentSectionAnchors === 'function') {
+                canvas.stabilizePermanentSectionAnchors({ syncBounds: false });
+            }
+            if (typeof canvas.syncViewportVisualState === 'function') {
+                canvas.syncViewportVisualState();
+            }
+        } catch (_) { }
+    };
+
+    run();
+    try { requestAnimationFrame(run); } catch (_) { }
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 260);
+
+    try {
+        window.dispatchEvent(new CustomEvent('canvas-viewport-chrome-stabilized', {
+            detail: { reason }
+        }));
+    } catch (_) { }
+}
+
+function __shouldSuppressCanvasBootstrapRestoreInHistory(target) {
+    try {
+        if (currentView !== 'canvas') return false;
+        return !!(typeof window.__shouldSuppressCanvasBootstrapRestore === 'function'
+            && window.__shouldSuppressCanvasBootstrapRestore(target));
+    } catch (_) {
+        return false;
+    }
+}
+
+function __isCanvasBodyScrollRestoreBlocked(body) {
+    if (!body) return false;
+    try {
+        const until = parseInt(body.dataset && body.dataset.scrollRestoreBlockUntil ? body.dataset.scrollRestoreBlockUntil : '0', 10) || 0;
+        if (until && Date.now() < until) return true;
+    } catch (_) { }
+    return __shouldSuppressCanvasBootstrapRestoreInHistory(body);
+}
+window.__isCanvasBodyScrollRestoreBlocked = __isCanvasBodyScrollRestoreBlocked;
+
+function __scheduleCanvasBodyScrollRestoreInHistory(body, payload, options = {}) {
+    if (!body || !payload || typeof payload !== 'object') return false;
+
+    const target = options && options.target ? options.target : body;
+    const suppressBootstrapRestore = __shouldSuppressCanvasBootstrapRestoreInHistory(target);
+
+    if (typeof window.__scheduleCanvasBodyScrollRestore === 'function') {
+        return !!window.__scheduleCanvasBodyScrollRestore(body, payload, Object.assign({}, options, {
+            target,
+            suppressBootstrapRestore
+        }));
+    }
+
+    if (typeof payload.top === 'number') body.scrollTop = payload.top || 0;
+    if (typeof payload.left === 'number') body.scrollLeft = payload.left || 0;
+    return true;
+}
+
+function normalizeSidePanelFloatingToolsMode(mode) {
+    return mode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE
+        || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
+        || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN
+        ? mode
+        : SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+}
+
+function getSidePanelFloatingToolsMode() {
+    try {
+        if (isSidePanelMode) {
+            const savedMode = localStorage.getItem(SIDE_PANEL_FLOATING_TOOLS_MODE_KEY);
+            if (savedMode) return normalizeSidePanelFloatingToolsMode(savedMode);
+            return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+        }
+
+        const canvasMode = localStorage.getItem(CANVAS_FLOATING_TOOLS_MODE_KEY);
+        if (canvasMode) return normalizeSidePanelFloatingToolsMode(canvasMode);
+        return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+    } catch (_) {
+        return SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+    }
+}
+
+function setSidePanelFloatingToolsMode(mode) {
+    let normalizedMode = normalizeSidePanelFloatingToolsMode(mode);
+    if (!isSidePanelMode && normalizedMode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE) {
+        normalizedMode = SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN;
+    }
+
+    try {
+        if (isSidePanelMode) {
+            __saveLocalStorageRaw(SIDE_PANEL_FLOATING_TOOLS_MODE_KEY, normalizedMode);
+        } else {
+            __saveLocalStorageRaw(CANVAS_FLOATING_TOOLS_MODE_KEY, normalizedMode);
+        }
+    } catch (_) { }
+}
+
+function applySidePanelFloatingToolsMode(mode) {
+    const normalizedMode = normalizeSidePanelFloatingToolsMode(mode);
+    setSidePanelFloatingToolsMode(normalizedMode);
+    updateSidePanelFloatingToolsDisplay();
+}
+
+function updateFloatingToolsModeControlState() {
+    const mode = getSidePanelFloatingToolsMode();
+    document.querySelectorAll('.floating-tools-mode-switch').forEach((switchEl) => {
+        switchEl.querySelectorAll('.floating-tools-mode-btn').forEach((btn) => {
+            const isActive = btn.dataset.mode === mode;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+    });
+}
+
+function isSidePanelFloatingToolsVisible() {
+    return getSidePanelFloatingToolsMode() === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN;
+}
+
+function setSidePanelFloatingToolsVisible(visible) {
+    setSidePanelFloatingToolsMode(
+        visible ? SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN : SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN
+    );
+}
+
+function clampCanvasFloatingValue(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function normalizeCanvasFloatingDockEdge(edge) {
+    const value = String(edge || '').toLowerCase();
+    return CANVAS_FLOATING_DOCK_EDGES.includes(value) ? value : 'top';
+}
+
+function normalizeCanvasFloatingDockRatio(ratio) {
+    const value = Number(ratio);
+    if (!Number.isFinite(value)) return 0;
+    return clampCanvasFloatingValue(value, 0, 1);
+}
+
+function readCanvasFloatingToolsDockState() {
+    if (canvasFloatingToolsDockStateCache) {
+        return {
+            edge: canvasFloatingToolsDockStateCache.edge,
+            ratio: canvasFloatingToolsDockStateCache.ratio
+        };
+    }
+
+    let parsed = null;
+    try {
+        const raw = localStorage.getItem(CANVAS_FLOATING_TOOLS_DOCK_KEY);
+        if (raw) {
+            parsed = JSON.parse(raw);
+        }
+    } catch (_) { }
+
+    const hasParsedRatio = parsed && Number.isFinite(Number(parsed.ratio));
+    const state = {
+        edge: normalizeCanvasFloatingDockEdge(parsed && parsed.edge),
+        ratio: hasParsedRatio
+            ? normalizeCanvasFloatingDockRatio(parsed && parsed.ratio)
+            : CANVAS_FLOATING_DEFAULT_DOCK_RATIO
+    };
+
+    if (!parsed || !parsed.edge) {
+        state.edge = CANVAS_FLOATING_DEFAULT_DOCK_EDGE;
+    }
+
+    canvasFloatingToolsDockStateCache = state;
+    return { edge: state.edge, ratio: state.ratio };
+}
+
+function writeCanvasFloatingToolsDockState(state) {
+    const normalized = {
+        edge: normalizeCanvasFloatingDockEdge(state && state.edge),
+        ratio: normalizeCanvasFloatingDockRatio(state && state.ratio)
+    };
+
+    canvasFloatingToolsDockStateCache = normalized;
+    try {
+        __saveLocalStorageJSON(CANVAS_FLOATING_TOOLS_DOCK_KEY, normalized);
+    } catch (_) { }
+    return { edge: normalized.edge, ratio: normalized.ratio };
+}
+
+function cacheCanvasFloatingToolsDockState(state) {
+    const normalized = {
+        edge: normalizeCanvasFloatingDockEdge(state && state.edge),
+        ratio: normalizeCanvasFloatingDockRatio(state && state.ratio)
+    };
+    canvasFloatingToolsDockStateCache = normalized;
+    return { edge: normalized.edge, ratio: normalized.ratio };
+}
+
+function getCanvasFloatingToolsWorkspaceRect() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return null;
+    const rect = workspace.getBoundingClientRect();
+    if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {
+        return null;
+    }
+    return rect;
+}
+
+function getCanvasFloatingToolsIndicatorSize(mode) {
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    const miniToggle = document.getElementById('canvasFloatingToggleMini');
+    if (!zoomIndicator) {
+        return {
+            width: 0,
+            height: 0
+        };
+    }
+
+    if (mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN) {
+        if (miniToggle) {
+            const rect = miniToggle.getBoundingClientRect();
+            if (rect && Number.isFinite(rect.width) && rect.width > 0 && Number.isFinite(rect.height) && rect.height > 0) {
+                return {
+                    width: rect.width,
+                    height: rect.height
+                };
+            }
+        }
+        return {
+            width: 24,
+            height: 32
+        };
+    }
+
+    const rect = zoomIndicator.getBoundingClientRect();
+    const width = rect && Number.isFinite(rect.width) && rect.width > 0 ? rect.width : 250;
+    const height = rect && Number.isFinite(rect.height) && rect.height > 0 ? rect.height : 84;
+    return { width, height };
+}
+
+function buildCanvasFloatingHorizontalTrack(minX, maxX, restrictMiddle) {
+    const safeMin = Math.min(minX, maxX);
+    const safeMax = Math.max(minX, maxX);
+    const available = Math.max(0, safeMax - safeMin);
+
+    if (!restrictMiddle || available <= 0) {
+        return {
+            segmented: false,
+            minX: safeMin,
+            maxX: safeMax,
+            available
+        };
+    }
+
+    const segmentLength = Math.min(CANVAS_FLOATING_EDGE_TRACK_INSET_PX, available / 2);
+    if (segmentLength <= 0) {
+        return {
+            segmented: false,
+            minX: safeMin,
+            maxX: safeMax,
+            available
+        };
+    }
+
+    const leftEnd = safeMin + segmentLength;
+    const rightStart = safeMax - segmentLength;
+    if (rightStart <= leftEnd) {
+        return {
+            segmented: false,
+            minX: safeMin,
+            maxX: safeMax,
+            available
+        };
+    }
+
+    return {
+        segmented: true,
+        minX: safeMin,
+        maxX: safeMax,
+        available,
+        segmentLength,
+        leftEnd,
+        rightStart,
+        totalLength: segmentLength * 2
+    };
+}
+
+function getCanvasFloatingTrackXByRatio(track, ratio) {
+    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
+    if (!track.segmented) {
+        if (track.available <= 0) return track.minX;
+        return track.minX + (track.available * safeRatio);
+    }
+
+    const totalLength = track.totalLength;
+    if (!Number.isFinite(totalLength) || totalLength <= 0) {
+        return track.minX;
+    }
+
+    const progress = safeRatio * totalLength;
+    if (progress <= track.segmentLength) {
+        return track.minX + progress;
+    }
+
+    return track.rightStart + (progress - track.segmentLength);
+}
+
+function getCanvasFloatingTrackRatioByX(track, x) {
+    if (!track.segmented) {
+        if (track.available <= 0) return 0;
+        const clampedX = clampCanvasFloatingValue(x, track.minX, track.maxX);
+        return normalizeCanvasFloatingDockRatio((clampedX - track.minX) / track.available);
+    }
+
+    const xSafe = Number.isFinite(x) ? x : track.minX;
+    const leftDistance = xSafe < track.minX
+        ? (track.minX - xSafe)
+        : (xSafe > track.leftEnd ? (xSafe - track.leftEnd) : 0);
+    const rightDistance = xSafe < track.rightStart
+        ? (track.rightStart - xSafe)
+        : (xSafe > track.maxX ? (xSafe - track.maxX) : 0);
+
+    const pickLeft = leftDistance <= rightDistance;
+    let progress = 0;
+
+    if (pickLeft) {
+        const leftX = clampCanvasFloatingValue(xSafe, track.minX, track.leftEnd);
+        progress = leftX - track.minX;
+    } else {
+        const rightX = clampCanvasFloatingValue(xSafe, track.rightStart, track.maxX);
+        progress = track.segmentLength + (rightX - track.rightStart);
+    }
+
+    if (!Number.isFinite(track.totalLength) || track.totalLength <= 0) return 0;
+    return normalizeCanvasFloatingDockRatio(progress / track.totalLength);
+}
+
+function resolveCanvasFloatingIndicatorPosition(state, options = {}) {
+    const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
+    const dock = {
+        edge: normalizeCanvasFloatingDockEdge(state && state.edge),
+        ratio: normalizeCanvasFloatingDockRatio(state && state.ratio)
+    };
+
+    const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
+    if (!workspaceRect) return null;
+
+    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
+    const margin = CANVAS_FLOATING_EDGE_MARGIN_PX;
+    const maxLeft = Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
+    const minLeft = margin;
+    const maxTop = Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
+    const minTop = margin;
+
+    let left = minLeft;
+    let top = minTop;
+
+    if (dock.edge === 'left') {
+        left = minLeft;
+        top = minTop + ((maxTop - minTop) * dock.ratio);
+    } else if (dock.edge === 'right') {
+        left = maxLeft;
+        top = minTop + ((maxTop - minTop) * dock.ratio);
+    } else if (dock.edge === 'top' || dock.edge === 'bottom') {
+        const track = buildCanvasFloatingHorizontalTrack(minLeft, maxLeft, false);
+        left = getCanvasFloatingTrackXByRatio(track, dock.ratio);
+        top = dock.edge === 'top' ? minTop : maxTop;
+    }
+
+    return {
+        edge: dock.edge,
+        ratio: dock.ratio,
+        left: clampCanvasFloatingValue(left, minLeft, maxLeft),
+        top: clampCanvasFloatingValue(top, minTop, maxTop)
+    };
+}
+
+function applyCanvasFloatingToolsDockState(state, options = {}) {
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    if (!zoomIndicator) {
+        if (options && options.persist === true) {
+            return writeCanvasFloatingToolsDockState(state);
+        }
+        return cacheCanvasFloatingToolsDockState(state);
+    }
+
+    const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
+    const position = resolveCanvasFloatingIndicatorPosition(state, { mode });
+    const normalized = {
+        edge: normalizeCanvasFloatingDockEdge(position ? position.edge : (state && state.edge)),
+        ratio: normalizeCanvasFloatingDockRatio(position ? position.ratio : (state && state.ratio))
+    };
+
+    if (position) {
+        zoomIndicator.style.left = `${position.left}px`;
+        zoomIndicator.style.top = `${position.top}px`;
+    }
+    zoomIndicator.dataset.dockEdge = normalized.edge;
+
+    if (options && options.persist === true) {
+        return writeCanvasFloatingToolsDockState(normalized);
+    }
+    return cacheCanvasFloatingToolsDockState(normalized);
+}
+
+function resolveCanvasFloatingDockStateFromPointer(clientX, clientY, options = {}) {
+    const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
+    const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
+    if (!workspaceRect) return null;
+
+    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
+    const margin = CANVAS_FLOATING_EDGE_MARGIN_PX;
+    const maxLeft = Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
+    const minLeft = margin;
+    const maxTop = Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
+    const minTop = margin;
+
+    const localX = clampCanvasFloatingValue(clientX - workspaceRect.left, 0, workspaceRect.width);
+    const localY = clampCanvasFloatingValue(clientY - workspaceRect.top, 0, workspaceRect.height);
+
+    const edgeDistances = [
+        { edge: 'left', distance: localX },
+        { edge: 'right', distance: Math.abs(workspaceRect.width - localX) },
+        { edge: 'top', distance: localY },
+        { edge: 'bottom', distance: Math.abs(workspaceRect.height - localY) }
+    ];
+    edgeDistances.sort((a, b) => a.distance - b.distance);
+
+    let edge = normalizeCanvasFloatingDockEdge(options.forcedEdge || '');
+    if (!options.forcedEdge) {
+        edge = edgeDistances[0].edge;
+        const preferredEdge = normalizeCanvasFloatingDockEdge(options.currentEdge);
+        const preferredMatch = edgeDistances.find(item => item.edge === preferredEdge);
+        if (preferredMatch && (preferredMatch.distance - edgeDistances[0].distance) <= 10) {
+            edge = preferredEdge;
+        }
+    }
+
+    let ratio = 0;
+    if (edge === 'left' || edge === 'right') {
+        const trackHeight = Math.max(0, maxTop - minTop);
+        if (trackHeight > 0) {
+            ratio = normalizeCanvasFloatingDockRatio((clampCanvasFloatingValue(localY, minTop, maxTop) - minTop) / trackHeight);
+        }
+    } else {
+        const track = buildCanvasFloatingHorizontalTrack(minLeft, maxLeft, false);
+        ratio = getCanvasFloatingTrackRatioByX(track, localX);
+    }
+
+    return {
+        edge,
+        ratio
+    };
+}
+
+function isCanvasFloatingNearTopOrBottomCorner(edge, ratio) {
+    const safeEdge = normalizeCanvasFloatingDockEdge(edge);
+    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
+    if (safeEdge !== 'left' && safeEdge !== 'right') return false;
+    const thresholdRatio = normalizeCanvasFloatingDockRatio(CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD);
+    return safeRatio <= thresholdRatio || safeRatio >= (1 - thresholdRatio);
+}
+
+function isCanvasFloatingNearLeftOrRightCorner(edge, ratio) {
+    const safeEdge = normalizeCanvasFloatingDockEdge(edge);
+    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
+    if (safeEdge !== 'top' && safeEdge !== 'bottom') return false;
+    const thresholdRatio = normalizeCanvasFloatingDockRatio(CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD);
+    return safeRatio <= thresholdRatio || safeRatio >= (1 - thresholdRatio);
+}
+
+function getCanvasFloatingDragButtons() {
+    const miniToggle = document.getElementById('canvasFloatingToggleMini');
+    const inlineToggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
+    return [miniToggle, inlineToggleBtn].filter(Boolean);
+}
+
+function ensureCanvasFloatingDragHints(btn) {
+    if (!btn) return;
+    const hintDefs = [
+        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-up', selector: '.canvas-floating-drag-hint-up' },
+        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-down', selector: '.canvas-floating-drag-hint-down' },
+        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-left', selector: '.canvas-floating-drag-hint-left' },
+        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-right', selector: '.canvas-floating-drag-hint-right' }
+    ];
+
+    hintDefs.forEach((def) => {
+        let hint = btn.querySelector(def.selector);
+        if (!hint) {
+            hint = document.createElement('span');
+            hint.className = def.className;
+            hint.setAttribute('aria-hidden', 'true');
+            btn.appendChild(hint);
+        }
+    });
+}
+
+function clearCanvasFloatingHintHoldTimer() {
+    if (canvasFloatingToolsHintHoldTimer == null) return;
+    window.clearTimeout(canvasFloatingToolsHintHoldTimer);
+    canvasFloatingToolsHintHoldTimer = null;
+}
+
+function setCanvasFloatingDragGuide(edge) {
+    const normalized = edge === 'up' || edge === 'down' || edge === 'left' || edge === 'right'
+        ? edge
+        : '';
+    const buttons = getCanvasFloatingDragButtons();
+    buttons.forEach((btn) => {
+        if (!btn) return;
+        if (canvasFloatingToolsDragSession && btn === canvasFloatingToolsDragSession.sourceBtn && normalized) {
+            btn.dataset.dragGuide = normalized;
+        } else {
+            delete btn.dataset.dragGuide;
+        }
+    });
+}
+
+function getCanvasFloatingAllowedDragDirections(edge) {
+    return new Set(['left', 'right', 'up', 'down']);
+}
+
+function getCanvasFloatingDragGuideDirection(dx, dy, edge) {
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+    if (absDx < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD && absDy < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
+        return null;
+    }
+
+    const primary = absDx >= absDy
+        ? (dx >= 0 ? 'right' : 'left')
+        : (dy >= 0 ? 'down' : 'up');
+
+    const allowed = getCanvasFloatingAllowedDragDirections(edge);
+    if (allowed.has(primary)) return primary;
+    return null;
+}
+
+function getCanvasFloatingGuideDirectionAtCurrentDock(dx, dy, dockState) {
+    const edge = normalizeCanvasFloatingDockEdge(dockState && dockState.edge);
+    const ratio = normalizeCanvasFloatingDockRatio(dockState && dockState.ratio);
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+    if (absDx < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD && absDy < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
+        return null;
+    }
+
+    if (edge === 'left' || edge === 'right') {
+        const movingHorizontal = absDx >= absDy && absDx >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD;
+        if (movingHorizontal) {
+            return dx >= 0 ? 'right' : 'left';
+        }
+        return dy >= 0 ? 'down' : 'up';
+    }
+
+    if (edge === 'top' || edge === 'bottom') {
+        const movingVertical = absDy > absDx && absDy >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD;
+        if (movingVertical) {
+            return dy >= 0 ? 'down' : 'up';
+        }
+        return dx >= 0 ? 'right' : 'left';
+    }
+
+    return getCanvasFloatingDragGuideDirection(dx, dy, edge);
+}
+
+function resolveCanvasFloatingAdjacentEdgeFromCorner(currentEdge, ratio, dx, dy) {
+    const edge = normalizeCanvasFloatingDockEdge(currentEdge);
+    const safeRatio = normalizeCanvasFloatingDockRatio(ratio);
+    const nearStart = safeRatio <= CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD;
+    const nearEnd = safeRatio >= (1 - CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD);
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (edge === 'left' || edge === 'right') {
+        const towardInner = edge === 'left' ? dx > 0 : dx < 0;
+
+        // Allow sliding along perimeter (up/down past corners)
+        if (nearStart && dy < -CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'top';
+        if (nearEnd && dy > CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'bottom';
+
+        if (!towardInner || absDx < CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD || absDx < absDy) return null;
+        if (nearStart) return 'top';
+        if (nearEnd) return 'bottom';
+        return null;
+    }
+
+    if (edge === 'top' || edge === 'bottom') {
+        const towardInner = edge === 'top' ? dy > 0 : dy < 0;
+
+        // Allow sliding along perimeter (left/right past corners)
+        if (nearStart && dx < -CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'left';
+        if (nearEnd && dx > CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) return 'right';
+
+        if (!towardInner || absDy < CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD || absDy <= absDx) return null;
+        if (nearStart) return 'left';
+        if (nearEnd) return 'right';
+        return null;
+    }
+
+    return null;
+}
+
+function resolveCanvasFloatingFinalEdgeFromRelease(edge, dx, dy) {
+    const currentEdge = normalizeCanvasFloatingDockEdge(edge);
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+    const horizontalDominant = absDx >= absDy;
+
+    // Only switch if dragging AWAY from the current edge.
+    // If we have already moved dragging to the new edge (e.g. Left -> Right),
+    // currentEdge will be 'right', and dx will be positive. We should NOT switch back to left.
+
+    if (currentEdge === 'left') {
+        if (horizontalDominant && dx >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'right';
+        return 'left';
+    }
+    if (currentEdge === 'right') {
+        if (horizontalDominant && dx <= -CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'left';
+        return 'right';
+    }
+    if (currentEdge === 'top') {
+        if (!horizontalDominant && dy >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'bottom';
+        return 'top';
+    }
+    if (currentEdge === 'bottom') {
+        if (!horizontalDominant && dy <= -CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD) return 'top';
+        return 'bottom';
+    }
+
+    return currentEdge;
+}
+
+function resolveCanvasFloatingFinalDockStateOnRelease(event, dragSession, dx, dy) {
+    const current = dragSession && dragSession.currentDockState
+        ? dragSession.currentDockState
+        : { edge: 'top', ratio: 0 };
+    const targetEdge = resolveCanvasFloatingFinalEdgeFromRelease(current.edge, dx, dy);
+    const targetX = event.clientX - (dragSession.dragOffsetX || 0);
+    const targetY = event.clientY - (dragSession.dragOffsetY || 0);
+
+    const next = resolveCanvasFloatingDockStateFromPointer(targetX, targetY, {
+        mode: dragSession ? dragSession.mode : undefined,
+        currentEdge: targetEdge,
+        forcedEdge: targetEdge
+    });
+    if (!next) {
+        return {
+            edge: normalizeCanvasFloatingDockEdge(targetEdge),
+            ratio: normalizeCanvasFloatingDockRatio(current.ratio)
+        };
+    }
+    return next;
+}
+
+function resolveCanvasFloatingDockStateDuringDrag(event, dragSession, dx, dy) {
+    const current = dragSession && dragSession.currentDockState
+        ? dragSession.currentDockState
+        : { edge: 'top', ratio: 0 };
+    const edge = normalizeCanvasFloatingDockEdge(current.edge);
+    const ratio = normalizeCanvasFloatingDockRatio(current.ratio);
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    let forcedEdge = edge;
+    const adjacent = resolveCanvasFloatingAdjacentEdgeFromCorner(edge, ratio, dx, dy);
+    if (adjacent) {
+        forcedEdge = adjacent;
+    }
+
+    const targetX = event.clientX - (dragSession.dragOffsetX || 0);
+    const targetY = event.clientY - (dragSession.dragOffsetY || 0);
+
+    const next = resolveCanvasFloatingDockStateFromPointer(targetX, targetY, {
+        mode: dragSession ? dragSession.mode : undefined,
+        currentEdge: forcedEdge,
+        forcedEdge
+    });
+
+    if (!next) {
+        return {
+            edge: forcedEdge,
+            ratio
+        };
+    }
+    return next;
+}
+
+function setCanvasFloatingHoldVisualActive(active) {
+    if (!canvasFloatingToolsDragSession || !canvasFloatingToolsDragSession.sourceBtn) return;
+    canvasFloatingToolsDragSession.sourceBtn.classList.toggle('canvas-floating-hold-active', active === true);
+}
+
+function scheduleCanvasFloatingHintReveal() {
+    clearCanvasFloatingHintHoldTimer();
+    canvasFloatingToolsHintHoldTimer = window.setTimeout(() => {
+        canvasFloatingToolsHintHoldTimer = null;
+        if (!canvasFloatingToolsDragSession || !canvasFloatingToolsDragSession.sourceBtn) return;
+        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-show-hints');
+        setCanvasFloatingHoldVisualActive(true);
+    }, CANVAS_FLOATING_HINT_HOLD_DELAY_MS);
+}
+
+function clearCanvasFloatingDragVisualState() {
+    const buttons = getCanvasFloatingDragButtons();
+    buttons.forEach((btn) => {
+        if (!btn) return;
+        btn.classList.remove('canvas-floating-show-hints');
+        btn.classList.remove('canvas-floating-hold-active');
+        btn.classList.remove('canvas-floating-dragging');
+        delete btn.dataset.dragGuide;
+    });
+
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    if (zoomIndicator) {
+        zoomIndicator.classList.remove('canvas-floating-dragging');
+    }
+}
+
+function clearCanvasFloatingToolsDragSession() {
+    clearCanvasFloatingHintHoldTimer();
+    if (!canvasFloatingToolsDragSession) {
+        clearCanvasFloatingDragVisualState();
+        return;
+    }
+
+    const { sourceBtn, pointerId } = canvasFloatingToolsDragSession;
+    try {
+        if (sourceBtn && sourceBtn.hasPointerCapture(pointerId)) {
+            sourceBtn.releasePointerCapture(pointerId);
+        }
+    } catch (_) { }
+
+    canvasFloatingToolsDragSession = null;
+    clearCanvasFloatingDragVisualState();
+}
+
+function beginCanvasFloatingToolsDrag(event, sourceBtn, mode) {
+    if (!sourceBtn) return;
+    if (event.button !== 0) return;
+
+    clearCanvasFloatingToolsDragSession();
+    ensureCanvasFloatingDragHints(sourceBtn);
+
+    const initialState = readCanvasFloatingToolsDockState();
+    canvasFloatingToolsDragSession = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+        sourceBtn,
+        mode,
+        currentDockState: {
+            edge: initialState.edge,
+            ratio: initialState.ratio
+        }
+    };
+    sourceBtn.dataset.dockEdge = initialState.edge;
+
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+    try {
+        const zoomIndicator = document.getElementById('canvasZoomIndicator');
+        if (zoomIndicator) {
+            const rect = zoomIndicator.getBoundingClientRect();
+            dragOffsetX = event.clientX - rect.left;
+            dragOffsetY = event.clientY - rect.top;
+        } else {
+            // Fallback to button if indicator not found (unlikely)
+            const rect = sourceBtn.getBoundingClientRect();
+            dragOffsetX = event.clientX - rect.left;
+            dragOffsetY = event.clientY - rect.top;
+        }
+    } catch (_) { }
+
+    canvasFloatingToolsDragSession.dragOffsetX = dragOffsetX;
+    canvasFloatingToolsDragSession.dragOffsetY = dragOffsetY;
+
+    try {
+        sourceBtn.setPointerCapture(event.pointerId);
+    } catch (_) { }
+
+    sourceBtn.classList.remove('canvas-floating-show-hints');
+    sourceBtn.classList.remove('canvas-floating-hold-active');
+    sourceBtn.classList.remove('canvas-floating-dragging');
+    setCanvasFloatingDragGuide(null);
+    scheduleCanvasFloatingHintReveal();
+    event.preventDefault();
+}
+
+function handleCanvasFloatingToolsDragMove(event) {
+    if (!canvasFloatingToolsDragSession || event.pointerId !== canvasFloatingToolsDragSession.pointerId) return;
+
+    const dx = event.clientX - canvasFloatingToolsDragSession.startX;
+    const dy = event.clientY - canvasFloatingToolsDragSession.startY;
+    const dragDistance = Math.hypot(dx, dy);
+
+    if (!canvasFloatingToolsDragSession.moved && dragDistance >= CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
+        canvasFloatingToolsDragSession.moved = true;
+        clearCanvasFloatingHintHoldTimer();
+        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-show-hints');
+        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-hold-active');
+        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-dragging');
+        const zoomIndicator = document.getElementById('canvasZoomIndicator');
+        if (zoomIndicator) {
+            zoomIndicator.classList.add('canvas-floating-dragging');
+        }
+    }
+
+    if (!canvasFloatingToolsDragSession.moved) return;
+
+    const nextState = resolveCanvasFloatingDockStateDuringDrag(
+        event,
+        canvasFloatingToolsDragSession,
+        dx,
+        dy
+    );
+
+    if (nextState) {
+        const applied = applyCanvasFloatingToolsDockState(nextState, {
+            persist: false,
+            mode: canvasFloatingToolsDragSession.mode
+        });
+        canvasFloatingToolsDragSession.currentDockState = {
+            edge: applied.edge,
+            ratio: applied.ratio
+        };
+        canvasFloatingToolsDragSession.sourceBtn.dataset.dockEdge = applied.edge;
+        setCanvasFloatingDragGuide(getCanvasFloatingGuideDirectionAtCurrentDock(dx, dy, applied));
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+}
+
+function finishCanvasFloatingToolsDrag(event, canceled) {
+    if (!canvasFloatingToolsDragSession || event.pointerId !== canvasFloatingToolsDragSession.pointerId) return;
+
+    const dx = event.clientX - canvasFloatingToolsDragSession.startX;
+    const dy = event.clientY - canvasFloatingToolsDragSession.startY;
+    const dragDistance = Math.hypot(dx, dy);
+    const moved = canvasFloatingToolsDragSession.moved || dragDistance >= CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD;
+    let consumed = false;
+
+    if (!canceled && moved) {
+        const finalState = resolveCanvasFloatingFinalDockStateOnRelease(
+            event,
+            canvasFloatingToolsDragSession,
+            dx,
+            dy
+        );
+
+        if (finalState) {
+            applyCanvasFloatingToolsDockState(finalState, {
+                persist: true,
+                mode: canvasFloatingToolsDragSession.mode
+            });
+            consumed = true;
+        }
+    }
+
+    clearCanvasFloatingToolsDragSession();
+
+    if (consumed) {
+        suppressCanvasFloatingToolsToggleClick = true;
+        window.setTimeout(() => {
+            suppressCanvasFloatingToolsToggleClick = false;
+        }, 0);
+    }
+}
+
+function bindCanvasFloatingToolsGlobalDragEvents() {
+    if (document.documentElement.hasAttribute('data-canvas-floating-global-drag-bound')) return;
+    document.documentElement.setAttribute('data-canvas-floating-global-drag-bound', 'true');
+
+    document.addEventListener('pointermove', handleCanvasFloatingToolsDragMove, true);
+    document.addEventListener('pointerup', (event) => {
+        finishCanvasFloatingToolsDrag(event, false);
+    }, true);
+    document.addEventListener('pointercancel', (event) => {
+        finishCanvasFloatingToolsDrag(event, true);
+    }, true);
+}
+
+function bindCanvasFloatingToolsResizeHandler() {
+    if (canvasFloatingToolsResizeBound) return;
+    canvasFloatingToolsResizeBound = true;
+    window.addEventListener('resize', () => {
+        if (currentView !== 'canvas') return;
+        applyCanvasFloatingToolsDockState(readCanvasFloatingToolsDockState(), { persist: false });
+    });
+}
+
+function updateSidePanelFloatingToolsDisplay() {
+    const zoomIndicator = document.getElementById('canvasZoomIndicator');
+    const miniToggle = document.getElementById('canvasFloatingToggleMini');
+    const inlinePanel = document.getElementById('canvasFloatingToolsPanel');
+    const inlineToggleBtn = document.getElementById('canvasFloatingToolsToggleBtn');
+    const mode = getSidePanelFloatingToolsMode();
+    const inCanvasView = currentView === 'canvas';
+
+    if (zoomIndicator) {
+        const shouldShowMain = inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE;
+        zoomIndicator.style.display = shouldShowMain ? 'block' : 'none';
+        zoomIndicator.classList.toggle('floating-tools-collapsed', mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN);
+        zoomIndicator.dataset.floatingMode = mode;
+    }
+
+    if (miniToggle) {
+        const shouldAttachMini = inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE;
+        miniToggle.style.display = shouldAttachMini ? 'inline-flex' : 'none';
+    }
+
+    if ((!inCanvasView || mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN) && inlinePanel && !inlinePanel.hasAttribute('hidden')) {
+        inlinePanel.setAttribute('hidden', '');
+    }
+    if (inlineToggleBtn && (!inCanvasView || mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN)) {
+        inlineToggleBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    if (inCanvasView && mode !== SIDE_PANEL_FLOATING_TOOLS_MODES.NONE) {
+        applyCanvasFloatingToolsDockState(readCanvasFloatingToolsDockState(), {
+            persist: false,
+            mode
+        });
+    }
+
+    if ((!inCanvasView || mode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE) && canvasFloatingToolsDragSession) {
+        clearCanvasFloatingToolsDragSession();
+    }
+
+    updateFloatingToolsModeControlState();
+}
+
 
 // =============================================================================
 // 侧边栏收起功能
@@ -11700,6 +11945,10 @@ function initHeaderToggle() {
     }
 }
 
+// =================================================================================
+// IX. VIEW SWITCHING & LINK-CLICK ROUTING NOTES (视图切换与链接点击路由说明)
+// =================================================================================
+
 // =============================================================================
 // 视图切换
 // =============================================================================
@@ -11932,6 +12181,11 @@ function renderCurrentView() {
 //   - 如果新增链接区域有自己的处理逻辑，必须在下面添加排除条件！
 //   - 否则会导致链接被打开两次（本监听器 + 专用监听器都处理）
 //   - 详见：.agent/workflows/link-click-handling.md
+
+// =================================================================================
+// X. BOOKMARK TREE VIEW, LAZY LOADING & CHANGE RENDERING (书签树视图、懒加载与变更渲染)
+// =================================================================================
+
 // =============================================================================
 // 书签树视图
 // =============================================================================
@@ -14472,7 +14726,7 @@ function attachTreeEvents(treeContainer) {
                 // 如果处于批量选择模式，或者按下了修饰键（Option/Alt/Shift）用于选择，屏蔽默认的打开逻辑
                 const hasSelectModifier = e.altKey || e.shiftKey;
                 const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-                if ((typeof window.selectMode !== 'undefined' && window.selectMode && !(isMac && e.ctrlKey)) || 
+                if ((typeof window.selectMode !== 'undefined' && window.selectMode && !(isMac && e.ctrlKey)) ||
                     hasSelectModifier) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -14559,8 +14813,8 @@ function attachTreeEvents(treeContainer) {
                        e.clientY >= rect.top - 2 && e.clientY <= rect.bottom + 2;
             };
 
-            if (isClickInsideElement('.tree-item-hover-actions') || 
-                isClickInsideElement('.tree-item-tag-dots') || 
+            if (isClickInsideElement('.tree-item-hover-actions') ||
+                isClickInsideElement('.tree-item-tag-dots') ||
                 isClickInsideElement('.tree-item-note-marker') ||
                 isClickInsideElement('.tree-info-icon') ||
                 isClickInsideElement('.tree-tip-icon')) {
@@ -15653,6 +15907,9 @@ function enrichRemoveInfoWithSnapshot(id, removeInfo) {
 }
 
 
+// =================================================================================
+// XI. SEARCH BRIDGE (搜索桥接)
+// =================================================================================
 
 // =============================================================================
 // 搜索功能（核心逻辑已移动到 search/search.js）
@@ -15795,194 +16052,23 @@ function performSearch(query) {
     }
 }
 
+// =================================================================================
+// XII. REALTIME UPDATES, BOOKMARK API & MESSAGE LISTENERS (实时更新、书签 API 与消息监听)
+// =================================================================================
+
 // =============================================================================
-// 主题和语言切换
+// 实时监听状态
 // =============================================================================
 
-// 主题和语言切换 - 独立设置，主UI优先
-// 设置覆盖后会显示重置按钮
+// 实时更新状态控制
+let messageListenerRegistered = false;
+let canvasFullscreenBridgeStorageListenerBound = false;
+let lastHandledCanvasFullscreenBridgeNonce = null;
+let sidePanelMirroredCanvasFullscreen = false;
+let pendingCanvasFullscreenBridgeNonces = new Set();
+// 显式移动集合（基于 onMoved 事件），用于同级移动标识，设置短期有效期
+// 页面刷新/重新打开时，恢复“显式移动”标记
 
-function toggleTheme() {
-    currentTheme = currentTheme === 'light' ? 'dark' : 'light';
-    if (currentTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-    else document.documentElement.removeAttribute('data-theme');
-
-    // 主题切换后立即刷新画布连接线标签背景色
-    try {
-        if (currentView === 'canvas' && typeof renderEdges === 'function') {
-            renderEdges();
-        }
-    } catch (_) { }
-
-    // Sync with main UI:
-    // - theme.js uses localStorage.themePreference
-    // - History Viewer follows chrome.storage.local.currentTheme
-    try {
-        __saveLocalStorageRaw('themePreference', currentTheme);
-        __removeLocalStorageKey('historyViewerHasCustomTheme');
-        __removeLocalStorageKey('historyViewerCustomTheme');
-    } catch (_) { }
-    try {
-        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
-            browserAPI.storage.local.set({ currentTheme }, () => { });
-        }
-    } catch (_) { }
-
-    // 更新图标
-    const icon = document.querySelector('#themeToggle i');
-    if (icon) {
-        icon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-    }
-    const settingsIcon = document.querySelector('#settingsMenu [data-action="toggle-theme"] i');
-    if (settingsIcon) {
-        settingsIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-    }
-}
-
-function toggleLanguage() {
-    currentLang = currentLang === 'zh_CN' ? 'en' : 'zh_CN';
-    window.currentLang = currentLang; // 同步到 window
-
-    // Sync language preference in current page and extension storage.
-    try {
-        __saveLocalStorageRaw('preferredLang', currentLang);
-        __removeLocalStorageKey('historyViewerHasCustomLang');
-        __removeLocalStorageKey('historyViewerCustomLang');
-    } catch (_) { }
-    try {
-        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
-            browserAPI.storage.local.set({ preferredLang: currentLang }, () => { });
-        }
-    } catch (_) { }
-
-    applyLanguage();
-
-    // 只更新界面文字，不重新渲染内容（避免图标重新加载）
-    // renderCurrentView();
-
-    // 手动更新需要多语言的UI元素（不涉及书签树内容）
-    updateLanguageDependentUI();
-
-    // [User Request] 更新搜索组件语言
-    if (typeof window.updateSearchUILanguage === 'function') {
-        window.updateSearchUILanguage();
-    }
-
-    // Canvas-only：不涉及热力图/关联记录
-}
-
-// 更新依赖语言的UI元素（不重新渲染内容，避免图标重新加载）
-function updateLanguageDependentUI() {
-    const isEn = currentLang === 'en';
-
-    // 更新加载文本（如果存在）
-    const loadingTexts = document.querySelectorAll('.loading');
-    loadingTexts.forEach(el => {
-        if (el.textContent.includes('Loading') || el.textContent.includes('加载中')) {
-            el.textContent = i18n.loading[currentLang];
-        }
-    });
-
-    // 更新空状态文本
-    const emptyStates = document.querySelectorAll('.empty-state');
-    emptyStates.forEach(el => {
-        if (el.textContent.includes('No') || el.textContent.includes('没有')) {
-            el.textContent = isEn ? 'No data' : '没有数据';
-        }
-    });
-
-    // ===== 更新临时栏目相关的多语言元素 =====
-
-    // 1. 更新临时栏目的按钮tooltip
-    document.querySelectorAll('.temp-node-rename-btn').forEach(btn => {
-        const label = isEn ? 'Rename section' : '重命名栏目';
-        btn.title = label;
-        btn.setAttribute('aria-label', label);
-    });
-
-    document.querySelectorAll('.temp-node-color-btn, .temp-node-color-input').forEach(btn => {
-        const label = isEn ? 'Change color' : '调整栏目颜色';
-        btn.title = label;
-        btn.setAttribute('aria-label', label);
-    });
-
-    document.querySelectorAll('.temp-color-lock-btn').forEach(btn => {
-        const locked = btn.classList.contains('locked');
-        const label = locked
-            ? (isEn ? 'Unlock color' : '解除锁定')
-            : (isEn ? 'Lock color' : '锁定颜色');
-        btn.title = label;
-        btn.setAttribute('aria-label', label);
-    });
-
-    document.querySelectorAll('.temp-node-close').forEach(btn => {
-        const label = isEn ? 'Remove section' : '删除临时栏目';
-        btn.title = label;
-        btn.setAttribute('aria-label', label);
-    });
-
-    // 2. 更新临时栏目说明（现为 WYSIWYG editor）
-    document.querySelectorAll('.temp-node-description').forEach(descEl => {
-        const placeholder = isEn ? 'Click to add description...' : '点击添加说明...';
-        try {
-            descEl.setAttribute('data-placeholder', placeholder);
-            descEl.setAttribute('aria-label', placeholder);
-        } catch (_) { }
-
-        const text = (descEl.textContent || '').replace(/\u200B/g, '').trim();
-        const hasNonText = !!descEl.querySelector('hr, input[type="checkbox"], ul, ol, blockquote, h1, h2, h3, h4, h5, h6');
-        const hasContent = Boolean(text) || hasNonText;
-        descEl.title = hasContent
-            ? (isEn ? 'Click to edit' : '点击编辑说明')
-            : (isEn ? 'Click to add description' : '点击添加说明');
-    });
-
-    // 3. 更新说明编辑按钮的tooltip
-    document.querySelectorAll('.temp-node-desc-edit-btn').forEach(btn => {
-        btn.title = isEn ? 'Edit description' : '编辑说明';
-    });
-
-    document.querySelectorAll('.temp-node-desc-format-btn').forEach(btn => {
-        btn.title = isEn ? 'Format toolbar' : '格式工具栏';
-    });
-
-    document.querySelectorAll('.temp-node-desc-delete-btn').forEach(btn => {
-        btn.title = isEn ? 'Clear input' : '清空输入框';
-    });
-
-    // 3.5. Update Permanent Section Titles (Copies)
-    const pTitle = i18n.permanentSectionTitle[currentLang];
-    document.querySelectorAll('.permanent-section-copy .permanent-section-title h3').forEach(el => {
-        el.textContent = pTitle;
-    });
-
-    // 4. 更新永久栏目的说明提示 (Including Copies)
-    document.querySelectorAll('.permanent-section-tip-collapsed span').forEach(el => {
-        const text = isEn ? 'Click to add description...' : '点击添加说明...';
-        el.textContent = text;
-    });
-
-    document.querySelectorAll('.permanent-section-tip').forEach(tip => {
-        const placeholder = isEn ? 'Click to add description...' : '点击添加说明...';
-        try {
-            tip.setAttribute('data-placeholder', placeholder);
-            tip.setAttribute('aria-label', placeholder);
-        } catch (_) { }
-
-        const text = (tip.textContent || '').replace(/\u200B/g, '').trim();
-        const hasNonText = !!tip.querySelector('hr, input[type="checkbox"], ul, ol, blockquote, h1, h2, h3, h4, h5, h6');
-        const hasContent = Boolean(text) || hasNonText;
-        tip.title = hasContent
-            ? (isEn ? 'Click to edit' : '点击编辑说明')
-            : (isEn ? 'Click to add description' : '点击添加说明');
-    });
-
-    document.querySelectorAll('.permanent-section-tip-format-btn').forEach(btn => {
-        btn.title = isEn ? 'Format toolbar' : '格式工具栏';
-    });
-
-    ;
-}
 
 // =============================================================================
 // 实时更新
@@ -16498,6 +16584,10 @@ function setupRealtimeMessageListener() {
     });
 }
 
+// =================================================================================
+// XIII. GENERAL UTILITIES & TOASTS (通用工具函数与提示)
+// =================================================================================
+
 // =============================================================================
 // 工具函数
 // =============================================================================
@@ -16672,7 +16762,7 @@ function showToast(message, options = {}) {
     let positionCss = '';
     let animIn = 'slideIn';
     let animOut = 'slideOut';
-    
+
     if (position === 'top-left') {
         positionCss = 'top: 20px; left: 20px;';
         animIn = 'slideInLeft';
@@ -16683,7 +16773,7 @@ function showToast(message, options = {}) {
         // bottom-right
         positionCss = 'bottom: 20px; right: 20px;';
     }
-    
+
     const duration = options && typeof options.duration === 'number' ? options.duration : 2000;
     const toast = document.createElement('div');
     toast.style.cssText = `
@@ -16700,18 +16790,18 @@ function showToast(message, options = {}) {
         align-items: center;
         gap: 8px;
     `;
-    
+
     if (options && options.icon) {
         const icon = document.createElement('i');
         icon.className = options.icon;
         if (options.spin) icon.style.animation = 'spin 1s linear infinite';
         toast.appendChild(icon);
     }
-    
+
     const textSpan = document.createElement('span');
     textSpan.textContent = message;
     toast.appendChild(textSpan);
-    
+
     const targetParent = (typeof window.getOverlayContainer === 'function') ? window.getOverlayContainer() : document.body;
     targetParent.appendChild(toast);
 
@@ -16721,7 +16811,7 @@ function showToast(message, options = {}) {
             setTimeout(() => toast.remove(), 300);
         }, duration);
     }
-    
+
     return {
         update: (msg) => {
             textSpan.textContent = msg;

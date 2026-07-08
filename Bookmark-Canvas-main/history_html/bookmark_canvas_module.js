@@ -2,6 +2,34 @@
 // Bookmark Canvas Module - 基于原有Bookmark Tree改造的Canvas功能
 // =============================================================================
 
+// =================================================================================
+// TABLE OF CONTENTS (目录索引)
+// =================================================================================
+// I.     MODULE STATE & STORAGE HELPERS (模块状态、存储键与基础辅助函数)
+// II.    CTRL SECTION OPERATIONS (Ctrl 专属栏目蒙版、拖动与尺寸调整)
+// III.   CANVAS SETTINGS & TEMP SECTION DATA HELPERS (画布设置、临时栏目标识与数据辅助)
+// IV.    INITIAL DEMO TEMPLATE (首次使用演示模板)
+// V.     CANVAS VIEW INITIALIZATION & EXTERNAL DROPS (Canvas 初始化与外部拖入处理)
+// VI.    BOOKMARK TREE DRAG ENHANCEMENT (书签树拖拽增强)
+// VII.   ZOOM, PAN, VIEW STATE & VIRTUALIZATION (缩放、平移、视图状态、虚拟化与滚动条)
+// VIII.  LOCATE, DRAG, RESIZE & PERMANENT SECTION MOTION (定位、拖动、缩放与永久栏目移动)
+// IX.    TEMP SECTION MANAGEMENT (临时节点/栏目管理)
+// X.     MARKDOWN TEXT NODES & CARD GROUPS (Markdown 文本节点与卡片组)
+// XI.    TEMP TREE LAZY LOADING & DORMANCY (临时树懒加载与栏目休眠)
+// XII.   CLEAR MODES, PERMANENT TIP & DRAG BACK (清除模式、永久栏目提示与拖回永久栏目)
+// XIII.  EVENT LISTENERS & BCS RESTORE HOOKS (事件监听与 BCS 恢复钩子)
+// XIV.   CONNECTION EDGES (连接线核心功能)
+// XV.    EDGE TOOLBAR (连接线工具栏功能)
+// XVI.   SHORTCUTS, CTRL RESET & MODULE EXPORTS (快捷键、按键状态重置与模块导出)
+// XVII.  APPEARANCE SETTINGS PANEL (外观管理面板)
+// XVIII. SIDE PANEL & OTHER SETTINGS PANEL (侧边栏与其他管理面板)
+// XIX.   PERFORMANCE SETTINGS PANEL (性能管理面板)
+// =================================================================================
+
+// =================================================================================
+// I. MODULE STATE & STORAGE HELPERS (模块状态、存储键与基础辅助函数)
+// =================================================================================
+
 // Import/export transfer logic moved to transfer_AI_sync/import-export-transfer-ui-support.js
 
 // Canvas状态管理
@@ -52,9 +80,9 @@ function getOverlayContainer() {
         return window.getOverlayContainer();
     }
     const container = document.querySelector('.canvas-main-container');
-    if (container && (document.fullscreenElement === container || 
-                      document.webkitFullscreenElement === container || 
-                      document.mozFullScreenElement === container || 
+    if (container && (document.fullscreenElement === container ||
+                      document.webkitFullscreenElement === container ||
+                      document.mozFullScreenElement === container ||
                       document.msFullscreenElement === container)) {
         return container;
     }
@@ -1400,9 +1428,9 @@ function updateCanvasGridLayerTransform(panX, panY, scale, force = false) {
     try { grid.style.transform = next; } catch (_) { }
 }
 
-// =============================================================================
-// Ctrl 专属栏目操作（蒙版 + 拖动/尺寸调整入口）
-// =============================================================================
+// =================================================================================
+// II. CTRL SECTION OPERATIONS (Ctrl 专属栏目蒙版、拖动与尺寸调整)
+// =================================================================================
 
 function isSectionCtrlModeEvent(e) {
     if (typeof clickToClearModeActive !== 'undefined' && clickToClearModeActive) return false;
@@ -2064,6 +2092,11 @@ function handleCtrlOverlayMouseDown(e) {
         startSectionResize(host, e);
     }
 }
+
+// =================================================================================
+// III. CANVAS SETTINGS & TEMP SECTION DATA HELPERS (画布设置、临时栏目标识与数据辅助)
+// =================================================================================
+
 const TEMP_SECTION_DEFAULT_WIDTH = 525;
 const TEMP_SECTION_DEFAULT_HEIGHT = 380;
 const TEMP_SECTION_DEFAULT_COLOR = '#2563eb';
@@ -2207,6 +2240,12 @@ const DEFAULT_ZOOM_MAGNET_POINT_1_SPEED = CANVAS_RUNTIME_PLATFORM.isWindows ? 0.
 const DEFAULT_ZOOM_MAGNET_POINT_2_SPEED = 1.0;
 let canvasWinInputDebugSeq = 0;
 const canvasWinInputDebugLastTs = new Map();
+
+function __unscaleZoomCurveFactor(scaled) {
+    const v = Math.max(0, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, scaled));
+    const norm = Math.max(0, v / ZOOM_CURVE_MAX_FACTOR);
+    return Math.pow(norm, 1 / ZOOM_CURVE_EXPONENT);
+}
 
 function __isCanvasWinInputDebugEnabled() {
     if (!CANVAS_RUNTIME_WINDOWS_LIKE) return false;
@@ -3536,9 +3575,9 @@ function applyCanvasAppearanceSettings(settings, options = {}) {
     }
 }
 
-// =============================================================================
-// 初始演示模板 - 首次使用时显示的使用指南
-// =============================================================================
+// =================================================================================
+// IV. INITIAL DEMO TEMPLATE (首次使用演示模板)
+// =================================================================================
 
 /**
  * 创建初始演示模板数据
@@ -4151,7 +4190,7 @@ JSON or HTML backup files exported by these projects can be directly **dragged**
             permCenterY = permH / 2;
         }
     } catch (_) {}
-    
+
     // 原始预置组的中心为 110 (即 -660 + 1540 / 2)
     // 需要平移的偏移量为：
     const offsetY = permCenterY - 110;
@@ -6549,9 +6588,9 @@ function createTempFolder(sectionId, parentId, title, options = {}) {
     return item && item.id ? item.id : null;
 }
 
-// =============================================================================
-// 初始化Canvas视图
-// =============================================================================
+// =================================================================================
+// V. CANVAS VIEW INITIALIZATION & EXTERNAL DROPS (Canvas 初始化与外部拖入处理)
+// =================================================================================
 
 function initCanvasView() {
     ;
@@ -7315,7 +7354,7 @@ async function createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, folder
         sequenceNumber,
         source: 'browser-drop'
     });
-    
+
     // 生成文件夹名称
     const resolvedFolderTitle = folderTitle || (isEn ? 'Imported Folder' : '拖入的文件夹');
 
@@ -7350,7 +7389,7 @@ async function createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, folder
         source: 'browser-drop',
         items: [folderItem]
     };
-    
+
     // Ensure the folder is collapsed
     __collapseTempFolderRecursively(sectionId, folderItem);
 
@@ -7528,9 +7567,9 @@ function getTransparentDragImage() {
     return __transparentDragImg;
 }
 
-// =============================================================================
-// 增强现有书签树的Canvas拖拽功能
-// =============================================================================
+// =================================================================================
+// VI. BOOKMARK TREE DRAG ENHANCEMENT (书签树拖拽增强)
+// =================================================================================
 
 function enhanceBookmarkTreeForCanvas(treeContainer) {
     const trees = [];
@@ -7885,9 +7924,9 @@ function createCanvasFolderItem(folder, isDraggable) {
     return item;
 }
 
-// =============================================================================
-// Canvas 缩放和平移功能
-// =============================================================================
+// =================================================================================
+// VII. ZOOM, PAN, VIEW STATE & VIRTUALIZATION (缩放、平移、视图状态、虚拟化与滚动条)
+// =================================================================================
 
 
 function setupCanvasZoomAndPan() {
@@ -8820,7 +8859,7 @@ function setupCanvasManageModal() {
 
         if (shortcutsModal && shortcutsModal.style.display === 'block') {
             const isClickInside = shortcutsModal.contains(e.target);
-            const isClickTrigger = e.target.closest('#canvasShortcutSettingsBtn') || 
+            const isClickTrigger = e.target.closest('#canvasShortcutSettingsBtn') ||
                                    e.target.closest('#canvasOtherShortcutSettingsBtn') ||
                                    e.target.closest('#settingsToggle') ||
                                    e.target.closest('#titleSettingsToggleBtn') ||
@@ -9654,9930 +9693,9 @@ function setupCanvasShortcutsModal() {
     if (closeBtn) closeBtn.addEventListener('click', close);
 }
 
-// =============================================================================
-// 侧边栏管理面板 (Side Panel Settings)
-// =============================================================================
-
-function openCanvasSidePanelSettingsModal() {
-    let modal = document.getElementById('canvasSidePanelSettingsModal');
-    if (modal) {
-        if (typeof modal.__cleanup === 'function') modal.__cleanup();
-        modal.remove();
-    }
-    createCanvasSidePanelSettingsModal();
-    modal = document.getElementById('canvasSidePanelSettingsModal');
-    if (!modal) return;
-
-    modal.style.display = 'flex';
-
-    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
-    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
-    const unknownText = isEn ? 'Unknown (open settings)' : '未知（打开设置查看）';
-    const leftText = isEn ? 'Left' : '左侧';
-    const rightText = isEn ? 'Right' : '右侧';
-
-    const positionEl = modal.querySelector('#canvasSidePanelPositionValue');
-    if (positionEl) positionEl.textContent = isEn ? 'Detecting...' : '检测中...';
-    const updateLayout = () => {
-        __getSidePanelLayout().then((layout) => {
-            const side = layout && layout.side ? String(layout.side) : '';
-            if (!positionEl) return;
-            if (side === 'left') positionEl.textContent = leftText;
-            else if (side === 'right') positionEl.textContent = rightText;
-            else positionEl.textContent = unknownText;
-        });
-    };
-    updateLayout();
-
-    const onFocus = () => updateLayout();
-    const onVisibility = () => {
-        if (document.visibilityState === 'visible') updateLayout();
-    };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibility);
-
-    const previousCleanup = typeof modal.__cleanup === 'function' ? modal.__cleanup : null;
-    modal.__cleanup = () => {
-        if (previousCleanup) {
-            try { previousCleanup(); } catch (_) { }
-        }
-        window.removeEventListener('focus', onFocus);
-        document.removeEventListener('visibilitychange', onVisibility);
-    };
-}
-
-function closeCanvasSidePanelSettingsModal() {
-    const modal = document.getElementById('canvasSidePanelSettingsModal');
-    if (modal) {
-        if (typeof modal.__cleanup === 'function') modal.__cleanup();
-        modal.style.display = 'none';
-    }
-}
-
-function createCanvasSidePanelSettingsModal() {
-    const modal = document.createElement('div');
-    modal.id = 'canvasSidePanelSettingsModal';
-    modal.className = 'modal';
-    modal.style.display = 'none';
-
-    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
-    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
-    const title = isEn ? 'Side Panel' : '侧边栏管理';
-    const positionLabel = isEn ? 'Side panel position' : '侧边栏位置';
-    const shortcutLabel = isEn ? 'Side panel shortcut' : '侧边栏快捷键';
-    const directoryCollapseLabel = isEn ? 'Directory collapse mode' : '目录栏折叠方式';
-    const manualText = isEn ? 'Manual' : '手动';
-    const autoText = isEn ? 'Auto' : '自动';
-    const autoWidthLabel = isEn ? 'Auto collapse width (px)' : '自动折叠阈值（px）';
-    const detectingText = isEn ? 'Detecting...' : '检测中...';
-    const openSettingsText = isEn ? 'Browser settings' : '浏览器设置';
-    const openShortcutSettingsText = isEn ? 'Shortcut settings' : '快捷键设置';
-    modal.innerHTML = `
-        <div class="modal-content sidepanel-settings-modal">
-            <div class="modal-header">
-                <h3>${title}</h3>
-                <button class="perf-modal-close" id="sidePanelModalCloseBtn"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="modal-body">
-                <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'System' : '系统设置'}</div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${positionLabel}</span>
-                            <button class="perf-help-btn" id="sidePanelHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content sidepanel-row-content">
-                            <div class="sidepanel-position-value" id="canvasSidePanelPositionValue">${detectingText}</div>
-                            <button class="sidepanel-settings-btn" id="canvasSidePanelOpenSettingsBtn" type="button">${openSettingsText}</button>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${shortcutLabel}</span>
-                        </div>
-                        <div class="appearance-row-content sidepanel-row-content">
-                            <button class="sidepanel-settings-btn" id="canvasSidePanelShortcutOpenSettingsBtnMain" type="button">${openShortcutSettingsText}</button>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${directoryCollapseLabel}</span>
-                            <button class="perf-help-btn" id="sidePanelSidebarCollapseHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-mode-toggle" id="sidePanelSidebarCollapseModeGroup">
-                                <label class="appearance-radio">
-                                    <input type="radio" name="sidepanel-sidebar-collapse-mode" value="manual">
-                                    <span>${manualText}</span>
-                                </label>
-                                <label class="appearance-radio">
-                                    <input type="radio" name="sidepanel-sidebar-collapse-mode" value="auto">
-                                    <span>${autoText}</span>
-                                </label>
-                            </div>
-                            <div class="appearance-size-inputs" id="sidePanelSidebarAutoCollapseInputs">
-                                <label class="appearance-inline-input" for="sidePanelSidebarAutoCollapseWidth">
-                                    <span>${autoWidthLabel}</span>
-                                    <input type="number" id="sidePanelSidebarAutoCollapseWidth" min="320" max="2000" step="10">
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="perf-help-popover" id="sidePanelHelpPopover">
-                <div class="perf-help-popover-content">
-                    ${isEn
-            ? '<b>Edge</b>: The sidebar is fixed on the right by default and cannot be moved to the left.'
-            : '<b>Edge</b>：侧边栏默认固定在右侧，无法移动到左侧。'}
-                </div>
-            </div>
-            <div class="perf-help-popover" id="sidePanelSidebarCollapseHelpPopover">
-                <div class="perf-help-popover-content">
-                    ${isEn
-            ? '<b>Auto</b>: directory panel expands/collapses by the auto width threshold.<br><b>Manual takeover</b>: once you click the directory toggle (expand/collapse) in HTML page or side panel, it switches to Manual immediately.<br><b>Reset</b>: click <b>Auto</b> here to return to automatic mode.<br><b>Sync</b>: this setting is synchronized in both places.'
-            : '<b>自动</b>：目录栏会按“自动折叠阈值”自动展开/收起。<br><b>手动接管</b>：只要你在 HTML 页面或侧边栏手动点击目录栏开关（展开/收起），就会立即切到手动。<br><b>回正</b>：在这里点击<b>自动</b>按钮即可恢复自动模式。<br><b>同步</b>：侧边栏与html页面的这个开关是同步的。'}
-                </div>
-            </div>
-        </div>
-    `;
-
-    getOverlayContainer().appendChild(modal);
-
-    const closeBtn = modal.querySelector('#sidePanelModalCloseBtn');
-    if (closeBtn) closeBtn.addEventListener('click', closeCanvasSidePanelSettingsModal);
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeCanvasSidePanelSettingsModal();
-    });
-
-    const openBtn = modal.querySelector('#canvasSidePanelOpenSettingsBtn');
-    if (openBtn) {
-        openBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            try {
-                if (chrome && chrome.tabs && typeof chrome.tabs.create === 'function') {
-                    const meta = __getSidePanelSettingsSearchMeta();
-                    chrome.tabs.create({ url: meta.url });
-                }
-            } catch (_) { }
-        });
-    }
-
-    const openShortcutBtn = modal.querySelector('#canvasSidePanelShortcutOpenSettingsBtnMain');
-    if (openShortcutBtn) {
-        openShortcutBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            try {
-                if (chrome && chrome.tabs && typeof chrome.tabs.create === 'function') {
-                    const ua = navigator.userAgent || '';
-                    const url = ua.includes('Edg/') ? 'edge://extensions/shortcuts' : 'chrome://extensions/shortcuts';
-                    chrome.tabs.create({ url });
-                }
-            } catch (_) { }
-        });
-    }
-
-    const sidePanelCollapseModeRadios = modal.querySelectorAll('input[name="sidepanel-sidebar-collapse-mode"]');
-    const sidePanelAutoWidthInput = modal.querySelector('#sidePanelSidebarAutoCollapseWidth');
-    const sidePanelAutoInputs = modal.querySelector('#sidePanelSidebarAutoCollapseInputs');
-
-    const getSidePanelCollapseModeFromUI = () => {
-        let mode = 'auto';
-        sidePanelCollapseModeRadios.forEach((radio) => {
-            if (radio.checked) {
-                mode = radio.value === 'manual' ? 'manual' : 'auto';
-            }
-        });
-        return mode;
-    };
-
-    const updateSidePanelAutoInputs = () => {
-        if (!sidePanelAutoInputs) return;
-        const useAuto = getSidePanelCollapseModeFromUI() === 'auto';
-        sidePanelAutoInputs.classList.toggle('is-disabled', !useAuto);
-        sidePanelAutoInputs.classList.toggle('is-hidden', !useAuto);
-    };
-
-    const syncSidePanelCollapsePrefsToUI = (settingsOverride = null) => {
-        const prefs = getCanvasDirectoryCollapsePrefs(settingsOverride, {
-            forSidePanel: __isCanvasInSidePanelMode()
-        });
-        __setAppearanceRadioGroup(modal, 'sidepanel-sidebar-collapse-mode', prefs.mode || 'auto');
-        if (sidePanelAutoWidthInput) {
-            sidePanelAutoWidthInput.value = String(__clampNumber(prefs.width, 320, 2000, 600));
-        }
-        updateSidePanelAutoInputs();
-    };
-
-    let sidePanelCollapseSaveTimer = null;
-    const scheduleSidePanelCollapseSave = () => {
-        if (sidePanelCollapseSaveTimer) {
-            clearTimeout(sidePanelCollapseSaveTimer);
-        }
-        sidePanelCollapseSaveTimer = setTimeout(() => {
-            sidePanelCollapseSaveTimer = null;
-            const mode = getSidePanelCollapseModeFromUI();
-            const widthRaw = sidePanelAutoWidthInput ? parseInt(sidePanelAutoWidthInput.value, 10) : 600;
-            const width = __clampNumber(widthRaw, 320, 2000, 600);
-            if (sidePanelAutoWidthInput) {
-                sidePanelAutoWidthInput.value = String(width);
-            }
-            setCanvasDirectoryCollapsePrefs(
-                { mode, width },
-                {
-                    forSidePanel: __isCanvasInSidePanelMode(),
-                    dispatch: true
-                }
-            );
-        }, 120);
-    };
-
-    sidePanelCollapseModeRadios.forEach((radio) => {
-        radio.addEventListener('change', () => {
-            updateSidePanelAutoInputs();
-            scheduleSidePanelCollapseSave();
-        });
-    });
-
-    if (sidePanelAutoWidthInput) {
-        const onWidthChange = () => {
-            const width = __clampNumber(parseInt(sidePanelAutoWidthInput.value, 10), 320, 2000, 600);
-            sidePanelAutoWidthInput.value = String(width);
-            scheduleSidePanelCollapseSave();
-        };
-        sidePanelAutoWidthInput.addEventListener('input', onWidthChange);
-        sidePanelAutoWidthInput.addEventListener('change', onWidthChange);
-    }
-
-    const onCanvasOtherSettingsUpdated = (event) => {
-        const detail = event && event.detail;
-        if (!detail || typeof detail !== 'object') return;
-        syncSidePanelCollapsePrefsToUI(detail);
-    };
-    window.addEventListener('canvas-other-settings-updated', onCanvasOtherSettingsUpdated);
-    syncSidePanelCollapsePrefsToUI();
-
-    const previousCleanup = typeof modal.__cleanup === 'function' ? modal.__cleanup : null;
-    modal.__cleanup = () => {
-        if (previousCleanup) {
-            try { previousCleanup(); } catch (_) { }
-        }
-        if (sidePanelCollapseSaveTimer) {
-            clearTimeout(sidePanelCollapseSaveTimer);
-            sidePanelCollapseSaveTimer = null;
-        }
-        window.removeEventListener('canvas-other-settings-updated', onCanvasOtherSettingsUpdated);
-    };
-
-    const helpBtn = modal.querySelector('#sidePanelHelpBtn');
-    const helpPopover = modal.querySelector('#sidePanelHelpPopover');
-    const sidePanelSidebarCollapseHelpBtn = modal.querySelector('#sidePanelSidebarCollapseHelpBtn');
-    const sidePanelSidebarCollapseHelpPopover = modal.querySelector('#sidePanelSidebarCollapseHelpPopover');
-    const showPopover = (btn, popover) => {
-        if (!btn || !popover) return;
-        modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
-        const rect = btn.getBoundingClientRect();
-        const modalRect = modal.querySelector('.modal-content').getBoundingClientRect();
-        popover.style.top = (rect.bottom - modalRect.top + 8) + 'px';
-        popover.style.left = (rect.left - modalRect.left) + 'px';
-        popover.classList.add('show');
-    };
-    const hidePopovers = () => {
-        modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
-    };
-    const bindSidePanelHelpPopover = (btn, popover) => {
-        if (!btn || !popover) return;
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (popover.classList.contains('show')) hidePopovers();
-            else showPopover(btn, popover);
-        });
-    };
-    bindSidePanelHelpPopover(helpBtn, helpPopover);
-    bindSidePanelHelpPopover(sidePanelSidebarCollapseHelpBtn, sidePanelSidebarCollapseHelpPopover);
-    modal.addEventListener('click', (e) => {
-        if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
-            hidePopovers();
-        }
-    });
-}
-
-function openCanvasShortcutsModal(options = {}) {
-    const modal = document.getElementById('canvasShortcutsModal');
-    if (!modal) return;
-    setupCanvasShortcutsModal();
-
-    const { anchorToSettings = true } = options;
-
-    // 先关闭帮助弹窗和管理弹窗
-    try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
-    try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
-    try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
-    try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
-
-    modal.style.display = 'block';
-
-    if (anchorToSettings) {
-        window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(modal));
-    } else {
-        modal.style.position = '';
-        modal.style.left = '';
-        modal.style.top = '';
-    }
-
-    updateShortcutDisplays();
-    if (typeof updateShortcutsDisplay === 'function') {
-        updateShortcutsDisplay();
-    }
-}
-
-function closeCanvasShortcutsModal() {
-    const modal = document.getElementById('canvasShortcutsModal');
-    if (modal) modal.style.display = 'none';
-    stopShortcutRecording(null);
-}
-
-function openCanvasOpenSourceModal() {
-    const modal = document.getElementById('canvasOpenSourceModal');
-    if (!modal) return;
-    setupCanvasOpenSourceModal();
-
-    // 先关闭帮助弹窗、快捷键弹窗和管理弹窗
-    try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
-    try { document.getElementById('canvasShortcutsModal').style.display = 'none'; } catch (_) { }
-    try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
-    try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
-
-    modal.style.display = 'block';
-
-    window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(modal));
-}
-
-function closeCanvasOpenSourceModal() {
-    const modal = document.getElementById('canvasOpenSourceModal');
-    if (modal) modal.style.display = 'none';
-}
-
-function setupCanvasOpenSourceModal() {
-    const modal = document.getElementById('canvasOpenSourceModal');
-    if (!modal || modal.dataset.bound === 'true') return;
-    modal.dataset.bound = 'true';
-
-    const closeBtn = document.getElementById('canvasOpenSourceModalClose');
-    if (closeBtn) {
-        closeBtn.onclick = () => {
-            closeCanvasOpenSourceModal();
-        };
-    }
-}
-
-// =============================================================================
-// 快捷键自定义功能
-// =============================================================================
-
-const CANVAS_SHORTCUTS_KEY = 'canvas-custom-shortcuts';
-const DEFAULT_SHORTCUTS = {
-    ctrlKey: 'Control',  // Control, Alt, Shift, Meta
-    spaceKey: 'Space'    // Space, or any other key
-};
-
-let canvasShortcuts = { ...DEFAULT_SHORTCUTS };
-let isRecordingShortcut = false;
-let recordingTarget = null; // 'ctrl' or 'space'
-
-function loadCanvasShortcuts() {
-    try {
-        const saved = localStorage.getItem(CANVAS_SHORTCUTS_KEY);
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            // 如果之前保存的是旧默认值 Alt，自动升级到新的默认值 Control，避免旧缓存导致冲突
-            if (parsed.ctrlKey === 'Alt') {
-                parsed.ctrlKey = 'Control';
-                try {
-                    localStorage.setItem(CANVAS_SHORTCUTS_KEY, JSON.stringify(parsed));
-                } catch (_) {}
-            }
-            canvasShortcuts = { ...DEFAULT_SHORTCUTS, ...parsed };
-        }
-    } catch (e) {
-        console.warn('[Canvas] 加载快捷键设置失败:', e);
-    }
-    updateShortcutDisplays();
-}
-
-function saveCanvasShortcuts() {
-    try {
-        saveSharedState(CANVAS_SHORTCUTS_KEY, canvasShortcuts);
-    } catch (e) {
-        console.warn('[Canvas] 保存快捷键设置失败:', e);
-    }
-}
-
-function getKeyDisplayName(keyCode, lang) {
-    const isZh = lang === 'zh_CN';
-    const isMac = /Mac|iPod|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
-    const keyMap = {
-        'Control': 'Ctrl',
-        'Alt': isMac ? 'Option' : 'Alt',
-        'Shift': 'Shift',
-        'Meta': isMac ? 'Cmd' : 'Win',
-        'Space': isZh ? '空格' : 'Space',
-        'Tab': 'Tab'
-    };
-    if (keyMap[keyCode]) return keyMap[keyCode];
-    // KeyA -> A, Digit1 -> 1
-    if (/^Key([A-Z])$/.test(keyCode)) return keyCode.slice(3);
-    if (/^Digit([0-9])$/.test(keyCode)) return keyCode.slice(5);
-    return keyCode;
-}
-
-function updateShortcutDisplays() {
-    const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
-
-    // 更新 Ctrl 键显示
-    const ctrlName = getKeyDisplayName(canvasShortcuts.ctrlKey, lang);
-    document.querySelectorAll('[data-shortcut-display="ctrl"]').forEach(el => {
-        el.textContent = ctrlName;
-    });
-    const ctrlTitleSuffix = (lang === 'en') ? ' Key Operations' : '键操作';
-    document.querySelectorAll('[data-shortcut-title="ctrl"]').forEach(el => {
-        el.textContent = `${ctrlName}${ctrlTitleSuffix}`;
-    });
-
-    // 更新 Space 键显示
-    const spaceName = getKeyDisplayName(canvasShortcuts.spaceKey, lang);
-    document.querySelectorAll('[data-shortcut-display="space"]').forEach(el => {
-        el.textContent = spaceName;
-    });
-    const spaceTitleSuffix = (lang === 'en') ? ' Key Operations' : '键操作';
-    document.querySelectorAll('[data-shortcut-title="space"]').forEach(el => {
-        el.textContent = `${spaceName}${spaceTitleSuffix}`;
-    });
-}
-
-function startShortcutRecording(target) {
-    isRecordingShortcut = true;
-    recordingTarget = target;
-
-    const recorder = document.getElementById('canvasShortcutRecorder');
-    const recorderText = document.getElementById('recorderText');
-    const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
-
-    if (recorder) {
-        recorder.style.display = 'block';
-        if (recorderText) {
-            recorderText.textContent = lang === 'zh_CN' ? '请按下新的快捷键...' : 'Press a new shortcut key...';
-        }
-    }
-
-    // 高亮对应的键
-    if (target === 'ctrl') {
-        document.querySelectorAll('[data-shortcut-display="ctrl"]').forEach(el => {
-            el.classList.add('recording');
-        });
-    } else if (target === 'space') {
-        document.querySelectorAll('[data-shortcut-display="space"]').forEach(el => {
-            el.classList.add('recording');
-        });
-    }
-}
-
-function stopShortcutRecording(newKey) {
-    if (!isRecordingShortcut) return;
-
-    document.querySelectorAll('[data-shortcut-display]').forEach(el => {
-        el.classList.remove('recording');
-    });
-
-    const recorder = document.getElementById('canvasShortcutRecorder');
-    if (recorder) recorder.style.display = 'none';
-
-    if (newKey && recordingTarget) {
-        if (recordingTarget === 'ctrl') {
-            canvasShortcuts.ctrlKey = newKey;
-        } else if (recordingTarget === 'space') {
-            canvasShortcuts.spaceKey = newKey;
-        }
-        saveCanvasShortcuts();
-        updateShortcutDisplays();
-    }
-
-    isRecordingShortcut = false;
-    recordingTarget = null;
-}
-
-function isCustomCtrlKeyPressed(e) {
-    const key = canvasShortcuts.ctrlKey;
-    const now = Date.now();
-    const isModifierKey = ['Control', 'Alt', 'Shift', 'Meta'].includes(key);
-    if (isModifierKey && !CanvasState.physicalModifiers[key] && (now - (CanvasState.lastModifierKeyReleaseTime || 0) < 800)) {
-        return false;
-    }
-
-    // 修饰键使用事件属性检测
-    switch (key) {
-        case 'Control': return e.ctrlKey;
-        case 'Alt': return e.altKey;
-        case 'Shift': return e.shiftKey;
-        case 'Meta': return e.metaKey;
-    }
-    // 普通键使用状态检测
-    return CanvasState.isCtrlPressed;
-}
-
-function isCustomSpaceKeyPressed(keyCode) {
-    const key = canvasShortcuts.spaceKey;
-    return keyCode === key;
-}
-
-function getCustomCtrlKeyCode() {
-    return canvasShortcuts.ctrlKey;
-}
-
-function getCustomSpaceKeyCode() {
-    return canvasShortcuts.spaceKey;
-}
-
-function setupCanvasHelpModal() {
-    const helpBtn = document.getElementById('canvasHelpBtn');
-    const helpModal = document.getElementById('canvasHelpModal');
-    const helpModalClose = document.getElementById('canvasHelpModalClose');
-    const manageModal = document.getElementById('canvasManageModal');
-
-    if (!helpBtn || !helpModal) return;
-
-    const tabs = Array.from(helpModal.querySelectorAll('.canvas-help-tab'));
-    const panels = Array.from(helpModal.querySelectorAll('.canvas-help-panel'));
-
-    const setActiveTab = (tabName) => {
-        tabs.forEach(tab => {
-            const isActive = tab.dataset.helpTab === tabName;
-            tab.classList.toggle('active', isActive);
-            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-        });
-        panels.forEach(panel => {
-            panel.classList.toggle('active', panel.dataset.helpPanel === tabName);
-        });
-    };
-
-    tabs.forEach(tab => {
-        tab.addEventListener('click', (e) => {
-            e.stopPropagation();
-            setActiveTab(tab.dataset.helpTab);
-        });
-    });
-
-    helpBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // 先关闭管理弹窗
-        if (manageModal) {
-            stopShortcutRecording(null);
-            manageModal.style.display = 'none';
-        }
-        // 切换帮助弹窗
-        const isVisible = helpModal.style.display === 'block';
-        helpModal.style.display = isVisible ? 'none' : 'block';
-        if (!isVisible) {
-            if (typeof updateShortcutDisplays === 'function') {
-                updateShortcutDisplays();
-            }
-            if (typeof updateShortcutsDisplay === 'function') {
-                updateShortcutsDisplay();
-            }
-        }
-        if (!isVisible && tabs.length && !tabs.some(tab => tab.classList.contains('active'))) {
-            setActiveTab(tabs[0].dataset.helpTab);
-        }
-    });
-
-    if (helpModalClose) {
-        helpModalClose.addEventListener('click', () => {
-            helpModal.style.display = 'none';
-        });
-    }
-
-    // 快捷键编辑按钮
-    const editCtrlBtn = document.getElementById('editCtrlKeyBtn');
-    const editSpaceBtn = document.getElementById('editSpaceKeyBtn');
-    const editCtrlBtnHelp = document.getElementById('editCtrlKeyBtnHelp');
-    const editSpaceBtnHelp = document.getElementById('editSpaceKeyBtnHelp');
-    const recorderCancelBtn = document.getElementById('recorderCancelBtn');
-
-    if (editCtrlBtn) {
-        editCtrlBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            startShortcutRecording('ctrl');
-        });
-    }
-
-    if (editSpaceBtn) {
-        editSpaceBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            startShortcutRecording('space');
-        });
-    }
-
-    if (editCtrlBtnHelp) {
-        editCtrlBtnHelp.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openCanvasShortcutsModal();
-            startShortcutRecording('ctrl');
-        });
-    }
-
-    if (editSpaceBtnHelp) {
-        editSpaceBtnHelp.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openCanvasShortcutsModal();
-            startShortcutRecording('space');
-        });
-    }
-
-    if (recorderCancelBtn) {
-        recorderCancelBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            stopShortcutRecording(null);
-        });
-    }
-
-    // 问号帮助按钮
-    const recorderHelpBtn = document.getElementById('recorderHelpBtn');
-    const recorderHelpTooltip = document.getElementById('recorderHelpTooltip');
-
-    if (recorderHelpBtn && recorderHelpTooltip) {
-        recorderHelpBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const isVisible = recorderHelpTooltip.style.display === 'block';
-            recorderHelpTooltip.style.display = isVisible ? 'none' : 'block';
-        });
-
-        // 点击其他地方关闭提示
-        document.addEventListener('click', (e) => {
-            if (recorderHelpTooltip.style.display === 'block' &&
-                !recorderHelpTooltip.contains(e.target) &&
-                e.target !== recorderHelpBtn &&
-                !recorderHelpBtn.contains(e.target)) {
-                recorderHelpTooltip.style.display = 'none';
-            }
-        });
-    }
-
-    // 监听键盘事件进行录制
-    document.addEventListener('keydown', (e) => {
-        if (!isRecordingShortcut) return;
-
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-
-        const modifierKeys = ['Control', 'Alt', 'Shift', 'Meta'];
-        const specialKeys = ['Space', 'Tab'];
-
-        let newKey = null;
-
-        // 修饰键直接使用 e.key
-        if (modifierKeys.includes(e.key)) {
-            newKey = e.key;
-        }
-        // 特殊键使用 e.code
-        else if (specialKeys.includes(e.code)) {
-            newKey = e.code;
-        }
-        // 普通字母/数字键使用 e.code (如 KeyA, KeyB, Digit1)
-        else if (/^(Key[A-Z]|Digit[0-9])$/.test(e.code)) {
-            newKey = e.code;
-        }
-
-        if (newKey) stopShortcutRecording(newKey);
-    }, true);
-
-    // 点击其他地方关闭弹窗
-    document.addEventListener('click', (e) => {
-        if (helpModal.style.display === 'block' &&
-            !helpModal.contains(e.target) &&
-            e.target !== helpBtn &&
-            !helpBtn.contains(e.target)) {
-            helpModal.style.display = 'none';
-        }
-    });
-}
-
-function openCanvasHelpModal(tabName = 'shortcuts') {
-    const helpModal = document.getElementById('canvasHelpModal');
-    const manageModal = document.getElementById('canvasManageModal');
-    const shortcutsModal = document.getElementById('canvasShortcutsModal');
-    const otherManageModal = document.getElementById('canvasOtherManageModal');
-    if (!helpModal) return;
-
-    if (manageModal) {
-        stopShortcutRecording(null);
-        manageModal.style.display = 'none';
-    }
-    if (shortcutsModal) shortcutsModal.style.display = 'none';
-    if (otherManageModal) otherManageModal.style.display = 'none';
-    try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
-
-    const tabs = Array.from(helpModal.querySelectorAll('.canvas-help-tab'));
-    const panels = Array.from(helpModal.querySelectorAll('.canvas-help-panel'));
-    
-    tabs.forEach(tab => {
-        const isActive = tab.dataset.helpTab === tabName;
-        tab.classList.toggle('active', isActive);
-        tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-    });
-    panels.forEach(panel => {
-        panel.classList.toggle('active', panel.dataset.helpPanel === tabName);
-    });
-
-    helpModal.style.display = 'block';
-
-    if (typeof positionManageModalUnderSettingsBtn === 'function') {
-        window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(helpModal));
-    }
-}
-
-function setCanvasScaleVars(container, scale, force = false) {
-    if (!container) return;
-
-    // [OPT] 缩放过程中停止更新CSS变量（防止网格/文字反向缩放的高频重绘）
-    // 用户明确要求：缩放时停止，结束时更新。使用 force 参数强制更新。
-    if (!force) {
-        const workspace = document.getElementById('canvasWorkspace');
-        if (workspace && workspace.classList.contains('is-zooming')) return;
-    }
-
-    const s = (typeof scale === 'number' && isFinite(scale) && scale > 0) ? scale : 1;
-    if (!force && cachedCanvasScaleVarsContainer === container && cachedCanvasScaleVarsValue === s) return;
-    cachedCanvasScaleVarsContainer = container;
-    cachedCanvasScaleVarsValue = s;
-    container.style.setProperty('--canvas-scale', s.toString());
-    container.style.setProperty('--canvas-scale-inv', (1 / s).toString());
-}
-
-function applyCanvasContentTransform(content, panX, panY, scale) {
-    if (!content) return;
-    const x = (typeof panX === 'number' && isFinite(panX)) ? panX : 0;
-    const y = (typeof panY === 'number' && isFinite(panY)) ? panY : 0;
-    const s = (typeof scale === 'number' && isFinite(scale) && scale > 0) ? scale : 1;
-    // 与 CSS 保持一致：translate(...) scale(...)（右侧先应用 scale，再应用 translate；平移不随缩放变化）
-    content.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
-    try { updateCanvasGridLayerTransform(x, y, s); } catch (_) { }
-    try {
-        if (__isCanvasNodeMaximizedActive()) {
-            scheduleMaximizedNodesRefresh({
-                delayMs: MAXIMIZED_NODE_RESIZE_REFRESH_DEBOUNCE_MS,
-                stabilizeDelayMs: MAXIMIZED_NODE_RESIZE_STABILIZE_DELAY_MS
-            });
-        } else {
-            refreshMaximizedNodes();
-        }
-    } catch (_) { }
-
-    // 解决在拖拽临时组（框选元素）时进行滚轮滚动，导致元素与鼠标吸附不稳定的问题
-    if (window.__BCSLassoTempGroup && 
-        typeof window.__BCSLassoTempGroup.isDragging === 'function' && 
-        window.__BCSLassoTempGroup.isDragging() && 
-        typeof window.__BCSLassoTempGroup.updateDragPositionForScroll === 'function') {
-        window.__BCSLassoTempGroup.updateDragPositionForScroll();
-    }
-    try { triggerCanvasViewportAutoRecord(x, y, s); } catch (_) { }
-}
-
-let canvasViewportAutoRecordTimer = null;
-function __isCanvasNodeMaximizedActiveForAnchorGuard() {
-    if (CanvasState.nodeMaximizedActive) return true;
-    try {
-        return !!document.querySelector('.canvas-node-maximized');
-    } catch (_) {
-        return false;
-    }
-}
-
-function triggerCanvasViewportAutoRecord(x, y, zoom) {
-    if (__isCanvasNodeMaximizedActiveForAnchorGuard()) {
-        return;
-    }
-    const settings = getCanvasOtherSettings();
-    if (!settings || settings.autoRecordAnchor !== true) {
-        return;
-    }
-    if (canvasViewportAutoRecordTimer) {
-        clearTimeout(canvasViewportAutoRecordTimer);
-    }
-    const intervalS = settings.autoRecordAnchorInterval || 15;
-    canvasViewportAutoRecordTimer = setTimeout(() => {
-        try {
-            checkAndRecordCanvasViewport(x, y, zoom);
-        } catch (_) {}
-    }, intervalS * 1000);
-}
-
-function checkAndRecordCanvasViewport(x, y, zoom) {
-    if (__isCanvasNodeMaximizedActiveForAnchorGuard()) {
-        return;
-    }
-    const last = CanvasState.lastAutoRecordAnchor;
-    if (last) {
-        const dx = Math.abs(x - last.x);
-        const dy = Math.abs(y - last.y);
-        const dz = Math.abs(zoom - last.zoom);
-        if (dx <= 1.0 && dy <= 1.0 && dz <= 0.001) {
-            return;
-        }
-    }
-    
-    const anchor = {
-        x: x,
-        y: y,
-        zoom: zoom,
-        timestamp: Date.now()
-    };
-    
-    CanvasState.lastAutoRecordAnchor = anchor;
-    saveSharedState('canvasAutoRecordedAnchor', anchor);
-    
-    try {
-        let historyList = [];
-        const rawHistory = localStorage.getItem('canvasNavigationHistory');
-        if (rawHistory) {
-            historyList = JSON.parse(rawHistory);
-        }
-        if (!Array.isArray(historyList)) {
-            historyList = [];
-        }
-        
-        historyList = historyList.filter(item => {
-            if (!item) return false;
-            const dx = Math.abs(item.x - x);
-            const dy = Math.abs(item.y - y);
-            const dz = Math.abs(item.zoom - zoom);
-            return !(dx <= 1.0 && dy <= 1.0 && dz <= 0.001);
-        });
-        
-        historyList.unshift(anchor);
-        const settings = getCanvasOtherSettings();
-        const limit = settings ? (settings.autoRecordAnchorLimit || 5) : 5;
-        if (historyList.length > limit) {
-            historyList = historyList.slice(0, limit);
-        }
-        
-        localStorage.setItem('canvasNavigationHistory', JSON.stringify(historyList));
-        window.dispatchEvent(new CustomEvent('canvas-navigation-history-updated', { detail: { list: historyList, newAnchor: anchor } }));
-    } catch (e) {
-        console.error('Failed to save navigation history:', e);
-    }
-}
-
-function __forceCanvasViewportVisualSync(options = {}) {
-    const opts = (options && typeof options === 'object') ? options : {};
-    const forceLowDetail = opts.forceLowDetail !== false;
-    const container = getCachedContainer();
-    const content = getCachedContent();
-    const z = clampCanvasZoom(CanvasState.zoom || CanvasState.baseZoom || 1);
-    CanvasState.zoom = z;
-    if (container) {
-        setCanvasScaleVars(container, z, true);
-        container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
-        container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
-    }
-    if (content) {
-        applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, z);
-    }
-    try { updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, z, true); } catch (_) { }
-    try { updateCanvasLowDetailMode(forceLowDetail); } catch (_) { }
-    try { updateScrollbarThumbsLightweight(); } catch (_) { }
-}
-
-let __canvasViewportVisualSyncLifecycleBound = false;
-let __canvasViewportVisualSyncRaf = 0;
-let __canvasViewportVisualSyncSecondRaf = 0;
-
-function __scheduleCanvasViewportVisualSync() {
-    if (__canvasViewportVisualSyncRaf || __canvasViewportVisualSyncSecondRaf) return;
-    __canvasViewportVisualSyncRaf = requestAnimationFrame(() => {
-        __canvasViewportVisualSyncRaf = 0;
-        try { __forceCanvasViewportVisualSync({ forceLowDetail: false }); } catch (_) { }
-        __canvasViewportVisualSyncSecondRaf = requestAnimationFrame(() => {
-            __canvasViewportVisualSyncSecondRaf = 0;
-            try { __forceCanvasViewportVisualSync({ forceLowDetail: false }); } catch (_) { }
-        });
-    });
-}
-
-function __isCanvasViewportVisualSyncEligible() {
-    const root = document && document.documentElement ? document.documentElement : null;
-    if (root && !root.classList.contains('canvas-view-active')) return false;
-    return !!(document.getElementById('canvasWorkspace') && getCachedContainer() && getCachedContent());
-}
-
-function __bindCanvasViewportVisualSyncLifecycle() {
-    if (__canvasViewportVisualSyncLifecycleBound) return;
-    __canvasViewportVisualSyncLifecycleBound = true;
-
-    const syncIfReady = () => {
-        if (!__isCanvasViewportVisualSyncEligible()) return;
-        __scheduleCanvasViewportVisualSync();
-    };
-    try { window.addEventListener('focus', syncIfReady); } catch (_) { }
-    try { window.addEventListener('pageshow', syncIfReady); } catch (_) { }
-    try {
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') syncIfReady();
-        });
-    } catch (_) { }
-}
-
-function __scheduleCanvasPostViewportStateStabilization() {
-    const run = () => {
-        try { stabilizePermanentSectionAnchors({ syncBounds: false }); } catch (_) { }
-        try { updateCanvasScrollBounds({ recomputeBounds: true, initial: false }); } catch (_) { }
-        try { updateScrollbarThumbs(); } catch (_) { }
-        try { __forceCanvasViewportVisualSync({ forceLowDetail: false }); } catch (_) { }
-    };
-
-    run();
-    try { requestAnimationFrame(run); } catch (_) { }
-    window.setTimeout(run, 80);
-    window.setTimeout(run, 260);
-}
-
-function getCanvasDisplayZoom() {
-    const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
-    const z = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-    return z / base;
-}
-
-function getCanvasZoomForScrollFactor() {
-    // [UX] 缩到极小时，滚动速度会因为 1/zoom 急剧变快；
-    // 用户反馈：显示缩放 < 25% 时速度不要再继续变快（保持曲率/速度一致）。
-    const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
-    const minDisplayZoom = 0.25;
-    const minZoom = base * minDisplayZoom;
-    const z = clampCanvasZoom(CanvasState.zoom || 1);
-    return Math.max(z, minZoom);
-}
-
-function isCanvasZoomMagnetEnabled() {
-    const s = getCanvasZoomMagnetSettings();
-    return !!(s && s.enabled);
-}
-
-function getCanvasZoomMagnetSettings() {
-    // Defaults:
-    // - magnet enabled: true
-    // - safe zone magnet (70%): enabled
-    // - low-detail boundary magnet (M2): disabled by default (Y=1.0 = no slowdown)
-    const defaults = { enabled: true, enableSafeZone: true, enableLowDetailMid: false };
-
-    // New format
-    try {
-        const saved = localStorage.getItem('canvasZoomMagnetSettings');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed && typeof parsed === 'object') {
-                return {
-                    enabled: (typeof parsed.enabled === 'boolean') ? parsed.enabled : defaults.enabled,
-                    enableSafeZone: (typeof parsed.enableSafeZone === 'boolean') ? parsed.enableSafeZone : defaults.enableSafeZone,
-                    enableLowDetailMid: (typeof parsed.enableLowDetailMid === 'boolean') ? parsed.enableLowDetailMid : defaults.enableLowDetailMid
-                };
-            }
-        }
-    } catch (_) { }
-
-    return defaults;
-}
-
-function __writeCanvasZoomMagnetSettings(next) {
-    const cur = getCanvasZoomMagnetSettings();
-    const merged = {
-        enabled: (typeof next.enabled === 'boolean') ? next.enabled : cur.enabled,
-        enableSafeZone: (typeof next.enableSafeZone === 'boolean') ? next.enableSafeZone : cur.enableSafeZone,
-        enableLowDetailMid: (typeof next.enableLowDetailMid === 'boolean') ? next.enableLowDetailMid : cur.enableLowDetailMid
-    };
-    try { saveSharedState('canvasZoomMagnetSettings', merged); } catch (_) { }
-    return merged;
-}
-
-function __syncPerfMagnetTogglesFromSettings(settings) {
-    const modal = document.getElementById('canvasPerfSettingsModal');
-    if (!modal || modal.style.display === 'none') return;
-    const t = modal.querySelector('#perfToggleZoomMagnet');
-    const s = modal.querySelector('#perfToggleZoomMagnetSafe');
-    const m = modal.querySelector('#perfToggleZoomMagnetMid');
-    if (t && typeof settings.enabled === 'boolean') t.checked = settings.enabled;
-    if (s && typeof settings.enableSafeZone === 'boolean') s.checked = settings.enableSafeZone;
-    if (m && typeof settings.enableLowDetailMid === 'boolean') m.checked = settings.enableLowDetailMid;
-    if (t) {
-        try { t.dispatchEvent(new Event('change')); } catch (_) { }
-    }
-}
-
-function __syncOtherMagnetTogglesFromSettings(modal, settings) {
-    const target = modal || document.getElementById('canvasOtherSettingsModal');
-    if (!target || target.style.display === 'none') return;
-    const safeToggle = target.querySelector('#otherMagnetSafeToggle');
-    const midToggle = target.querySelector('#otherMagnetMidToggle');
-    if (safeToggle && typeof settings.enableSafeZone === 'boolean') safeToggle.checked = settings.enableSafeZone;
-    if (midToggle && typeof settings.enableLowDetailMid === 'boolean') midToggle.checked = settings.enableLowDetailMid;
-}
-
-function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
-    if (!isCanvasZoomMagnetEnabled()) return { factor: 1, strength: 0 };
-    const dz = (typeof displayZoom === 'number' && isFinite(displayZoom) && displayZoom > 0) ? displayZoom : 1;
-    const nextDz = (typeof nextDisplayZoom === 'number' && isFinite(nextDisplayZoom) && nextDisplayZoom > 0) ? nextDisplayZoom : dz;
-    const baseFactor = Math.max(0.005, getCanvasZoomSpeedFactor(dz));
-    const maxFactor = ZOOM_CURVE_ABS_MAX_FACTOR;
-    const travel = Math.abs(Math.log(nextDz / dz));
-    const speedBoost = Math.max(0, Math.min(1, travel / 0.08));
-    const widthBoost = 1 + speedBoost * 0.8;
-    const strengthBoost = 1 + speedBoost * 0.6;
-
-    const settings = getCanvasZoomMagnetSettings();
-    const magnetPoints = __normalizeMagnetPoints(getCanvasZoomMagnetPoints());
-    const magnets = [];
-
-    try {
-        if (settings.enableSafeZone) {
-            const axis = __getOtherCurveZoomAxis();
-            const safe = __percentFromNormX(axis, magnetPoints.m1.x) / 100;
-            if (Number.isFinite(safe) && safe > 0) {
-                // Safe Zone 附近更明显（范围更宽、减速更强）
-                const halfWidth = Math.min(0.16, 0.08 * widthBoost);
-                magnets.push({ center: safe, halfWidth, minFactor: magnetPoints.m1.y, boost: strengthBoost });
-            }
-        }
-    } catch (_) { }
-
-    try {
-        if (settings.enableLowDetailMid) {
-            const axis = __getOtherCurveZoomAxis();
-            const enter = __percentFromNormX(axis, magnetPoints.m2.x) / 100;
-            if (Number.isFinite(enter) && enter > 0) {
-                const enterLowDetail = getCanvasLowDetailDisplayZoomThreshold();
-                const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
-                const band = Math.max(0.01, Math.abs(enterLowDetail - exit));
-                // 中心精准卡在低细节切换点；缓慢区覆盖边界前后，给 DOM/低细节状态切换留反应时间。
-                const baseHalf = Math.min(0.12, Math.max(0.06, band * 2.5));
-                const halfWidth = Math.min(0.18, baseHalf * widthBoost);
-                magnets.push({ center: enter, halfWidth, minFactor: magnetPoints.m2.y, boost: strengthBoost });
-            }
-        }
-    } catch (_) { }
-
-    if (!magnets.length) return { factor: 1, strength: 0 };
-
-    // 在“磁矩”附近将缩放变得更缓慢或更快；离开附近则恢复正常曲线。
-    // factor: 1 = 不变；越接近 center 越接近 minFactor。
-    let factor = 1;
-    let strength = 0;
-    for (const m of magnets) {
-        const a = dz;
-        const b = nextDz;
-        const minD = (m.center >= Math.min(a, b) && m.center <= Math.max(a, b))
-            ? 0
-            : Math.min(Math.abs(a - m.center), Math.abs(b - m.center));
-        if (!Number.isFinite(minD) || minD >= m.halfWidth) continue;
-
-        const t = Math.max(0, Math.min(1, minD / m.halfWidth));
-        const smooth = t * t * (3 - 2 * t); // smoothstep
-        const localStrength = Math.min(1, (1 - smooth) * (Number.isFinite(m.boost) ? m.boost : 1));
-        const desired = (Number.isFinite(m.minFactor) ? m.minFactor : 1) / baseFactor;
-        const localFactor = 1 + localStrength * (desired - 1);
-        const minLocal = 0.005 / baseFactor;
-        const maxLocal = maxFactor / baseFactor;
-        const clampedLocal = Math.max(minLocal, Math.min(maxLocal, localFactor));
-
-        if (desired >= 1) {
-            if (clampedLocal > factor) factor = clampedLocal;
-        } else {
-            if (clampedLocal < factor) factor = clampedLocal;
-            if (localStrength > strength) strength = localStrength;
-        }
-    }
-    return {
-        factor: Math.max(0.005 / baseFactor, Math.min(maxFactor / baseFactor, factor)),
-        strength: Math.max(0, Math.min(1, strength))
-    };
-}
-
-function getCanvasZoomCurveSettings() {
-    const settings = getCanvasOtherSettings();
-    return (settings && settings.zoomCurve) ? settings.zoomCurve : __cloneDefaultOtherSettings().zoomCurve;
-}
-
-function getCanvasZoomMagnetPoints() {
-    const settings = getCanvasOtherSettings();
-    if (settings && settings.useDefaultZoomCurve !== false) return __getDefaultMagnetPointsFromPerf();
-    if (settings && settings.magnetPoints) return settings.magnetPoints;
-    return __getDefaultMagnetPointsFromPerf();
-}
-
-function __cubicBezierCoord(t, p0, p1, p2, p3) {
-    const u = 1 - t;
-    return (u * u * u * p0) + (3 * u * u * t * p1) + (3 * u * t * t * p2) + (t * t * t * p3);
-}
-
-function __scaleZoomCurveFactor(raw) {
-    const clamped = Math.max(0, Math.min(ZOOM_CURVE_RAW_MAX, raw));
-    const scaled = Math.pow(clamped, ZOOM_CURVE_EXPONENT) * ZOOM_CURVE_MAX_FACTOR;
-    return Math.max(0, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, scaled));
-}
-
-function __unscaleZoomCurveFactor(scaled) {
-    const v = Math.max(0, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, scaled));
-    const norm = Math.max(0, v / ZOOM_CURVE_MAX_FACTOR);
-    return Math.pow(norm, 1 / ZOOM_CURVE_EXPONENT);
-}
-
-function __solveBezierTForX(x, x1, x2) {
-    let lo = 0;
-    let hi = 1;
-    for (let i = 0; i < 24; i++) {
-        const mid = (lo + hi) / 2;
-        const midX = __cubicBezierCoord(mid, 0, x1, x2, 1);
-        if (midX < x) lo = mid; else hi = mid;
-    }
-    return (lo + hi) / 2;
-}
-
-function __getZoomSpeedFactorFromCurve(displayZoom, curve) {
-    if (!curve || !curve.p1 || !curve.p2) return 1;
-    const { minPercent, maxPercent, range } = __getOtherCurveZoomAxis();
-    const percent = Math.max(minPercent, Math.min(maxPercent, (displayZoom || 1) * 100));
-    const x = (percent - minPercent) / range;
-    const t = __solveBezierTForX(x, curve.p1.x, curve.p2.x);
-    const p0y = (curve.p0 && Number.isFinite(curve.p0.y)) ? curve.p0.y : 1;
-    const p3y = (curve.p3 && Number.isFinite(curve.p3.y)) ? curve.p3.y : 1;
-    const y = __cubicBezierCoord(t, p0y, curve.p1.y, curve.p2.y, p3y);
-    return Math.max(0.005, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, __scaleZoomCurveFactor(y)));
-}
-
-function getCanvasZoomSpeedFactor(displayZoom) {
-    const curve = getCanvasZoomCurveSettings();
-    return __getZoomSpeedFactorFromCurve(displayZoom, curve);
-}
-
-function getCanvasTrackpadZoomRate(settingsOverride = null) {
-    const settings = settingsOverride || getCanvasOtherSettings();
-    return __clampNumber(
-        settings && settings.trackpadZoomRate,
-        TRACKPAD_ZOOM_RATE_MIN,
-        TRACKPAD_ZOOM_RATE_MAX,
-        TRACKPAD_ZOOM_RATE_DEFAULT
-    );
-}
-
-function getCanvasWheelVerticalPanRate(settingsOverride = null) {
-    const settings = settingsOverride || getCanvasOtherSettings();
-    return __clampNumber(
-        settings && settings.wheelVerticalPanRate,
-        CANVAS_PAN_RATE_MIN,
-        CANVAS_PAN_RATE_MAX,
-        CANVAS_PAN_RATE_DEFAULT
-    );
-}
-
-function getCanvasWheelHorizontalPanRate(settingsOverride = null) {
-    const settings = settingsOverride || getCanvasOtherSettings();
-    return __clampNumber(
-        settings && settings.wheelHorizontalPanRate,
-        CANVAS_PAN_RATE_MIN,
-        CANVAS_PAN_RATE_MAX,
-        CANVAS_PAN_RATE_DEFAULT
-    );
-}
-
-function getCanvasTrackpadPanRate(settingsOverride = null) {
-    const settings = settingsOverride || getCanvasOtherSettings();
-    return __clampNumber(
-        settings && settings.trackpadPanRate,
-        CANVAS_PAN_RATE_MIN,
-        CANVAS_PAN_RATE_MAX,
-        CANVAS_PAN_RATE_DEFAULT
-    );
-}
-
-// 平面滚动速率 < 100% 时，加快拖尾收敛，避免“步进变小但惯性拖尾不变”的黏滞感。
-function __getCanvasPanTailCompensation(rate) {
-    const normalized = __clampNumber(rate, CANVAS_PAN_RATE_MIN, CANVAS_PAN_RATE_MAX, CANVAS_PAN_RATE_DEFAULT);
-    if (normalized >= 1) return 1;
-    return 1 / normalized;
-}
-
-function __getCanvasWheelPanTailCompensation(axis) {
-    const rate = axis === 'horizontal'
-        ? getCanvasWheelHorizontalPanRate()
-        : getCanvasWheelVerticalPanRate();
-    return __getCanvasPanTailCompensation(rate);
-}
-
-function __isCanvasDiscretePanWheelEvent(event) {
-    if (!event) return false;
-    return __isLikelyCanvasDiscreteWheelEvent(event);
-}
-
-function __shouldTreatMacWheelAsTouchpad(event, normalizedWheel) {
-    if (!CANVAS_RUNTIME_PLATFORM.isMac || !event) return true;
-    if (__isCanvasTouchpadPinch(event)) return true;
-    if (__isCanvasDiscretePanWheelEvent(event)) return false;
-    const absX = Math.abs(Number(normalizedWheel.deltaX) || 0);
-    const absY = Math.abs(Number(normalizedWheel.deltaY) || 0);
-    if (absX >= 1 && absY >= 1) return true;
-    return false;
-}
-
-function __shouldPreferSnappyCanvasPan(isTouchpad, wheelVerticalPanRate, wheelHorizontalPanRate, trackpadPanRate) {
-    if (isTouchpad) return trackpadPanRate <= 1;
-    // 鼠标滚轮始终同步直达；速率百分比只改变步进大小，不引入额外拖尾。
-    return true;
-}
-
-function __syncCanvasPanVisualImmediate() {
-    if (CanvasState.scrollAnimation.frameId) {
-        cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
-        CanvasState.scrollAnimation.frameId = null;
-    }
-    CanvasState.scrollAnimation.source = 'direct';
-    CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
-    CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
-    applyPanOffsetFast();
-    updateScrollbarThumbsLightweight();
-}
-
-function __getCanvasWheelDeltaModeScale(event) {
-    if (!event) return 1;
-    const mode = Number(event.deltaMode);
-    if (mode === 1) return CANVAS_WHEEL_LINE_PIXEL;
-    if (mode === 2) {
-        const viewportHeight = (typeof window !== 'undefined' && Number.isFinite(window.innerHeight))
-            ? window.innerHeight
-            : 800;
-        return Math.max(240, viewportHeight);
-    }
-    return 1;
-}
-
-function __normalizeCanvasWheelEventDeltas(event) {
-    if (!event) return { deltaX: 0, deltaY: 0 };
-    const scale = __getCanvasWheelDeltaModeScale(event);
-    return {
-        deltaX: (Number(event.deltaX) || 0) * scale,
-        deltaY: (Number(event.deltaY) || 0) * scale
-    };
-}
-
-function __isLikelyCanvasDiscreteWheelEvent(event) {
-    if (!event) return false;
-    const mode = Number(event.deltaMode);
-    if (mode === 1 || mode === 2) return true;
-    if (mode !== 0) return false;
-
-    const absDeltaX = Math.abs(Number(event.deltaX) || 0);
-    const absDeltaY = Math.abs(Number(event.deltaY) || 0);
-    const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
-    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return false;
-
-    if (primaryDelta >= DISCRETE_WHEEL_EVENT_DELTA_MIN) return true;
-
-    const hasFractional = (absDeltaX > 0 && !Number.isInteger(absDeltaX))
-        || (absDeltaY > 0 && !Number.isInteger(absDeltaY));
-    if (hasFractional) return false;
-
-    return (Number.isInteger(absDeltaX) && Number.isInteger(absDeltaY) && primaryDelta >= 8);
-}
-
-function __isCanvasDiscreteWheelEvent(event) {
-    if (!event || !CANVAS_RUNTIME_WINDOWS_LIKE) return false;
-    return __isLikelyCanvasDiscreteWheelEvent(event);
-}
-
-function __isCanvasTouchpadLikeScrollInput(event, normalizedDeltas = null) {
-    if (!event) return false;
-    if (Number(event.deltaMode) !== 0) return false;
-    if (__isCanvasDiscreteWheelEvent(event)) return false;
-
-    const source = (normalizedDeltas && typeof normalizedDeltas === 'object') ? normalizedDeltas : event;
-    const absDeltaX = Math.abs(Number(source.deltaX) || 0);
-    const absDeltaY = Math.abs(Number(source.deltaY) || 0);
-    const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
-    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return false;
-
-    if (primaryDelta <= ZOOM_INPUT_TOUCHPAD_DELTA_MAX) return true;
-
-    if (primaryDelta < ZOOM_INPUT_WHEEL_DELTA_MIN) {
-        const rawAbsDeltaX = Math.abs(Number(event.deltaX) || 0);
-        const rawAbsDeltaY = Math.abs(Number(event.deltaY) || 0);
-        const hasFractional = (rawAbsDeltaX > 0 && !Number.isInteger(rawAbsDeltaX))
-            || (rawAbsDeltaY > 0 && !Number.isInteger(rawAbsDeltaY));
-        if (hasFractional) return true;
-    }
-
-    return false;
-}
-
-function __shouldSmoothCanvasWheelZoom(event, zoomInputMode) {
-    if (zoomInputMode !== 'wheel') return false;
-    return __isCanvasDiscreteWheelEvent(event);
-}
-
-// [Fix-v7] Windows 滚轮缩放事件预处理：排队过期事件过滤 + 方向反转防抖
-// 返回 { delta: number, suppressed: boolean }
-// - delta: 缩放增量（保持原始量级，正=放大，负=缩小，与 rawDelta 同向）
-// - suppressed: true 表示此事件应被丢弃（过期排队/方向锁定中）
-// 注意：不对 delta 数值做归一化——Windows 每档 ±120 经下游公式约产生 ~9% 缩放，
-// 与主流应用的 Ctrl+滚轮步长一致。真正的问题是事件堆积和方向抖动，而非单步幅度。
-function __preprocessWindowsWheelZoomEvent(event, rawDelta) {
-    if (!CANVAS_RUNTIME_WINDOWS_LIKE) return { delta: rawDelta, suppressed: false };
-
-    const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-        ? performance.now() : Date.now();
-
-    // ① 时间归一化：丢弃排队过期事件
-    // Windows 下高频滚轮 + 主线程卡顿 → 事件堆积；event.timeStamp 代表事件产生时间。
-    // 如果产生时间距当前已过太久，说明是排队滞后事件，丢弃以避免累积误差。
-    if (event && Number.isFinite(event.timeStamp) && event.timeStamp > 0) {
-        const eventAge = now - event.timeStamp;
-        if (eventAge > WINDOWS_WHEEL_ZOOM_STALE_EVENT_MS) {
-            __logCanvasWinInput('wheel-zoom-stale-drop', {
-                eventAge: __roundCanvasDebugNumber(eventAge, 1),
-                threshold: WINDOWS_WHEEL_ZOOM_STALE_EVENT_MS,
-                rawDelta: __roundCanvasDebugNumber(rawDelta, 3)
-            }, { throttleKey: 'wheel-zoom-stale-drop', throttleMs: 60 });
-            return { delta: 0, suppressed: true };
-        }
-    }
-
-    // ② 方向反转防抖锁（不修改 delta 数值，仅做过滤）
-    const sign = rawDelta > 0 ? 1 : (rawDelta < 0 ? -1 : 0);
-
-    if (sign !== 0) {
-        if (sign === winWheelZoomDirLockSign) {
-            // 同方向：累加计数
-            winWheelZoomDirConsecutive++;
-        } else {
-            // 方向改变
-            if (winWheelZoomDirLockSign !== 0 && winWheelZoomDirConsecutive >= WINDOWS_WHEEL_ZOOM_DIR_LOCK_MIN_EVENTS) {
-                // 之前已确立方向 → 启动反转锁
-                winWheelZoomDirLockTime = now;
-            }
-            winWheelZoomDirLockSign = sign;
-            winWheelZoomDirConsecutive = 1;
-        }
-
-        // 检查反转锁：在锁定窗口内且方向刚刚翻转（计数不足），抑制此事件
-        if (winWheelZoomDirLockTime > 0 && (now - winWheelZoomDirLockTime) < WINDOWS_WHEEL_ZOOM_DIR_LOCK_MS) {
-            if (winWheelZoomDirConsecutive < WINDOWS_WHEEL_ZOOM_DIR_LOCK_MIN_EVENTS) {
-                __logCanvasWinInput('wheel-zoom-dir-lock-drop', {
-                    sign,
-                    consecutive: winWheelZoomDirConsecutive,
-                    lockAge: __roundCanvasDebugNumber(now - winWheelZoomDirLockTime, 1),
-                    rawDelta: __roundCanvasDebugNumber(rawDelta, 4)
-                }, { throttleKey: 'wheel-zoom-dir-lock-drop', throttleMs: 60 });
-                return { delta: 0, suppressed: true };
-            }
-        }
-
-        // 锁定窗口已过期 → 清除
-        if (winWheelZoomDirLockTime > 0 && (now - winWheelZoomDirLockTime) >= WINDOWS_WHEEL_ZOOM_DIR_LOCK_MS) {
-            winWheelZoomDirLockTime = 0;
-        }
-    }
-
-    winWheelZoomLastEventNow = now;
-    return { delta: rawDelta, suppressed: false };
-}
-
-// [Fix-v7] 重置 Windows 滚轮缩放方向锁状态（缩放结束 / 切换输入模式时调用）
-function __resetWindowsWheelZoomDirLock() {
-    winWheelZoomDirLockSign = 0;
-    winWheelZoomDirLockTime = 0;
-    winWheelZoomDirConsecutive = 0;
-    winWheelZoomLastEventNow = 0;
-}
-
-function __shouldSmoothCanvasWheelPan(event, isTouchpad) {
-    if (isTouchpad) return false;
-    if (!__isCanvasDiscretePanWheelEvent(event)) return false;
-    // 平面滚动速率已直接缩放步进；再叠平滑追赶会在 >100% 时产生“目标跑在前、画面在后”的果冻拖尾。
-    // Windows/Linux 如需实验性微平滑，仅由平台常量打开。
-    return CANVAS_RUNTIME_WINDOWS_LIKE && WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED;
-}
-
-function __isCanvasTouchpadPinch(e) {
-    if (!e) return false;
-    // Touchpad pinch always sends a wheel event with ctrlKey: true.
-    // And the physical Ctrl key is not pressed on the keyboard.
-    // Also, it is not a discrete/step-wise wheel event.
-    return !!(e.ctrlKey && !CanvasState.isCtrlPressed && !__isLikelyCanvasDiscreteWheelEvent(e));
-}
-
-function resolveCanvasZoomInputMode(event) {
-    if (!event || event.deltaMode !== 0) return 'wheel';
-
-    const now = Date.now();
-    const commitMode = (mode) => {
-        CanvasState.touchpadState.lastZoomInputMode = mode;
-        CanvasState.touchpadState.lastZoomInputTime = now;
-        return mode;
-    };
-
-    if (__isCanvasTouchpadPinch(event)) {
-        return commitMode('touchpad');
-    }
-
-    const absDeltaX = Math.abs(Number(event.deltaX) || 0);
-    const absDeltaY = Math.abs(Number(event.deltaY) || 0);
-    const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
-    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return commitMode('wheel');
-
-    // 物理按下缩放修饰键时，一律视为 Scrolling（Wheel / Swipe zoom）路径。
-    // 这样可以保证磁矩/曲线仅作用于滚轮与双指滑动缩放，不干扰 Pinch 独立速率。
-    if (CanvasState.isCtrlPressed) {
-        return commitMode('wheel');
-    }
-    if (event.metaKey && !event.ctrlKey) {
-        return commitMode('wheel');
-    }
-
-    if (canvasShortcuts && canvasShortcuts.ctrlKey === 'Control' && event.ctrlKey && !CanvasState.isCtrlPressed) {
-        const rawDeltaX = Number(event.deltaX);
-        const rawDeltaY = Number(event.deltaY);
-        const looksDiscreteWheel = Number.isFinite(rawDeltaX)
-            && Number.isFinite(rawDeltaY)
-            && Number.isInteger(rawDeltaX)
-            && Number.isInteger(rawDeltaY);
-        if (__isLikelyCanvasDiscreteWheelEvent(event)) {
-            return commitMode('wheel');
-        }
-        const likelyWindowsLinuxCtrlSynthPinch = CANVAS_RUNTIME_WINDOWS_LIKE
-            && primaryDelta <= WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_MAX
-            && absDeltaX <= WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_X_MAX
-            && absDeltaY <= WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_MAX;
-
-        const mode = likelyWindowsLinuxCtrlSynthPinch
-            ? 'touchpad'
-            : ((looksDiscreteWheel && primaryDelta >= 1)
-                ? 'wheel'
-                : ((primaryDelta <= ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX
-                    && absDeltaX <= ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX
-                    && absDeltaY <= ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX)
-                    ? 'touchpad'
-                    : 'wheel'));
-
-        return commitMode(mode);
-    }
-
-    const state = CanvasState.touchpadState || {};
-    let mode = 'wheel';
-
-    if (primaryDelta <= ZOOM_INPUT_TOUCHPAD_DELTA_MAX) {
-        mode = 'touchpad';
-    } else if (primaryDelta >= ZOOM_INPUT_WHEEL_DELTA_MIN) {
-        mode = 'wheel';
-    } else {
-        const hasRecentMode = typeof state.lastZoomInputMode === 'string'
-            && (now - (Number(state.lastZoomInputTime) || 0)) <= ZOOM_INPUT_MODE_STICKY_MS;
-        mode = hasRecentMode ? state.lastZoomInputMode : 'wheel';
-    }
-
-    return commitMode(mode);
-}
-
-function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
-    const delta = Number(rawDelta);
-    if (!Number.isFinite(delta) || delta === 0) return 1;
-
-    const absDelta = Math.abs(delta);
-    const rateFactor = getCanvasTrackpadZoomRate() * TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER;
-
-    // 与 Chromium 的 pinch->wheel 映射保持一致：scale = exp(-deltaY / 100)
-    // 这里 rawDelta = -deltaY，因此 nativeLogDelta = rawDelta / 100
-    const nativeLogDelta = delta / TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR;
-    // 触控板捏合遵循滚轮曲线与磁矩
-    const curveFactor = getCanvasZoomSpeedFactor(_displayZoom);
-    const nextDisplayZoomNoMagnet = _displayZoom * Math.exp(nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER);
-    const magnet = getCanvasZoomMagnetEffect(_displayZoom, nextDisplayZoomNoMagnet);
-    const magnetFactor = magnet.factor;
-    let targetLogDelta = nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER * curveFactor * magnetFactor;
-
-    const prevLogDelta = Number.isFinite(CanvasState.touchpadState.lastZoomDelta)
-        ? CanvasState.touchpadState.lastZoomDelta
-        : 0;
-
-    // 方向切换时快速衰减残留，避免“反向捏合被黏住”的阻尼感
-    const hasPrev = Math.abs(prevLogDelta) > 0.000001;
-    const hasTarget = Math.abs(targetLogDelta) > 0.000001;
-    const directionFlip = hasPrev && hasTarget && ((prevLogDelta > 0) !== (targetLogDelta > 0));
-    const carriedPrev = directionFlip ? (prevLogDelta * 0.22) : prevLogDelta;
-
-    const alphaBase = Math.max(
-        TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN,
-        Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, 0.36 + absDelta / 26)
-    );
-    const alpha = directionFlip
-        ? Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, alphaBase + 0.12)
-        : alphaBase;
-
-    let smoothedLogDelta = hasPrev
-        ? carriedPrev + (targetLogDelta - carriedPrev) * alpha
-        : targetLogDelta;
-
-    // 手势趋近停止时快速贴近目标，避免尾巴拖拽造成“粘手”
-    if (Math.abs(targetLogDelta) < 0.0012 && Math.abs(smoothedLogDelta) < 0.0022) {
-        smoothedLogDelta = targetLogDelta;
-    }
-
-    CanvasState.touchpadState.lastZoomDelta = smoothedLogDelta;
-    if (CanvasState.touchpadState.zoomDeltaTimer) {
-        clearTimeout(CanvasState.touchpadState.zoomDeltaTimer);
-    }
-    CanvasState.touchpadState.zoomDeltaTimer = setTimeout(() => {
-        CanvasState.touchpadState.lastZoomDelta = 0;
-        CanvasState.touchpadState.zoomDeltaTimer = null;
-    }, TRACKPAD_ZOOM_IDLE_RESET_MS);
-
-    let zoomFactor = Math.exp(smoothedLogDelta);
-    let stepCap = Math.max(
-        TRACKPAD_ZOOM_STEP_CAP_MIN,
-        Math.min(TRACKPAD_ZOOM_STEP_CAP_MAX, 1.022 + Math.min(24, absDelta) / 260)
-    );
-
-    if (zoomFactor > stepCap) zoomFactor = stepCap;
-    if (zoomFactor < (1 / stepCap)) zoomFactor = 1 / stepCap;
-    return zoomFactor;
-}
-
-function getCanvasLowDetailDisplayZoomThreshold() {
-    // 动态阈值：从 localStorage 读取，默认 70% 启用低细节模式
-    try {
-        const saved = localStorage.getItem('canvasZoomThresholds');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed && Number.isFinite(parsed.enterLowDetail)) {
-                return parsed.enterLowDetail;
-            }
-        }
-    } catch (_) { }
-    return 0.70;
-}
-
-function getCanvasLowDetailPrewarmDisplayZoomThreshold() {
-    // 预热阈值不再作为用户独立参数暴露，固定由“低细节切换阈值”向下派生。
-    return __deriveCanvasLowDetailPrewarmThreshold(getCanvasLowDetailDisplayZoomThreshold());
-}
-
-/**
- * 获取安全区阈值 - 第一优先级
- * 当缩放 >= 此阈值时，绝对不进入低细节模式
- * 默认 70%
- */
-/**
- * 获取缩放下限配置
- * 默认 10%
- */
-function getCanvasMinZoomLimit() {
-    try {
-        const saved = localStorage.getItem('canvasMinZoomLimit');
-        if (saved) {
-            const val = parseFloat(saved);
-            if (Number.isFinite(val)) {
-                const normalized = Math.min(100, Math.max(1, val));
-                if (normalized !== val) {
-                    saveSharedState('canvasMinZoomLimit', String(normalized), { asJSON: false });
-                }
-                return normalized;
-            }
-        }
-    } catch (_) { }
-    return 10; // Default 10%
-}
-
-function getCanvasMaxZoomLimit() {
-    try {
-        const saved = localStorage.getItem('canvasMaxZoomLimit');
-        if (saved) {
-            const val = parseFloat(saved);
-            if (Number.isFinite(val)) {
-                const normalized = Math.min(1000, Math.max(100, val));
-                if (normalized !== val) {
-                    saveSharedState('canvasMaxZoomLimit', String(normalized), { asJSON: false });
-                }
-                return normalized;
-            }
-        }
-    } catch (_) { }
-    return 300; // Default 300%
-}
-
-/**
- * 获取安全区阈值 - 第一优先级
- * 当缩放 >= 此阈值时，绝对不进入低细节模式
- * 默认 70%
- */
-function getCanvasSafeZoneThreshold() {
-    try {
-        const saved = localStorage.getItem('canvasSafeZoneSettings');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed && Number.isFinite(parsed.threshold)) {
-                return parsed.threshold;
-            }
-        }
-    } catch (_) { }
-    return 0.70; // 默认 70%
-}
-
-function isCanvasSafeZoneEnabled() {
-    return false;
-}
-
-function isCanvasHugeData() {
-    const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
-    const mdCount = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.length : 0;
-    const edgeCount = Array.isArray(CanvasState.edges) ? CanvasState.edges.length : 0;
-    return tempCount > 180 || (tempCount + mdCount + edgeCount) > 420;
-}
-
-/**
- * 递归计算书签项的总数量（包括文件夹内嵌套的所有子书签）
- * 这统计的是"数据量"而非"已渲染DOM数量"，因此包括懒加载未展开的书签
- */
-/**
- * 递归计算书签项的总数量（包括文件夹内嵌套的所有子书签）
- * 这统计的是"数据量"而非"已渲染DOM数量"，因此包括懒加载未展开的书签
- */
-function countBookmarksRecursive(items) {
-    if (!Array.isArray(items)) return 0;
-    let count = 0;
-    for (const item of items) {
-        if (!item) continue;
-        // 每个item都算一个
-        count++;
-        // 递归计算子项（文件夹内部的书签）
-        if (Array.isArray(item.children) && item.children.length > 0) {
-            count += countBookmarksRecursive(item.children);
-        }
-    }
-    return count;
-}
-
-function __countBookmarksAndFoldersRecursive(items, acc) {
-    if (!Array.isArray(items) || !acc) return;
-    for (const item of items) {
-        if (!item) continue;
-
-        const hasChildren = Array.isArray(item.children) && item.children.length > 0;
-        const isBookmark = !!(item.url || item.type === 'bookmark');
-        const isFolder = !isBookmark;
-
-        if (isBookmark) acc.bookmarks++;
-        else if (isFolder) acc.folders++;
-
-        if (hasChildren) {
-            __countBookmarksAndFoldersRecursive(item.children, acc);
-        }
-    }
-}
-
-function __getBookmarkAndFolderStats(items) {
-    const acc = { bookmarks: 0, folders: 0 };
-    __countBookmarksAndFoldersRecursive(items, acc);
-    return acc;
-}
-
-function __getPermanentColumnCountForPerfTotals() {
-    let count = 0;
-    if (document.getElementById('permanentSection')) {
-        count += 1;
-    }
-    try {
-        const copies = __readPermanentSectionCopies() || [];
-        count += copies.filter(c => c && c.id).length;
-    } catch (_) { }
-    return count;
-}
-
-function __getCanvasTotalDataStatsSync() {
-    if (!CanvasState.__perfTotalStats) {
-        CanvasState.__perfTotalStats = {
-            permanentBase: { bookmarks: 0, folders: 0 },
-            permanentFetchedAt: 0,
-            totalColumnCount: 0,
-            totalBookmarkCount: 0,
-            totalFolderCount: 0,
-            _signature: '',
-            _computedAt: 0
-        };
-    }
-    const cache = CanvasState.__perfTotalStats;
-    const now = Date.now();
-
-    const permanentColumnCount = __getPermanentColumnCountForPerfTotals();
-    const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
-    const mdNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [];
-    const mdNodeCount = mdNodes.filter(Boolean).length;
-
-    const signature = `${permanentColumnCount}|${tempCount}|${mdNodes.length}|${CanvasState.tempSectionCounter || 0}|${CanvasState.mdNodeCounter || 0}`;
-    const needsRecompute = (signature !== cache._signature) || ((now - (cache._computedAt || 0)) > 800);
-
-    if (!needsRecompute) return cache;
-
-    // Total columns = permanent (incl copies) + temp + markdown cards/groups.
-    const totalColumnCount = permanentColumnCount + tempCount + mdNodeCount;
-
-    // Total bookmarks/folders:
-    // - Permanent section copies render the same underlying tree multiple times, so totals should
-    //   reflect that (main + copies). We compute the permanent tree stats ONCE, then multiply by
-    //   the number of permanent columns.
-    // - Temporary sections are stored as independent canvas data, so count all of them.
-    const permBase = cache.permanentBase || { bookmarks: 0, folders: 0 };
-    const permBookmarks = (permBase.bookmarks || 0) * permanentColumnCount;
-    const permFolders = (permBase.folders || 0) * permanentColumnCount;
-
-    let tempBookmarks = 0;
-    let tempFolders = 0;
-    try {
-        (CanvasState.tempSections || []).forEach((section) => {
-            if (!section || !Array.isArray(section.items)) return;
-            const s = __getBookmarkAndFolderStats(section.items);
-            tempBookmarks += (s.bookmarks || 0);
-            tempFolders += (s.folders || 0);
-        });
-    } catch (_) { }
-
-    cache.totalColumnCount = totalColumnCount;
-    cache.totalBookmarkCount = permBookmarks + tempBookmarks;
-    cache.totalFolderCount = permFolders + tempFolders;
-    cache._signature = signature;
-    cache._computedAt = now;
-    return cache;
-}
-
-async function __refreshCanvasPermanentBaseStatsForPerfTotals() {
-    if (!CanvasState.__perfTotalStats) __getCanvasTotalDataStatsSync();
-    const cache = CanvasState.__perfTotalStats;
-
-    const now = Date.now();
-    if (cache.permanentFetchedAt && (now - cache.permanentFetchedAt) < 30000) return;
-
-    try {
-        const tree = await __readPermanentTreeSnapshotFromBcs();
-        const root = Array.isArray(tree) ? tree[0] : null;
-        const items = (root && Array.isArray(root.children)) ? root.children : tree;
-        const stats = __getBookmarkAndFolderStats(items);
-        cache.permanentBase = stats;
-        cache.permanentFetchedAt = Date.now();
-        cache._signature = '';
-
-        // If modal is open, refresh numbers immediately
-        try { updateCanvasPerfSettingsUI(); } catch (_) { }
-    } catch (_) { }
-}
-
-/**
- * 统计当前栏目在 DOM 中实际渲染的节点数量（可视书签 + 文件夹）
- * 排除已折叠的内容
- * @returns {{ bookmarks: number, folders: number }}
- */
-function countVisibleDOMNodes(sectionId) {
-    const secEl = (typeof sectionId === 'string')
-        ? document.getElementById(sectionId)
-        : sectionId;
-    if (!secEl || !secEl.querySelectorAll) return { bookmarks: 0, folders: 0 };
-
-    // 尝试查询 .tree-item 并通过 data-node-type 区分
-    const items = secEl.querySelectorAll('.tree-item');
-    if (items.length > 0) {
-        let b = 0, f = 0;
-        items.forEach(item => {
-            // 只统计可见的（如果隐藏在折叠父级下，通常不渲染或 display:none）
-            if (item.dataset.nodeType === 'folder') f++;
-            else b++;
-        });
-        return { bookmarks: b, folders: f };
-    }
-
-    // Fallback: 尝试查询 class
-    const b = secEl.querySelectorAll('.bookmark-node, .tree-bookmark').length;
-    const f = secEl.querySelectorAll('.folder-node, .tree-folder').length;
-
-    // Fallback 2: 如果都找不到，默认全是书签混合
-    if (b === 0 && f === 0) {
-        const aggr = secEl.querySelectorAll('li').length;
-        return { bookmarks: aggr, folders: 0 };
-    }
-
-    return { bookmarks: b, folders: f };
-}
-
-
-
-/**
- * 计算当前视界窗口内的数据统计
- * @returns {{ visibleSectionCount: number, totalBookmarkCount: number, avgBookmarksPerSection: number }}
- */
-function getCanvasViewportDataStats() {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return {
-        visibleSectionCount: 0,
-        loadedSectionCount: 0,
-        totalVisibleNodeCount: 0,
-        visibleBookmarkCount: 0,
-        visibleFolderCount: 0,
-        loadedBookmarkCount: 0,
-        loadedFolderCount: 0,
-        avgBookmarksPerSection: 0
-    };
-
-    // 如果处于低细节模式（内容被简化/隐藏），则认为可视书签/文件夹数为 0
-    const isLowDetail = CanvasState.lowDetailEnabled && CanvasState.lowDetailActive;
-    if (isLowDetail) {
-        // 我们继续计算 visibleSectionCount，但不计算书签内容
-        // 所以不需要在这里立刻 return，而是下面的循环里跳过 countVisibleDOMNodes
-    }
-
-    const rect = getCachedCanvasWorkspaceRect(workspace, true);
-    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-    const panX = CanvasState.panOffsetX || 0;
-    const panY = CanvasState.panOffsetY || 0;
-
-    // 视口边界（canvas坐标系）
-    const viewportLeft = (0 - panX) / zoom;
-    const viewportRight = (rect.width - panX) / zoom;
-    const viewportTop = (0 - panY) / zoom;
-    const viewportBottom = (rect.height - panY) / zoom;
-
-    let visibleSectionCount = 0;
-    let totalVisibleNodeCount = 0;
-    let visibleBookmarkCount = 0;
-    let visibleFolderCount = 0;
-    let loadedSectionCount = 0; // count of sections with DOM loaded
-    // 已加载书签/文件夹：统计所有 DOM 实际加载的栏目中的节点（不限于视口）
-    let loadedBookmarkCount = 0;
-    let loadedFolderCount = 0;
-
-    for (const section of (CanvasState.tempSections || [])) {
-        if (!section || !section.id) continue;
-        const baseSize = getTempSectionBaseSize(section);
-        const x = Number(section.x);
-        const y = Number(section.y);
-        const w = Number(section.width || baseSize.width);
-        const h = Number(section.height || baseSize.height);
-        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
-
-        // 严格检查 DOM 是否存在（不限于视口范围——用于"已加载"计数）
-        const secEl = document.getElementById(section.id);
-        const isContentUnloaded = CanvasState.unloadedTempSectionTrees.has(section.id);
-        const isDomLoaded = !!(secEl && !isContentUnloaded);
-
-        // 统计已加载 DOM 节点（只查询一次，视口内的可视计数复用同一结果）
-        let counts = null;
-        if (isDomLoaded && !isLowDetail) {
-            counts = countVisibleDOMNodes(section.id);
-            loadedBookmarkCount += counts.bookmarks;
-            loadedFolderCount += counts.folders;
-        }
-
-        // 检测是否在视口内（有任意交集即算可见）
-        const inViewport = !(
-            x + w < viewportLeft ||
-            x > viewportRight ||
-            y + h < viewportTop ||
-            y > viewportBottom
-        );
-
-        if (inViewport) {
-            visibleSectionCount++;
-
-            if (isDomLoaded) {
-                loadedSectionCount++;
-
-                if (counts) {
-                    // 复用已计算的 counts，避免重复 DOM 查询
-                    visibleBookmarkCount += counts.bookmarks;
-                    visibleFolderCount += counts.folders;
-                    totalVisibleNodeCount += (counts.bookmarks + counts.folders);
-                }
-            }
-        }
-    }
-
-    // 永久书签栏目（含副本）也算
-    try {
-        const permSections = Array.from(document.querySelectorAll('.permanent-bookmark-section'));
-        permSections.forEach((permEl) => {
-            if (!permEl) return;
-            const x = parseFloat(permEl.style.left) || 0;
-            const y = parseFloat(permEl.style.top) || 0;
-            const w = parseFloat(permEl.style.width) || permEl.offsetWidth || 0;
-            const h = parseFloat(permEl.style.height) || permEl.offsetHeight || 0;
-            if (w <= 0 || h <= 0) return;
-
-            // 永久栏目 DOM 始终加载，只查询一次复用结果
-            let counts = null;
-            if (!isLowDetail) {
-                counts = countVisibleDOMNodes(permEl);
-                loadedBookmarkCount += counts.bookmarks;
-                loadedFolderCount += counts.folders;
-            }
-
-            const isPermVisible = !(
-                x + w < viewportLeft ||
-                x > viewportRight ||
-                y + h < viewportTop ||
-                y > viewportBottom
-            );
-            if (!isPermVisible) return;
-
-            visibleSectionCount++;
-            loadedSectionCount++;
-            if (counts) {
-                // 复用已计算的 counts
-                visibleBookmarkCount += counts.bookmarks;
-                visibleFolderCount += counts.folders;
-                totalVisibleNodeCount += (counts.bookmarks + counts.folders);
-            }
-        });
-    } catch (_) { }
-
-    // 空白栏目和卡片组也计入“可视栏目数”。
-    try {
-        const mdBaseSize = getBlankNodeDefaultSize();
-        for (const node of (CanvasState.mdNodes || [])) {
-            if (!node || !node.id) continue;
-            const x = Number(node.x);
-            const y = Number(node.y);
-            const w = Number(node.width || mdBaseSize.width);
-            const h = Number(node.height || mdBaseSize.height);
-            if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
-
-            const inViewport = !(
-                x + w < viewportLeft ||
-                x > viewportRight ||
-                y + h < viewportTop ||
-                y > viewportBottom
-            );
-            if (!inViewport) continue;
-
-            visibleSectionCount++;
-        }
-    } catch (_) { }
-
-    // 避免除以0
-    const avgBookmarksPerSection = loadedSectionCount > 0
-        ? Math.round(totalVisibleNodeCount / loadedSectionCount)
-        : 0;
-
-    // 同步更新缓存，避免运行时 __isViewportLowDetailEffective() 发起额外 DOM 查询
-    CanvasState._loadedNodeCount = loadedBookmarkCount + loadedFolderCount;
-    CanvasState._loadedNodeCountAt = Date.now();
-
-    return {
-        visibleSectionCount,
-        loadedSectionCount,
-        totalVisibleNodeCount,
-        visibleBookmarkCount,
-        visibleFolderCount,
-        loadedBookmarkCount,
-        loadedFolderCount,
-        avgBookmarksPerSection
-    };
-}
-
-/**
- * 更新数据密集模式状态
- * 使用节流机制避免高频计算
- * @param {boolean} force - 是否强制更新（跳过节流）
- * @param {Object} options - 可选项
- * @param {boolean} options.useCached - 是否只使用缓存状态
- * @returns {boolean} 是否处于数据密集模式
- */
-function updateDataIntensiveMode(force = false, options = {}) {
-    const dim = CanvasState.dataIntensiveMode;
-    if (!dim) return false;
-    dim.active = false;
-    dim.totalAlwaysActive = false;
-    return false;
-}
-
-/**
- * 检查是否应该即时触发低细节模式
- * 在数据密集模式下，缩放开始的瞬间就进入低细节
- */
-function shouldInstantLowDetailOnZoom() {
-    // 检查数据密集模式状态
-    const dim = CanvasState.dataIntensiveMode;
-    if (!dim) return false;
-
-    // [Highest Priority] 安全区：缩放 >= 阈值时，绝对不进入低细节模式
-    const displayZoom = getCanvasDisplayZoom();
-    if (isCanvasSafeZoneEnabled()) {
-        const safeZoneThreshold = getCanvasSafeZoneThreshold();
-        if (displayZoom >= safeZoneThreshold) {
-            return false;
-        }
-    }
-
-    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
-    const safetyFloor = 0.15;
-    if (!(displayZoom <= enterThreshold || displayZoom < safetyFloor)) {
-        return false;
-    }
-
-    // 只有在数据量过大(active) 且用户按住 Ctrl 键缩放时，才提前进入低细节；
-    // Ctrl 不能越过用户设置的低细节阈值，否则阈值~安全区之间会反复闪成色块。
-    const isCtrl = !!(CanvasState.isCtrlPressed || (CanvasState.dragState && CanvasState.dragState.meta && CanvasState.dragState.meta.ctrlOverlay));
-
-    // 使用缓存的active状态（避免在缩放热路径上做重计算）
-    return dim.active && isCtrl;
-}
-
-function isCanvasVirtualizationEnabled() {
-    const mode = CanvasState.virtualizationEnabled;
-    if (mode === 'off') return false;
-    if (mode === 'on') return true;
-    // 'auto': 保留原有自动判断逻辑（栏目数阈值）
-
-    try {
-        const totals = __getCanvasTotalDataStatsSync();
-        const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && isFinite(CanvasState.virtualizationMinColumns))
-            ? CanvasState.virtualizationMinColumns
-            : 25;
-        if (totals && totals.totalColumnCount < minCols) {
-            return false;
-        }
-    } catch (_) {}
-
-    return true;
-}
-
-function getCanvasVirtualizationBudget() {
-    const displayZoom = getCanvasDisplayZoom();
-    const huge = isCanvasHugeData();
-    const isLowDetail = !!CanvasState.lowDetailActive;
-
-    // 低细节：只显示叠层文字，不加载树 DOM
-    if (isLowDetail) {
-        return { marginPx: 240, maxLoaded: 0 };
-    }
-
-    // [数据密集模式] 严格控制加载预算：只加载视界窗口内的栏目
-    // 这样放大时只加载当前看得到的内容，其他保持低细节/未加载状态
-    // [Fix] 预算控制仅依赖"数据量是否过大"，而不依赖"是否按了Ctrl"(shouldInstantLowDetailOnZoom)
-    // 即使不按Ctrl进入低细节模式，只要数据量大，就必须限制DOM加载数量，否则会卡顿
-    const dataIntensive = CanvasState.dataIntensiveMode && CanvasState.dataIntensiveMode.active;
-    if (dataIntensive) {
-        const z = Math.max(0.01, Math.min(2, displayZoom));
-        let maxLoaded = 6;  // 更严格的预算
-        let marginPx = 60;  // 更小的margin，严格限制在视界窗口内
-
-        if (z < 0.50) {
-            maxLoaded = 3;
-            marginPx = 30;
-        } else if (z < 0.80) {
-            maxLoaded = 5;
-            marginPx = 50;
-        } else if (z < 1.20) {
-            maxLoaded = 8;
-            marginPx = 80;
-        } else {
-            maxLoaded = 12;
-            marginPx = 120;
-        }
-
-        return { marginPx, maxLoaded };
-    }
-
-    // 统一自适应预算策略（非数据密集模式）
-    const z = Math.max(0.01, Math.min(2, displayZoom));
-    let maxLoaded = 10;
-    let marginPx = 220;
-
-    if (z < 0.40) {
-        maxLoaded = huge ? 5 : 7;
-        marginPx = 180;
-    } else if (z < 0.70) {
-        maxLoaded = huge ? 8 : 12;
-        marginPx = 240;
-    } else if (z < 1.00) {
-        maxLoaded = huge ? 12 : 18;
-        marginPx = 360;
-    } else if (z < 1.40) {
-        maxLoaded = huge ? 18 : 28;
-        marginPx = 520;
-    } else {
-        maxLoaded = huge ? 24 : 36;
-        marginPx = 680;
-    }
-
-    return { marginPx, maxLoaded };
-}
-
-let canvasVirtualizationTimer = null;
-let canvasVirtualizationPending = false;
-let lastCanvasVirtualizationRunAt = 0;
-let canvasVirtualizationUnloadTimer = null;
-let canvasLowDetailDomPruneTimer = null;
-let canvasLowDetailDomRestoreTimer = null;
-let canvasLowDetailSafeZoneAuditTimer = null;
-let canvasZoomPerformanceModeRestoreTimer = null;
-const CANVAS_LOW_DETAIL_DOM_PRUNE_DEBOUNCE_MS = 80;
-const CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS = 360;
-const CANVAS_LOW_DETAIL_DOM_PRUNE_GRACE_MS = 12000;
-const CANVAS_LOW_DETAIL_DOM_PRUNE_BUSY_RETRY_MS = 1000;
-const CANVAS_LOW_DETAIL_DOM_RESTORE_GRACE_MS = 520;
-const CANVAS_LOW_DETAIL_DOM_RESTORE_BUSY_RETRY_MS = 180;
-const CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS = 1200;
-const CANVAS_ZOOM_PERFORMANCE_MODE_RESTORE_MS = 140;
-const CANVAS_ZOOM_PERFORMANCE_MODE_TOTAL_CARD_THRESHOLD = 80;
-const CANVAS_ZOOM_PERFORMANCE_MODE_VISIBLE_CARD_THRESHOLD = 14;
-const CANVAS_ZOOM_PERFORMANCE_MODE_MIN_DISPLAY_THRESHOLD = 0.45;
-
-function __getCanvasCardCountForInteractionPerf() {
-    const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
-    const mdCount = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(Boolean).length : 0;
-    if (tempCount + mdCount >= CANVAS_ZOOM_PERFORMANCE_MODE_TOTAL_CARD_THRESHOLD) {
-        return tempCount + mdCount;
-    }
-    let permanentCount = 0;
-    try {
-        permanentCount = document.querySelectorAll('.permanent-bookmark-section').length;
-    } catch (_) {
-        permanentCount = document.getElementById('permanentSection') ? 1 : 0;
-    }
-    return tempCount + mdCount + permanentCount;
-}
-
-function __isCanvasHotInteractionActive(workspace = null) {
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    return !!(ws && (
-        ws.classList.contains('is-zooming') ||
-        ws.classList.contains('is-scrolling') ||
-        CanvasState.isPanning ||
-        (CanvasState.inertiaState && CanvasState.inertiaState.isActive) ||
-        (CanvasState.dragState && CanvasState.dragState.isDragging)
-    ));
-}
-
-function __getCanvasZoomPerformanceDisplayThreshold() {
-    const enter = getCanvasLowDetailDisplayZoomThreshold();
-    const safe = isCanvasSafeZoneEnabled() ? getCanvasSafeZoneThreshold() : 1;
-    const safeBound = Math.max(0.25, safe - 0.08);
-    const preferred = Math.max(CANVAS_ZOOM_PERFORMANCE_MODE_MIN_DISPLAY_THRESHOLD, enter + 0.12);
-    return Math.min(preferred, safeBound);
-}
-
-function shouldUseCanvasZoomPerformanceMode() {
-    if (__isCanvasNodeMaximizedActive()) return false;
-    const displayZoom = getCanvasDisplayZoom();
-    if (displayZoom > __getCanvasZoomPerformanceDisplayThreshold()) return false;
-
-    const dim = CanvasState.dataIntensiveMode || {};
-    const stats = dim.cachedStats || {};
-    const visibleCards = Number(stats.visibleSectionCount) || 0;
-    const totalCards = __getCanvasCardCountForInteractionPerf();
-
-    return !!(
-        CanvasState.lowDetailActive ||
-        dim.active ||
-        isCanvasHugeData() ||
-        visibleCards >= CANVAS_ZOOM_PERFORMANCE_MODE_VISIBLE_CARD_THRESHOLD ||
-        totalCards >= CANVAS_ZOOM_PERFORMANCE_MODE_TOTAL_CARD_THRESHOLD
-    );
-}
-
-function setCanvasZoomPerformanceModeActive(active) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-    const next = !!active;
-    if (canvasZoomPerformanceModeRestoreTimer) {
-        clearTimeout(canvasZoomPerformanceModeRestoreTimer);
-        canvasZoomPerformanceModeRestoreTimer = null;
-    }
-    if (CanvasState.zoomPerformanceModeActive === next &&
-        workspace.classList.contains('canvas-zoom-performance') === next) {
-        return;
-    }
-    CanvasState.zoomPerformanceModeActive = next;
-    if (next) {
-        try { __clearCanvasTreeFadeInClasses(workspace); } catch (_) { }
-    }
-    workspace.classList.toggle('canvas-zoom-performance', next);
-}
-
-function updateCanvasZoomPerformanceMode(options = {}) {
-    const opts = (options && typeof options === 'object') ? options : {};
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    if (opts.forceOff) {
-        setCanvasZoomPerformanceModeActive(false);
-        return;
-    }
-
-    const shouldActive = __isCanvasHotInteractionActive(workspace) && shouldUseCanvasZoomPerformanceMode();
-    if (shouldActive) {
-        setCanvasZoomPerformanceModeActive(true);
-        return;
-    }
-
-    if (!CanvasState.zoomPerformanceModeActive) return;
-
-    const delay = opts.deferOff === false
-        ? 0
-        : CANVAS_ZOOM_PERFORMANCE_MODE_RESTORE_MS;
-    if (delay <= 0) {
-        setCanvasZoomPerformanceModeActive(false);
-        return;
-    }
-    if (canvasZoomPerformanceModeRestoreTimer) return;
-    canvasZoomPerformanceModeRestoreTimer = setTimeout(() => {
-        canvasZoomPerformanceModeRestoreTimer = null;
-        const ws = document.getElementById('canvasWorkspace');
-        if (__isCanvasHotInteractionActive(ws) && shouldUseCanvasZoomPerformanceMode()) {
-            updateCanvasZoomPerformanceMode({ deferOff: true });
-            return;
-        }
-        setCanvasZoomPerformanceModeActive(false);
-    }, delay);
-}
-
-function __isCanvasInteractionBusyForDomRestore() {
-    const ws = document.getElementById('canvasWorkspace');
-    return !!(ws && (
-        ws.classList.contains('is-zooming') ||
-        ws.classList.contains('is-scrolling') ||
-        CanvasState.isPanning ||
-        (CanvasState.dragState && CanvasState.dragState.isDragging)
-    ));
-}
-
-function __getPermanentSectionTreeUnloadKey(sectionEl) {
-    try { return __getPermanentSectionCanvasNodeId(sectionEl); } catch (_) { }
-    if (!sectionEl) return '';
-    return sectionEl.id || (sectionEl.dataset && sectionEl.dataset.permanentSectionCopyId) || '';
-}
-
-function __getPermanentSectionTreeTargets() {
-    try {
-        const scope = document.getElementById('canvasContent') || document;
-        return Array.from(scope.querySelectorAll('.permanent-bookmark-section'));
-    } catch (_) {
-        return [];
-    }
-}
-
-function __unloadPermanentSectionTreeInPlace(sectionEl) {
-    if (!sectionEl || !sectionEl.querySelector) return false;
-    if (sectionEl.classList && sectionEl.classList.contains('canvas-node-maximized')) return false;
-
-    const tree = sectionEl.querySelector('.bookmark-tree');
-    if (!tree) return false;
-
-    const alreadyUnloaded = (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
-        (sectionEl.classList && sectionEl.classList.contains('permanent-tree-unloaded'));
-    if (alreadyUnloaded) return false;
-
-    try { __flushPermanentSectionViewState(sectionEl); } catch (_) { }
-
-    try { tree.replaceChildren(); } catch (_) { tree.innerHTML = ''; }
-    try { tree.style.display = 'none'; } catch (_) { }
-    try { tree.dataset.contentHidden = 'true'; } catch (_) { }
-    try { tree.dataset.contentUnloaded = 'true'; } catch (_) { }
-
-    const body = sectionEl.querySelector('.permanent-section-body');
-    if (body && body.dataset) {
-        try { body.dataset.contentHidden = 'true'; } catch (_) { }
-        try { body.dataset.contentUnloaded = 'true'; } catch (_) { }
-    }
-
-    try { sectionEl.classList.add('permanent-tree-unloaded'); } catch (_) { }
-    const key = __getPermanentSectionTreeUnloadKey(sectionEl);
-    if (key) {
-        try { CanvasState.unloadedPermanentSectionTrees.add(key); } catch (_) { }
-    }
-    return true;
-}
-
-function __unloadPermanentSectionTreesForLowDetail() {
-    let changed = false;
-    __getPermanentSectionTreeTargets().forEach((sectionEl) => {
-        try {
-            if (__unloadPermanentSectionTreeInPlace(sectionEl)) changed = true;
-        } catch (_) { }
-    });
-    return changed;
-}
-
-function __ensurePermanentSectionTreeLoadedInPlace(sectionEl) {
-    if (!sectionEl || !sectionEl.querySelector) return false;
-    const tree = sectionEl.querySelector('.bookmark-tree');
-    if (!tree) return false;
-
-    const isUnloaded = (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
-        (sectionEl.classList && sectionEl.classList.contains('permanent-tree-unloaded'));
-    if (!isUnloaded) return false;
-
-    try { tree.style.display = ''; } catch (_) { }
-    try { tree.dataset.contentHidden = 'false'; } catch (_) { }
-    try { tree.dataset.contentUnloaded = 'false'; } catch (_) { }
-
-    const body = sectionEl.querySelector('.permanent-section-body');
-    if (body && body.dataset) {
-        try { body.dataset.contentHidden = 'false'; } catch (_) { }
-        try { body.dataset.contentUnloaded = 'false'; } catch (_) { }
-    }
-
-    try { sectionEl.classList.remove('permanent-tree-unloaded'); } catch (_) { }
-    const key = __getPermanentSectionTreeUnloadKey(sectionEl);
-    if (key) {
-        try { CanvasState.unloadedPermanentSectionTrees.delete(key); } catch (_) { }
-    }
-
-    let rendered = false;
-    try {
-        if (tree && typeof window.__renderPermanentTreeIntoTree === 'function') {
-            rendered = !!window.__renderPermanentTreeIntoTree(tree, { force: true, reason: 'viewport-lazy-load' });
-        }
-    } catch (_) { }
-    if (!rendered) {
-        try {
-            if (typeof window.__renderPermanentTreeSharedViews === 'function') {
-                rendered = !!window.__renderPermanentTreeSharedViews({
-                    includePrimary: true,
-                    includeCopies: true,
-                    force: true,
-                    reason: 'viewport-lazy-load'
-                });
-            }
-        } catch (_) { }
-    }
-    return rendered;
-}
-
-function __restorePermanentSectionTreesAfterLowDetail() {
-    const targets = __getPermanentSectionTreeTargets().filter((sectionEl) => {
-        const tree = sectionEl && sectionEl.querySelector ? sectionEl.querySelector('.bookmark-tree') : null;
-        return !!(tree && (
-            (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
-            (sectionEl.classList && sectionEl.classList.contains('permanent-tree-unloaded'))
-        ));
-    });
-    if (!targets.length) return false;
-
-    targets.forEach((sectionEl) => {
-        try {
-            const tree = sectionEl.querySelector('.bookmark-tree');
-            if (tree) {
-                tree.style.display = '';
-                tree.dataset.contentHidden = 'false';
-                tree.dataset.contentUnloaded = 'false';
-            }
-            const body = sectionEl.querySelector('.permanent-section-body');
-            if (body && body.dataset) {
-                body.dataset.contentHidden = 'false';
-                body.dataset.contentUnloaded = 'false';
-            }
-        } catch (_) { }
-    });
-
-    let rendered = false;
-    try {
-        if (typeof window.__renderPermanentTreeSharedViews === 'function') {
-            rendered = !!window.__renderPermanentTreeSharedViews({
-                includePrimary: true,
-                includeCopies: true,
-                force: true,
-                reason: 'low-detail-exit'
-            });
-        }
-    } catch (_) { }
-
-    if (!rendered) {
-        targets.forEach((sectionEl) => {
-            try {
-                const tree = sectionEl.querySelector('.bookmark-tree');
-                if (tree && typeof window.__renderPermanentTreeIntoTree === 'function') {
-                    if (window.__renderPermanentTreeIntoTree(tree, { force: true, reason: 'low-detail-exit' })) {
-                        rendered = true;
-                    }
-                }
-            } catch (_) { }
-        });
-    }
-
-    targets.forEach((sectionEl) => {
-        try {
-            sectionEl.classList.remove('permanent-tree-unloaded');
-            const key = __getPermanentSectionTreeUnloadKey(sectionEl);
-            if (key) CanvasState.unloadedPermanentSectionTrees.delete(key);
-        } catch (_) { }
-    });
-
-    return rendered;
-}
-
-function __scheduleCanvasLowDetailDomPrune(delayMs = CANVAS_LOW_DETAIL_DOM_PRUNE_GRACE_MS, options = {}) {
-    if (canvasLowDetailDomRestoreTimer) {
-        clearTimeout(canvasLowDetailDomRestoreTimer);
-        canvasLowDetailDomRestoreTimer = null;
-    }
-    if (CanvasState.lowDetailDomPruned && CanvasState.lowDetailActive) return;
-    if (canvasLowDetailDomPruneTimer) {
-        clearTimeout(canvasLowDetailDomPruneTimer);
-        canvasLowDetailDomPruneTimer = null;
-    }
-    const now = Date.now();
-    const sinceLast = now - (Number(CanvasState.lowDetailDomLastPruneAt || 0) || 0);
-    const throttleDelay = sinceLast >= CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS
-        ? 0
-        : (CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS - sinceLast);
-    const opts = (options && typeof options === 'object') ? options : {};
-    const minDelay = opts.allowShortDelay ? 0 : CANVAS_LOW_DETAIL_DOM_PRUNE_GRACE_MS;
-    const requestedDelay = Math.max(minDelay, Number(delayMs) || 0);
-    const delay = Math.max(requestedDelay, CanvasState.lowDetailDomPruned ? throttleDelay : Math.min(throttleDelay, CANVAS_LOW_DETAIL_DOM_PRUNE_DEBOUNCE_MS));
-    const generation = (Number(CanvasState.lowDetailDomPruneGeneration || 0) || 0) + 1;
-    CanvasState.lowDetailDomPruneGeneration = generation;
-    canvasLowDetailDomPruneTimer = setTimeout(() => {
-        canvasLowDetailDomPruneTimer = null;
-        if (!CanvasState.lowDetailActive) return;
-        if (CanvasState.lowDetailDomPruneGeneration !== generation) return;
-        if (__isCanvasInteractionBusyForDomRestore()) {
-            __scheduleCanvasLowDetailDomPrune(CANVAS_LOW_DETAIL_DOM_PRUNE_BUSY_RETRY_MS, { allowShortDelay: true });
-            return;
-        }
-        try { __unloadPermanentSectionTreesForLowDetail(); } catch (_) { }
-        if (isCanvasVirtualizationEnabled()) {
-            try { runCanvasVirtualizationUpdate({ force: true, doLoad: false, doUnload: true, lowDetailPrune: true }); } catch (_) { }
-        } else {
-            try { startCanvasLowDetailUnloadJob(); } catch (_) { }
-        }
-        CanvasState.lowDetailDomPruned = true;
-        CanvasState.lowDetailDomLastPruneAt = Date.now();
-    }, delay);
-}
-
-function __scheduleCanvasLowDetailDomRestore(delayMs = CANVAS_LOW_DETAIL_DOM_RESTORE_GRACE_MS) {
-    if (canvasLowDetailDomPruneTimer) {
-        clearTimeout(canvasLowDetailDomPruneTimer);
-        canvasLowDetailDomPruneTimer = null;
-    }
-    const hasUnloadedTemp = CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.size > 0;
-    const hasUnloadedPerm = CanvasState.unloadedPermanentSectionTrees && CanvasState.unloadedPermanentSectionTrees.size > 0;
-    if (!CanvasState.lowDetailDomPruned && !hasUnloadedTemp && !hasUnloadedPerm) {
-        return;
-    }
-    if (canvasLowDetailDomRestoreTimer) {
-        clearTimeout(canvasLowDetailDomRestoreTimer);
-        canvasLowDetailDomRestoreTimer = null;
-    }
-    canvasLowDetailDomRestoreTimer = setTimeout(() => {
-        canvasLowDetailDomRestoreTimer = null;
-        if (CanvasState.lowDetailActive) return;
-        if (__isCanvasInteractionBusyForDomRestore()) {
-            __scheduleCanvasLowDetailDomRestore(CANVAS_LOW_DETAIL_DOM_RESTORE_BUSY_RETRY_MS);
-            return;
-        }
-        try { __restorePermanentSectionTreesAfterLowDetail(); } catch (_) { }
-        if (!isCanvasVirtualizationEnabled()) {
-            try { __restoreAllVirtualisedNodes(); } catch (_) { }
-        }
-        CanvasState.lowDetailDomPruned = false;
-        CanvasState.lowDetailDomLastRestoreAt = Date.now();
-        try { scheduleCanvasVirtualizationUpdate(0); } catch (_) { }
-    }, Math.max(0, Number(delayMs) || 0));
-}
-
-function __updateNodeOffScreenState(id, isOffScreen) {
-    if (!CanvasState.offScreenNodesTime) {
-        CanvasState.offScreenNodesTime = new Map();
-    }
-    if (isOffScreen) {
-        if (!CanvasState.offScreenNodesTime.has(id)) {
-            CanvasState.offScreenNodesTime.set(id, Date.now());
-        }
-    } else {
-        CanvasState.offScreenNodesTime.delete(id);
-    }
-}
-
-/**
- * 轻量级缓存：获取当前 DOM 中已加载的书签+文件夹节点总数
- * 使用 3 秒 TTL 缓存避免频繁 DOM 查询
- */
-function __getLoadedNodeCountFast() {
-    try {
-        const totals = __getCanvasTotalDataStatsSync();
-        return (totals.totalBookmarkCount || 0) + (totals.totalFolderCount || 0);
-    } catch (_) {
-        return 0;
-    }
-}
-
-/**
- * 判断视野外低细节模式是否在运行时实际生效：
- * - 用户开关必须打开
- * - 已加载节点数（书签+文件夹）必须 >= 自动触发阈值
- */
-function __isViewportLowDetailEffective() {
-    if (CanvasState.lowDetailEnabled === false) return false;
-
-    const mode = CanvasState.viewportLowDetailEnabled;
-    if (mode === 'off') return false;
-    if (mode === 'on') return true;
-    // 'auto': 保留原有自动判断逻辑
-
-    const minNodes = (typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' &&
-                      Number.isFinite(CanvasState.viewportLowDetailMinLoadedNodes))
-        ? CanvasState.viewportLowDetailMinLoadedNodes
-        : 100;
-
-    return __getLoadedNodeCountFast() >= minNodes;
-}
-
-function __shouldNodeBeLowDetail(id, defaultIsLowDetail) {
-    if (!defaultIsLowDetail) {
-        return false;
-    }
-    if (CanvasState.lowDetailActive) {
-        return true;
-    }
-    const delayS = CanvasState.viewportLowDetailDelayS;
-    if (typeof delayS !== 'number' || delayS <= 0) {
-        return true;
-    }
-    const offScreenTime = CanvasState.offScreenNodesTime ? CanvasState.offScreenNodesTime.get(id) : null;
-    if (offScreenTime === null) {
-        return false;
-    }
-    return (Date.now() - offScreenTime) >= (delayS * 1000);
-}
-
-function __shouldNodeBeUnloaded(id) {
-    const delayS = CanvasState.virtualizationUnloadDelayS;
-    if (typeof delayS !== 'number' || delayS <= 0) {
-        return true;
-    }
-    const offScreenTime = CanvasState.offScreenNodesTime ? CanvasState.offScreenNodesTime.get(id) : null;
-    if (offScreenTime === null) {
-        return false;
-    }
-    return (Date.now() - offScreenTime) >= (delayS * 1000);
-}
-
-let canvasVirtualizationWakeupTimer = null;
-function __scheduleCanvasVirtualizationWakeup(delayMs) {
-    if (canvasVirtualizationWakeupTimer) {
-        clearTimeout(canvasVirtualizationWakeupTimer);
-        canvasVirtualizationWakeupTimer = null;
-    }
-    if (Number.isFinite(delayMs) && delayMs > 0 && delayMs !== Infinity) {
-        canvasVirtualizationWakeupTimer = setTimeout(() => {
-            canvasVirtualizationWakeupTimer = null;
-            try {
-                runCanvasVirtualizationUpdate({ force: true });
-            } catch (_) {}
-        }, delayMs + 50);
-    }
-}
-
-function __updateVirtualizationWakeupScheduler() {
-    let minWakeup = Infinity;
-    const nowTime = Date.now();
-    if (CanvasState.offScreenNodesTime && CanvasState.offScreenNodesTime.size > 0) {
-        const lowDetailDelayMs = (CanvasState.viewportLowDetailDelayS || 5.0) * 1000;
-        const unloadDelayMs = (CanvasState.virtualizationUnloadDelayS || 10.0) * 1000;
-        
-        for (const [id, offScreenTime] of CanvasState.offScreenNodesTime.entries()) {
-            const elapsed = nowTime - offScreenTime;
-            
-            if (__isViewportLowDetailEffective() && elapsed < lowDetailDelayMs) {
-                const rem = lowDetailDelayMs - elapsed;
-                if (rem < minWakeup) minWakeup = rem;
-            }
-            if (isCanvasVirtualizationEnabled() && elapsed < unloadDelayMs) {
-                const rem = unloadDelayMs - elapsed;
-                if (rem < minWakeup) minWakeup = rem;
-            }
-        }
-    }
-    __scheduleCanvasVirtualizationWakeup(minWakeup);
-}
-
-function cancelCanvasVirtualizationUnloadUpdate() {
-    if (!canvasVirtualizationUnloadTimer) return;
-    clearTimeout(canvasVirtualizationUnloadTimer);
-    canvasVirtualizationUnloadTimer = null;
-}
-
-function cancelAllCanvasVirtualizationTimers() {
-    if (canvasVirtualizationUnloadTimer) {
-        clearTimeout(canvasVirtualizationUnloadTimer);
-        canvasVirtualizationUnloadTimer = null;
-    }
-    if (canvasVirtualizationWakeupTimer) {
-        clearTimeout(canvasVirtualizationWakeupTimer);
-        canvasVirtualizationWakeupTimer = null;
-    }
-    if (canvasVirtualizationTimer) {
-        clearTimeout(canvasVirtualizationTimer);
-        canvasVirtualizationTimer = null;
-        canvasVirtualizationPending = false;
-    }
-}
-
-if (!window.__canvasVirtualizationVisibilityBound) {
-    window.__canvasVirtualizationVisibilityBound = true;
-    document.addEventListener('visibilitychange', () => {
-        try {
-            if (document.visibilityState === 'hidden') {
-                cancelAllCanvasVirtualizationTimers();
-            } else if (document.visibilityState === 'visible') {
-                if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
-                    scheduleCanvasVirtualizationUpdate(60);
-                }
-            }
-        } catch (_) { }
-    });
-}
-
-// 虚拟化：卸载额外防抖（避免频繁缩放/窗口变化导致树内容反复卸载/重建）
-function scheduleCanvasVirtualizationUnloadUpdate(delayMs = null) {
-    if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective()) return;
-
-    cancelCanvasVirtualizationUnloadUpdate();
-
-    const configured = (typeof CanvasState.virtualizationUnloadDebounceMs === 'number' && isFinite(CanvasState.virtualizationUnloadDebounceMs))
-        ? Math.max(0, CanvasState.virtualizationUnloadDebounceMs)
-        : 1000;
-    const delay = (typeof delayMs === 'number' && isFinite(delayMs))
-        ? Math.max(0, delayMs)
-        : (isCanvasHugeData() ? (configured + 300) : configured);
-
-    canvasVirtualizationUnloadTimer = setTimeout(() => {
-        canvasVirtualizationUnloadTimer = null;
-        const ws = document.getElementById('canvasWorkspace');
-        const isInteracting = ws && (isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || ws.classList.contains('is-zooming'));
-        if (isInteracting) {
-            scheduleCanvasVirtualizationUnloadUpdate(configured);
-            return;
-        }
-        try { runCanvasVirtualizationUpdate({ doLoad: false, doUnload: true }); } catch (_) { }
-    }, delay);
-}
-
-function scheduleCanvasVirtualizationUpdate(delayMs = null) {
-    if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective()) {
-        cancelAllCanvasVirtualizationTimers();
-        return;
-    }
-    cancelCanvasVirtualizationUnloadUpdate();
-    if (canvasVirtualizationPending) return;
-    canvasVirtualizationPending = true;
-
-    if (canvasVirtualizationTimer) {
-        clearTimeout(canvasVirtualizationTimer);
-        canvasVirtualizationTimer = null;
-    }
-
-    const delay = typeof delayMs === 'number'
-        ? delayMs
-        : (isCanvasHugeData() ? 260 : 120);
-
-    canvasVirtualizationTimer = setTimeout(() => {
-        canvasVirtualizationTimer = null;
-        canvasVirtualizationPending = false;
-        // 低细节：先切视觉，重 DOM 延迟卸载，避免边界附近来回缩放反复构建/销毁。
-        if (CanvasState.lowDetailActive) {
-            try { __updateNonTempNodesViewportVisibility(); } catch (_) { }
-            try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
-            return;
-        }
-        // 正常：先补加载（稳定体验），再延迟卸载（避免抖动）
-        try { runCanvasVirtualizationUpdate({ doLoad: true, doUnload: false }); } catch (_) { }
-        scheduleCanvasVirtualizationUnloadUpdate();
-    }, delay);
-}
-
-let __canvasLazyLoadQueue = {
-    generation: 0,
-    frameId: null,
-    queue: []
-};
-
-function __clearCanvasLazyLoadQueue() {
-    __canvasLazyLoadQueue.generation++;
-    if (__canvasLazyLoadQueue.frameId) {
-        try { cancelAnimationFrame(__canvasLazyLoadQueue.frameId); } catch (_) { }
-        __canvasLazyLoadQueue.frameId = null;
-    }
-    __canvasLazyLoadQueue.queue = [];
-}
-
-function __enqueueCanvasLazyLoadNode(nodeInfo) {
-    __canvasLazyLoadQueue.queue.push(nodeInfo);
-}
-
-function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoomIn, viewportCenterX, viewportCenterY, options = {}) {
-    const generation = __canvasLazyLoadQueue.generation;
-    const queue = __canvasLazyLoadQueue.queue;
-    if (!queue.length) return;
-
-    // Calculate distance and sort the queue
-    queue.forEach(item => {
-        item.distance = Math.hypot(
-            item.x + item.w / 2 - viewportCenterX,
-            item.y + item.h / 2 - viewportCenterY
-        );
-    });
-
-    if (sortMode === 'x-asc') {
-        queue.sort((a, b) => a.x - b.x);
-    } else if (sortMode === 'x-desc') {
-        queue.sort((a, b) => b.x - a.x);
-    } else if (sortMode === 'y-asc') {
-        queue.sort((a, b) => a.y - b.y);
-    } else if (sortMode === 'y-desc') {
-        queue.sort((a, b) => b.y - a.y);
-    } else {
-        queue.sort((a, b) => a.distance - b.distance);
-    }
-
-    const LAZY_LOAD_MAX_PER_FRAME = 4;
-    let index = 0;
-
-    const renderItem = (item) => {
-        const type = item.type;
-        const data = item.data;
-        const id = item.id;
-
-        if (type === 'temp') {
-            try { renderTempNode(data, { skipTree: true }); } catch (_) { }
-            const el = document.getElementById(id);
-            if (el) {
-                __setCanvasViewportLazyShellClass(el, false);
-                if (CanvasState.lowDetailActive) {
-                    try { __unloadTempSectionTreeInPlace(id); } catch (_) { }
-                } else {
-                    try { __ensureTempSectionTreeLoadedInPlace(data); } catch (_) { }
-                }
-            }
-        } else if (type === 'md') {
-            try { renderMdNode(data, { shellOnly: item.shouldActive }); } catch (_) { }
-            const el = document.getElementById(id);
-            if (el) {
-                if (item.shouldActive) {
-                    try { __unloadMdNodeContentInPlace(data); } catch (_) { }
-                } else {
-                    try { __ensureMdNodeContentLoadedInPlace(data); } catch (_) { }
-                }
-                __setCanvasViewportLazyShellClass(el, false);
-                el.classList.toggle('low-detail-active', item.shouldActive);
-                if (item.shouldActive) {
-                    try { __ensureMdNodeLowDetailOverlay(el, data); } catch (_) { }
-                }
-            }
-        } else if (type === 'copy') {
-            try {
-                __createPermanentSectionCopyFromStorage({
-                    id: item.copyId,
-                    displayIndex: item.displayIndex,
-                    ...data
-                });
-            } catch (_) { }
-            const el = document.getElementById(id);
-            if (el) {
-                __setCanvasViewportLazyShellClass(el, false);
-                if (!CanvasState.lowDetailActive && !item.shouldActive) {
-                    try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
-                }
-                el.classList.toggle('low-detail-active', item.shouldActive);
-                if (item.shouldActive) {
-                    try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
-                }
-            }
-        } else if (type === 'group') {
-            try { renderMdNode(data); } catch (_) { }
-            const el = document.getElementById(id);
-            if (el) {
-                __setCanvasViewportLazyShellClass(el, false);
-                el.classList.toggle('low-detail-active', item.shouldActive);
-                if (item.shouldActive && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                    try { window.__BCSCardGroup.ensureLowDetailOverlay(el, data); } catch (_) { }
-                }
-            }
-        }
-    };
-
-    const step = () => {
-        if (__canvasLazyLoadQueue.generation !== generation) return;
-        let count = 0;
-
-        const currentBounds = __getCanvasViewportBounds(workspace, 0);
-
-        while (index < queue.length && count < LAZY_LOAD_MAX_PER_FRAME) {
-            const item = queue[index];
-            const inViewport = !__isCanvasRectOutsideBounds(item.x, item.y, item.w, item.h, currentBounds);
-
-            renderItem(item);
-            index++;
-
-            if (!inViewport) {
-                count++;
-            }
-        }
-        if (index < queue.length) {
-            __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
-        } else {
-            __canvasLazyLoadQueue.frameId = null;
-            try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
-            try { scheduleEdgesRender(0); } catch (_) { }
-        }
-    };
-
-    __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
-}
-
-
-function runCanvasVirtualizationUpdate(options = {}) {
-    const enabled = isCanvasVirtualizationEnabled();
-    const viewportLowDetail = __isViewportLowDetailEffective();
-    if (!enabled && !viewportLowDetail) {
-        if (CanvasState.__virtualizationWasEnabled !== false || CanvasState.__viewportLowDetailWasActive) {
-            CanvasState.__virtualizationWasEnabled = false;
-            CanvasState.__viewportLowDetailWasActive = false;
-            cancelAllCanvasVirtualizationTimers();
-            if (CanvasState.offScreenNodesTime) {
-                CanvasState.offScreenNodesTime.clear();
-            }
-            try { __restoreAllVirtualisedNodes(); } catch (_) {}
-        }
-        return;
-    }
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    // Block virtualization updates during low-detail visual ripple transition to avoid conflicts
-    if (workspace.classList && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)) return;
-
-    if (typeof options !== 'object' || options === null) {
-        options = {};
-    }
-    let {
-        force = false,
-        doUnload = true, // 不在预算内/低细节：卸载树 DOM
-        doLoad = true    // 在预算内：加载树 DOM
-    } = options;
-
-    const allowLowDetailPrune = !!options.lowDetailPrune;
-    if (CanvasState.lowDetailActive) {
-        doLoad = false;
-        if (!allowLowDetailPrune) {
-            try { __updateNonTempNodesViewportVisibility({ doLoad: false, doUnload: doUnload }); } catch (_) { }
-            if (doUnload) {
-                try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
-            }
-            return;
-        }
-        try { __unloadPermanentSectionTreesForLowDetail(); } catch (_) { }
-        doUnload = true;
-    }
-
-    // 交互中不做 DOM 装载/卸载（只做 transform），保证缩放/拖动过程流畅
-    const isInteracting = (CanvasState.touchpadState && CanvasState.touchpadState.isScrolling) || CanvasState.isPanning || CanvasState.dragState.isDragging || workspace.classList.contains('is-zooming');
-    if (isInteracting && !force) {
-        if (!doLoad && doUnload) {
-            scheduleCanvasVirtualizationUnloadUpdate(isCanvasHugeData() ? 320 : 180);
-        } else {
-            scheduleCanvasVirtualizationUpdate(isCanvasHugeData() ? 320 : 180);
-        }
-        return;
-    }
-
-    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    const minInterval = isCanvasHugeData() ? 260 : 140;
-    if (now - lastCanvasVirtualizationRunAt < minInterval) {
-        if (!doLoad && doUnload) {
-            scheduleCanvasVirtualizationUnloadUpdate(minInterval);
-        } else {
-            scheduleCanvasVirtualizationUpdate(minInterval);
-        }
-        return;
-    }
-    lastCanvasVirtualizationRunAt = now;
-
-    if (!enabled) {
-        CanvasState.__virtualizationWasEnabled = false;
-        CanvasState.__viewportLowDetailWasActive = true;
-        const bounds = __getCanvasViewportBounds(workspace, 0);
-        const cards = Array.from(workspace.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
-        const isGlobalLowDetail = !!CanvasState.lowDetailActive;
-        cards.forEach(card => {
-            const cardId = card.id;
-            const isOutside = __isCardOutsideViewportBounds(card, bounds);
-            __updateNodeOffScreenState(cardId, isOutside);
-
-            let shouldBeLowDetail = isGlobalLowDetail;
-            if (!shouldBeLowDetail && viewportLowDetail) {
-                shouldBeLowDetail = __shouldNodeBeLowDetail(cardId, isOutside);
-            }
-            if (card.classList && card.classList.contains('canvas-node-maximized')) {
-                shouldBeLowDetail = false;
-            }
-            const wasActive = card.classList.contains('low-detail-active');
-            if (shouldBeLowDetail !== wasActive) {
-                card.classList.toggle('low-detail-active', shouldBeLowDetail);
-            }
-            if (shouldBeLowDetail) {
-                __ensureLowDetailOverlayForCard(card);
-            } else {
-                const sectionId = card.id;
-                if (card.classList.contains('temp-canvas-node')) {
-                    const section = (CanvasState.tempSections || []).find(s => s && s.id === sectionId);
-                    if (section) {
-                        try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
-                    }
-                } else if (card.classList.contains('permanent-bookmark-section')) {
-                    try { __ensurePermanentSectionTreeLoadedInPlace(card); } catch (_) { }
-                } else if (card.classList.contains('md-canvas-node')) {
-                    const node = (CanvasState.mdNodes || []).find(n => n && n.id === sectionId);
-                    if (node) {
-                        try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
-                    }
-                }
-            }
-        });
-        try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
-
-        // Wakeup logic for non-virtualized delay low detail transitions
-        let minWakeup = Infinity;
-        const nowTime = Date.now();
-        if (CanvasState.offScreenNodesTime && CanvasState.offScreenNodesTime.size > 0) {
-            const lowDetailDelayMs = (CanvasState.viewportLowDetailDelayS || 5.0) * 1000;
-            for (const [id, offScreenTime] of CanvasState.offScreenNodesTime.entries()) {
-                const elapsed = nowTime - offScreenTime;
-                if (viewportLowDetail && elapsed < lowDetailDelayMs) {
-                    const rem = lowDetailDelayMs - elapsed;
-                    if (rem < minWakeup) minWakeup = rem;
-                }
-            }
-        }
-        __scheduleCanvasVirtualizationWakeup(minWakeup);
-        return;
-    }
-    CanvasState.__virtualizationWasEnabled = true;
-
-    // Detect movement directions for sequential queue loading
-    const prevZoom = CanvasState.previousZoom !== null ? CanvasState.previousZoom : (CanvasState.zoom || 1);
-    const currentZoom = CanvasState.zoom || 1;
-    const prevPanX = CanvasState.previousPanOffsetX !== null ? CanvasState.previousPanOffsetX : (CanvasState.panOffsetX || 0);
-    const currentPanX = CanvasState.panOffsetX || 0;
-    const prevPanY = CanvasState.previousPanOffsetY !== null ? CanvasState.previousPanOffsetY : (CanvasState.panOffsetY || 0);
-    const currentPanY = CanvasState.panOffsetY || 0;
-
-    const zoomChanged = prevZoom !== currentZoom;
-    const panChanged = prevPanX !== currentPanX || prevPanY !== currentPanY;
-
-    let sortMode = 'distance';
-    let zoomIn = false;
-
-    if (zoomChanged) {
-        sortMode = 'distance';
-        zoomIn = currentZoom > prevZoom;
-    } else if (panChanged) {
-        const dx = currentPanX - prevPanX;
-        const dy = currentPanY - prevPanY;
-        if (Math.abs(dx) > Math.abs(dy)) {
-            sortMode = dx < 0 ? 'x-asc' : 'x-desc';
-        } else {
-            sortMode = dy < 0 ? 'y-asc' : 'y-desc';
-        }
-    }
-
-    // Clear previous queued frames
-    __clearCanvasLazyLoadQueue();
-
-    const { marginPx, maxLoaded } = getCanvasVirtualizationBudget();
-
-    const rect = workspace.getBoundingClientRect();
-    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-    const panX = CanvasState.panOffsetX || 0;
-    const panY = CanvasState.panOffsetY || 0;
-
-    const margin = marginPx / zoom;
-    const viewportLeft0 = (0 - panX) / zoom;
-    const viewportRight0 = (rect.width - panX) / zoom;
-    const viewportTop0 = (0 - panY) / zoom;
-    const viewportBottom0 = (rect.height - panY) / zoom;
-
-    const viewportLeft = viewportLeft0 - margin;
-    const viewportRight = viewportRight0 + margin;
-    const viewportTop = viewportTop0 - margin;
-    const viewportBottom = viewportBottom0 + margin;
-    const viewportCenterX = (rect.width / 2 - panX) / zoom;
-    const viewportCenterY = (rect.height / 2 - panY) / zoom;
-
-    const visualBounds = __getCanvasViewportBounds(workspace, 0);
-
-    const candidates = [];
-    const mustLoad = new Set(); // 视界内：必须保持树内容加载（减少“可见区域闪烁”）
-    for (const section of (CanvasState.tempSections || [])) {
-        if (!section || !section.id) continue;
-        const baseSize = getTempSectionBaseSize(section);
-        const x = Number(section.x);
-        const y = Number(section.y);
-        const w = Number(section.width || baseSize.width);
-        const h = Number(section.height || baseSize.height);
-        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
-        const inViewport = !(
-            x + w < viewportLeft0 ||
-            x > viewportRight0 ||
-            y + h < viewportTop0 ||
-            y > viewportBottom0
-        );
-        if (inViewport) mustLoad.add(section.id);
-        __updateNodeOffScreenState(section.id, !inViewport);
-        const inRange = !(
-            x + w < viewportLeft ||
-            x > viewportRight ||
-            y + h < viewportTop ||
-            y > viewportBottom
-        );
-        if (!inRange) continue;
-        const cx = x + w / 2;
-        const cy = y + h / 2;
-        const dx_center = cx - viewportCenterX;
-        const dy_center = cy - viewportCenterY;
-        candidates.push({ section, dist2: dx_center * dx_center + dy_center * dy_center });
-    }
-
-    candidates.sort((a, b) => a.dist2 - b.dist2);
-
-    const desired = new Set();
-    let effectiveMaxLoaded = Math.max(0, maxLoaded);
-    if (mustLoad.size > effectiveMaxLoaded) {
-        effectiveMaxLoaded = mustLoad.size;
-    }
-
-    // 1) 视界内必须加载
-    for (const id of mustLoad) {
-        desired.add(id);
-    }
-
-    const isLoadedNow = (id) => !!id && !(CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(id));
-
-    // 2) 优先保留已经加载过的（避免频繁缩放时“换一批栏目反复加载/卸载”造成闪烁）
-    for (let i = 0; i < candidates.length && desired.size < effectiveMaxLoaded; i++) {
-        const id = candidates[i].section.id;
-        if (!id || desired.has(id)) continue;
-        if (!isLoadedNow(id)) continue;
-        desired.add(id);
-    }
-
-    // 3) 再补齐最近的
-    for (let i = 0; i < candidates.length && desired.size < effectiveMaxLoaded; i++) {
-        const id = candidates[i].section.id;
-        if (!id || desired.has(id)) continue;
-        desired.add(id);
-    }
-
-    const isRippleOrLowDetail = !!CanvasState.lowDetailActive || (workspace && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS));
-
-    for (const section of (CanvasState.tempSections || [])) {
-        if (!section || !section.id) continue;
-        let shouldLoad = desired.has(section.id);
-        if (!shouldLoad) {
-            // 兜底：严格视口内永远不卸载
-            const baseSize = getTempSectionBaseSize(section);
-            const x = Number(section.x);
-            const y = Number(section.y);
-            const w = Number(section.width || baseSize.width);
-            const h = Number(section.height || baseSize.height);
-            const hasRect = [x, y, w, h].every(v => typeof v === 'number' && isFinite(v));
-            const inViewportStrict = hasRect ? !(
-                x + w < viewportLeft0 ||
-                x > viewportRight0 ||
-                y + h < viewportTop0 ||
-                y > viewportBottom0
-            ) : true;
-            if (inViewportStrict) shouldLoad = true;
-        }
-
-        let element = document.getElementById(section.id);
-        const shouldKeepLoaded = element && __shouldKeepLazyCardDomLoaded(element);
-
-        if (!shouldLoad && !shouldKeepLoaded) {
-            const canUnload = __shouldNodeBeUnloaded(section.id);
-            if (doUnload && element && canUnload) {
-                try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
-                try { element.remove(); } catch (_) { }
-                element = null;
-            }
-            continue;
-        }
-
-        const baseSize = getTempSectionBaseSize(section);
-        const x = Number(section.x);
-        const y = Number(section.y);
-        const w = Number(section.width || baseSize.width);
-        const h = Number(section.height || baseSize.height);
-        const inViewportStrict = !(
-            x + w < viewportLeft0 ||
-            x > viewportRight0 ||
-            y + h < viewportTop0 ||
-            y > viewportBottom0
-        );
-
-        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
-
-        if (!element) {
-            if (shouldInstantLoad) {
-                try { renderTempNode(section, { skipTree: isRippleOrLowDetail }); } catch (_) { }
-                element = document.getElementById(section.id);
-            } else {
-                __enqueueCanvasLazyLoadNode({
-                    type: 'temp',
-                    id: section.id,
-                    x: x,
-                    y: y,
-                    w: w,
-                    h: h,
-                    data: section
-                });
-            }
-        }
-
-        if (element) {
-            __setCanvasViewportLazyShellClass(element, false);
-            let isLowDetail = !!CanvasState.lowDetailActive;
-            if (!isLowDetail && __isViewportLowDetailEffective()) {
-                const baseSize = getTempSectionBaseSize(section);
-                const x = Number(section.x);
-                const y = Number(section.y);
-                const w = Number(section.width || baseSize.width);
-                const h = Number(section.height || baseSize.height);
-                const isOutside = __isCanvasRectOutsideBounds(x, y, w, h, visualBounds);
-                isLowDetail = __shouldNodeBeLowDetail(section.id, isOutside);
-            }
-            if (element.classList && element.classList.contains('canvas-node-maximized')) {
-                isLowDetail = false;
-            }
-
-            const wasActive = element.classList.contains('low-detail-active');
-            if (isLowDetail !== wasActive) {
-                element.classList.toggle('low-detail-active', isLowDetail);
-            }
-
-            if (isLowDetail) {
-                const canUnload = __shouldNodeBeUnloaded(section.id);
-                if (doUnload && canUnload) {
-                    try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
-                }
-            } else if (doLoad) {
-                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
-            }
-        }
-    }
-
-    try {
-        __updateNonTempNodesViewportVisibility(options);
-    } catch (_) {}
-
-    // Start sequential loading of enqueued items
-    try {
-        __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoomIn, viewportCenterX, viewportCenterY, options);
-    } catch (_) {}
-
-    // Save state for next interaction check
-    CanvasState.previousZoom = currentZoom;
-    CanvasState.previousPanOffsetX = currentPanX;
-    CanvasState.previousPanOffsetY = currentPanY;
-
-    try { __updateVirtualizationWakeupScheduler(); } catch (_) { }
-}
-
-function __restoreAllVirtualisedNodes() {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    // 清除所有卡片的低细节样式与屏蔽状态
-    try {
-        workspace.querySelectorAll('.low-detail-active').forEach(el => el.classList.remove('low-detail-active'));
-        workspace.querySelectorAll('.card-group-low-detail-child-hidden').forEach(el => el.classList.remove('card-group-low-detail-child-hidden'));
-        __clearCardGroupLowDetailMembershipState();
-    } catch (_) {}
-
-    // 1. Temp sections
-    if (Array.isArray(CanvasState.tempSections)) {
-        CanvasState.tempSections.forEach(section => {
-            if (!section || !section.id) return;
-            let el = document.getElementById(section.id);
-            if (!el) {
-                try { renderTempNode(section); } catch (_) {}
-                el = document.getElementById(section.id);
-            }
-            if (el) {
-                __setCanvasViewportLazyShellClass(el, false);
-                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) {}
-            }
-        });
-    }
-
-    // 2. MD Nodes & Groups
-    if (Array.isArray(CanvasState.mdNodes)) {
-        CanvasState.mdNodes.forEach(node => {
-            if (!node || !node.id) return;
-            let el = document.getElementById(node.id);
-            if (!el) {
-                try { renderMdNode(node); } catch (_) {}
-                el = document.getElementById(node.id);
-            }
-            if (el) {
-                __setCanvasViewportLazyShellClass(el, false);
-                if (node.subtype !== 'card-group') {
-                    try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) {}
-                }
-            }
-        });
-    }
-
-    // 3. Permanent section
-    const mainEl = document.getElementById('permanentSection');
-    if (mainEl) {
-        __setCanvasViewportLazyShellClass(mainEl, false);
-        try { __ensurePermanentSectionTreeLoadedInPlace(mainEl); } catch (_) {}
-    }
-
-    // 4. Copies
-    const existingMeta = (__readPermanentSectionCopies() || []).filter(item => item && item.id);
-    const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
-        ? CanvasState.permanentLayout.copiesById
-        : {};
-    existingMeta.forEach(meta => {
-        const copyId = meta.id;
-        const displayIndex = meta.displayIndex;
-        const cardState = copyStateById[copyId];
-        if (!cardState) return;
-        const elId = 'permanent-section-copy-' + copyId;
-        let el = document.getElementById(elId);
-        if (!el) {
-            try {
-                el = __createPermanentSectionCopyFromStorage({
-                    id: copyId,
-                    displayIndex,
-                    ...cardState
-                });
-            } catch (_) {}
-        }
-        if (el) {
-            __setCanvasViewportLazyShellClass(el, false);
-            try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) {}
-        }
-    });
-
-    try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) {}
-}
-
-function isCanvasBlockDormancyEnabled() {
-    // 统一废弃旧的 Block Dormancy，全部由 Virtualization 接管
-    return false;
-}
-
-function __getCanvasBlockDormancyActiveRange(workspaceRect) {
-    if (!workspaceRect || !isFinite(workspaceRect.width) || !isFinite(workspaceRect.height) || workspaceRect.width <= 0 || workspaceRect.height <= 0) {
-        return null;
-    }
-
-    const fixedDisplayZoom = (typeof CanvasState.blockDormancyDisplayZoom === 'number' && isFinite(CanvasState.blockDormancyDisplayZoom))
-        ? Math.max(0.01, CanvasState.blockDormancyDisplayZoom)
-        : 0.20;
-    const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
-    const fixedRawZoom = Math.max(0.0001, base * fixedDisplayZoom);
-
-    // 区块尺寸：以“显示缩放 fixedDisplayZoom”时的一屏为一个区块（转为 canvas 坐标）
-    const cellW = workspaceRect.width / fixedRawZoom;
-    const cellH = workspaceRect.height / fixedRawZoom;
-    if (!isFinite(cellW) || !isFinite(cellH) || cellW <= 0 || cellH <= 0) return null;
-
-    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-    const panX = CanvasState.panOffsetX || 0;
-    const panY = CanvasState.panOffsetY || 0;
-
-    const viewLeft = (0 - panX) / zoom;
-    const viewRight = (workspaceRect.width - panX) / zoom;
-    const viewTop = (0 - panY) / zoom;
-    const viewBottom = (workspaceRect.height - panY) / zoom;
-
-    const left = Math.min(viewLeft, viewRight);
-    const right = Math.max(viewLeft, viewRight);
-    const top = Math.min(viewTop, viewBottom);
-    const bottom = Math.max(viewTop, viewBottom);
-
-    const pad = (typeof CanvasState.blockDormancyPaddingBlocks === 'number' && isFinite(CanvasState.blockDormancyPaddingBlocks))
-        ? Math.max(0, Math.floor(CanvasState.blockDormancyPaddingBlocks))
-        : 0;
-
-    const minBlockX = Math.floor(left / cellW) - pad;
-    const maxBlockX = Math.floor(right / cellW) + pad;
-    const minBlockY = Math.floor(top / cellH) - pad;
-    const maxBlockY = Math.floor(bottom / cellH) + pad;
-
-    return {
-        cellW,
-        cellH,
-        minBlockX,
-        maxBlockX,
-        minBlockY,
-        maxBlockY,
-        zoom,
-        viewportLeft: left,
-        viewportRight: right,
-        viewportTop: top,
-        viewportBottom: bottom
-    };
-}
-
-function __isTempSectionInBlockRange(section, range) {
-    if (!section || !section.id || !range) return false;
-    const baseSize = getTempSectionBaseSize(section);
-    const x = Number(section.x);
-    const y = Number(section.y);
-    const w = Number(section.width || baseSize.width);
-    const h = Number(section.height || baseSize.height);
-    if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) return false;
-    const minBx = Math.floor(x / range.cellW);
-    const maxBx = Math.floor((x + w) / range.cellW);
-    const minBy = Math.floor(y / range.cellH);
-    const maxBy = Math.floor((y + h) / range.cellH);
-    return (
-        maxBx >= range.minBlockX &&
-        minBx <= range.maxBlockX &&
-        maxBy >= range.minBlockY &&
-        minBy <= range.maxBlockY
-    );
-}
-
-function runCanvasBlockDormancyUpdate(options = {}) {
-    if (!isCanvasBlockDormancyEnabled()) return;
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    if (typeof options !== 'object' || options === null) {
-        options = {};
-    }
-    const {
-        force = false,
-        doUnload = true, // 区块外卸载树 DOM + dormant-content
-        doLoad = true    // 区块内视口附近按需加载树 DOM
-    } = options;
-
-    // 交互中不做大规模 DOM 卸载/恢复，避免掉帧；停止交互后再执行
-    const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || workspace.classList.contains('is-zooming');
-    if (isInteracting && !force) return;
-
-    const rect = workspace.getBoundingClientRect();
-    const range = __getCanvasBlockDormancyActiveRange(rect);
-    if (!range) return;
-
-    // 区块休眠启用时：避免旧的“延迟休眠定时器”在后台触发，造成状态冲突
-    try { cancelAllDormancyTimers(); } catch (_) { }
-
-    const marginPx = 80;
-    const margin = marginPx / range.zoom;
-
-    for (const section of (CanvasState.tempSections || [])) {
-        if (!section || !section.id) continue;
-
-        // 置顶栏目：保持常驻（不参与区块外卸载），体验与旧休眠一致
-        const pinned = !!section.pinned;
-        const x = Number(section.x);
-        const y = Number(section.y);
-        const w = Number(section.width || baseSize.width);
-        const h = Number(section.height || baseSize.height);
-        const hasRect = [x, y, w, h].every(v => typeof v === 'number' && isFinite(v));
-        const inViewportStrict = hasRect ? !(
-            x + w < range.viewportLeft ||
-            x > range.viewportRight ||
-            y + h < range.viewportTop ||
-            y > range.viewportBottom
-        ) : true;
-        // 兜底：视口内必须视为“活跃区块”（防止 Resize/边界误差导致可见栏目被误卸载而闪烁）
-        const inBlock = pinned ? true : (__isTempSectionInBlockRange(section, range) || inViewportStrict);
-        let element = document.getElementById(section.id);
-
-        if (!inBlock) {
-            if (doUnload && element) {
-                try { element.classList.add('dormant-content'); } catch (_) { }
-                // 区块外：强制卸载树 DOM（保持壳体与叠层文字可见）
-                try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
-            }
-            continue;
-        }
-
-        // 区块内：确保可见（防止旧逻辑遗留 display:none）
-        if (element && element.style && element.style.display === 'none') {
-            try { element.style.display = ''; } catch (_) { }
-        }
-
-        // 兼容旧的持久化休眠标记：区块内遇到 dormant 则直接唤醒
-        if (section.dormant) {
-            try { wakeSection(section); } catch (_) { }
-        }
-
-        if (!element) {
-            // 没有壳体：先渲染壳体（不构建树内容）
-            try { renderTempNode(section, { skipTree: true }); } catch (_) { }
-            element = document.getElementById(section.id);
-        }
-
-        if (element) {
-            try { element.classList.remove('dormant-content'); } catch (_) { }
-        }
-
-        // 区块内：进入视口附近时按需加载树内容（保持“只在需要时加载”）
-        if (!doLoad) continue;
-        if (CanvasState.lowDetailActive) continue;
-        if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.has(section.id)) continue;
-
-        if (!hasRect) continue;
-
-        const nearViewport = !(
-            x + w < range.viewportLeft - margin ||
-            x > range.viewportRight + margin ||
-            y + h < range.viewportTop - margin ||
-            y > range.viewportBottom + margin
-        );
-        if (!nearViewport) continue;
-
-        try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
-    }
-}
-
-let lowDetailUnloadJobRunning = false;
-let lowDetailUnloadJobIndex = 0;
-let lowDetailUnloadJobQueue = null;
-
-function __ensureTempTreeSkeleton(element) {
-    if (!element || !element.querySelector) return null;
-    const body = element.classList && element.classList.contains('temp-node-body')
-        ? element
-        : element.querySelector('.temp-node-body');
-    if (!body) return null;
-
-    let skeleton = body.querySelector('.temp-tree-skeleton');
-    if (skeleton) return skeleton;
-
-    skeleton = document.createElement('div');
-    skeleton.className = 'temp-tree-skeleton';
-    skeleton.setAttribute('aria-hidden', 'true');
-    for (let i = 0; i < 7; i += 1) {
-        const line = document.createElement('div');
-        line.className = 'temp-tree-skeleton-line';
-        skeleton.appendChild(line);
-    }
-    body.appendChild(skeleton);
-    return skeleton;
-}
-
-function cancelCanvasLowDetailUnloadJob() {
-    lowDetailUnloadJobRunning = false;
-    lowDetailUnloadJobIndex = 0;
-    lowDetailUnloadJobQueue = null;
-}
-
-function __unloadTempSectionTreeInPlace(sectionId) {
-    if (!sectionId) return false;
-    const element = document.getElementById(sectionId);
-    if (!element) return false;
-    const treeContainer = element.querySelector('.temp-bookmark-tree');
-    if (!treeContainer) return false;
-
-    const alreadyUnloaded = (treeContainer.dataset && treeContainer.dataset.contentUnloaded === 'true') ||
-        (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(sectionId));
-    if (alreadyUnloaded) return false;
-
-    // 保存滚动位置，避免卸载 DOM 后 scrollTop 重置丢失
-    const body = element.querySelector('.temp-node-body');
-    if (body && typeof __flushCanvasSectionScrollPersistence === 'function') {
-        const scrollBaseKey = __getTempSectionScrollBaseKey(sectionId);
-        if (scrollBaseKey) {
-            try {
-                __flushCanvasSectionScrollPersistence(body, {
-                    baseKey: scrollBaseKey,
-                    readFromDom: true
-                });
-            } catch (_) { }
-        }
-    }
-
-    // 卸载 DOM（释放大量节点的布局/样式/事件负担）；后续可通过 renderTempNode / __ensureTempSectionTreeLoadedInPlace 恢复
-    try { treeContainer.innerHTML = ''; } catch (_) { }
-    try { treeContainer.style.display = 'none'; } catch (_) { }
-    try { treeContainer.dataset.contentHidden = 'true'; } catch (_) { }
-    try { treeContainer.dataset.contentUnloaded = 'true'; } catch (_) { }
-    try { __ensureTempTreeSkeleton(element); } catch (_) { }
-    try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.add(sectionId); } catch (_) { }
-    try { element.classList.add('temp-tree-unloaded'); } catch (_) { }
-    return true;
-}
-
-function __scheduleCanvasLowDetailUnloadChunk() {
-    if (!lowDetailUnloadJobRunning) return;
-    const run = () => {
-        try { __runCanvasLowDetailUnloadChunk(); } catch (_) { }
-    };
-    if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(run);
-    } else {
-        setTimeout(run, 60);
-    }
-}
-
-function __runCanvasLowDetailUnloadChunk() {
-    if (!lowDetailUnloadJobRunning) return;
-    if (!CanvasState.lowDetailActive) {
-        cancelCanvasLowDetailUnloadJob();
-        return;
-    }
-
-    // 用户交互中：不要做 DOM 卸载/重排，避免掉帧；等停止交互后继续
-    const ws = document.getElementById('canvasWorkspace');
-    const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || (ws && ws.classList && ws.classList.contains('is-zooming'));
-    if (isInteracting) {
-        __scheduleCanvasLowDetailUnloadChunk();
-        return;
-    }
-
-    if (!Array.isArray(lowDetailUnloadJobQueue) || !lowDetailUnloadJobQueue.length) {
-        const ids = Array.isArray(CanvasState.tempSections)
-            ? CanvasState.tempSections.map(s => (s && s.id ? s.id : null)).filter(Boolean)
-            : [];
-        lowDetailUnloadJobQueue = ids;
-        lowDetailUnloadJobIndex = 0;
-    }
-
-    const queue = lowDetailUnloadJobQueue || [];
-    let idx = lowDetailUnloadJobIndex || 0;
-
-    const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    const budgetMs = 10;
-    const maxPerChunk = 12;
-    let unloaded = 0;
-
-    while (idx < queue.length) {
-        if (unloaded >= maxPerChunk) break;
-        const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-        if (now - start > budgetMs) break;
-
-        const sectionId = queue[idx++];
-        if (__unloadTempSectionTreeInPlace(sectionId)) unloaded += 1;
-    }
-
-    lowDetailUnloadJobIndex = idx;
-
-    if (idx >= queue.length) {
-        cancelCanvasLowDetailUnloadJob();
-        return;
-    }
-
-    __scheduleCanvasLowDetailUnloadChunk();
-}
-
-function startCanvasLowDetailUnloadJob() {
-    // 低细节模式的目标之一是“缩小后不加载重内容”；如果之前已经渲染过大量树 DOM，
-    // 仅靠 CSS display:none 仍可能带来较高的样式/内存负担。进入低细节后用 idle 分片卸载树 DOM。
-    if (!CanvasState.lowDetailActive) return;
-    // 启用虚拟化时：runCanvasVirtualizationUpdate() 会统一做“加载预算/卸载”，避免两套机制叠加
-    if (isCanvasVirtualizationEnabled()) return;
-    if (lowDetailUnloadJobRunning) return;
-    lowDetailUnloadJobRunning = true;
-    lowDetailUnloadJobQueue = null;
-    lowDetailUnloadJobIndex = 0;
-    __scheduleCanvasLowDetailUnloadChunk();
-}
-
-function __cleanupCanvasTreeFadeInClass(treeContainer) {
-    if (!treeContainer || !treeContainer.classList) return;
-    const handler = treeContainer.__canvasFadeInCleanupHandler;
-    if (handler) {
-        try { treeContainer.removeEventListener('animationend', handler); } catch (_) { }
-    }
-    const timer = treeContainer.__canvasFadeInCleanupTimer;
-    if (timer) {
-        try { clearTimeout(timer); } catch (_) { }
-    }
-    treeContainer.__canvasFadeInCleanupHandler = null;
-    treeContainer.__canvasFadeInCleanupTimer = null;
-    try { treeContainer.classList.remove('animate-fade-in'); } catch (_) { }
-}
-
-function __scheduleCanvasTreeFadeInCleanup(treeContainer) {
-    if (!treeContainer || !treeContainer.classList) return;
-    const previousHandler = treeContainer.__canvasFadeInCleanupHandler;
-    if (previousHandler) {
-        try { treeContainer.removeEventListener('animationend', previousHandler); } catch (_) { }
-    }
-    const previousTimer = treeContainer.__canvasFadeInCleanupTimer;
-    if (previousTimer) {
-        try { clearTimeout(previousTimer); } catch (_) { }
-    }
-
-    const cleanup = (event) => {
-        if (event && event.target !== treeContainer) return;
-        __cleanupCanvasTreeFadeInClass(treeContainer);
-    };
-    treeContainer.__canvasFadeInCleanupHandler = cleanup;
-    try { treeContainer.addEventListener('animationend', cleanup); } catch (_) { }
-    treeContainer.__canvasFadeInCleanupTimer = setTimeout(cleanup, 420);
-}
-
-function __clearCanvasTreeFadeInClasses(scope = null) {
-    const root = scope && scope.querySelectorAll ? scope : document;
-    if (!root || !root.querySelectorAll) return;
-    root.querySelectorAll('.bookmark-tree.animate-fade-in').forEach(tree => {
-        try { __cleanupCanvasTreeFadeInClass(tree); } catch (_) { }
-    });
-}
-
-function __ensureTempSectionTreeLoadedInPlace(section) {
-    if (!section || !section.id) return false;
-
-    const element = document.getElementById(section.id);
-    if (!element) return false;
-    if (element.classList && element.classList.contains('dormant-content')) return false;
-    if (section.dormant) return false;
-
-    const treeContainer = element.querySelector('.temp-bookmark-tree');
-    if (!treeContainer) return false;
-
-    const isUnloaded = (treeContainer.dataset && treeContainer.dataset.contentUnloaded === 'true') ||
-        (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(section.id));
-    if (!isUnloaded) return false;
-
-    // 清空并重建（只重建树内容，不重建整个卡片，避免闪烁/黑屏）
-    try { treeContainer.innerHTML = ''; } catch (_) { }
-
-    if (Array.isArray(section.items)) {
-        const treeFragment = document.createDocumentFragment();
-        const total = section.items.length;
-        const rootVisible = getTempSectionRootVisibleCount(section, total);
-        const initialItems = rootVisible >= total ? section.items : section.items.slice(0, rootVisible);
-
-        initialItems.forEach((item) => {
-            try {
-                const node = buildTempTreeNode(section, item, 0);
-                if (node) treeFragment.appendChild(node);
-            } catch (_) { }
-        });
-
-        if (rootVisible < total) {
-            try {
-                const loadMoreBtn = createTempRootLoadMoreButton(section, rootVisible, total, treeContainer);
-                if (loadMoreBtn) treeFragment.appendChild(loadMoreBtn);
-            } catch (_) { }
-        }
-
-        try { treeContainer.appendChild(treeFragment); } catch (_) { }
-    }
-
-    try { treeContainer.style.display = ''; } catch (_) { }
-    try { treeContainer.style.height = ''; } catch (_) { }
-    try { treeContainer.dataset.contentHidden = 'false'; } catch (_) { }
-    try { treeContainer.dataset.contentUnloaded = 'false'; } catch (_) { }
-    try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.delete(section.id); } catch (_) { }
-    try { element.classList.remove('temp-tree-unloaded'); } catch (_) { }
-    try {
-        const skeleton = element.querySelector('.temp-tree-skeleton');
-        if (skeleton) skeleton.remove();
-    } catch (_) { }
-
-    // 为新生成的节点补绑定拖拽/点击事件（避免预热后操作失效）
-    try { if (typeof attachTreeEvents === 'function') attachTreeEvents(treeContainer); } catch (_) { }
-    try { if (typeof attachDragEvents === 'function') attachDragEvents(treeContainer); } catch (_) { }
-    try { if (typeof attachPointerDragEvents === 'function') attachPointerDragEvents(treeContainer); } catch (_) { }
-
-    // 恢复滚动位置，避免懒加载重新渲染后页面重置到顶部
-    const persisted = typeof __readPartitionedViewJSON === 'function' ? __readPartitionedViewJSON(__getTempSectionScrollKey(section.id), null) : null;
-    if (persisted && typeof persisted.top === 'number') {
-        const body = element.querySelector('.temp-node-body');
-        if (body && typeof __scheduleCanvasBodyScrollRestore === 'function') {
-            try {
-                __scheduleCanvasBodyScrollRestore(body, {
-                    top: persisted.top || 0,
-                    left: persisted.left || 0
-                }, {
-                    target: element,
-                    fallbackDelays: [10, 50, 100]
-                });
-            } catch (_) { }
-        }
-    }
-
-    // 小数据加载时保留淡入；大数据/刚退出低细节时避免批量 opacity/transform 动画放大闪烁。
-    try {
-        treeContainer.classList.remove('animate-fade-in');
-        const suppressUntil = Number(CanvasState.suppressTreeLoadAnimationUntil || 0) || 0;
-        const shouldAnimate = !isCanvasHugeData() && Date.now() >= suppressUntil;
-        if (shouldAnimate) {
-            treeContainer.classList.add('animate-fade-in');
-            __scheduleCanvasTreeFadeInCleanup(treeContainer);
-        }
-    } catch (_) { }
-
-    return true;
-}
-
-function __buildTempSectionTreeFragment(section, treeContainer, options = {}) {
-    const fragment = document.createDocumentFragment();
-    if (!section || !Array.isArray(section.items)) return fragment;
-
-    const total = section.items.length;
-    const rootVisible = getTempSectionRootVisibleCount(section, total);
-    const initialItems = rootVisible >= total ? section.items : section.items.slice(0, rootVisible);
-
-    initialItems.forEach((item) => {
-        try {
-            const node = buildTempTreeNode(section, item, 0, options);
-            if (node) fragment.appendChild(node);
-        } catch (_) { }
-    });
-
-    if (rootVisible < total) {
-        try {
-            const loadMoreBtn = createTempRootLoadMoreButton(section, rootVisible, total, treeContainer);
-            if (loadMoreBtn) fragment.appendChild(loadMoreBtn);
-        } catch (_) { }
-    }
-
-    return fragment;
-}
-
-function refreshTempSectionTreeInPlace(section, options = {}) {
-    if (!section || !section.id) return false;
-
-    let element = document.getElementById(section.id);
-    if (!element) {
-        try {
-            renderTempNode(section, (isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled()) ? { skipTree: true } : {});
-            element = document.getElementById(section.id);
-        } catch (_) { }
-        return !!element;
-    }
-
-    const treeContainer = element.querySelector('.temp-bookmark-tree');
-    if (!treeContainer) {
-        try { renderTempNode(section, { skipTree: !!(options && options.skipTree) }); } catch (_) { }
-        return !!document.getElementById(section.id);
-    }
-
-    const isUnloaded = (treeContainer.dataset && treeContainer.dataset.contentUnloaded === 'true') ||
-        (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(section.id));
-    const shouldKeepUnloaded = !!(
-        section.dormant ||
-        CanvasState.lowDetailActive ||
-        (isUnloaded && !(options && options.forceBuildTree))
-    );
-
-    if (shouldKeepUnloaded) {
-        try { treeContainer.innerHTML = ''; } catch (_) { }
-        try { treeContainer.style.display = 'none'; } catch (_) { }
-        try { treeContainer.dataset.contentHidden = 'true'; } catch (_) { }
-        try { treeContainer.dataset.contentUnloaded = 'true'; } catch (_) { }
-        try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.add(section.id); } catch (_) { }
-        try { element.classList.add('temp-tree-unloaded'); } catch (_) { }
-        return true;
-    }
-
-    const existingLoadedCounts = scanExpandedFolderCounts(treeContainer);
-    try { treeContainer.innerHTML = ''; } catch (_) { }
-    try { treeContainer.appendChild(__buildTempSectionTreeFragment(section, treeContainer, { existingLoadedCounts })); } catch (_) { }
-    try { treeContainer.style.display = ''; } catch (_) { }
-    try { treeContainer.style.height = ''; } catch (_) { }
-    try { treeContainer.dataset.contentHidden = 'false'; } catch (_) { }
-    try { treeContainer.dataset.contentUnloaded = 'false'; } catch (_) { }
-    try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.delete(section.id); } catch (_) { }
-    try { element.classList.remove('temp-tree-unloaded'); } catch (_) { }
-
-    try { setupTempSectionTreeInteractions(treeContainer, section); } catch (_) { }
-    try { if (typeof attachTreeEvents === 'function') attachTreeEvents(treeContainer); } catch (_) { }
-    try { if (typeof attachDragEvents === 'function' && treeContainer.querySelector('.tree-item[data-node-id]')) attachDragEvents(treeContainer); } catch (_) { }
-    try { if (typeof attachPointerDragEvents === 'function') attachPointerDragEvents(treeContainer); } catch (_) { }
-    try { if (typeof window.__updateTraceHighlights === 'function') window.__updateTraceHighlights(); } catch (_) { }
-
-    return true;
-}
-window.refreshTempSectionTreeInPlace = refreshTempSectionTreeInPlace;
-
-let lastLowDetailPrewarmAt = 0;
-
-function prewarmCanvasLowDetailVisibleTrees(options = {}) {
-    const {
-        maxWarm = 12,
-        margin = 120
-    } = (options && typeof options === 'object') ? options : {};
-
-    if (!CanvasState.lowDetailEnabled || !CanvasState.lowDetailActive) return 0;
-    // 虚拟化启用时：按需加载逻辑接管，避免 prewarm 造成“一屏全加载”的不适
-    if (isCanvasVirtualizationEnabled()) return 0;
-
-    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    if (now - lastLowDetailPrewarmAt < 900) return 0;
-    lastLowDetailPrewarmAt = now;
-
-    const threshold = getCanvasLowDetailPrewarmDisplayZoomThreshold();
-    const displayZoom = getCanvasDisplayZoom();
-    if (threshold > 0 && displayZoom < threshold) return 0;
-
-    if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) return 0;
-
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return 0;
-
-    const workspaceRect = workspace.getBoundingClientRect();
-    const visibleArea = {
-        left: workspaceRect.left - margin,
-        right: workspaceRect.right + margin,
-        top: workspaceRect.top - margin,
-        bottom: workspaceRect.bottom + margin
-    };
-
-    const scale = CanvasState.zoom || 1;
-    let warmed = 0;
-
-    // 以“当前视口中心”为基准，仅预热中心附近少量栏目，避免低细节临界视界一屏全部一起加载
-    const centerScreenX = workspaceRect.left + (workspaceRect.width / 2);
-    const centerScreenY = workspaceRect.top + (workspaceRect.height / 2);
-    const candidates = [];
-
-    for (const section of CanvasState.tempSections) {
-        if (!section || !section.id) continue;
-        if (section.dormant) continue;
-        if (!CanvasState.unloadedTempSectionTrees.has(section.id)) continue;
-
-        const element = document.getElementById(section.id);
-        if (!element) continue; // 只预热已存在的栏目，避免离屏创建大量DOM
-
-        const x = section.x * scale + CanvasState.panOffsetX + workspaceRect.left;
-        const y = section.y * scale + CanvasState.panOffsetY + workspaceRect.top;
-        const width = (section.width || 360) * scale;
-        const height = (section.height || 280) * scale;
-
-        const isInViewport = !(
-            x + width < visibleArea.left ||
-            x > visibleArea.right ||
-            y + height < visibleArea.top ||
-            y > visibleArea.bottom
-        );
-        if (!isInViewport) continue;
-
-        const cx = x + width / 2;
-        const cy = y + height / 2;
-        const dx = cx - centerScreenX;
-        const dy = cy - centerScreenY;
-        candidates.push({ section, dist2: dx * dx + dy * dy });
-    }
-
-    candidates.sort((a, b) => a.dist2 - b.dist2);
-
-    const limit = Math.max(0, Math.min(maxWarm, 24)); // 双保险：避免用户传入过大
-    for (let i = 0; i < candidates.length && warmed < limit; i++) {
-        const section = candidates[i].section;
-        try {
-            if (__ensureTempSectionTreeLoadedInPlace(section)) warmed += 1;
-        } catch (_) { }
-    }
-
-    return warmed;
-}
-
-function cancelCanvasLowDetailPrewarmJob() {
-    CanvasState.lowDetailPrewarmRunning = false;
-    CanvasState.lowDetailPrewarmQueue = null;
-    CanvasState.lowDetailPrewarmIndex = 0;
-    if (CanvasState.lowDetailPrewarmTimer) {
-        clearTimeout(CanvasState.lowDetailPrewarmTimer);
-        CanvasState.lowDetailPrewarmTimer = null;
-    }
-}
-
-function buildCanvasLowDetailPrewarmQueue(options = {}) {
-    const {
-        margin = 240
-    } = (options && typeof options === 'object') ? options : {};
-
-    if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) return [];
-
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return [];
-
-    const workspaceRect = workspace.getBoundingClientRect();
-    const visibleArea = {
-        left: workspaceRect.left - margin,
-        right: workspaceRect.right + margin,
-        top: workspaceRect.top - margin,
-        bottom: workspaceRect.bottom + margin
-    };
-
-    const scale = CanvasState.zoom || 1;
-    const queue = [];
-
-    for (const section of CanvasState.tempSections) {
-        if (!section || !section.id) continue;
-        if (section.dormant) continue;
-        if (!CanvasState.unloadedTempSectionTrees.has(section.id)) continue;
-
-        const element = document.getElementById(section.id);
-        if (!element) continue;
-
-        const x = section.x * scale + CanvasState.panOffsetX + workspaceRect.left;
-        const y = section.y * scale + CanvasState.panOffsetY + workspaceRect.top;
-        const width = (section.width || 360) * scale;
-        const height = (section.height || 280) * scale;
-
-        const isInViewport = !(
-            x + width < visibleArea.left ||
-            x > visibleArea.right ||
-            y + height < visibleArea.top ||
-            y > visibleArea.bottom
-        );
-        if (!isInViewport) continue;
-
-        queue.push(section);
-    }
-
-    return queue;
-}
-
-function __scheduleCanvasLowDetailPrewarmChunk() {
-    if (!CanvasState.lowDetailPrewarmRunning) return;
-
-    const run = (deadline) => {
-        try { __runCanvasLowDetailPrewarmChunk(deadline); } catch (_) { }
-    };
-
-    if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(run);
-    } else {
-        setTimeout(() => run(null), 60);
-    }
-}
-
-function __runCanvasLowDetailPrewarmChunk(deadline) {
-    if (!CanvasState.lowDetailPrewarmRunning) return;
-
-    // 用户交互中：暂停预热（会触发 DOM 构建），等停止交互后继续
-    const ws = document.getElementById('canvasWorkspace');
-    const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || (ws && ws.classList && ws.classList.contains('is-zooming'));
-    if (isInteracting) {
-        __scheduleCanvasLowDetailPrewarmChunk();
-        return;
-    }
-
-    // 大数据量场景：预热会反复扫描队列并逐步构建大量 DOM，容易导致缩放/拖动掉帧；
-    // 这里选择直接禁用预热，以保证交互流畅（放大退出低细节时再按需渲染）。
-    if (isCanvasHugeData()) {
-        cancelCanvasLowDetailPrewarmJob();
-        return;
-    }
-    if (isCanvasVirtualizationEnabled()) {
-        cancelCanvasLowDetailPrewarmJob();
-        return;
-    }
-
-    if (!CanvasState.lowDetailEnabled || !CanvasState.lowDetailActive) {
-        cancelCanvasLowDetailPrewarmJob();
-        return;
-    }
-
-    const threshold = getCanvasLowDetailPrewarmDisplayZoomThreshold();
-    const displayZoom = getCanvasDisplayZoom();
-    if (threshold > 0 && displayZoom < threshold) {
-        // 还没到预热区间：暂停但不清空（后续可能继续放大触发）
-        cancelCanvasLowDetailPrewarmJob();
-        return;
-    }
-
-    if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) {
-        cancelCanvasLowDetailPrewarmJob();
-        // 内部缓冲加载完成后尝试退出低细节（如果已超过显示切换阈值）
-        try { updateCanvasLowDetailMode(true); } catch (_) { }
-        return;
-    }
-
-    if (!Array.isArray(CanvasState.lowDetailPrewarmQueue) || !CanvasState.lowDetailPrewarmQueue.length) {
-        CanvasState.lowDetailPrewarmQueue = buildCanvasLowDetailPrewarmQueue({ margin: 240 });
-        CanvasState.lowDetailPrewarmIndex = 0;
-    }
-
-    const queue = CanvasState.lowDetailPrewarmQueue || [];
-    let idx = CanvasState.lowDetailPrewarmIndex || 0;
-
-    const maxPerChunk = 3;
-    const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    let warmed = 0;
-
-    while (idx < queue.length) {
-        if (warmed >= maxPerChunk) break;
-
-        // 时间预算：尽量避免卡顿（没有 idle deadline 时使用 12ms 预算）
-        if (deadline && typeof deadline.timeRemaining === 'function') {
-            if (deadline.timeRemaining() < 6) break;
-        } else {
-            const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-            if (now - start > 12) break;
-        }
-
-        const section = queue[idx++];
-        if (!section || !section.id) continue;
-        if (section.dormant) continue;
-        if (!CanvasState.unloadedTempSectionTrees.has(section.id)) continue;
-        if (!document.getElementById(section.id)) continue;
-
-        try {
-            if (__ensureTempSectionTreeLoadedInPlace(section)) {
-                warmed += 1;
-            }
-        } catch (_) { }
-    }
-
-    CanvasState.lowDetailPrewarmIndex = idx;
-
-    if (idx >= queue.length) {
-        // 队列跑完：如果仍有未加载（可能视口变化），重建一次；否则结束
-        if (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.size) {
-            CanvasState.lowDetailPrewarmQueue = buildCanvasLowDetailPrewarmQueue({ margin: 240 });
-            CanvasState.lowDetailPrewarmIndex = 0;
-            if (CanvasState.lowDetailPrewarmQueue && CanvasState.lowDetailPrewarmQueue.length) {
-                __scheduleCanvasLowDetailPrewarmChunk();
-                return;
-            }
-        }
-
-        cancelCanvasLowDetailPrewarmJob();
-        try { updateCanvasLowDetailMode(true); } catch (_) { }
-        return;
-    }
-
-    __scheduleCanvasLowDetailPrewarmChunk();
-}
-
-function maybeStartCanvasLowDetailPrewarmJob() {
-    if (!CanvasState.lowDetailEnabled || !CanvasState.lowDetailActive) {
-        cancelCanvasLowDetailPrewarmJob();
-        return;
-    }
-
-    if (isCanvasHugeData()) return;
-    if (isCanvasVirtualizationEnabled()) return;
-
-    const threshold = getCanvasLowDetailPrewarmDisplayZoomThreshold();
-    const displayZoom = getCanvasDisplayZoom();
-    if (threshold > 0 && displayZoom < threshold) return;
-
-    if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) return;
-
-    if (CanvasState.lowDetailPrewarmRunning) return;
-
-    // 防抖：合并多次触发（尤其是滚轮缩放）
-    if (CanvasState.lowDetailPrewarmTimer) return;
-    CanvasState.lowDetailPrewarmTimer = setTimeout(() => {
-        CanvasState.lowDetailPrewarmTimer = null;
-        if (!CanvasState.lowDetailEnabled || !CanvasState.lowDetailActive) return;
-        if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) return;
-        const t = getCanvasLowDetailPrewarmDisplayZoomThreshold();
-        if (t > 0 && getCanvasDisplayZoom() < t) return;
-
-        CanvasState.lowDetailPrewarmRunning = true;
-        CanvasState.lowDetailPrewarmQueue = buildCanvasLowDetailPrewarmQueue({ margin: 240 });
-        CanvasState.lowDetailPrewarmIndex = 0;
-        __scheduleCanvasLowDetailPrewarmChunk();
-    }, 80);
-}
-
-function __getCanvasViewportBounds(workspace, marginPx = 250) {
-    if (!workspace) return null;
-    const rect = workspace.getBoundingClientRect();
-    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-    const panX = CanvasState.panOffsetX || 0;
-    const panY = CanvasState.panOffsetY || 0;
-
-    const safeMarginPx = Math.max(0, Number(marginPx) || 0);
-    const margin = safeMarginPx / zoom;
-    return {
-        left: (0 - panX) / zoom - margin,
-        right: (rect.width - panX) / zoom + margin,
-        top: (0 - panY) / zoom - margin,
-        bottom: (rect.height - panY) / zoom + margin
-    };
-}
-
-function __isCardOutsideViewportBounds(el, bounds) {
-    if (!el || !bounds) return false;
-    const x = parseFloat(el.style.left) || 0;
-    const y = parseFloat(el.style.top) || 0;
-    const w = parseFloat(el.style.width) || el.offsetWidth || 0;
-    const h = parseFloat(el.style.height) || el.offsetHeight || 0;
-
-    return (
-        x + w < bounds.left ||
-        x > bounds.right ||
-        y + h < bounds.top ||
-        y > bounds.bottom
-    );
-}
-
-function __isCanvasRectOutsideBounds(x, y, width, height, bounds) {
-    if (!bounds) return false;
-    const nx = Number(x) || 0;
-    const ny = Number(y) || 0;
-    const w = Number(width) || 0;
-    const h = Number(height) || 0;
-    return (
-        nx + w < bounds.left ||
-        nx > bounds.right ||
-        ny + h < bounds.top ||
-        ny > bounds.bottom
-    );
-}
-
-function __getCanvasViewportLazyMarginPx() {
-    if (CanvasState.lowDetailActive) return 0;
-    try {
-        const dim = CanvasState.dataIntensiveMode || {};
-        if (dim.active || isCanvasHugeData()) return 0;
-        const budget = getCanvasVirtualizationBudget();
-        const margin = Number(budget && budget.marginPx);
-        return Number.isFinite(margin) ? Math.max(0, Math.min(160, margin)) : 80;
-    } catch (_) {
-        return 0;
-    }
-}
-
-function __getMdNodeRectForViewport(node, el = null) {
-    if (!node && !el) return null;
-    const mdBaseSize = getBlankNodeDefaultSize();
-    const x = Number(node && node.x);
-    const y = Number(node && node.y);
-    const w = Number(node && node.width) || (el ? (parseFloat(el.style.width) || el.offsetWidth) : 0) || mdBaseSize.width;
-    const h = Number(node && node.height) || (el ? (parseFloat(el.style.height) || el.offsetHeight) : 0) || mdBaseSize.height;
-    const left = Number.isFinite(x) ? x : (el ? (parseFloat(el.style.left) || 0) : 0);
-    const top = Number.isFinite(y) ? y : (el ? (parseFloat(el.style.top) || 0) : 0);
-    if (![left, top, w, h].every(v => typeof v === 'number' && isFinite(v))) return null;
-    return { x: left, y: top, width: w, height: h };
-}
-
-function __isMdNodeInViewportBounds(node, bounds, el = null) {
-    const rect = __getMdNodeRectForViewport(node, el);
-    if (!rect || !bounds) return true;
-    return !__isCanvasRectOutsideBounds(rect.x, rect.y, rect.width, rect.height, bounds);
-}
-
-function __setCanvasViewportLazyShellClass(el, active) {
-    if (!el || !el.classList) return;
-    const next = !!active;
-    try { el.classList.toggle(CANVAS_VIEWPORT_LAZY_SHELL_CLASS, next); } catch (_) { }
-    try {
-        if (el.dataset) {
-            if (next) el.dataset.viewportLazy = 'true';
-            else delete el.dataset.viewportLazy;
-        }
-    } catch (_) { }
-}
-
-function __shouldKeepLazyCardDomLoaded(el) {
-    if (!el || !el.classList) return false;
-    if (el.classList.contains('selected') ||
-        el.classList.contains('editing') ||
-        el.classList.contains('dragging') ||
-        el.classList.contains('resizing') ||
-        el.classList.contains('canvas-node-maximized')) {
-        return true;
-    }
-    if (el.dataset && el.dataset.editing === 'true') return true;
-    try {
-        const active = document.activeElement;
-        if (active && el.contains(active)) return true;
-    } catch (_) { }
-    return false;
-}
-
-function __getCardGroupLowDetailNodeById(id) {
-    const groupId = String(id || '').trim();
-    if (!groupId || !Array.isArray(CanvasState.mdNodes)) return null;
-    return CanvasState.mdNodes.find(node => node && node.id === groupId && node.subtype === 'card-group') || null;
-}
-
-function __resolveCardGroupLowDetailMemberElement(member) {
-    if (!member || !member.data) return null;
-    const id = String(member.data.id || '').trim();
-    if (!id) return null;
-    if (member.type === 'permanent-section') {
-        return member.data._permanentElement
-            || (typeof __resolveCanvasNodeElementById === 'function' ? __resolveCanvasNodeElementById(id) : null)
-            || document.getElementById(id);
-    }
-    return document.getElementById(id);
-}
-
-let __cardGroupLowDetailMembershipSignature = '';
-let __cardGroupLowDetailMembershipDirty = true;
-
-function __markCardGroupLowDetailMembershipDirty() {
-    __cardGroupLowDetailMembershipDirty = true;
-}
-
-function __isCardGroupLowDetailMembershipHotInteraction() {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return false;
-    const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
-    return !!(
-        workspace.classList.contains('is-zooming') ||
-        workspace.classList.contains('is-scrolling') ||
-        (CanvasState.touchpadState && CanvasState.touchpadState.isScrolling) ||
-        CanvasState.isPanning ||
-        (CanvasState.dragState && CanvasState.dragState.isDragging) ||
-        (resizeState && resizeState.active)
-    );
-}
-
-function __getCardGroupLowDetailElementKey(el) {
-    if (!el) return '';
-    const id = String(el.id || '').trim();
-    if (id) return id;
-    try {
-        if (el.dataset && el.dataset.permanentSectionCopyId) {
-            return `permanent-section-copy-${String(el.dataset.permanentSectionCopyId || '').trim()}`;
-        }
-    } catch (_) { }
-    return '';
-}
-
-function __clearCardGroupLowDetailMembershipState() {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return false;
-
-    const hostedClass = 'card-group-low-detail-child-hidden';
-    const nestedVisibleClass = 'card-group-low-detail-nested-visible';
-    let changed = false;
-
-    try {
-        workspace.querySelectorAll(`.${hostedClass}, .${nestedVisibleClass}, [data-low-detail-host-group-id]`).forEach(el => {
-            try {
-                if (el.classList.contains(hostedClass)) {
-                    el.classList.remove(hostedClass);
-                    changed = true;
-                }
-                if (el.classList.contains(nestedVisibleClass)) {
-                    el.classList.remove(nestedVisibleClass);
-                    changed = true;
-                }
-                if (el.dataset && el.dataset.lowDetailHostGroupId) {
-                    delete el.dataset.lowDetailHostGroupId;
-                    changed = true;
-                }
-            } catch (_) { }
-        });
-    } catch (_) { }
-
-    __cardGroupLowDetailMembershipSignature = '';
-    __cardGroupLowDetailMembershipDirty = false;
-    if (changed) {
-        try { scheduleEdgesRender(0); } catch (_) { }
-    }
-    return changed;
-}
-
-function __isCardGroupLowDetailMembershipDomSynced(desiredHosted, desiredNestedGroups, desiredGroupDepths, desiredGroupNodes) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return true;
-
-    const hostedClass = 'card-group-low-detail-child-hidden';
-    const nestedVisibleClass = 'card-group-low-detail-nested-visible';
-
-    try {
-        for (const [el, hostGroupId] of desiredHosted.entries()) {
-            if (!el || !el.classList || !el.classList.contains(hostedClass)) return false;
-            if (el.classList.contains('low-detail-active')) return false;
-            if (!el.dataset || el.dataset.lowDetailHostGroupId !== hostGroupId) return false;
-        }
-        for (const el of desiredNestedGroups) {
-            if (!el || !el.classList || !el.classList.contains(nestedVisibleClass)) return false;
-            if (el.classList.contains(hostedClass)) return false;
-            if (el.dataset && el.dataset.lowDetailHostGroupId) return false;
-        }
-        for (const [el, node] of desiredGroupNodes.entries()) {
-            if (!el || !el.classList || !el.classList.contains('low-detail-active')) return false;
-            if (!el.querySelector('.card-group-low-detail-overlay')) return false;
-        }
-        for (const [el, depth] of desiredGroupDepths.entries()) {
-            const opacity = Math.max(0.48, 1 - depth * 0.16).toFixed(2);
-            if (!el || !el.style || el.style.getPropertyValue('--card-group-low-detail-title-opacity') !== opacity) return false;
-        }
-        const staleNodes = workspace.querySelectorAll(`.${hostedClass}, .${nestedVisibleClass}, [data-low-detail-host-group-id]`);
-        for (const stale of staleNodes) {
-            const staleHosted = stale.classList && stale.classList.contains(hostedClass);
-            const staleNested = stale.classList && stale.classList.contains(nestedVisibleClass);
-            if (staleHosted && !desiredHosted.has(stale)) return false;
-            if (staleNested && !desiredNestedGroups.has(stale)) return false;
-            if (stale.dataset && stale.dataset.lowDetailHostGroupId && !desiredHosted.has(stale)) return false;
-        }
-    } catch (_) {
-        return false;
-    }
-
-    return true;
-}
-
-function __applyCardGroupLowDetailMembershipState(options = {}) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return false;
-
-    const opts = (options && typeof options === 'object') ? options : {};
-    const force = !!opts.force;
-
-    const hostedClass = 'card-group-low-detail-child-hidden';
-    const nestedVisibleClass = 'card-group-low-detail-nested-visible';
-
-    const groupApi = (typeof window !== 'undefined') ? window.__BCSCardGroup : null;
-    if (!groupApi || typeof groupApi.getRecursiveGeometricMembers !== 'function') {
-        return __clearCardGroupLowDetailMembershipState();
-    }
-
-    const groupSelector = CanvasState.lowDetailActive
-        ? `.card-group-canvas-node:not(.${CANVAS_VIEWPORT_LAZY_SHELL_CLASS})`
-        : `.card-group-canvas-node.low-detail-active:not(.${CANVAS_VIEWPORT_LAZY_SHELL_CLASS})`;
-    const activeGroups = Array.from(workspace.querySelectorAll(groupSelector))
-        .map((element) => {
-            const node = __getCardGroupLowDetailNodeById(element.id);
-            if (!node) return null;
-            const width = Number(node.width) || parseFloat(element.style.width) || element.offsetWidth || 0;
-            const height = Number(node.height) || parseFloat(element.style.height) || element.offsetHeight || 0;
-            return { element, node, area: Math.max(1, width * height) };
-        })
-        .filter(Boolean)
-        .sort((a, b) => b.area - a.area);
-
-    if (!activeGroups.length) {
-        return __clearCardGroupLowDetailMembershipState();
-    }
-
-    const desiredHosted = new Map();
-    const desiredNestedGroups = new Set();
-    const desiredGroupDepths = new Map();
-    const desiredGroupNodes = new Map();
-    const desiredTempUnloads = new Set();
-    const setGroupLowDetailDepth = (element, depth) => {
-        if (!element) return;
-        const safeDepth = Math.max(0, Math.min(8, Math.floor(Number(depth) || 0)));
-        const prevDepth = desiredGroupDepths.has(element) ? desiredGroupDepths.get(element) : -1;
-        if (prevDepth >= safeDepth) return;
-        desiredGroupDepths.set(element, safeDepth);
-    };
-    const markHosted = (element, hostGroupId) => {
-        if (!element || !hostGroupId) return;
-        desiredHosted.set(element, String(hostGroupId));
-    };
-
-    activeGroups.forEach((entry) => {
-        if (!entry || !entry.node || !entry.element) return;
-        if (desiredHosted.has(entry.element)) return;
-        desiredGroupNodes.set(entry.element, entry.node);
-        if (!desiredGroupDepths.has(entry.element)) setGroupLowDetailDepth(entry.element, 0);
-        const entryDepth = desiredGroupDepths.get(entry.element) || 0;
-
-        if (typeof groupApi.getDirectGeometricMembers === 'function') {
-            try {
-                const directMembers = groupApi.getDirectGeometricMembers(entry.node) || [];
-                directMembers.forEach((member) => {
-                    if (!member || member.type !== 'md-node' || !member.data || member.data.subtype !== 'card-group') return;
-                    const memberEl = __resolveCardGroupLowDetailMemberElement(member);
-                    if (memberEl) setGroupLowDetailDepth(memberEl, entryDepth + 1);
-                });
-            } catch (_) { }
-        }
-
-        let members = [];
-        try { members = groupApi.getRecursiveGeometricMembers(entry.node) || []; } catch (_) { members = []; }
-        members.forEach((member) => {
-            if (!member || !member.data) return;
-            const memberId = String(member.data.id || '').trim();
-            if (!memberId || memberId === entry.node.id) return;
-            const memberEl = __resolveCardGroupLowDetailMemberElement(member);
-            if (!memberEl) return;
-
-            if (member.type === 'md-node' && member.data && member.data.subtype === 'card-group') {
-                try {
-                    setGroupLowDetailDepth(memberEl, entryDepth + 1);
-                    desiredGroupNodes.set(memberEl, member.data);
-                    desiredNestedGroups.add(memberEl);
-                } catch (_) { }
-                return;
-            }
-
-            markHosted(memberEl, entry.node.id);
-
-            if (member.type === 'temp-section') {
-                desiredTempUnloads.add(memberId);
-            }
-        });
-    });
-
-    const activeKey = activeGroups
-        .map(({ element, node }) => {
-            const id = __getCardGroupLowDetailElementKey(element);
-            return `${id}:${Number(node.x) || 0},${Number(node.y) || 0},${Number(node.width) || 0},${Number(node.height) || 0}:${String(node.label || '')}`;
-        })
-        .sort()
-        .join('|');
-    const hostedKey = Array.from(desiredHosted.entries())
-        .map(([el, host]) => `${__getCardGroupLowDetailElementKey(el)}>${host}`)
-        .sort()
-        .join('|');
-    const nestedKey = Array.from(desiredNestedGroups)
-        .map(el => __getCardGroupLowDetailElementKey(el))
-        .sort()
-        .join('|');
-    const depthKey = Array.from(desiredGroupDepths.entries())
-        .map(([el, depth]) => `${__getCardGroupLowDetailElementKey(el)}:${depth}`)
-        .sort()
-        .join('|');
-    const signature = `${CanvasState.lowDetailActive ? '1' : '0'}::${activeKey}::${hostedKey}::${nestedKey}::${depthKey}`;
-    if (!force &&
-        signature === __cardGroupLowDetailMembershipSignature &&
-        __isCardGroupLowDetailMembershipDomSynced(desiredHosted, desiredNestedGroups, desiredGroupDepths, desiredGroupNodes)) {
-        __cardGroupLowDetailMembershipDirty = false;
-        return false;
-    }
-
-    let changed = false;
-    __cardGroupLowDetailMembershipSignature = signature;
-
-    desiredGroupNodes.forEach((node, el) => {
-        try {
-            if (el.classList.contains('canvas-node-maximized') && el.classList.contains('low-detail-active')) {
-                el.classList.remove('low-detail-active');
-                changed = true;
-            } else if (!el.classList.contains('low-detail-active') && !el.classList.contains('canvas-node-maximized')) {
-                el.classList.add('low-detail-active');
-                changed = true;
-            }
-            if (typeof groupApi.ensureLowDetailOverlay === 'function') {
-                groupApi.ensureLowDetailOverlay(el, node);
-            }
-        } catch (_) { }
-    });
-
-    desiredGroupDepths.forEach((depth, el) => {
-        try {
-            const opacity = Math.max(0.48, 1 - depth * 0.16).toFixed(2);
-            if (el.style.getPropertyValue('--card-group-low-detail-title-opacity') !== opacity) {
-                el.style.setProperty('--card-group-low-detail-title-opacity', opacity);
-                changed = true;
-            }
-        } catch (_) { }
-    });
-
-    desiredTempUnloads.forEach((memberId) => {
-        try {
-            if (__unloadTempSectionTreeInPlace(memberId)) changed = true;
-        } catch (_) { }
-    });
-
-    try {
-        workspace.querySelectorAll(`.${hostedClass}, [data-low-detail-host-group-id]`).forEach(el => {
-            if (desiredHosted.has(el)) return;
-            try {
-                if (el.classList.contains(hostedClass)) {
-                    el.classList.remove(hostedClass);
-                    changed = true;
-                    // 当离开卡片组低细节屏蔽状态时，如果全局低细节模式未开启，则立即加载卡片树内容
-                    if (!CanvasState.lowDetailActive) {
-                        const sectionId = el.id;
-                        if (el.classList.contains('temp-canvas-node')) {
-                            const section = (CanvasState.tempSections || []).find(s => s && s.id === sectionId);
-                            if (section) {
-                                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
-                            }
-                        } else if (el.classList.contains('permanent-bookmark-section')) {
-                            try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
-                        } else if (el.classList.contains('md-canvas-node')) {
-                            const node = (CanvasState.mdNodes || []).find(n => n && n.id === sectionId);
-                            if (node) {
-                                try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
-                            }
-                        }
-                    }
-                }
-                if (el.dataset && el.dataset.lowDetailHostGroupId) {
-                    delete el.dataset.lowDetailHostGroupId;
-                    changed = true;
-                }
-            } catch (_) { }
-        });
-    } catch (_) { }
-
-    try {
-        workspace.querySelectorAll(`.${nestedVisibleClass}`).forEach(el => {
-            if (desiredNestedGroups.has(el)) return;
-            try {
-                el.classList.remove(nestedVisibleClass);
-                changed = true;
-            } catch (_) { }
-        });
-    } catch (_) { }
-
-    desiredNestedGroups.forEach(el => {
-        try {
-            if (!el.classList.contains(nestedVisibleClass)) {
-                el.classList.add(nestedVisibleClass);
-                changed = true;
-            }
-            if (el.classList.contains(hostedClass)) {
-                el.classList.remove(hostedClass);
-                changed = true;
-            }
-            if (el.dataset && el.dataset.lowDetailHostGroupId) {
-                delete el.dataset.lowDetailHostGroupId;
-                changed = true;
-            }
-        } catch (_) { }
-    });
-
-    desiredHosted.forEach((hostGroupId, el) => {
-        try {
-            if (!el.classList.contains(hostedClass)) {
-                el.classList.add(hostedClass);
-                changed = true;
-            }
-            if (el.classList.contains('low-detail-active')) {
-                el.classList.remove('low-detail-active');
-                changed = true;
-            }
-            if (el.dataset && el.dataset.lowDetailHostGroupId !== hostGroupId) {
-                el.dataset.lowDetailHostGroupId = hostGroupId;
-                changed = true;
-            }
-        } catch (_) { }
-    });
-
-    if (changed) {
-        try { scheduleEdgesRender(0); } catch (_) { }
-    }
-    __cardGroupLowDetailMembershipDirty = false;
-    return changed;
-}
-
-function __maybeApplyCardGroupLowDetailMembershipState(options = {}) {
-    const opts = (options && typeof options === 'object') ? options : {};
-    if (!opts.force &&
-        CanvasState.lowDetailActive &&
-        !__cardGroupLowDetailMembershipDirty &&
-        __cardGroupLowDetailMembershipSignature) {
-        return false;
-    }
-    if (!opts.force &&
-        CanvasState.lowDetailActive &&
-        __cardGroupLowDetailMembershipDirty &&
-        __isCardGroupLowDetailMembershipHotInteraction()) {
-        return false;
-    }
-    return __applyCardGroupLowDetailMembershipState(opts);
-}
-
-function __updateNonTempNodesViewportVisibility(options = {}) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-    if (workspace.classList && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)) return;
-
-    if (typeof options !== 'object' || options === null) {
-        options = {};
-    }
-    const { doLoad = true, doUnload = true, force = false } = options;
-
-    const visualBounds = __getCanvasViewportBounds(workspace, 0);
-    const lazyBounds = __getCanvasViewportBounds(workspace, __getCanvasViewportLazyMarginPx());
-    const isGlobalLowDetail = !!CanvasState.lowDetailActive;
-    const allowViewportLowDetail = __isViewportLowDetailEffective();
-
-    const isRippleOrLowDetail = isGlobalLowDetail || (workspace && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS));
-
-    // 1) 空白栏目 (mdNodes)
-    const mdNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(node => node && node.id && node.subtype !== 'card-group') : [];
-    mdNodes.forEach(node => {
-        let el = document.getElementById(node.id);
-        const inLazyRange = __isMdNodeInViewportBounds(node, lazyBounds, el);
-        const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
-
-        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
-        __updateNodeOffScreenState(node.id, !inViewportStrict);
-
-        let shouldActive = isGlobalLowDetail;
-        if (!shouldActive && allowViewportLowDetail) {
-            const isOutside = !__isMdNodeInViewportBounds(node, visualBounds, el);
-            shouldActive = __shouldNodeBeLowDetail(node.id, isOutside);
-        }
-        if (el && el.classList.contains('canvas-node-maximized')) {
-            shouldActive = false;
-        }
-
-        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
-        if (!inLazyRange && !shouldKeepLoaded) {
-            const canUnload = __shouldNodeBeUnloaded(node.id);
-            if (doUnload && el && canUnload) {
-                try { el.remove(); } catch (_) { }
-                el = null;
-            }
-            return;
-        }
-
-        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
-
-        if (!el) {
-            if (shouldInstantLoad) {
-                try { renderMdNode(node, { shellOnly: shouldActive }); } catch (_) { }
-                el = document.getElementById(node.id);
-            } else {
-                __enqueueCanvasLazyLoadNode({
-                    type: 'md',
-                    id: node.id,
-                    x: Number(node.x) || 0,
-                    y: Number(node.y) || 0,
-                    w: Number(node.width) || 100,
-                    h: Number(node.height) || 100,
-                    shouldActive: shouldActive,
-                    data: node
-                });
-            }
-        }
-
-        if (el) {
-            if (el.classList.contains('card-group-low-detail-child-hidden')) return;
-
-            if (shouldActive && !shouldKeepLoaded) {
-                const canUnload = __shouldNodeBeUnloaded(node.id);
-                if (doUnload && canUnload) {
-                    try { __unloadMdNodeContentInPlace(node); } catch (_) { }
-                    el = document.getElementById(node.id) || el;
-                }
-            } else if (!shouldActive) {
-                if (doLoad) {
-                    try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
-                    el = document.getElementById(node.id) || el;
-                }
-            }
-
-            __setCanvasViewportLazyShellClass(el, false);
-
-            const wasActive = el.classList.contains('low-detail-active');
-            if (shouldActive !== wasActive) {
-                el.classList.toggle('low-detail-active', shouldActive);
-            }
-
-            // 进入低细节时，刷新文字叠层内容
-            if (shouldActive) {
-                try {
-                    if (node) {
-                        __ensureMdNodeLowDetailOverlay(el, node);
-                    }
-                } catch (_) {}
-            }
-        }
-    });
-
-    // 2) 永久栏目 (permanentSections)
-    // 2a) 主永久栏目 (permanentSection) - 静态存在，不删除 DOM，仅卸载树
-    const mainEl = document.getElementById('permanentSection');
-    if (mainEl) {
-        const outsideLazyRange = __isCardOutsideViewportBounds(mainEl, lazyBounds);
-        const shouldKeepLoaded = __shouldKeepLazyCardDomLoaded(mainEl);
-
-        const inViewportStrict = !__isCardOutsideViewportBounds(mainEl, visualBounds);
-        __updateNodeOffScreenState('permanentSection', !inViewportStrict);
-
-        let shouldActive = isGlobalLowDetail;
-        if (!shouldActive && allowViewportLowDetail) {
-            const isOutside = __isCardOutsideViewportBounds(mainEl, visualBounds);
-            shouldActive = __shouldNodeBeLowDetail('permanentSection', isOutside);
-        }
-        if (mainEl.classList.contains('canvas-node-maximized')) {
-            shouldActive = false;
-        }
-
-        if (outsideLazyRange && !shouldKeepLoaded) {
-            const canUnload = __shouldNodeBeUnloaded('permanentSection');
-            if (doUnload && canUnload) {
-                try { __unloadPermanentSectionTreeInPlace(mainEl); } catch (_) { }
-                __setCanvasViewportLazyShellClass(mainEl, true);
-            }
-        } else {
-            __setCanvasViewportLazyShellClass(mainEl, false);
-            if ((!CanvasState.lowDetailActive || mainEl.classList.contains('canvas-node-maximized')) && !shouldActive) {
-                if (doLoad) {
-                    try { __ensurePermanentSectionTreeLoadedInPlace(mainEl); } catch (_) { }
-                }
-            }
-        }
-
-        const wasActive = mainEl.classList.contains('low-detail-active');
-        if (shouldActive !== wasActive) {
-            mainEl.classList.toggle('low-detail-active', shouldActive);
-        }
-
-        if (shouldActive) {
-            try { __ensurePermanentSectionLowDetailOverlay(mainEl); } catch (_) { }
-        }
-    }
-
-    // 2b) 永久栏目副本 (copies)
-    const existingMeta = (__readPermanentSectionCopies() || []).filter((item) => item && item.id);
-    const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
-        ? CanvasState.permanentLayout.copiesById
-        : {};
-
-    existingMeta.forEach(meta => {
-        const copyId = meta.id;
-        const displayIndex = meta.displayIndex;
-        const cardState = copyStateById[copyId];
-        if (!cardState) return;
-
-        const outsideLazyRange = __isCanvasRectOutsideBounds(cardState.left, cardState.top, cardState.width, cardState.height, lazyBounds);
-        const elId = 'permanent-section-copy-' + copyId;
-        let el = document.getElementById(elId);
-        const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
-
-        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(cardState.left), Number(cardState.top), Number(cardState.width || 100), Number(cardState.height || 100), visualBounds);
-        __updateNodeOffScreenState(elId, !inViewportStrict);
-
-        let shouldActive = isGlobalLowDetail;
-        if (!shouldActive && allowViewportLowDetail) {
-            const isOutside = __isCanvasRectOutsideBounds(cardState.left, cardState.top, cardState.width, cardState.height, visualBounds);
-            shouldActive = __shouldNodeBeLowDetail(elId, isOutside);
-        }
-        if (el && el.classList.contains('canvas-node-maximized')) {
-            shouldActive = false;
-        }
-
-        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
-        if (outsideLazyRange && !shouldKeepLoaded) {
-            const canUnload = __shouldNodeBeUnloaded(elId);
-            if (doUnload && el && canUnload) {
-                try { __unloadPermanentSectionTreeInPlace(el); } catch (_) { }
-                try { el.remove(); } catch (_) { }
-                el = null;
-            }
-            return;
-        }
-
-        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
-
-        if (!el) {
-            if (shouldInstantLoad) {
-                try {
-                    el = __createPermanentSectionCopyFromStorage({
-                        id: copyId,
-                        displayIndex,
-                        ...cardState
-                    });
-                } catch (_) { }
-            } else {
-                __enqueueCanvasLazyLoadNode({
-                    type: 'copy',
-                    id: elId,
-                    x: Number(cardState.left) || 0,
-                    y: Number(cardState.top) || 0,
-                    w: Number(cardState.width) || 100,
-                    h: Number(cardState.height) || 100,
-                    shouldActive: shouldActive,
-                    copyId: copyId,
-                    displayIndex: displayIndex,
-                    data: cardState
-                });
-            }
-        }
-
-        if (el) {
-            if (el.classList.contains('card-group-low-detail-child-hidden')) return;
-
-            __setCanvasViewportLazyShellClass(el, false);
-            if ((!CanvasState.lowDetailActive || el.classList.contains('canvas-node-maximized')) && !shouldActive) {
-                if (doLoad) {
-                    try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
-                }
-            }
-
-            const wasActive = el.classList.contains('low-detail-active');
-            if (shouldActive !== wasActive) {
-                el.classList.toggle('low-detail-active', shouldActive);
-            }
-
-            if (shouldActive) {
-                try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
-            }
-        }
-    });
-
-    // 3) 卡片组
-    const cardGroupNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(node => node && node.id && node.subtype === 'card-group') : [];
-    cardGroupNodes.forEach(node => {
-        let el = document.getElementById(node.id);
-        const inLazyRange = __isMdNodeInViewportBounds(node, lazyBounds, el);
-        const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
-
-        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
-        __updateNodeOffScreenState(node.id, !inViewportStrict);
-
-        let shouldActive = isGlobalLowDetail;
-        if (!shouldActive && allowViewportLowDetail) {
-            const isOutside = !__isMdNodeInViewportBounds(node, visualBounds, el);
-            shouldActive = __shouldNodeBeLowDetail(node.id, isOutside);
-        }
-        if (el && el.classList.contains('canvas-node-maximized')) {
-            shouldActive = false;
-        }
-
-        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
-        if (!inLazyRange && !shouldKeepLoaded) {
-            const canUnload = __shouldNodeBeUnloaded(node.id);
-            if (doUnload && el && canUnload) {
-                try { el.remove(); } catch (_) { }
-                el = null;
-            }
-            return;
-        }
-
-        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
-
-        if (!el) {
-            if (shouldInstantLoad) {
-                try { renderMdNode(node); } catch (_) { }
-                el = document.getElementById(node.id);
-            } else {
-                __enqueueCanvasLazyLoadNode({
-                    type: 'group',
-                    id: node.id,
-                    x: Number(node.x) || 0,
-                    y: Number(node.y) || 0,
-                    w: Number(node.width) || 100,
-                    h: Number(node.height) || 100,
-                    shouldActive: shouldActive,
-                    data: node
-                });
-            }
-        }
-
-        if (el) {
-            __setCanvasViewportLazyShellClass(el, false);
-
-            const wasActive = el.classList.contains('low-detail-active');
-            if (shouldActive !== wasActive) {
-                el.classList.toggle('low-detail-active', shouldActive);
-            }
-
-            if (shouldActive) {
-                try {
-                    if (window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                        window.__BCSCardGroup.ensureLowDetailOverlay(el, node);
-                    }
-                } catch (_) { }
-            }
-        }
-    });
-
-    try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
-    try { __updateVirtualizationWakeupScheduler(); } catch (_) { }
-}
-
-function __ensureCanvasLowDetailOverlaysReady(workspace = null) {
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    if (!ws) return;
-
-    try {
-        const sections = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [];
-        sections.forEach(section => {
-            if (!section || !section.id) return;
-            const el = document.getElementById(section.id);
-            if (el) __ensureTempSectionLowDetailOverlay(section, el);
-        });
-    } catch (_) { }
-
-    try {
-        ws.querySelectorAll('.permanent-bookmark-section').forEach(el => {
-            try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
-        });
-    } catch (_) { }
-
-    try { __updateAllMdNodeLowDetailOverlays(); } catch (_) { }
-
-    try {
-        ws.querySelectorAll('.card-group-canvas-node').forEach(el => {
-            try {
-                const node = __getCardGroupLowDetailNodeById(el.id);
-                if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                    window.__BCSCardGroup.ensureLowDetailOverlay(el, node);
-                }
-            } catch (_) { }
-        });
-    } catch (_) { }
-}
-
-function __cancelCanvasLowDetailRipple(workspace = null, options = {}) {
-    const hasRunningFrame = !!CanvasState.lowDetailRippleFrame;
-    CanvasState.lowDetailRippleGeneration = (Number(CanvasState.lowDetailRippleGeneration || 0) || 0) + 1;
-    if (CanvasState.lowDetailRippleFrame) {
-        try { cancelAnimationFrame(CanvasState.lowDetailRippleFrame); } catch (_) { }
-        CanvasState.lowDetailRippleFrame = null;
-    }
-    const opts = (options && typeof options === 'object') ? options : {};
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    if (hasRunningFrame && !CanvasState.lowDetailActive && !opts.startingNew) {
-        try { __finalizeCanvasLowDetailExitVisualState(ws); } catch (_) { }
-    }
-    if (opts.keepClass) return;
-    if (ws && ws.classList) {
-        try { ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS); } catch (_) { }
-    }
-}
-
-function __clearCanvasLowDetailFreezeInv() {
-    CanvasState.lowDetailFreezeInv = null;
-    try {
-        const container = getCachedContainer();
-        if (container) container.style.removeProperty('--canvas-low-detail-freeze-inv');
-    } catch (_) { }
-}
-
-function __isCanvasSafeZoneActive(displayZoom = null) {
-    const zoom = (typeof displayZoom === 'number' && isFinite(displayZoom))
-        ? displayZoom
-        : getCanvasDisplayZoom();
-
-    if (isCanvasSafeZoneEnabled()) {
-        const threshold = getCanvasSafeZoneThreshold();
-        return Number.isFinite(zoom) && Number.isFinite(threshold) && threshold > 0 && zoom >= threshold;
-    }
-
-    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
-    const exitThreshold = enterThreshold + CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS;
-    return Number.isFinite(zoom) && zoom >= exitThreshold;
-}
-
-function __hasCanvasGlobalLowDetailResidue(workspace = null) {
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    if (!ws || !ws.classList) return !!CanvasState.lowDetailActive;
-    return !!(
-        CanvasState.lowDetailActive ||
-        CanvasState.lowDetailFreezeInv !== null ||
-        ws.classList.contains('canvas-low-detail') ||
-        ws.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)
-    );
-}
-
-function __hasCanvasSafeZoneLowDetailResidue(workspace = null) {
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    if (!ws) return !!CanvasState.lowDetailActive;
-    if (__hasCanvasGlobalLowDetailResidue(ws)) return true;
-    try {
-        if (ws.querySelector('.card-group-low-detail-child-hidden, .card-group-low-detail-nested-visible, [data-low-detail-host-group-id]')) {
-            return true;
-        }
-        const bounds = __getCanvasViewportBounds(ws, 0);
-        const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR + '.low-detail-active'));
-        for (const card of cards) {
-            if (!__isCardOutsideViewportBounds(card, bounds)) {
-                return true;
-            }
-        }
-    } catch (_) { }
-    return false;
-}
-
-function __forceCanvasLowDetailVisualExit(workspace = null, options = {}) {
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    const opts = (options && typeof options === 'object') ? options : {};
-    const clearAllCards = opts.clearAllCards === true;
-
-    __clearCanvasLazyLoadQueue();
-    CanvasState.lowDetailActive = false;
-    CanvasState.suppressTreeLoadAnimationUntil = Date.now() + CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS;
-    try { __cancelCanvasLowDetailRipple(ws); } catch (_) { }
-    if (ws && ws.classList) {
-        try {
-            ws.classList.remove('canvas-low-detail');
-            ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
-        } catch (_) { }
-        if (clearAllCards) {
-            try { ws.querySelectorAll('.low-detail-active').forEach(el => el.classList.remove('low-detail-active')); } catch (_) { }
-            try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
-        } else {
-            const bounds = __getCanvasViewportBounds(ws, 0);
-            const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
-            cards.forEach(card => {
-                const activeForCard = __shouldKeepCardLowDetailAfterGlobalExit(card, bounds);
-                if (card.classList && !card.classList.contains('card-group-low-detail-child-hidden')) {
-                    card.classList.toggle('low-detail-active', activeForCard);
-                }
-            });
-        }
-    }
-    __clearCanvasLowDetailFreezeInv();
-    try { cancelCanvasLowDetailPrewarmJob(); } catch (_) { }
-    try {
-        const edgeToolbar = document.getElementById('edge-toolbar');
-        if (edgeToolbar) edgeToolbar.style.display = '';
-    } catch (_) { }
-    if (opts.restoreDom !== false) {
-        try { __scheduleCanvasLowDetailDomRestore(0); } catch (_) { }
-    }
-    if (clearAllCards) {
-        try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: false }); } catch (_) { }
-    } else {
-        try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: true }); } catch (_) { }
-    }
-    if (opts.scheduleVirtualization !== false) {
-        try { scheduleCanvasVirtualizationUpdate(0); } catch (_) { }
-    }
-    try { scheduleEdgesRender(0); } catch (_) { }
-}
-
-function __auditCanvasLowDetailSafeZoneExit(reason = 'safe-zone-audit') {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace || !__isCanvasSafeZoneActive()) return false;
-    if (!__hasCanvasSafeZoneLowDetailResidue(workspace)) return false;
-    __forceCanvasLowDetailVisualExit(workspace, {
-        clearAllCards: true,
-        restoreDom: true,
-        scheduleVirtualization: true,
-        reason
-    });
-    return true;
-}
-
-function __scheduleCanvasLowDetailSafeZoneAudit(reason = 'safe-zone-audit', delayMs = 90) {
-    if (canvasLowDetailSafeZoneAuditTimer) {
-        clearTimeout(canvasLowDetailSafeZoneAuditTimer);
-        canvasLowDetailSafeZoneAuditTimer = null;
-    }
-    if (!__isCanvasSafeZoneActive()) return;
-    canvasLowDetailSafeZoneAuditTimer = setTimeout(() => {
-        canvasLowDetailSafeZoneAuditTimer = null;
-        try { __auditCanvasLowDetailSafeZoneExit(reason); } catch (_) { }
-    }, Math.max(0, Number(delayMs) || 0));
-}
-
-function __getCanvasLowDetailRippleViewportRect(workspace) {
-    const container = getCachedContainer() || (workspace && workspace.parentElement) || workspace;
-    if (!container || typeof container.getBoundingClientRect !== 'function') return null;
-    try {
-        const rect = container.getBoundingClientRect();
-        if (!rect || rect.width <= 0 || rect.height <= 0) return null;
-        return rect;
-    } catch (_) {
-        return null;
-    }
-}
-
-function __isRectNearLowDetailRippleViewport(rect, viewportRect) {
-    if (!rect || !viewportRect) return false;
-    const m = CANVAS_LOW_DETAIL_RIPPLE_NEAR_MARGIN;
-    return !(
-        rect.right < viewportRect.left - m ||
-        rect.left > viewportRect.right + m ||
-        rect.bottom < viewportRect.top - m ||
-        rect.top > viewportRect.bottom + m
-    );
-}
-
-function __isCardAlreadyLowDetailIntrinsic(card) {
-    if (!card || !card.classList) return false;
-    return !!(
-        card.classList.contains('low-detail-active') ||
-        card.classList.contains('dormant-content') ||
-        card.classList.contains('temp-tree-unloaded') ||
-        card.classList.contains('permanent-tree-unloaded') ||
-        card.classList.contains('card-group-low-detail-child-hidden')
-    );
-}
-
-function __ensureLowDetailOverlayForCard(card) {
-    if (!card || !card.classList) return;
-    try {
-        if (card.classList.contains('temp-canvas-node')) {
-            const sectionId = card.dataset ? (card.dataset.sectionId || card.id) : card.id;
-            const section = (typeof getTempSection === 'function') ? getTempSection(sectionId) : null;
-            if (section) __ensureTempSectionLowDetailOverlay(section, card);
-            return;
-        }
-    } catch (_) { }
-    try {
-        if (card.classList.contains('permanent-bookmark-section')) {
-            __ensurePermanentSectionLowDetailOverlay(card);
-            return;
-        }
-    } catch (_) { }
-    try {
-        if (card.classList.contains('card-group-canvas-node')) {
-            const node = __getCardGroupLowDetailNodeById(card.id);
-            if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                window.__BCSCardGroup.ensureLowDetailOverlay(card, node);
-            }
-            return;
-        }
-    } catch (_) { }
-    try {
-        if (card.classList.contains('md-canvas-node')) {
-            const node = (typeof getMdNodeById === 'function') ? getMdNodeById(card.id) : null;
-            if (node) __ensureMdNodeLowDetailOverlay(card, node);
-        }
-    } catch (_) { }
-}
-
-function __shouldKeepCardLowDetailAfterGlobalExit(card, bounds) {
-    if (!card || !card.classList) return false;
-    if (card.classList.contains('card-group-low-detail-child-hidden')) return true;
-    if (card.classList.contains('canvas-node-maximized')) return false;
-
-    if (card.classList.contains('md-canvas-node') ||
-        card.classList.contains('permanent-bookmark-section') ||
-        card.classList.contains('card-group-canvas-node') ||
-        card.classList.contains('temp-canvas-node')) {
-        if (__isViewportLowDetailEffective()) {
-            return __isCardOutsideViewportBounds(card, bounds);
-        }
-    }
-
-    if (card.classList.contains('dormant-content')) return true;
-    return false;
-}
-
-function __collectCanvasLowDetailRippleCards(workspace, shouldActive) {
-    const viewportRect = __getCanvasLowDetailRippleViewportRect(workspace);
-    if (!workspace || !viewportRect) return [];
-    const centerX = viewportRect.left + viewportRect.width / 2;
-    const centerY = viewportRect.top + viewportRect.height / 2;
-    const bounds = __getCanvasViewportBounds(workspace, 0);
-    const cards = Array.from(workspace.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
-    const entries = [];
-
-    cards.forEach(card => {
-        if (!card || !card.classList) return;
-        if (card.classList.contains('card-group-low-detail-child-hidden')) return;
-        const rect = (typeof card.getBoundingClientRect === 'function') ? card.getBoundingClientRect() : null;
-        if (!rect || rect.width <= 0 || rect.height <= 0) return;
-        if (!__isRectNearLowDetailRippleViewport(rect, viewportRect)) return;
-
-        if (shouldActive) {
-            if (__isCardAlreadyLowDetailIntrinsic(card)) return;
-        } else {
-            if (__shouldKeepCardLowDetailAfterGlobalExit(card, bounds)) return;
-        }
-
-        const cardX = rect.left + rect.width / 2;
-        const cardY = rect.top + rect.height / 2;
-        const distance = Math.hypot(cardX - centerX, cardY - centerY);
-        entries.push({ card, distance });
-    });
-
-    if (!entries.length) return [];
-    const maxDistance = Math.max(1, ...entries.map(entry => entry.distance));
-    entries.forEach(entry => {
-        // Enter: outside -> viewport center. Exit: viewport center -> outside.
-        entry.wave = shouldActive ? (maxDistance - entry.distance) : entry.distance;
-    });
-    entries.sort((a, b) => a.wave - b.wave);
-    return entries;
-}
-
-function __finalizeCanvasLowDetailExitVisualState(workspace) {
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    if (!ws) return;
-
-    ws.classList.remove('canvas-low-detail');
-    ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
-    try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
-
-    const bounds = __getCanvasViewportBounds(ws, 0);
-    const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
-    cards.forEach(card => {
-        const activeForCard = __shouldKeepCardLowDetailAfterGlobalExit(card, bounds);
-        if (card.classList && !card.classList.contains('card-group-low-detail-child-hidden')) {
-            card.classList.toggle('low-detail-active', activeForCard);
-        }
-        if (activeForCard) {
-            __ensureLowDetailOverlayForCard(card);
-        }
-    });
-
-    try { __maybeApplyCardGroupLowDetailMembershipState({ force: false }); } catch (_) { }
-}
-
-function __startCanvasLowDetailVisualRipple(shouldActive, workspace = null) {
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    if (!ws || !ws.classList) return false;
-
-    __clearCanvasLazyLoadQueue();
-    __cancelCanvasLowDetailRipple(ws, { startingNew: true });
-    const generation = (Number(CanvasState.lowDetailRippleGeneration || 0) || 0) + 1;
-    CanvasState.lowDetailRippleGeneration = generation;
-
-    if (shouldActive) {
-        __ensureCanvasLowDetailOverlaysReady(ws);
-        ws.classList.add(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
-        ws.classList.add('canvas-low-detail');
-    } else {
-        __ensureCanvasLowDetailOverlaysReady(ws);
-        ws.classList.add(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
-    }
-
-    const entries = __collectCanvasLowDetailRippleCards(ws, shouldActive);
-    if (!shouldActive) {
-        entries.forEach(entry => {
-            try {
-                __ensureLowDetailOverlayForCard(entry.card);
-                entry.card.classList.add('low-detail-active');
-            } catch (_) { }
-        });
-        ws.classList.remove('canvas-low-detail');
-    }
-
-    const finish = () => {
-        if (CanvasState.lowDetailRippleGeneration !== generation) return;
-        CanvasState.lowDetailRippleFrame = null;
-        if (shouldActive) {
-            ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
-            ws.classList.add('canvas-low-detail');
-            try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
-            try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
-            try { runCanvasVirtualizationUpdate({ force: true, doLoad: false, doUnload: true, lowDetailPrune: true }); } catch (_) { }
-        } else {
-            __finalizeCanvasLowDetailExitVisualState(ws);
-            try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: true }); } catch (_) { }
-        }
-        try { scheduleEdgesRender(0); } catch (_) { }
-    };
-
-    if (!entries.length) {
-        finish();
-        return true;
-    }
-
-    const maxWave = Math.max(1, ...entries.map(entry => entry.wave));
-    const duration = Math.min(
-        CANVAS_LOW_DETAIL_RIPPLE_MAX_MS,
-        Math.max(CANVAS_LOW_DETAIL_RIPPLE_MIN_MS, 140 + entries.length * 8)
-    );
-    const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    let index = 0;
-
-    const applyEntry = (entry) => {
-        if (!entry || !entry.card || !entry.card.classList) return;
-        try {
-            if (shouldActive) {
-                __ensureLowDetailOverlayForCard(entry.card);
-                entry.card.classList.add('low-detail-active');
-            } else {
-                entry.card.classList.remove('low-detail-active');
-            }
-        } catch (_) { }
-    };
-
-    const step = (now) => {
-        if (CanvasState.lowDetailRippleGeneration !== generation) return;
-        const current = (typeof now === 'number') ? now : Date.now();
-        const t = Math.max(0, Math.min(1, (current - start) / duration));
-        const threshold = maxWave * t;
-        let applied = 0;
-        while (index < entries.length &&
-            (entries[index].wave <= threshold || (t >= 1 && applied < CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME)) &&
-            applied < CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME) {
-            applyEntry(entries[index]);
-            index++;
-            applied++;
-        }
-        if (index >= entries.length) {
-            finish();
-            return;
-        }
-        CanvasState.lowDetailRippleFrame = requestAnimationFrame(step);
-    };
-
-    CanvasState.lowDetailRippleFrame = requestAnimationFrame(step);
-    return true;
-}
-
-function __enterCanvasLowDetailVisualState(workspace = null) {
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    if (!ws) return;
-
-    __ensureCanvasLowDetailOverlaysReady(ws);
-    try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
-    try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
-    ws.classList.add('canvas-low-detail');
-}
-
-function __exitCanvasLowDetailVisualState(workspace = null) {
-    const ws = workspace || document.getElementById('canvasWorkspace');
-    if (!ws) return;
-
-    __cancelCanvasLowDetailRipple(ws);
-    ws.classList.remove('canvas-low-detail');
-    try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
-}
-
-function __applyLowDetailStateVisualSync(shouldActive, options = {}) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    if (!shouldActive && isCanvasSafeZoneEnabled() && __isCanvasSafeZoneActive()) {
-        __forceCanvasLowDetailVisualExit(workspace, {
-            clearAllCards: true,
-            restoreDom: true,
-            scheduleVirtualization: true,
-            reason: 'safe-zone-visual-sync'
-        });
-        __scheduleCanvasLowDetailSafeZoneAudit('safe-zone-visual-sync-post', 90);
-        return;
-    }
-
-    const opts = (options && typeof options === 'object') ? options : {};
-    if (!opts.skipRipple && __startCanvasLowDetailVisualRipple(shouldActive, workspace)) {
-        return;
-    }
-
-    if (shouldActive) __enterCanvasLowDetailVisualState(workspace);
-    else __finalizeCanvasLowDetailExitVisualState(workspace);
-}
-
-function updateCanvasLowDetailMode(force = false) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    const container = getCachedContainer();
-    const clearFreezeInv = () => {
-        __clearCanvasLowDetailFreezeInv();
-    };
-    const ensureFreezeInv = () => {
-        if (typeof CanvasState.lowDetailFreezeInv === 'number' && isFinite(CanvasState.lowDetailFreezeInv) && CanvasState.lowDetailFreezeInv > 0) {
-            try {
-                if (container && !container.style.getPropertyValue('--canvas-low-detail-freeze-inv')) {
-                    container.style.setProperty('--canvas-low-detail-freeze-inv', CanvasState.lowDetailFreezeInv.toString());
-                }
-            } catch (_) { }
-            return;
-        }
-        const z = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-        const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
-        const displayThreshold = getCanvasLowDetailDisplayZoomThreshold();
-        const refZoom = (typeof displayThreshold === 'number' && isFinite(displayThreshold) && displayThreshold > 0)
-            ? (base * displayThreshold)
-            : z;
-        // 固定在“阈值那一刻”的补偿（避免继续缩小时文字相对栏目不断变大）
-        const inv = 1 / Math.max(z, refZoom);
-        CanvasState.lowDetailFreezeInv = inv;
-        try { if (container) container.style.setProperty('--canvas-low-detail-freeze-inv', inv.toString()); } catch (_) { }
-    };
-
-    if (!CanvasState.lowDetailEnabled) {
-        if (force || __hasCanvasSafeZoneLowDetailResidue(workspace)) {
-            __forceCanvasLowDetailVisualExit(workspace, {
-                clearAllCards: true,
-                restoreDom: true,
-                scheduleVirtualization: true,
-                reason: 'low-detail-disabled'
-            });
-        }
-        return;
-    }
-
-    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
-    const exitThreshold = enterThreshold + CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS;
-    const displayZoom = getCanvasDisplayZoom();
-    const wasActive = CanvasState.lowDetailActive;
-
-    // 交互状态检测
-    const isZoomingClass = workspace.classList.contains('is-zooming');
-    const isScrolling = CanvasState.touchpadState.isScrolling || false;
-    const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
-    const isResizing = !!((resizeState && resizeState.active) || (workspace.querySelector && workspace.querySelector('.resizing')));
-    const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || isZoomingClass || isResizing;
-
-    // 稳定低细节交互帧只需要保持 transform/CSS 变量，不要重算数据量或组成员。
-    const safeZoneEnabled = isCanvasSafeZoneEnabled();
-    const safeZoneThreshold = getCanvasSafeZoneThreshold();
-    const safeZoneActive = safeZoneEnabled && displayZoom >= safeZoneThreshold;
-    if (safeZoneActive) {
-        try { updateDataIntensiveMode(force, { useCached: !force && isInteracting }); } catch (_) { }
-        if (force || __hasCanvasSafeZoneLowDetailResidue(workspace)) {
-            __forceCanvasLowDetailVisualExit(workspace, {
-                clearAllCards: true,
-                restoreDom: true,
-                scheduleVirtualization: true,
-                reason: 'safe-zone'
-            });
-        }
-        __scheduleCanvasLowDetailSafeZoneAudit('safe-zone-post-update', force ? 0 : 90);
-        return;
-    }
-    if (!force &&
-        wasActive &&
-        isInteracting &&
-        enterThreshold > 0 &&
-        displayZoom <= exitThreshold) {
-        ensureFreezeInv();
-        if (!workspace.classList.contains('canvas-low-detail')) {
-            __enterCanvasLowDetailVisualState(workspace);
-        }
-        return;
-    }
-
-    // [Fix Priority] 数据密集模式判断；交互中只读缓存，避免缩放/拖拽帧扫描可视 DOM。
-    updateDataIntensiveMode(force, { useCached: !force && isInteracting });
-    const dim = CanvasState.dataIntensiveMode;
-    const isTotalAlwaysActive = !!(dim && dim.totalAlwaysEnabled && dim.totalAlwaysActive);
-    const isDataOrange = !!(dim && dim.active);
-
-    // [Fix Priority] 优先级逻辑重构
-    let shouldActive;
-
-    if (isTotalAlwaysActive) {
-        const zoomSaysLowDetail = wasActive
-            ? ((enterThreshold > 0) ? (displayZoom <= exitThreshold) : false)
-            : ((enterThreshold > 0) ? (displayZoom <= enterThreshold) : false);
-        const safetyFloor = 0.15;
-        shouldActive = zoomSaysLowDetail || (displayZoom < safetyFloor);
-    } else if (isDataOrange) {
-        const zoomSaysLowDetail = wasActive
-            ? ((enterThreshold > 0) ? (displayZoom <= exitThreshold) : false)
-            : ((enterThreshold > 0) ? (displayZoom <= enterThreshold) : false);
-        const safetyFloor = 0.15;
-        shouldActive = zoomSaysLowDetail || (displayZoom < safetyFloor);
-    } else {
-        if (wasActive) {
-            shouldActive = (enterThreshold > 0) ? (displayZoom <= exitThreshold) : false;
-        } else {
-            shouldActive = (enterThreshold > 0) ? (displayZoom <= enterThreshold) : false;
-        }
-    }
-
-    // [Fix] 交互门控逻辑
-    if (!force && isInteracting) {
-        if (enterThreshold > 0 && displayZoom > exitThreshold && !shouldActive && wasActive) {
-            // Allow Exit: the configured low-detail threshold is the visible boundary.
-        } else if (shouldActive && !wasActive) {
-            // Allow Entry
-        } else {
-            if (shouldActive === wasActive) return;
-            if (!shouldActive && wasActive) return;
-            if (!isDataOrange) return;
-        }
-    }
-
-    if (shouldActive === wasActive) {
-        if (shouldActive) {
-            ensureFreezeInv();
-            if (!workspace.classList.contains('canvas-low-detail')) {
-                __enterCanvasLowDetailVisualState(workspace);
-            } else {
-                try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) { }
-            }
-            try { __scheduleCanvasLowDetailDomPrune(0); } catch (_) { }
-            try { maybeStartCanvasLowDetailPrewarmJob(); } catch (_) { }
-        } else if (!shouldActive && (force || __hasCanvasGlobalLowDetailResidue(workspace))) {
-            __forceCanvasLowDetailVisualExit(workspace, {
-                clearAllCards: !__isViewportLowDetailEffective(),
-                restoreDom: true,
-                scheduleVirtualization: force,
-                reason: force ? 'force-state-sync' : 'visual-residue-sync'
-            });
-        }
-        return;
-    }
-
-    if (shouldActive !== wasActive) {
-        __clearCanvasLazyLoadQueue();
-    }
-    CanvasState.lowDetailActive = shouldActive;
-
-    // 进入低细节：隐藏连接线工具栏（避免“悬空工具条”）
-    if (shouldActive) {
-        CanvasState.suppressTreeLoadAnimationUntil = Date.now() + CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS;
-        ensureFreezeInv();
-        const edgeToolbar = document.getElementById('edge-toolbar');
-        if (edgeToolbar) edgeToolbar.style.display = 'none';
-        try { __scheduleCanvasLowDetailDomPrune(0); } catch (_) { }
-    } else {
-        // 退出低细节
-        CanvasState.suppressTreeLoadAnimationUntil = Date.now() + CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS;
-        clearFreezeInv();
-        try { cancelCanvasLowDetailPrewarmJob(); } catch (_) { }
-        const edgeToolbar = document.getElementById('edge-toolbar');
-        if (edgeToolbar) edgeToolbar.style.display = '';
-        try { __scheduleCanvasLowDetailDomRestore(0); } catch (_) { }
-
-        // 如果不在交互中，可以尝试加载视口内内容
-        if (!isInteracting) {
-            requestAnimationFrame(() => {
-                if (!CanvasState.lowDetailActive) {
-                    try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: !__isViewportLowDetailEffective() }); } catch (_) { }
-                }
-            });
-        }
-        try { scheduleEdgesRender(0); } catch (_) { }
-    }
-
-    // 低细节视觉状态必须同步切换，避免出现“先隐藏内容、后补文字层”的中间态。
-    try {
-        __applyLowDetailStateVisualSync(shouldActive, { skipRipple: force });
-    } catch (_) {
-        if (shouldActive) {
-            try { __enterCanvasLowDetailVisualState(workspace); } catch (_) {
-                workspace.classList.add('canvas-low-detail');
-                try { __updateAllMdNodeLowDetailOverlays(); } catch (_) {}
-            }
-        } else {
-            try { __exitCanvasLowDetailVisualState(workspace); } catch (_) {
-                workspace.classList.remove('canvas-low-detail');
-            }
-        }
-        if (shouldActive) {
-            try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
-        }
-        try { __maybeApplyCardGroupLowDetailMembershipState({ force: shouldActive }); } catch (_) { }
-    }
-}
-
-function setCanvasZoom(zoom, centerX = null, centerY = null, options = {}) {
-    const container = getCachedContainer();
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!container || !workspace) return;
-
-    const oldZoom = CanvasState.zoom;
-
-    if (typeof options !== 'object' || options === null) {
-        options = {};
-    }
-    const {
-        recomputeBounds = false,
-        skipSave = false,
-        silent = false,
-        skipScrollbarUpdate = false, // 新增：跳过滚动条更新（滚动时使用）
-        forceScaleVars = false
-    } = options;
-
-    // 限制缩放范围（最小显示 1%）
-    zoom = clampCanvasZoom(zoom);
-
-    // 如果没有指定中心点，使用 workspace 的中心点
-    if (centerX === null || centerY === null) {
-        const workspaceRect = workspace.getBoundingClientRect();
-        centerX = workspaceRect.width / 2;
-        centerY = workspaceRect.height / 2;
-    }
-
-    // 计算中心点在 canvas-content 坐标系中的位置
-    const canvasCenterX = (centerX - CanvasState.panOffsetX) / oldZoom;
-    const canvasCenterY = (centerY - CanvasState.panOffsetY) / oldZoom;
-
-    // 应用新的缩放
-    CanvasState.zoom = zoom;
-    if (CanvasState.physicalModifiers && (CanvasState.physicalModifiers.Control || CanvasState.physicalModifiers.Meta || CanvasState.physicalModifiers.Alt || CanvasState.physicalModifiers.Shift)) {
-        CanvasState.zoomOccurredWithModifier = true;
-    }
-
-    // 调整平移偏移，使中心点保持在相同的视觉位置
-    CanvasState.panOffsetX = centerX - canvasCenterX * zoom;
-    CanvasState.panOffsetY = centerY - canvasCenterY * zoom;
-
-    // 优化：滚动时延迟更新边界
-    if (!skipScrollbarUpdate) {
-        setCanvasScaleVars(container, zoom, forceScaleVars);
-        updateCanvasScrollBounds({ initial: false, recomputeBounds });
-        savePanOffsetThrottled();
-    } else {
-        // 滚动/滚轮缩放时：仍需同步缩放变量（供低缩放文字/连线标签使用），但跳过边界计算
-        setCanvasScaleVars(container, zoom, forceScaleVars);
-        // 滚动时使用极速平移（直接 transform）
-        applyPanOffsetFast();
-    }
-
-    // 缩放阈值降级：用已经更新后的 pan/transform 判断，避免快速缩放时新 zoom + 旧 pan 造成模式抖动。
-    updateCanvasLowDetailMode();
-    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
-
-    if (!skipScrollbarUpdate) {
-        // [Fix] 缩放后检查唤醒状态：交互中/低细节/大数据时用节流，避免每次缩放都全量扫描导致掉帧
-        const isZooming = workspace.classList.contains('is-zooming');
-        if (CanvasState.lowDetailActive || (isZooming && isCanvasHugeData())) {
-            scheduleDormancyUpdate();
-        } else {
-            scheduleDormancyUpdate(0);
-        }
-    }
-
-    // 更新显示
-    const zoomValue = document.getElementById('zoomValue');
-    if (zoomValue) {
-        const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
-        const displayZoom = zoom / base;
-        zoomValue.textContent = (displayZoom * 100).toFixed(0) + '%';
-        // [Fix] 如果小于 10%，显示一位小数
-        if (displayZoom < 0.1) {
-            zoomValue.textContent = (displayZoom * 100).toFixed(1) + '%';
-        } else {
-            zoomValue.textContent = Math.round(displayZoom * 100) + '%';
-        }
-    }
-
-    // 保存缩放级别
-    if (!skipSave) {
-        saveZoomThrottled(zoom);
-    }
-
-    // 移除缩放日志以减少控制台输出
-    // if (!silent) {
-    //     console.log('[Canvas] 缩放:', Math.round(zoom * 100) + '%', '中心点:', { canvasCenterX, canvasCenterY });
-    // }
-
-    // 缩放变化后，更新连接线工具栏位置以保持固定像素偏移
-    updateEdgeToolbarPosition();
-}
-
-function applyPanOffset() {
-    const container = getCachedContainer();
-    const content = getCachedContent();
-    if (!container || !content) return;
-
-    // 不要自动限制滚动位置，允许用户自由滚动到空白区域
-    // CanvasState.panOffsetX = clampPan('horizontal', CanvasState.panOffsetX);
-    // CanvasState.panOffsetY = clampPan('vertical', CanvasState.panOffsetY);
-
-    const scale = CanvasState.zoom;
-    applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, scale);
-
-    // 同步 CSS 变量：用于背景网格、以及其它依赖变量的样式
-    container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
-    container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
-
-    // 调度滚动条更新（RAF 去抖）
-    scheduleScrollbarUpdate();
-
-    if (!CanvasState.scrollAnimation.frameId) {
-        CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
-        CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
-    }
-}
-
-// 性能优化：极速平移（使用 transform，完全跳过边界检查和滚动条）
-function applyPanOffsetFast() {
-    const container = getCachedContainer();
-    const content = getCachedContent();
-    if (!content) return;
-
-    // 直接使用 transform，跳过 clampPan（transform 只触发合成，性能最优）
-    const scale = CanvasState.zoom;
-    applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, scale);
-
-    // [Fix] 移除交互过程中的实时唤醒检查，通过 onScrollStop 在停止时统一处理
-    // 之前尝试的 150ms 节流检查会导致高频 DOM 操作引发闪烁
-
-    // [OPT] 只有在非快速缩放模式下才更新背景网格变量
-    // 如果正在缩放(is-zooming)，网格是隐藏的，更新变量纯属浪费性能
-    const workspace = document.getElementById('canvasWorkspace');
-    const isZooming = workspace && workspace.classList.contains('is-zooming');
-
-    if (!isZooming && container) {
-        setCanvasScaleVars(container, scale);
-        // 不在高频交互过程中更新 --canvas-pan-*，避免触发 background-position repaint。
-        // 网格层由 #canvasGridLayer 的 transform 接管，停止交互后由 onScrollStop 统一同步变量即可。
-    }
-}
-
-// 性能优化：标记正在滚动
-function markScrolling() {
-    isScrolling = true;
-    try {
-        const ws = document.getElementById('canvasWorkspace');
-        if (ws) ws.classList.add('is-scrolling');
-    } catch (_) { }
-    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
-
-    // 清除之前的停止计时器
-    if (scrollStopTimer) {
-        clearTimeout(scrollStopTimer);
-    }
-
-    // 设置新的停止计时器
-    scrollStopTimer = setTimeout(() => {
-        isScrolling = false;
-        try {
-            const ws = document.getElementById('canvasWorkspace');
-            if (ws) ws.classList.remove('is-scrolling');
-        } catch (_) { }
-        onScrollStop();
-    }, SCROLL_STOP_DELAY);
-}
-
-// 性能优化：滚动停止后的处理
-function onScrollStop() {
-    // 滚动停止后：同步 CSS 变量（用于背景网格），但不再切换渲染模式（避免闪烁）
-    const container = getCachedContainer();
-    const content = getCachedContent();
-
-    if (container && content) {
-        setCanvasScaleVars(container, CanvasState.zoom);
-        container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
-        container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
-        applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom);
-    }
-
-    // 启动惯性滚动（拖尾阻尼效果）
-    startInertiaScroll();
-
-    // 更新边界和滚动条
-    scheduleBoundsUpdate();
-    scheduleScrollbarUpdate();
-    savePanOffsetThrottled();
-
-    // [数据密集模式] 平移停止后更新状态（视口变化可能影响可见数据量）
-    try { updateDataIntensiveMode(); } catch (_) { }
-
-    // 更新休眠/按需加载状态
-    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
-        scheduleCanvasVirtualizationUpdate();
-    } else if (!CanvasState.lowDetailActive || !isCanvasHugeData()) {
-        scheduleDormancyUpdate();
-    }
-    try { scheduleEdgesRender(isCanvasHugeData() ? 120 : 40); } catch (_) { }
-    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
-}
-
-function cancelCanvasBlockDormancyUnloadUpdate() {
-    if (!canvasBlockDormancyUnloadTimer) return;
-    clearTimeout(canvasBlockDormancyUnloadTimer);
-    canvasBlockDormancyUnloadTimer = null;
-}
-
-// 区块休眠：区块外卸载额外防抖（避免频繁操作造成反复卸载/重建）
-function scheduleCanvasBlockDormancyUnloadUpdate(delayMs = null) {
-    if (!isCanvasBlockDormancyEnabled()) return;
-
-    cancelCanvasBlockDormancyUnloadUpdate();
-
-    const configured = (typeof CanvasState.blockDormancyUnloadDebounceMs === 'number' && isFinite(CanvasState.blockDormancyUnloadDebounceMs))
-        ? Math.max(0, CanvasState.blockDormancyUnloadDebounceMs)
-        : 900;
-    const delay = (typeof delayMs === 'number' && isFinite(delayMs))
-        ? Math.max(0, delayMs)
-        : (isCanvasHugeData() ? (configured + 300) : configured);
-
-    canvasBlockDormancyUnloadTimer = setTimeout(() => {
-        canvasBlockDormancyUnloadTimer = null;
-        try { runCanvasBlockDormancyUpdate({ doLoad: false, doUnload: true }); } catch (_) { }
-    }, delay);
-}
-
-// 性能优化：调度休眠管理更新（节流）
-function scheduleDormancyUpdate(delayMs = null) {
-    if (__isCanvasNodeMaximizedActive()) return;
-    if (dormancyUpdatePending) return;
-
-    // 极限/大数据：用虚拟化按需加载替代 dormancy 全量扫描
-    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
-        cancelCanvasBlockDormancyUnloadUpdate();
-        scheduleCanvasVirtualizationUpdate();
-        return;
-    }
-
-    dormancyUpdatePending = true;
-
-    if (dormancyUpdateTimer) {
-        clearTimeout(dormancyUpdateTimer);
-    }
-
-    const delay = (typeof delayMs === 'number' && isFinite(delayMs))
-        ? Math.max(0, delayMs)
-        : (isCanvasHugeData() ? 420 : 200); // 大数据量时加大节流，避免频繁全量扫描
-
-    dormancyUpdateTimer = setTimeout(() => {
-        dormancyUpdateTimer = null;
-        dormancyUpdatePending = false;
-        if (__isCanvasNodeMaximizedActive()) return;
-        if (isCanvasBlockDormancyEnabled()) {
-            // 快速：先恢复/按需加载“区块内+视口附近”的内容
-            runCanvasBlockDormancyUpdate({ doLoad: true, doUnload: false });
-            // 稳定：区块外卸载额外防抖，避免用户频繁操作时抖动
-            scheduleCanvasBlockDormancyUnloadUpdate();
-        }
-    }, delay);
-}
-
-// 惯性滚动相关函数
-function __resolveCanvasPanInertiaInputType(isTouchpad, isDiscreteWheel) {
-    if (!isTouchpad && CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel) {
-        const resolved = WINDOWS_LINUX_WHEEL_PAN_INERTIA_ENABLED
-            ? PAN_INERTIA_INPUT_WHEEL
-            : PAN_INERTIA_INPUT_NONE;
-        __logCanvasWinInput('wheel-pan-inertia-route', {
-            isTouchpad,
-            isDiscreteWheel,
-            inertiaEnabled: WINDOWS_LINUX_WHEEL_PAN_INERTIA_ENABLED,
-            resolvedInputType: resolved
-        }, { throttleKey: 'wheel-pan-inertia-route', throttleMs: 120 });
-        return resolved;
-    }
-    return PAN_INERTIA_INPUT_NONE;
-}
-
-function __resetCanvasPanInertiaSample() {
-    CanvasState.inertiaState.lastDeltaX = 0;
-    CanvasState.inertiaState.lastDeltaY = 0;
-    CanvasState.inertiaState.lastTime = 0;
-    CanvasState.inertiaState.inputType = PAN_INERTIA_INPUT_NONE;
-}
-
-function __updateCanvasPanInertiaSample(inputType, panDeltaX, panDeltaY) {
-    if (inputType !== PAN_INERTIA_INPUT_WHEEL) {
-        __resetCanvasPanInertiaSample();
-        return;
-    }
-
-    const sampleX = Number(panDeltaX) || 0;
-    const sampleY = Number(panDeltaY) || 0;
-    const blend = WHEEL_PAN_INERTIA_SAMPLE_BLEND;
-    if (blend >= 1) {
-        CanvasState.inertiaState.lastDeltaX = sampleX;
-        CanvasState.inertiaState.lastDeltaY = sampleY;
-    } else {
-        CanvasState.inertiaState.lastDeltaX = (CanvasState.inertiaState.lastDeltaX * (1 - blend)) + (sampleX * blend);
-        CanvasState.inertiaState.lastDeltaY = (CanvasState.inertiaState.lastDeltaY * (1 - blend)) + (sampleY * blend);
-    }
-    CanvasState.inertiaState.lastTime = Date.now();
-    CanvasState.inertiaState.inputType = inputType;
-}
-
-function __getCanvasPanInertiaParams(inputType) {
-    if (inputType === PAN_INERTIA_INPUT_WHEEL) {
-        return {
-            maxStartAgeMs: WHEEL_PAN_INERTIA_MAX_START_AGE_MS,
-            minSpeed: WHEEL_PAN_INERTIA_MIN_SPEED,
-            multiplier: WHEEL_PAN_INERTIA_MULTIPLIER,
-            damping: WHEEL_PAN_INERTIA_DAMPING,
-            stopThreshold: WHEEL_PAN_INERTIA_STOP_THRESHOLD
-        };
-    }
-    return null;
-}
-
-function startInertiaScroll() {
-    const inputType = CanvasState.inertiaState.inputType || PAN_INERTIA_INPUT_NONE;
-    const params = __getCanvasPanInertiaParams(inputType);
-    if (!params) {
-        __logCanvasWinInput('wheel-pan-inertia-skip', {
-            reason: 'no-params',
-            inputType
-        }, { throttleKey: 'wheel-pan-inertia-skip', throttleMs: 120 });
-        return;
-    }
-    const timeSinceLastScroll = Date.now() - (Number(CanvasState.inertiaState.lastTime) || 0);
-    if (!Number.isFinite(timeSinceLastScroll) || timeSinceLastScroll > params.maxStartAgeMs) {
-        __logCanvasWinInput('wheel-pan-inertia-skip', {
-            reason: 'sample-expired',
-            inputType,
-            timeSinceLastScroll: __roundCanvasDebugNumber(timeSinceLastScroll, 2),
-            maxStartAgeMs: params.maxStartAgeMs
-        }, { throttleKey: 'wheel-pan-inertia-skip', throttleMs: 120 });
-        __resetCanvasPanInertiaSample();
-        return;
-    }
-
-    const absVelocityX = Math.abs(Number(CanvasState.inertiaState.lastDeltaX) || 0);
-    const absVelocityY = Math.abs(Number(CanvasState.inertiaState.lastDeltaY) || 0);
-
-    // 如果速度太小，不启动惯性滚动
-    if (absVelocityX < params.minSpeed && absVelocityY < params.minSpeed) {
-        __logCanvasWinInput('wheel-pan-inertia-skip', {
-            reason: 'below-min-speed',
-            inputType,
-            absVelocityX: __roundCanvasDebugNumber(absVelocityX, 5),
-            absVelocityY: __roundCanvasDebugNumber(absVelocityY, 5),
-            minSpeed: params.minSpeed
-        }, { throttleKey: 'wheel-pan-inertia-skip', throttleMs: 120 });
-        __resetCanvasPanInertiaSample();
-        return;
-    }
-
-    // 速度单位使用 panDelta（像素偏移），保证滚轮/触控板同一套惯性模型可控
-    CanvasState.inertiaState.velocityX = CanvasState.inertiaState.lastDeltaX * params.multiplier;
-    CanvasState.inertiaState.velocityY = CanvasState.inertiaState.lastDeltaY * params.multiplier;
-    CanvasState.inertiaState.isActive = true;
-    __logCanvasWinInput('wheel-pan-inertia-start', {
-        inputType,
-        lastDeltaX: __roundCanvasDebugNumber(CanvasState.inertiaState.lastDeltaX, 5),
-        lastDeltaY: __roundCanvasDebugNumber(CanvasState.inertiaState.lastDeltaY, 5),
-        multiplier: params.multiplier,
-        startVelocityX: __roundCanvasDebugNumber(CanvasState.inertiaState.velocityX, 5),
-        startVelocityY: __roundCanvasDebugNumber(CanvasState.inertiaState.velocityY, 5)
-    }, { force: true, throttleMs: 0 });
-
-    // 启动惯性滚动动画
-    runInertiaScroll();
-}
-
-function runInertiaScroll() {
-    if (!CanvasState.inertiaState.isActive) {
-        return;
-    }
-
-    const inputType = CanvasState.inertiaState.inputType || PAN_INERTIA_INPUT_NONE;
-    const params = __getCanvasPanInertiaParams(inputType);
-    if (!params) {
-        cancelInertiaScroll();
-        return;
-    }
-    const damping = params.damping;
-    const stopThreshold = params.stopThreshold;
-
-    // 应用速度
-    if (Math.abs(CanvasState.inertiaState.velocityX) > stopThreshold) {
-        CanvasState.panOffsetX += CanvasState.inertiaState.velocityX;
-    }
-    if (Math.abs(CanvasState.inertiaState.velocityY) > stopThreshold) {
-        CanvasState.panOffsetY += CanvasState.inertiaState.velocityY;
-    }
-
-    // 应用阻尼
-    CanvasState.inertiaState.velocityX *= damping;
-    CanvasState.inertiaState.velocityY *= damping;
-
-    // 更新显示
-    applyPanOffsetFast();
-    updateScrollbarThumbsLightweight();
-
-    // 检查是否应该停止
-    const absVelocityX = Math.abs(CanvasState.inertiaState.velocityX);
-    const absVelocityY = Math.abs(CanvasState.inertiaState.velocityY);
-
-    if (absVelocityX < stopThreshold && absVelocityY < stopThreshold) {
-        // 停止惯性滚动
-        CanvasState.inertiaState.isActive = false;
-        CanvasState.inertiaState.velocityX = 0;
-        CanvasState.inertiaState.velocityY = 0;
-        CanvasState.inertiaState.animationId = null;
-        __resetCanvasPanInertiaSample();
-
-        // 惯性滚动结束后，进行最终更新
-        const container = getCachedContainer();
-        const content = getCachedContent();
-        if (container && content) {
-            setCanvasScaleVars(container, CanvasState.zoom);
-            container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
-            container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
-            applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom);
-        }
-        scheduleScrollbarUpdate();
-        savePanOffsetThrottled();
-        try { updateCanvasZoomPerformanceMode({ deferOff: false }); } catch (_) { }
-        return;
-    }
-
-    // 继续动画
-    CanvasState.inertiaState.animationId = requestAnimationFrame(runInertiaScroll);
-}
-
-function cancelInertiaScroll() {
-    const wasActive = !!CanvasState.inertiaState.isActive;
-    if (CanvasState.inertiaState.animationId) {
-        cancelAnimationFrame(CanvasState.inertiaState.animationId);
-        CanvasState.inertiaState.animationId = null;
-    }
-    CanvasState.inertiaState.isActive = false;
-    CanvasState.inertiaState.velocityX = 0;
-    CanvasState.inertiaState.velocityY = 0;
-    __resetCanvasPanInertiaSample();
-    if (wasActive) {
-        __logCanvasWinInput('wheel-pan-inertia-cancel', {
-            reason: 'cancelInertiaScroll'
-        }, { force: true, throttleMs: 0 });
-        try { updateCanvasZoomPerformanceMode({ deferOff: false }); } catch (_) { }
-    }
-}
-
-function __cancelCanvasPendingScrollUpdate() {
-    if (scrollUpdateFrame) {
-        cancelAnimationFrame(scrollUpdateFrame);
-        scrollUpdateFrame = null;
-    }
-    pendingScrollRequest = null;
-}
-
-function __cancelCanvasScrollAnimationFrame() {
-    if (CanvasState.scrollAnimation.frameId) {
-        cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
-        CanvasState.scrollAnimation.frameId = null;
-    }
-    CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
-    CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
-    CanvasState.scrollAnimation.source = null;
-}
-
-function __startWinWheelPanPump() {
-    if (winWheelPanPumpFrame) return;
-
-    const pump = () => {
-        winWheelPanPumpFrame = null;
-        const residualX = WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL
-            * Math.min(1, getCanvasWheelHorizontalPanRate());
-        const residualY = WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL
-            * Math.min(1, getCanvasWheelVerticalPanRate());
-        if (Math.abs(winWheelPanAccumX) < residualX &&
-            Math.abs(winWheelPanAccumY) < residualY) {
-            winWheelPanAccumX = 0;
-            winWheelPanAccumY = 0;
-            return;
-        }
-
-        const drainX = Math.min(
-            0.9,
-            WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN * __getCanvasWheelPanTailCompensation('horizontal')
-        );
-        const drainY = Math.min(
-            0.9,
-            WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN * __getCanvasWheelPanTailCompensation('vertical')
-        );
-        const stepX = winWheelPanAccumX * drainX;
-        const stepY = winWheelPanAccumY * drainY;
-        
-        winWheelPanAccumX -= stepX;
-        winWheelPanAccumY -= stepY;
-
-        CanvasState.scrollAnimation.source = 'direct';
-        CanvasState.panOffsetX += stepX;
-        CanvasState.panOffsetY += stepY;
-        CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
-        CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
-
-        applyPanOffsetFast();
-        updateScrollbarThumbsLightweight();
-
-        if (Math.abs(winWheelPanAccumX) >= residualX ||
-            Math.abs(winWheelPanAccumY) >= residualY) {
-            winWheelPanPumpFrame = requestAnimationFrame(pump);
-        } else {
-            winWheelPanAccumX = 0;
-            winWheelPanAccumY = 0;
-            scheduleScrollUpdate();
-        }
-    };
-    winWheelPanPumpFrame = requestAnimationFrame(pump);
-}
-
-function __cancelCanvasWheelPanMotion() {
-    if (winWheelPanPumpFrame) {
-        cancelAnimationFrame(winWheelPanPumpFrame);
-        winWheelPanPumpFrame = null;
-    }
-    winWheelPanAccumX = 0;
-    winWheelPanAccumY = 0;
-    cancelInertiaScroll();
-    __cancelCanvasPendingScrollUpdate();
-    __cancelCanvasScrollAnimationFrame();
-}
-
-// 边缘自动滚动相关函数
-function checkEdgeAutoScroll(clientX, clientY) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    const rect = workspace.getBoundingClientRect();
-    const edgeThreshold = 100; // 触发自动滚动的边缘距离（像素）
-    const maxSpeed = 8;        // 最大滚动速度 - 降低到8，使操作更温和
-    const minSpeed = 1.5;      // 最小滚动速度
-
-    // 计算距离边缘 of the viewport/workspace
-    const distLeft = clientX - rect.left;
-    const distRight = rect.right - clientX;
-    const distTop = clientY - rect.top;
-    const distBottom = rect.bottom - clientY;
-
-    let targetVelocityX = 0;
-    let targetVelocityY = 0;
-
-    // 匀速化：使用线性比率，使速度随着越靠近边缘而均匀地、缓慢地增加，避免突然的加速抖动
-    // 横向滚动
-    if (distLeft < edgeThreshold && distLeft > 0) {
-        const ratio = 1 - (distLeft / edgeThreshold);
-        targetVelocityX = minSpeed + (maxSpeed - minSpeed) * ratio;
-    } else if (distRight < edgeThreshold && distRight > 0) {
-        const ratio = 1 - (distRight / edgeThreshold);
-        targetVelocityX = -(minSpeed + (maxSpeed - minSpeed) * ratio);
-    }
-
-    // 纵向滚动
-    if (distTop < edgeThreshold && distTop > 0) {
-        const ratio = 1 - (distTop / edgeThreshold);
-        targetVelocityY = minSpeed + (maxSpeed - minSpeed) * ratio;
-    } else if (distBottom < edgeThreshold && distBottom > 0) {
-        const ratio = 1 - (distBottom / edgeThreshold);
-        targetVelocityY = -(minSpeed + (maxSpeed - minSpeed) * ratio);
-    }
-
-    // 启动或更新自动滚动
-    if (targetVelocityX !== 0 || targetVelocityY !== 0) {
-        startEdgeAutoScroll(targetVelocityX, targetVelocityY);
-    } else {
-        stopEdgeAutoScroll();
-    }
-}
-
-function startEdgeAutoScroll(targetVelocityX, targetVelocityY) {
-    // 更新目标速度
-    CanvasState.autoScrollState.targetVelocityX = targetVelocityX;
-    CanvasState.autoScrollState.targetVelocityY = targetVelocityY;
-
-    // 如果已经在自动滚动，只更新目标速度
-    if (CanvasState.autoScrollState.isActive) {
-        return;
-    }
-
-    // 首次启动时，将当前速度设置为目标速度的一半，实现平滑启动
-    CanvasState.autoScrollState.velocityX = targetVelocityX * 0.5;
-    CanvasState.autoScrollState.velocityY = targetVelocityY * 0.5;
-    CanvasState.autoScrollState.isActive = true;
-    runEdgeAutoScroll();
-}
-
-function runEdgeAutoScroll() {
-    if (!CanvasState.autoScrollState.isActive) {
-        return;
-    }
-
-    const state = CanvasState.autoScrollState;
-    const scrollFactor = 1.0 / getCanvasZoomForScrollFactor();
-
-    // 使用线性插值（lerp）平滑地过渡到目标速度，避免抖动
-    // velocityX = velocityX + (targetVelocityX - velocityX) * smoothing
-    const smoothing = state.smoothing;
-    state.velocityX += (state.targetVelocityX - state.velocityX) * smoothing;
-    state.velocityY += (state.targetVelocityY - state.velocityY) * smoothing;
-
-    // 应用滚动
-    CanvasState.panOffsetX += state.velocityX * scrollFactor;
-    CanvasState.panOffsetY += state.velocityY * scrollFactor;
-
-    // 更新显示
-    applyPanOffsetFast();
-    updateScrollbarThumbsLightweight();
-
-    // 同步更新拖动元素的位置
-    if (CanvasState.dragState.isDragging && CanvasState.dragState.draggedElement) {
-        const panDeltaX = state.velocityX * scrollFactor;
-        const panDeltaY = state.velocityY * scrollFactor;
-        adjustDragReferenceForPan(panDeltaX, panDeltaY, CanvasState.dragState.lastClientX, CanvasState.dragState.lastClientY);
-    }
-
-    // 同步更新框选临时组拖动位置
-    if (window.__BCSLassoTempGroup && typeof window.__BCSLassoTempGroup.updateDragPositionForScroll === 'function') {
-        window.__BCSLassoTempGroup.updateDragPositionForScroll();
-    }
-
-    // 继续动画
-    state.intervalId = requestAnimationFrame(runEdgeAutoScroll);
-}
-
-function stopEdgeAutoScroll() {
-    const state = CanvasState.autoScrollState;
-
-    if (state.intervalId) {
-        cancelAnimationFrame(state.intervalId);
-        state.intervalId = null;
-    }
-
-    // 重置所有状态
-    state.isActive = false;
-    state.velocityX = 0;
-    state.velocityY = 0;
-    state.targetVelocityX = 0;
-    state.targetVelocityY = 0;
-
-    // 停止后进行最终更新
-    const isTempGroupDragging = window.__BCSLassoTempGroup && 
-                               typeof window.__BCSLassoTempGroup.isDragging === 'function' && 
-                               window.__BCSLassoTempGroup.isDragging();
-    if (CanvasState.dragState.isDragging || isTempGroupDragging) {
-        const container = getCachedContainer();
-        const content = getCachedContent();
-        if (container && content) {
-            setCanvasScaleVars(container, CanvasState.zoom);
-            container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
-            container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
-            applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom);
-        }
-        scheduleScrollbarUpdate();
-    }
-}
-if (typeof window !== 'undefined') {
-    window.checkEdgeAutoScroll = checkEdgeAutoScroll;
-    window.stopEdgeAutoScroll = stopEdgeAutoScroll;
-}
-
-// 性能优化：调度滚动条更新（使用 RAF 去抖）
-function scheduleScrollbarUpdate() {
-    if (__isCanvasNodeMaximizedActive()) return;
-    if (scrollbarUpdatePending) return;
-
-    scrollbarUpdatePending = true;
-
-    if (scrollbarUpdateFrame) {
-        cancelAnimationFrame(scrollbarUpdateFrame);
-    }
-
-    scrollbarUpdateFrame = requestAnimationFrame(() => {
-        scrollbarUpdateFrame = null;
-        scrollbarUpdatePending = false;
-        if (__isCanvasNodeMaximizedActive()) return;
-        updateScrollbarThumbs();
-    });
-}
-
-// 性能优化：调度边界更新（使用 RAF 去抖）
-function scheduleBoundsUpdate() {
-    if (__isCanvasNodeMaximizedActive()) return;
-    if (boundsUpdatePending) return;
-
-    boundsUpdatePending = true;
-
-    if (boundsUpdateFrame) {
-        cancelAnimationFrame(boundsUpdateFrame);
-    }
-
-    boundsUpdateFrame = requestAnimationFrame(() => {
-        boundsUpdateFrame = null;
-        boundsUpdatePending = false;
-        if (__isCanvasNodeMaximizedActive()) return;
-        updateCanvasScrollBounds({ initial: false, recomputeBounds: true });
-    });
-}
-
-
-function __getCanvasViewSurfaceKey() {
-    try {
-        const key = window.__CANVAS_VIEW_SURFACE_KEY__;
-        if (typeof key === 'string' && key) return key;
-    } catch (_) { }
-    return null;
-}
-
-function __detectCanvasSidePanelModeFromUrl() {
-    try {
-        const params = new URLSearchParams(window.location.search || '');
-        const flag = params.get('sidepanel') || params.get('side_panel') || params.get('panel');
-        return flag === '1' || flag === 'true';
-    } catch (_) {
-        return false;
-    }
-}
-
-function __getCanvasViewPartitionKey() {
-    try {
-        const key = window.__CANVAS_VIEW_PARTITION_KEY__;
-        if (key === 'page' || key === 'sidepanel') return key;
-    } catch (_) { }
-    try {
-        if (window.__SIDE_PANEL_MODE__ === true) return 'sidepanel';
-    } catch (_) { }
-    return __detectCanvasSidePanelModeFromUrl() ? 'sidepanel' : 'page';
-}
-
-function __buildCanvasCameraStorageKey(partitionKey, field) {
-    if (!partitionKey || !field) return '';
-    return `${CANVAS_CAMERA_VIEW_STORAGE_NS}:${partitionKey}:${field}`;
-}
-
-function __getCanvasCameraStorageKeys() {
-    const partitionKey = __getCanvasViewPartitionKey();
-    const surfaceKey = __getCanvasViewSurfaceKey();
-
-    return {
-        partitionKey,
-        surfaceKey,
-        zoomKey: __buildCanvasCameraStorageKey(partitionKey, 'zoom'),
-        panKey: __buildCanvasCameraStorageKey(partitionKey, 'pan')
-    };
-}
-
-function __readCanvasCameraZoomFromStorage(keys) {
-    const key = keys && keys.zoomKey;
-    if (!key) return null;
-    try {
-        const raw = localStorage.getItem(key);
-        if (!raw) return null;
-        const zoom = parseFloat(raw);
-        return Number.isFinite(zoom) ? zoom : null;
-    } catch (_) {
-        return null;
-    }
-}
-
-function __readCanvasCameraPanFromStorage(keys) {
-    const key = keys && keys.panKey;
-    if (!key) return null;
-    try {
-        const raw = localStorage.getItem(key);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object') return null;
-        return {
-            x: Number(parsed.x) || 0,
-            y: Number(parsed.y) || 0
-        };
-    } catch (_) {
-        return null;
-    }
-}
-
-function loadCanvasZoom() {
-    try {
-        const keys = __getCanvasCameraStorageKeys();
-
-        const savedZoom = __readCanvasCameraZoomFromStorage(keys);
-        let zoomLoaded = false;
-        if (Number.isFinite(savedZoom)) {
-            setCanvasZoom(savedZoom, null, null, { recomputeBounds: false, skipSave: true, silent: true });
-            zoomLoaded = true;
-        }
-
-        // 新安装/无历史缩放：默认使用 baseZoom（旧 60% 视图）
-        if (!zoomLoaded && CanvasState.baseZoom && CanvasState.baseZoom !== 1) {
-            setCanvasZoom(CanvasState.baseZoom, null, null, { recomputeBounds: false, skipSave: true, silent: true });
-        }
-
-        // 加载平移位置
-        const pan = __readCanvasCameraPanFromStorage(keys);
-        if (pan) {
-            CanvasState.panOffsetX = pan.x;
-            CanvasState.panOffsetY = pan.y;
-            applyPanOffset();
-        } else {
-            // 首次安装，或者无历史平移
-            try {
-                locateToIntroCardsCenter();
-            } catch (_) { }
-        }
-    } catch (error) {
-        console.error('[Canvas] 加载画布状态失败:', error);
-    }
-
-    updateCanvasScrollBounds(true);
-    updateScrollbarThumbs();
-    __scheduleCanvasPostViewportStateStabilization();
-}
-
-function savePanOffset() {
-    saveViewState('camera', 'pan', {
-        x: CanvasState.panOffsetX,
-        y: CanvasState.panOffsetY
-    });
-}
-
-function savePanOffsetThrottled() {
-    if (panSaveTimeout) {
-        clearTimeout(panSaveTimeout);
-    }
-    panSaveTimeout = setTimeout(() => {
-        savePanOffset();
-        panSaveTimeout = null;
-    }, 160);
-}
-
-function saveZoomThrottled(zoom) {
-    if (zoomSaveTimeout) {
-        clearTimeout(zoomSaveTimeout);
-    }
-    zoomSaveTimeout = setTimeout(() => {
-        saveViewState('camera', 'zoom', zoom, { asJSON: false });
-        zoomSaveTimeout = null;
-    }, 160);
-}
-
-function scheduleZoomUpdate(zoom, centerX, centerY, options = {}) {
-    pendingZoomRequest = {
-        zoom,
-        centerX,
-        centerY,
-        options
-    };
-
-    if (!zoomUpdateFrame) {
-        zoomUpdateFrame = requestAnimationFrame(() => {
-            zoomUpdateFrame = null;
-            if (!pendingZoomRequest) return;
-
-            const { zoom, centerX, centerY, options } = pendingZoomRequest;
-            pendingZoomRequest = null;
-            setCanvasZoom(zoom, centerX, centerY, options);
-        });
-    }
-}
-
-function __getCanvasSmoothWheelZoomTarget() {
-    return Number.isFinite(smoothWheelZoomTarget) ? smoothWheelZoomTarget : null;
-}
-
-function __cancelCanvasSmoothWheelZoom() {
-    if (smoothWheelZoomFrame) {
-        cancelAnimationFrame(smoothWheelZoomFrame);
-        smoothWheelZoomFrame = null;
-    }
-    smoothWheelZoomTarget = null;
-    smoothWheelZoomCenterX = null;
-    smoothWheelZoomCenterY = null;
-    smoothWheelZoomOptions = null;
-    __resetWindowsWheelZoomDirLock();
-}
-
-function __runCanvasSmoothWheelZoomStep() {
-    smoothWheelZoomFrame = null;
-
-    const targetZoom = __getCanvasSmoothWheelZoomTarget();
-    if (!Number.isFinite(targetZoom)) return;
-
-    const currentZoom = Number.isFinite(pendingZoomRequest && pendingZoomRequest.zoom)
-        ? pendingZoomRequest.zoom
-        : (Number.isFinite(CanvasState.zoom) ? CanvasState.zoom : 1);
-    const diff = targetZoom - currentZoom;
-
-    if (!Number.isFinite(diff)) {
-        __logCanvasWinInput('wheel-zoom-smooth-invalid', {
-            targetZoom: __roundCanvasDebugNumber(targetZoom, 5),
-            currentZoom: __roundCanvasDebugNumber(currentZoom, 5),
-            diff
-        }, { force: true, throttleMs: 0 });
-        smoothWheelZoomTarget = null;
-        smoothWheelZoomOptions = null;
-        return;
-    }
-
-    if (Math.abs(diff) <= 0.0004) {
-        __logCanvasWinInput('wheel-zoom-smooth-finish', {
-            targetZoom: __roundCanvasDebugNumber(targetZoom, 5),
-            currentZoom: __roundCanvasDebugNumber(currentZoom, 5),
-            diff: __roundCanvasDebugNumber(diff, 7)
-        }, { force: true, throttleMs: 0 });
-        scheduleZoomUpdate(targetZoom, smoothWheelZoomCenterX, smoothWheelZoomCenterY, smoothWheelZoomOptions || {});
-        smoothWheelZoomTarget = null;
-        smoothWheelZoomOptions = null;
-        smoothWheelZoomCenterX = null;
-        smoothWheelZoomCenterY = null;
-        return;
-    }
-
-    const baseZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
-    const displayCurrent = currentZoom / baseZoom;
-    const displayTarget = targetZoom / baseZoom;
-    const curveFactor = Math.max(0.2, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, getCanvasZoomSpeedFactor(displayCurrent)));
-    const magnet = getCanvasZoomMagnetEffect(displayCurrent, displayTarget);
-    const wheelStepMultiplierRaw = Number(smoothWheelZoomOptions && smoothWheelZoomOptions.wheelSmoothStepMultiplier);
-    const wheelStepMultiplier = Number.isFinite(wheelStepMultiplierRaw)
-        ? Math.max(0.7, Math.min(1.8, wheelStepMultiplierRaw))
-        : 1;
-    const responseFromCurve = Math.pow(curveFactor, 0.32);
-    const clampedMagnetFactor = Math.max(0.35, Math.min(1.35, magnet.factor));
-    const responseFromMagnet = 0.84 + (0.16 * clampedMagnetFactor);
-
-    const fastStep = 0.34;
-    const slowStep = 0.26;
-    const baseStep = (Math.abs(diff) > 0.06 ? fastStep : slowStep) * wheelStepMultiplier;
-    const stepFactor = Math.max(0.10, Math.min(0.38, baseStep * responseFromCurve * responseFromMagnet));
-    const nextZoom = currentZoom + diff * stepFactor;
-    __logCanvasWinInput('wheel-zoom-smooth-step', {
-        currentZoom: __roundCanvasDebugNumber(currentZoom, 5),
-        targetZoom: __roundCanvasDebugNumber(targetZoom, 5),
-        diff: __roundCanvasDebugNumber(diff, 6),
-        wheelStepMultiplier: __roundCanvasDebugNumber(wheelStepMultiplier, 4),
-        curveFactor: __roundCanvasDebugNumber(curveFactor, 5),
-        magnetFactor: __roundCanvasDebugNumber(magnet.factor, 5),
-        stepFactor: __roundCanvasDebugNumber(stepFactor, 6),
-        nextZoom: __roundCanvasDebugNumber(nextZoom, 5)
-    }, { throttleKey: 'wheel-zoom-smooth-step', throttleMs: 90 });
-    scheduleZoomUpdate(nextZoom, smoothWheelZoomCenterX, smoothWheelZoomCenterY, smoothWheelZoomOptions || {});
-    smoothWheelZoomFrame = requestAnimationFrame(__runCanvasSmoothWheelZoomStep);
-}
-
-function __queueCanvasSmoothWheelZoom(targetZoom, centerX, centerY, options = {}) {
-    const clampedTarget = clampCanvasZoom(targetZoom);
-    if (!Number.isFinite(clampedTarget)) return;
-
-    smoothWheelZoomTarget = clampedTarget;
-    if (Number.isFinite(centerX)) smoothWheelZoomCenterX = centerX;
-    if (Number.isFinite(centerY)) smoothWheelZoomCenterY = centerY;
-    smoothWheelZoomOptions = options;
-
-    if (!smoothWheelZoomFrame) {
-        smoothWheelZoomFrame = requestAnimationFrame(__runCanvasSmoothWheelZoomStep);
-    }
-}
-
-function __cancelCanvasTrackpadZoomInertia(options = {}) {
-    const keepVelocity = !!(options && options.keepVelocity === true);
-    if (trackpadZoomInertiaFrame) {
-        cancelAnimationFrame(trackpadZoomInertiaFrame);
-        trackpadZoomInertiaFrame = null;
-    }
-    if (!keepVelocity) {
-        trackpadZoomInertiaVelocity = 0;
-    }
-    trackpadZoomInertiaLastInputTime = 0;
-    trackpadZoomInertiaCenterX = null;
-    trackpadZoomInertiaCenterY = null;
-    trackpadZoomInertiaOptions = null;
-}
-
-function __cancelCanvasPendingZoomUpdate() {
-    if (zoomUpdateFrame) {
-        cancelAnimationFrame(zoomUpdateFrame);
-        zoomUpdateFrame = null;
-    }
-    pendingZoomRequest = null;
-}
-
-function __onCanvasZoomEndCleanup() {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-    workspace.classList.remove('is-zooming');
-    invalidateCanvasWorkspaceRectCache();
-
-    // [OPT] 缩放结束：更新网格和CSS变量 (FORCE UPDATE)
-    try {
-        const container = getCachedContainer();
-        if (container) setCanvasScaleVars(container, CanvasState.zoom, true);
-        updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom, true);
-    } catch (_) { }
-
-    // [数据密集模式] 缩放结束：更新数据密集模式状态（为下一次缩放准备）
-    try { updateDataIntensiveMode(true); } catch (_) { }
-
-    // 强制刷新低细节模式（可能退出），确保逻辑发生在 is-zooming 解除之后
-    try { updateCanvasLowDetailMode(true); } catch (_) { }
-    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
-    // 低细节区间（65%~70%）：只预热“视口中心附近少量栏目”，避免一屏全加载
-    if (!isCanvasVirtualizationEnabled()) {
-        try { prewarmCanvasLowDetailVisibleTrees(); } catch (_) { }
-    }
-    // 缩放真正停止后再统一恢复/按需加载（避免 is-zooming 阶段被判定为交互中而跳过补渲染）
-    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
-        try { scheduleCanvasVirtualizationUpdate(); } catch (_) { }
-    } else {
-        try { scheduleDormancyUpdate(); } catch (_) { }
-    }
-    // Wheel 缩放过程中会跳过滚动条/边界更新；缩放停止后统一补一次，避免中途反复触发布局计算导致闪烁
-    try { updateCanvasScrollBounds({ recomputeBounds: false, initial: false }); } catch (_) { }
-    try { updateScrollbarThumbs(); } catch (_) { }
-    try { savePanOffsetThrottled(); } catch (_) { }
-    try { scheduleEdgesRender(0); } catch (_) { }
-    try { __updateCanvasPerfHud(); } catch (_) { }
-}
-
-function __startWinWheelZoomPump() {
-    if (winWheelZoomPumpFrame) return;
-
-    const pump = () => {
-        winWheelZoomPumpFrame = null;
-        if (Math.abs(winWheelZoomAccumDelta) < 0.01) {
-            winWheelZoomAccumDelta = 0;
-            const workspace = document.getElementById('canvasWorkspace');
-            if (workspace && !workspace._zoomEndTimer) {
-                __onCanvasZoomEndCleanup();
-            }
-            return;
-        }
-
-        const rawDelta = winWheelZoomAccumDelta;
-        const zoomSpeed = WINDOWS_LINUX_WHEEL_ZOOM_PUMP_SPEED; // 0.001
-
-        const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
-        const currentZoom = CanvasState.zoom;
-        const displayZoomForCalc = currentZoom / base;
-
-        const scaledDelta = rawDelta * WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR;
-
-        const nextDisplayZoomNoMagnet = (currentZoom * Math.exp(scaledDelta * zoomSpeed)) / base;
-        const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
-        const magnetFactor = (1 + (magnet.factor - 1) * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
-        const magnetStrength = (magnet.strength * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
-        const wheelCurveSpeedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
-        const effectiveDelta = scaledDelta * magnetFactor * wheelCurveSpeedFactor
-            * ZOOM_SPEED_GLOBAL_MULTIPLIER * SCROLLING_ZOOM_SPEED_BOOST
-            * WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST;
-
-        let zoomFactor = Math.exp(effectiveDelta * zoomSpeed);
-        const limitCap = WINDOWS_LINUX_WHEEL_ZOOM_MAX_FACTOR_PER_FRAME;
-        
-        let cappedFactor = zoomFactor;
-        if (cappedFactor > limitCap) cappedFactor = limitCap;
-        if (cappedFactor < (1 / limitCap)) cappedFactor = 1 / limitCap;
-
-        if (magnet && magnetStrength > 0) {
-            const maxCap = 1.16;
-            const minCap = 1.05;
-            const capDrop = 0.05;
-            const cap = Math.max(minCap, Math.min(maxCap, maxCap - capDrop * magnetStrength));
-            if (cappedFactor > cap) cappedFactor = cap;
-            if (cappedFactor < (1 / cap)) cappedFactor = 1 / cap;
-        }
-
-        const effectiveDeltaCapped = Math.log(cappedFactor) / zoomSpeed;
-        const multiplier = WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR * magnetFactor * wheelCurveSpeedFactor
-            * ZOOM_SPEED_GLOBAL_MULTIPLIER * SCROLLING_ZOOM_SPEED_BOOST
-            * WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST;
-        
-        const rawDeltaConsumed = effectiveDeltaCapped / multiplier;
-
-        winWheelZoomAccumDelta -= rawDeltaConsumed;
-        if (rawDelta > 0 && winWheelZoomAccumDelta < 0) winWheelZoomAccumDelta = 0;
-        if (rawDelta < 0 && winWheelZoomAccumDelta > 0) winWheelZoomAccumDelta = 0;
-
-        let newZoom = currentZoom * cappedFactor;
-        newZoom = clampCanvasZoom(newZoom);
-
-        setCanvasZoom(newZoom, winWheelZoomPumpCenterX, winWheelZoomPumpCenterY, winWheelZoomPumpOptions);
-
-        if (Math.abs(winWheelZoomAccumDelta) > 0.01) {
-            winWheelZoomPumpFrame = requestAnimationFrame(pump);
-        } else {
-            winWheelZoomAccumDelta = 0;
-            const workspace = document.getElementById('canvasWorkspace');
-            if (workspace && !workspace._zoomEndTimer) {
-                __onCanvasZoomEndCleanup();
-            }
-        }
-    };
-    winWheelZoomPumpFrame = requestAnimationFrame(pump);
-}
-
-function __cancelCanvasActiveZoomGesture(reason = 'interrupt') {
-    const workspace = document.getElementById('canvasWorkspace');
-    const hasActiveZoom = !!(
-        smoothWheelZoomFrame ||
-        trackpadZoomInertiaFrame ||
-        zoomUpdateFrame ||
-        pendingZoomRequest ||
-        winWheelZoomPumpFrame ||
-        (workspace && (workspace.classList.contains('is-zooming') || workspace._zoomEndTimer))
-    );
-    if (!hasActiveZoom) return false;
-
-    if (winWheelZoomPumpFrame) {
-        cancelAnimationFrame(winWheelZoomPumpFrame);
-        winWheelZoomPumpFrame = null;
-        winWheelZoomAccumDelta = 0;
-    }
-    __cancelCanvasSmoothWheelZoom();
-    __cancelCanvasTrackpadZoomInertia();
-    __cancelCanvasPendingZoomUpdate();
-    __resetWindowsWheelZoomDirLock();
-
-    if (workspace && workspace._zoomEndTimer) {
-        clearTimeout(workspace._zoomEndTimer);
-        workspace._zoomEndTimer = null;
-    }
-    if (workspace) {
-        workspace.classList.remove('is-zooming');
-    }
-
-    try {
-        const container = getCachedContainer();
-        if (container) {
-            setCanvasScaleVars(container, CanvasState.zoom, true);
-        }
-        updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom, true);
-        updateCanvasLowDetailMode(true);
-        updateCanvasZoomPerformanceMode({ deferOff: true });
-    } catch (_) { }
-
-    __logCanvasWinInput('zoom-interrupt', { reason }, {
-        throttleKey: `zoom-interrupt-${reason}`,
-        throttleMs: 160
-    });
-    return true;
-}
-
-function __runCanvasTrackpadZoomInertiaStep() {
-    trackpadZoomInertiaFrame = null;
-
-    if (!Number.isFinite(trackpadZoomInertiaVelocity)) {
-        __cancelCanvasTrackpadZoomInertia();
-        return;
-    }
-
-    const now = Date.now();
-    const sinceInput = now - (trackpadZoomInertiaLastInputTime || 0);
-    if (sinceInput < TRACKPAD_ZOOM_INERTIA_START_DELAY_MS) {
-        trackpadZoomInertiaFrame = requestAnimationFrame(__runCanvasTrackpadZoomInertiaStep);
-        return;
-    }
-
-    trackpadZoomInertiaVelocity *= TRACKPAD_ZOOM_INERTIA_DAMPING;
-    if (Math.abs(trackpadZoomInertiaVelocity) < TRACKPAD_ZOOM_INERTIA_MIN_LOG_DELTA) {
-        __cancelCanvasTrackpadZoomInertia();
-        return;
-    }
-
-    const currentZoom = Number.isFinite(pendingZoomRequest && pendingZoomRequest.zoom)
-        ? pendingZoomRequest.zoom
-        : (Number.isFinite(CanvasState.zoom) ? CanvasState.zoom : 1);
-    const logStep = Math.max(
-        -TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP,
-        Math.min(TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP, trackpadZoomInertiaVelocity)
-    );
-    const targetZoom = clampCanvasZoom(currentZoom * Math.exp(logStep));
-    if (!Number.isFinite(targetZoom) || Math.abs(targetZoom - currentZoom) < 0.000001) {
-        __cancelCanvasTrackpadZoomInertia();
-        return;
-    }
-
-    scheduleZoomUpdate(
-        targetZoom,
-        trackpadZoomInertiaCenterX,
-        trackpadZoomInertiaCenterY,
-        trackpadZoomInertiaOptions || { recomputeBounds: false, skipSave: false, skipScrollbarUpdate: true }
-    );
-    trackpadZoomInertiaFrame = requestAnimationFrame(__runCanvasTrackpadZoomInertiaStep);
-}
-
-function __pushCanvasTrackpadZoomInertiaFromFactor(zoomFactor, centerX, centerY, options = {}) {
-    const factor = Number(zoomFactor);
-    if (!Number.isFinite(factor) || factor <= 0) return;
-    const logDelta = Math.log(factor);
-    if (!Number.isFinite(logDelta) || Math.abs(logDelta) < 0.000001) return;
-
-    const clampedLogDelta = Math.max(
-        -TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP,
-        Math.min(TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP, logDelta)
-    );
-
-    trackpadZoomInertiaVelocity = Number.isFinite(trackpadZoomInertiaVelocity) && Math.abs(trackpadZoomInertiaVelocity) > 0.000001
-        ? (trackpadZoomInertiaVelocity * (1 - TRACKPAD_ZOOM_INERTIA_INPUT_BLEND))
-            + (clampedLogDelta * TRACKPAD_ZOOM_INERTIA_INPUT_BLEND)
-        : clampedLogDelta;
-    trackpadZoomInertiaLastInputTime = Date.now();
-    if (Number.isFinite(centerX)) trackpadZoomInertiaCenterX = centerX;
-    if (Number.isFinite(centerY)) trackpadZoomInertiaCenterY = centerY;
-    trackpadZoomInertiaOptions = options;
-
-    if (!trackpadZoomInertiaFrame) {
-        trackpadZoomInertiaFrame = requestAnimationFrame(__runCanvasTrackpadZoomInertiaStep);
-    }
-}
-
-function loadCanvasScrollPreferences() {
-    try {
-        const stored = localStorage.getItem('canvas-scroll-preferences');
-        if (!stored) return;
-
-        const parsed = JSON.parse(stored);
-        ['vertical', 'horizontal'].forEach(axis => {
-            if (parsed[axis]) {
-                CanvasState.scrollState[axis].hidden = Boolean(parsed[axis].hidden);
-                CanvasState.scrollState[axis].disabled = Boolean(parsed[axis].disabled);
-            }
-        });
-    } catch (error) {
-        console.error('[Canvas] 加载滚动条偏好失败:', error);
-    }
-}
-
-function persistCanvasScrollPreferences() {
-    try {
-        const payload = {
-            vertical: {
-                hidden: CanvasState.scrollState.vertical.hidden,
-                disabled: CanvasState.scrollState.vertical.disabled
-            },
-            horizontal: {
-                hidden: CanvasState.scrollState.horizontal.hidden,
-                disabled: CanvasState.scrollState.horizontal.disabled
-            }
-        };
-        saveSharedState('canvas-scroll-preferences', payload);
-    } catch (error) {
-        console.error('[Canvas] 保存滚动条偏好失败:', error);
-    }
-}
-
-function persistCanvasScrollbarPreloadState() {
-    try {
-        const payload = {
-            panX: Number.isFinite(CanvasState.panOffsetX) ? CanvasState.panOffsetX : 0,
-            panY: Number.isFinite(CanvasState.panOffsetY) ? CanvasState.panOffsetY : 0,
-            horizontal: {
-                min: Number.isFinite(CanvasState.scrollBounds.horizontal?.min) ? CanvasState.scrollBounds.horizontal.min : 0,
-                max: Number.isFinite(CanvasState.scrollBounds.horizontal?.max) ? CanvasState.scrollBounds.horizontal.max : 0
-            },
-            vertical: {
-                min: Number.isFinite(CanvasState.scrollBounds.vertical?.min) ? CanvasState.scrollBounds.vertical.min : 0,
-                max: Number.isFinite(CanvasState.scrollBounds.vertical?.max) ? CanvasState.scrollBounds.vertical.max : 0
-            },
-            ts: Date.now()
-        };
-        saveSharedState(CANVAS_SCROLLBAR_PRELOAD_KEY, payload);
-    } catch (_) { }
-}
-
-function persistCanvasScrollbarPreloadStateThrottled() {
-    if (scrollbarPreloadSaveTimeout) {
-        clearTimeout(scrollbarPreloadSaveTimeout);
-    }
-    scrollbarPreloadSaveTimeout = setTimeout(() => {
-        persistCanvasScrollbarPreloadState();
-        scrollbarPreloadSaveTimeout = null;
-    }, 120);
-}
-
-function setupCanvasScrollbars() {
-    const verticalBar = document.getElementById('canvasVerticalScrollbar');
-    const horizontalBar = document.getElementById('canvasHorizontalScrollbar');
-
-    if (!verticalBar && !horizontalBar) return;
-
-    const bars = [
-        { axis: 'vertical', element: verticalBar },
-        { axis: 'horizontal', element: horizontalBar }
-    ];
-
-    bars.forEach(({ axis, element }) => {
-        if (!element) return;
-
-        element.classList.toggle('is-hidden', CanvasState.scrollState[axis].hidden);
-        element.classList.toggle('is-disabled', CanvasState.scrollState[axis].disabled);
-        element.classList.remove('show-controls');
-
-        const hideBtn = element.querySelector('.scrollbar-btn.scroll-hide');
-        const disableBtn = element.querySelector('.scrollbar-btn.scroll-disable');
-        const thumb = element.querySelector('.scrollbar-thumb');
-        const controls = element.querySelector('.scrollbar-controls');
-
-        if (hideBtn) {
-            hideBtn.addEventListener('click', (event) => {
-                event.stopPropagation();
-                toggleScrollbarHidden(axis);
-                flashScrollbarControls(element);
-            });
-        }
-
-        if (disableBtn) {
-            disableBtn.addEventListener('click', (event) => {
-                event.stopPropagation();
-                toggleScrollbarDisabled(axis);
-                flashScrollbarControls(element);
-            });
-        }
-
-        if (thumb) {
-            thumb.addEventListener('mousedown', (event) => startScrollbarThumbDrag(event, axis));
-        }
-
-        attachScrollbarHoverHandlers(element, axis);
-    });
-
-    if (!CanvasState.scrollState.handlersAttached) {
-        document.addEventListener('mousemove', handleScrollbarThumbDrag);
-        document.addEventListener('mouseup', stopScrollbarThumbDrag);
-        CanvasState.scrollState.handlersAttached = true;
-    }
-
-    updateScrollbarControls('vertical');
-    updateScrollbarControls('horizontal');
-    updateScrollbarThumbs();
-}
-
-function toggleScrollbarHidden(axis) {
-    CanvasState.scrollState[axis].hidden = !CanvasState.scrollState[axis].hidden;
-    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
-    if (bar) {
-        bar.classList.toggle('is-hidden', CanvasState.scrollState[axis].hidden);
-    }
-    updateScrollbarControls(axis);
-    updateScrollbarThumbs();
-    persistCanvasScrollPreferences();
-}
-
-function toggleScrollbarDisabled(axis) {
-    CanvasState.scrollState[axis].disabled = !CanvasState.scrollState[axis].disabled;
-    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
-    if (bar) {
-        bar.classList.toggle('is-disabled', CanvasState.scrollState[axis].disabled);
-    }
-    updateScrollbarControls(axis);
-    persistCanvasScrollPreferences();
-}
-
-function updateScrollbarControls(axis) {
-    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
-    if (!bar) return;
-
-    const hideBtn = bar.querySelector('.scrollbar-btn.scroll-hide');
-    const hideIcon = hideBtn ? hideBtn.querySelector('i') : null;
-    const disableBtn = bar.querySelector('.scrollbar-btn.scroll-disable');
-    const disableIcon = disableBtn ? disableBtn.querySelector('i') : null;
-    const axisLabel = axis === 'vertical' ? '纵向' : '横向';
-
-    bar.classList.toggle('is-hidden', CanvasState.scrollState[axis].hidden);
-    bar.classList.toggle('is-disabled', CanvasState.scrollState[axis].disabled);
-
-    if (hideBtn) {
-        const label = CanvasState.scrollState[axis].hidden ? `显示${axisLabel}滚动条` : `隐藏${axisLabel}滚动条`;
-        hideBtn.setAttribute('aria-label', label);
-        hideBtn.removeAttribute('title');
-    }
-    if (hideIcon) {
-        hideIcon.className = CanvasState.scrollState[axis].hidden ? 'fas fa-eye' : 'fas fa-eye-slash';
-    }
-    if (disableBtn) {
-        const label = CanvasState.scrollState[axis].disabled ? `启用${axisLabel}滚动` : `禁用${axisLabel}滚动`;
-        disableBtn.setAttribute('aria-label', label);
-        disableBtn.removeAttribute('title');
-    }
-    if (disableIcon) {
-        disableIcon.className = CanvasState.scrollState[axis].disabled ? 'fas fa-unlock' : 'fas fa-ban';
-    }
-}
-
-function startScrollbarThumbDrag(event, axis) {
-    if (CanvasState.scrollState[axis].disabled) return;
-
-    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
-    if (!bar) return;
-
-    const track = bar.querySelector('.scrollbar-track');
-    const thumb = bar.querySelector('.scrollbar-thumb');
-    if (!track || !thumb) return;
-
-    event.preventDefault();
-
-    const trackRect = track.getBoundingClientRect();
-    const thumbRect = thumb.getBoundingClientRect();
-    const offset = axis === 'vertical' ? event.clientY - thumbRect.top : event.clientX - thumbRect.left;
-    const trackStart = axis === 'vertical' ? trackRect.top : trackRect.left;
-
-    __cancelCanvasWheelPanMotion();
-
-    CanvasState.scrollState.activeDragAxis = axis;
-    CanvasState.scrollState.dragInfo = {
-        offset,
-        trackStart,
-        trackSize: axis === 'vertical' ? trackRect.height : trackRect.width,
-        thumbSize: axis === 'vertical' ? thumbRect.height : thumbRect.width
-    };
-    __setCanvasScrollbarMetricCache(axis, track, thumb, CanvasState.scrollState.dragInfo.trackSize, CanvasState.scrollState.dragInfo.thumbSize);
-
-    CanvasState.scrollState[axis].dragging = true;
-    thumb.classList.add('dragging');
-}
-
-function handleScrollbarThumbDrag(event) {
-    const axis = CanvasState.scrollState.activeDragAxis;
-    if (!axis) return;
-
-    if (CanvasState.scrollState[axis].disabled) return;
-
-    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
-    if (!bar) return;
-
-    const track = bar.querySelector('.scrollbar-track');
-    const thumb = bar.querySelector('.scrollbar-thumb');
-    const info = CanvasState.scrollState.dragInfo;
-    if (!track || !thumb || !info) return;
-
-    event.preventDefault();
-
-    const coord = axis === 'vertical'
-        ? event.clientY - info.trackStart - info.offset
-        : event.clientX - info.trackStart - info.offset;
-    const maxTravel = Math.max(0, info.trackSize - info.thumbSize);
-    const clampedCoord = Math.min(Math.max(coord, 0), maxTravel);
-    const ratio = maxTravel === 0 ? 0 : clampedCoord / maxTravel;
-    const bounds = axis === 'vertical' ? CanvasState.scrollBounds.vertical : CanvasState.scrollBounds.horizontal;
-    const target = bounds.max - ratio * (bounds.max - bounds.min);
-
-    if (axis === 'vertical') {
-        CanvasState.panOffsetY = target;
-    } else {
-        CanvasState.panOffsetX = target;
-    }
-
-    applyPanOffset();
-}
-
-function stopScrollbarThumbDrag() {
-    const axis = CanvasState.scrollState.activeDragAxis;
-    if (!axis) return;
-
-    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
-    const thumb = bar ? bar.querySelector('.scrollbar-thumb') : null;
-
-    if (thumb) {
-        thumb.classList.remove('dragging');
-    }
-
-    CanvasState.scrollState[axis].dragging = false;
-    CanvasState.scrollState.activeDragAxis = null;
-    CanvasState.scrollState.dragInfo = null;
-    savePanOffsetThrottled();
-}
-
-function attachScrollbarHoverHandlers(bar, axis) {
-    if (!bar) return;
-    const controls = bar.querySelector('.scrollbar-controls');
-    if (!controls || scrollbarHoverState.has(bar)) return;
-
-    const state = {
-        axis,
-        hideTimer: null,
-        flashTimer: null,
-        pointerInside: false
-    };
-
-    const showControls = () => {
-        if (state.hideTimer) {
-            clearTimeout(state.hideTimer);
-            state.hideTimer = null;
-        }
-        bar.classList.add('show-controls');
-    };
-
-    const hideControls = () => {
-        if (state.hideTimer) {
-            clearTimeout(state.hideTimer);
-        }
-        state.hideTimer = setTimeout(() => {
-            if (state.pointerInside) return;
-            bar.classList.remove('show-controls');
-            state.hideTimer = null;
-        }, 220);
-    };
-
-    const enterControls = () => {
-        state.pointerInside = true;
-        showControls();
-    };
-
-    const leaveControls = () => {
-        state.pointerInside = false;
-        hideControls();
-    };
-
-    controls.addEventListener('mouseenter', enterControls);
-    controls.addEventListener('focusin', enterControls);
-    controls.addEventListener('mouseleave', leaveControls);
-    controls.addEventListener('focusout', leaveControls);
-    bar.addEventListener('mouseleave', leaveControls);
-
-    state.show = showControls;
-    state.hide = hideControls;
-
-    scrollbarHoverState.set(bar, state);
-}
-
-function flashScrollbarControls(bar, duration = 900) {
-    const state = scrollbarHoverState.get(bar);
-    if (!state) return;
-
-    state.show();
-    if (state.flashTimer) {
-        clearTimeout(state.flashTimer);
-    }
-    state.flashTimer = setTimeout(() => {
-        if (!state.pointerInside) {
-            bar.classList.remove('show-controls');
-        }
-        state.flashTimer = null;
-    }, duration);
-}
-
-function setupCanvasFullscreenControls() {
-    const btn = document.getElementById('canvasFullscreenBtn');
-    const container = document.querySelector('.canvas-main-container');
-    if (!btn || !container) return;
-
-    const inSidePanelMode = window.__SIDE_PANEL_MODE__ === true;
-    const canRequestFullscreen = document.documentElement.requestFullscreen ||
-        document.documentElement.webkitRequestFullscreen ||
-        document.documentElement.mozRequestFullScreen ||
-        document.documentElement.msRequestFullscreen;
-    if (!canRequestFullscreen && !inSidePanelMode) {
-        btn.style.display = 'none';
-        return;
-    }
-
-    if (!CanvasState.fullscreenHandlersBound) {
-        btn.addEventListener('click', toggleCanvasFullscreen);
-        document.addEventListener('fullscreenchange', handleCanvasFullscreenChange);
-        document.addEventListener('webkitfullscreenchange', handleCanvasFullscreenChange);
-        document.addEventListener('mozfullscreenchange', handleCanvasFullscreenChange);
-        document.addEventListener('MSFullscreenChange', handleCanvasFullscreenChange);
-        
-        // Listen to window resize events to detect Chrome window fullscreen state changes
-        window.addEventListener('resize', () => {
-            if (window.__canvasResizeTimeout) clearTimeout(window.__canvasResizeTimeout);
-            window.__canvasResizeTimeout = setTimeout(() => {
-                handleCanvasFullscreenChange();
-            }, 120);
-        });
-
-        // ESC key listener to exit fullscreen mode safely without conflicting with overlays/selectMode
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                const isCurrentlyFullscreen = !!getCurrentFullscreenElement() || (CanvasState.isFullscreen === true);
-                if (!isCurrentlyFullscreen) return;
-
-                // 1. If pointer drag is active, let drag-and-drop handle it
-                if (window.pointerDragState && window.pointerDragState.isDragging) {
-                    return;
-                }
-
-                // 2. If selectMode is active (batch operations), let selectMode handle it
-                if (typeof window.selectMode !== 'undefined' && window.selectMode === true) {
-                    return;
-                }
-
-                // 3. If context menu is open, let context menu handle it
-                const contextMenu = document.getElementById('bookmark-context-menu');
-                if (contextMenu && contextMenu.style.display !== 'none') {
-                    return;
-                }
-
-                // 4. If settingsMenu or quickAddMenu is open, let them handle it
-                const settingsMenu = document.getElementById('settingsMenu');
-                if (settingsMenu && !settingsMenu.hasAttribute('hidden')) {
-                    return;
-                }
-                const quickAddMenu = document.getElementById('quickAddMenu');
-                if (quickAddMenu && !quickAddMenu.hasAttribute('hidden')) {
-                    return;
-                }
-
-                // 5. If tag popover is open, let tag popover handle it
-                const tagPopover = document.querySelector('.tag-popover');
-                if (tagPopover && !tagPopover.hidden) {
-                    return;
-                }
-
-                // 6. If any modal / dialog is active, let them handle it
-                const hasVisibleModal = Array.from(document.querySelectorAll('.modal, .canvas-manage-modal, .canvas-help-modal')).some(el => {
-                    return el.classList.contains('show') || (el.style.display && el.style.display !== 'none');
-                });
-                if (hasVisibleModal) {
-                    return;
-                }
-
-                // 7. If typing in an input or textarea, let that handle it (e.g. revert / blur)
-                const activeEl = document.activeElement;
-                if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
-                    return;
-                }
-
-                toggleCanvasFullscreen();
-            }
-        });
-
-        CanvasState.fullscreenHandlersBound = true;
-    }
-
-    updateFullscreenButtonState();
-}
-
-function toggleCanvasFullscreen() {
-    if (window.__SIDE_PANEL_MODE__ === true) {
-        const bridgeOpenOrFocus = window.__canvasSidePanelOpenOrFocusPage;
-        const sidePanelFullscreenGetter = window.__canvasSidePanelGetFullscreenState;
-        const mirroredFullscreen = typeof sidePanelFullscreenGetter === 'function'
-            ? sidePanelFullscreenGetter() === true
-            : false;
-        const fullscreenIntent = mirroredFullscreen ? 'exit' : 'enter';
-
-        if (typeof bridgeOpenOrFocus === 'function') {
-            Promise.resolve(bridgeOpenOrFocus({ requestFullscreen: true, fullscreenIntent })).catch(error => {
-                console.warn('[Canvas] 侧边栏跳转 HTML 全屏失败:', error);
-            });
-        } else {
-            try {
-                const runtimeUrl = (typeof chrome !== 'undefined' && chrome?.runtime?.getURL)
-                    ? chrome.runtime.getURL('history_html/history.html?view=canvas')
-                    : 'history_html/history.html?view=canvas';
-                window.open(runtimeUrl, '_blank');
-            } catch (_) { }
-        }
-        return;
-    }
-
-    const target = document.documentElement;
-    const fullscreenElement = getCurrentFullscreenElement();
-    const isCurrentlyFullscreen = !!fullscreenElement || (CanvasState.isFullscreen === true);
-
-    if (isCurrentlyFullscreen) {
-        const exit = document.exitFullscreen ||
-            document.webkitExitFullscreen ||
-            document.mozCancelFullScreen ||
-            document.msExitFullscreen;
-        if (exit && fullscreenElement) {
-            Promise.resolve(exit.call(document)).catch(error => {
-                console.warn('[Canvas] HTML5 退出全屏失败:', error);
-            });
-        }
-        if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.getCurrent === 'function') {
-            chrome.windows.getCurrent((win) => {
-                if (win && win.state === 'fullscreen') {
-                    const prevState = localStorage.getItem('canvas-pre-fullscreen-window-state') || 'normal';
-                    const targetState = (prevState === 'fullscreen') ? 'normal' : prevState;
-                    chrome.windows.update(win.id, { state: targetState });
-                }
-            });
-        }
-        return;
-    }
-
-    const request = target.requestFullscreen ||
-        target.webkitRequestFullscreen ||
-        target.mozRequestFullScreen ||
-        target.msRequestFullscreen;
-
-    const hasTransientActivation = (typeof navigator !== 'undefined' && navigator.userActivation)
-        ? navigator.userActivation.isActive === true
-        : true;
-
-    if (request && hasTransientActivation) {
-        Promise.resolve(request.call(target)).catch(error => {
-            console.warn('[Canvas] HTML5 进入全屏失败, 尝试使用 Chrome 窗口全屏 API:', error);
-            enterExtensionWindowFullscreen();
-        });
-    } else {
-        console.warn('[Canvas] 无用户手势激活或 API 不可用, 尝试使用 Chrome 窗口全屏 API');
-        enterExtensionWindowFullscreen();
-    }
-}
-
-function enterExtensionWindowFullscreen() {
-    if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.getCurrent === 'function') {
-        chrome.windows.getCurrent((win) => {
-            if (win && typeof win.id === 'number') {
-                const prevState = win.state || 'normal';
-                localStorage.setItem('canvas-pre-fullscreen-window-state', prevState);
-                chrome.windows.update(win.id, { state: 'fullscreen' });
-            }
-        });
-    }
-}
-
-function handleCanvasFullscreenChange() {
-    const fullscreenElement = getCurrentFullscreenElement();
-    const isHtmlFullscreen = !!fullscreenElement;
-
-    if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.getCurrent === 'function') {
-        chrome.windows.getCurrent((win) => {
-            const isWindowFullscreen = win && win.state === 'fullscreen';
-            applyCanvasFullscreenState(isHtmlFullscreen || isWindowFullscreen);
-        });
-    } else {
-        applyCanvasFullscreenState(isHtmlFullscreen);
-    }
-}
-
-function applyCanvasFullscreenState(nextIsFullscreen) {
-    CanvasState.isFullscreen = nextIsFullscreen;
-
-    // Toggle page-level CSS classes so styles adjust correctly
-    if (CanvasState.isFullscreen) {
-        document.documentElement.classList.add('canvas-page-fullscreen-active');
-        document.body.classList.add('canvas-page-fullscreen-active');
-    } else {
-        document.documentElement.classList.remove('canvas-page-fullscreen-active');
-        document.body.classList.remove('canvas-page-fullscreen-active');
-    }
-
-    updateFullscreenButtonState();
-    updateNodeFullscreenButtons();
-
-    // Force recalculation of canvas layout, scroll limits, and offsets immediately when fullscreen state toggles
-    try {
-        updateCanvasScrollBounds({ recomputeBounds: true, initial: false });
-        stabilizePermanentSectionAnchors({ syncBounds: true });
-    } catch (_) { }
-
-    try {
-        const fullscreenStatePublisher = window.__canvasSidePanelPublishFullscreenStateFromModule;
-        if (typeof fullscreenStatePublisher === 'function') {
-            fullscreenStatePublisher(CanvasState.isFullscreen);
-        }
-    } catch (_) { }
-}
-
-function updateFullscreenButtonState() {
-    const btn = document.getElementById('canvasFullscreenBtn');
-    if (!btn) return;
-
-    const lang = getCanvasLanguage();
-    const enterLabel = getFullscreenLabel('canvasFullscreenEnter', lang);
-    const exitLabel = getFullscreenLabel('canvasFullscreenExit', lang);
-    let isFullscreen = CanvasState.isFullscreen === true;
-    if (window.__SIDE_PANEL_MODE__ === true) {
-        const sidePanelFullscreenGetter = window.__canvasSidePanelGetFullscreenState;
-        if (typeof sidePanelFullscreenGetter === 'function') {
-            isFullscreen = sidePanelFullscreenGetter() === true;
-        }
-    }
-
-    CanvasState.isFullscreen = isFullscreen;
-    const text = isFullscreen ? exitLabel : enterLabel;
-    btn.textContent = text;
-    btn.setAttribute('aria-label', text);
-    btn.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
-    btn.classList.toggle('fullscreen-active', isFullscreen);
-}
-
-function getCanvasLanguage() {
-    if (typeof window !== 'undefined' && window.currentLang) {
-        return window.currentLang;
-    }
-    return 'zh_CN';
-}
-
-function getFullscreenLabel(key, lang) {
-    if (window.i18n && window.i18n[key] && window.i18n[key][lang]) {
-        return window.i18n[key][lang];
-    }
-    if (key === 'canvasFullscreenExit') {
-        return lang === 'en' ? 'Exit' : '退出';
-    }
-    return lang === 'en' ? 'Fullscreen' : '全屏';
-}
-
-function getLayoutZoomLabel(kind, lang) {
-    const isEn = lang === 'en';
-    if (kind === 'in') return isEn ? 'Increase layout zoom' : '放大排版';
-    if (kind === 'out') return isEn ? 'Decrease layout zoom' : '缩小排版';
-    if (kind === 'value') return isEn ? 'Layout zoom' : '排版比例';
-    return '';
-}
-
-function __getNodeLayoutZoomKey(element) {
-    const descriptor = __serializeMaximizedNode(element);
-    if (!descriptor) return null;
-    return __getMaximizedDescriptorKey(descriptor);
-}
-
-function __getMaximizedDescriptorKey(descriptor) {
-    if (!descriptor || typeof descriptor !== 'object') return null;
-    if (descriptor.type === 'permanent-copy') {
-        return `permanent-copy:${descriptor.copyId || ''}`;
-    }
-    if (descriptor.id) {
-        return `${descriptor.type || 'node'}:${descriptor.id}`;
-    }
-    return descriptor.type ? `type:${descriptor.type}` : null;
-}
-
-function __normalizeLayoutZoomPercent(value, fallback) {
-    const safe = __clampNumber(value, NODE_LAYOUT_ZOOM_MIN, NODE_LAYOUT_ZOOM_MAX, fallback);
-    return Math.round(safe);
-}
-
-function __getLayoutZoomPlatformKey() {
-    if (CANVAS_RUNTIME_PLATFORM && CANVAS_RUNTIME_PLATFORM.isWindows) return 'windows';
-    if (CANVAS_RUNTIME_PLATFORM && CANVAS_RUNTIME_PLATFORM.isLinux) return 'linux';
-    if (CANVAS_RUNTIME_PLATFORM && CANVAS_RUNTIME_PLATFORM.isMac) return 'mac';
-    return 'other';
-}
-
-function __getDefaultLayoutZoomPercentByElement(element) {
-    const isMdNode = !!(element && element.classList && element.classList.contains('md-canvas-node'));
-    const settings = getCanvasAppearanceSettings();
-    const fullScreenZoom = __normalizeAppearanceFullscreenZoom(
-        settings && settings.fullScreenZoom,
-        __getDefaultAppearanceFullscreenZoomSettings()
-    );
-    return isMdNode ? fullScreenZoom.mdNode : fullScreenZoom.section;
-}
-
-function __parseLayoutZoomInput(value, fallback) {
-    const raw = String(value || '').trim().replace(/%/g, '');
-    const num = Number(raw);
-    if (!Number.isFinite(num)) return fallback;
-    return __normalizeLayoutZoomPercent(num, fallback);
-}
-
-function __getNodeLayoutZoomPercent(element) {
-    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
-    const key = __getNodeLayoutZoomKey(element);
-    if (!key) {
-        if (element && element.dataset && element.dataset.layoutZoomPercent) {
-            const parsed = Number(element.dataset.layoutZoomPercent);
-            if (Number.isFinite(parsed)) {
-                return __normalizeLayoutZoomPercent(parsed, defaultPercent);
-            }
-        }
-        return defaultPercent;
-    }
-    const map = __readJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, {});
-    const hasValue = !!(map && typeof map === 'object' && Object.prototype.hasOwnProperty.call(map, key));
-    if (!hasValue) return defaultPercent;
-    const raw = map[key];
-    return __normalizeLayoutZoomPercent(raw, defaultPercent);
-}
-
-function __applyNodeLayoutZoom(element, percent) {
-    if (!element) return;
-    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
-    const safe = __normalizeLayoutZoomPercent(
-        typeof percent === 'number' ? percent : __getNodeLayoutZoomPercent(element),
-        defaultPercent
-    );
-    try {
-        element.style.setProperty('--canvas-node-layout-zoom', String(safe / 100));
-    } catch (_) { }
-    if (element.dataset) {
-        element.dataset.layoutZoomPercent = String(safe);
-    }
-    __updateNodeLayoutZoomDisplay(element, safe);
-}
-
-function __setNodeLayoutZoomPercent(element, percent) {
-    if (!element) return;
-    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
-    const safe = __normalizeLayoutZoomPercent(percent, defaultPercent);
-    const key = __getNodeLayoutZoomKey(element);
-    if (key) {
-        const map = __readJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, {});
-        const nextMap = map && typeof map === 'object' ? map : {};
-        nextMap[key] = safe;
-        __writeJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, nextMap);
-    }
-    __applyNodeLayoutZoom(element, safe);
-}
-
-function __updateNodeLayoutZoomDisplay(element, percent) {
-    if (!element) return;
-    const display = element.querySelector('.canvas-layout-zoom-input, .canvas-layout-zoom-value');
-    if (!display) return;
-    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
-    const safe = __normalizeLayoutZoomPercent(
-        typeof percent === 'number' ? percent : __getNodeLayoutZoomPercent(element),
-        defaultPercent
-    );
-    if (display.tagName === 'INPUT') {
-        if (document.activeElement === display) return;
-        display.value = `${safe}%`;
-    } else {
-        display.textContent = `${safe}%`;
-    }
-}
-
-function __scheduleNodeLayoutZoomStabilize(element) {
-    if (!element) return;
-
-    const reapply = () => {
-        if (!element || !element.isConnected) return;
-        if (!__isNodeMaximized(element)) return;
-        __applyNodeLayoutZoom(element);
-    };
-
-    reapply();
-
-    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-        window.requestAnimationFrame(() => {
-            reapply();
-        });
-    }
-
-    const prevTimer = nodeLayoutZoomStabilizeTimerMap.get(element);
-    if (prevTimer) {
-        clearTimeout(prevTimer);
-    }
-
-    const timerId = setTimeout(() => {
-        nodeLayoutZoomStabilizeTimerMap.delete(element);
-        reapply();
-    }, NODE_LAYOUT_ZOOM_STABILIZE_DELAY_MS);
-
-    nodeLayoutZoomStabilizeTimerMap.set(element, timerId);
-}
-
-function __updateNodeLayoutZoomControls(element, lang) {
-    if (!element) return;
-    const zoomInLabel = getLayoutZoomLabel('in', lang);
-    const zoomOutLabel = getLayoutZoomLabel('out', lang);
-    const zoomValueLabel = getLayoutZoomLabel('value', lang);
-    const zoomInBtn = element.querySelector('.canvas-layout-zoom-btn[data-action="layout-zoom-in"]');
-    const zoomOutBtn = element.querySelector('.canvas-layout-zoom-btn[data-action="layout-zoom-out"]');
-    const zoomValue = element.querySelector('.canvas-layout-zoom-input, .canvas-layout-zoom-value');
-
-    if (zoomInBtn) {
-        zoomInBtn.setAttribute('title', zoomInLabel);
-        zoomInBtn.setAttribute('aria-label', zoomInLabel);
-        zoomInBtn.setAttribute('data-tooltip', zoomInLabel);
-    }
-    if (zoomOutBtn) {
-        zoomOutBtn.setAttribute('title', zoomOutLabel);
-        zoomOutBtn.setAttribute('aria-label', zoomOutLabel);
-        zoomOutBtn.setAttribute('data-tooltip', zoomOutLabel);
-    }
-    if (zoomValue) {
-        zoomValue.setAttribute('title', zoomValueLabel);
-        zoomValue.setAttribute('data-tooltip', zoomValueLabel);
-    }
-    __applyNodeLayoutZoom(element);
-    if (__isNodeMaximized(element)) {
-        __scheduleNodeLayoutZoomStabilize(element);
-    }
-    __bindNodeLayoutZoomInput(element);
-}
-
-function __adjustNodeLayoutZoom(element, delta) {
-    if (!element) return;
-    const current = __getNodeLayoutZoomPercent(element);
-    const next = __normalizeLayoutZoomPercent(current + delta, current);
-    if (next === current) return;
-    __setNodeLayoutZoomPercent(element, next);
-}
-
-function __handleLayoutZoomAction(element, action) {
-    if (!element || !action) return false;
-    if (action === 'layout-zoom-in') {
-        __adjustNodeLayoutZoom(element, NODE_LAYOUT_ZOOM_STEP);
-        return true;
-    }
-    if (action === 'layout-zoom-out') {
-        __adjustNodeLayoutZoom(element, -NODE_LAYOUT_ZOOM_STEP);
-        return true;
-    }
-    return false;
-}
-
-function __bindNodeLayoutZoomInput(element) {
-    if (!element) return;
-    const input = element.querySelector('.canvas-layout-zoom-input');
-    if (!input || input.dataset.layoutZoomBound === 'true') return;
-    input.dataset.layoutZoomBound = 'true';
-
-    input.addEventListener('focus', () => {
-        const current = __getNodeLayoutZoomPercent(element);
-        input.value = String(current);
-        try { input.select(); } catch (_) { }
-    });
-
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            if (e.isComposing) return;
-            e.preventDefault();
-            input.blur();
-        } else if (e.key === 'Escape') {
-            e.preventDefault();
-            input.value = `${__getNodeLayoutZoomPercent(element)}%`;
-            input.blur();
-        }
-    });
-
-    input.addEventListener('blur', () => {
-        const current = __getNodeLayoutZoomPercent(element);
-        const next = __parseLayoutZoomInput(input.value, current);
-        __setNodeLayoutZoomPercent(element, next);
-        input.value = `${next}%`;
-    });
-
-    ['mousedown', 'click'].forEach((evt) => {
-        input.addEventListener(evt, (e) => e.stopPropagation());
-    });
-}
-
-function __createLayoutZoomControls(buttonClass, lang, defaultPercent = null) {
-    const controls = document.createElement('div');
-    controls.className = 'canvas-layout-zoom-controls';
-    controls.setAttribute('data-layout-zoom-controls', 'true');
-    const sectionDefaultPercent = __getDefaultLayoutZoomPercentByElement(null);
-    const resolvedDefaultPercent = __normalizeLayoutZoomPercent(
-        Number.isFinite(defaultPercent) ? defaultPercent : sectionDefaultPercent,
-        sectionDefaultPercent
-    );
-
-    const zoomOutLabel = getLayoutZoomLabel('out', lang);
-    const zoomInLabel = getLayoutZoomLabel('in', lang);
-    const zoomValueLabel = getLayoutZoomLabel('value', lang);
-
-    const zoomOutBtn = document.createElement('button');
-    zoomOutBtn.type = 'button';
-    zoomOutBtn.className = `${buttonClass} canvas-layout-zoom-btn canvas-layout-zoom-out-btn`;
-    zoomOutBtn.setAttribute('data-action', 'layout-zoom-out');
-    zoomOutBtn.setAttribute('title', zoomOutLabel);
-    zoomOutBtn.setAttribute('aria-label', zoomOutLabel);
-    zoomOutBtn.setAttribute('data-tooltip', zoomOutLabel);
-    zoomOutBtn.innerHTML = '<i class="fas fa-minus"></i>';
-
-    const zoomValue = document.createElement('input');
-    zoomValue.type = 'text';
-    zoomValue.inputMode = 'numeric';
-    zoomValue.className = 'canvas-layout-zoom-value canvas-layout-zoom-input';
-    zoomValue.setAttribute('data-layout-zoom-value', 'true');
-    zoomValue.setAttribute('title', zoomValueLabel);
-    zoomValue.setAttribute('data-tooltip', zoomValueLabel);
-    zoomValue.setAttribute('aria-label', zoomValueLabel);
-    zoomValue.value = `${resolvedDefaultPercent}%`;
-
-    const zoomInBtn = document.createElement('button');
-    zoomInBtn.type = 'button';
-    zoomInBtn.className = `${buttonClass} canvas-layout-zoom-btn canvas-layout-zoom-in-btn`;
-    zoomInBtn.setAttribute('data-action', 'layout-zoom-in');
-    zoomInBtn.setAttribute('title', zoomInLabel);
-    zoomInBtn.setAttribute('aria-label', zoomInLabel);
-    zoomInBtn.setAttribute('data-tooltip', zoomInLabel);
-    zoomInBtn.innerHTML = '<i class="fas fa-plus"></i>';
-
-    controls.appendChild(zoomOutBtn);
-    controls.appendChild(zoomValue);
-    controls.appendChild(zoomInBtn);
-    return controls;
-}
-
-function getCurrentFullscreenElement() {
-    return document.fullscreenElement ||
-        document.webkitFullscreenElement ||
-        document.mozFullScreenElement ||
-        document.msFullscreenElement || null;
-}
-
-function __getCanvasViewportRect(options = {}) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return null;
-    const rect = workspace.getBoundingClientRect();
-    if ((options && options.viewportCoordinates === true) || __isCanvasNodeMaximizedActive()) {
-        return {
-            x: 0,
-            y: 0,
-            width: rect.width,
-            height: rect.height
-        };
-    }
-    const zoom = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.zoom === 'number' && CanvasState.zoom > 0)
-        ? CanvasState.zoom : 1;
-    const panX = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.panOffsetX === 'number')
-        ? CanvasState.panOffsetX : 0;
-    const panY = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.panOffsetY === 'number')
-        ? CanvasState.panOffsetY : 0;
-    return {
-        x: (-panX) / zoom,
-        y: (-panY) / zoom,
-        width: rect.width / zoom,
-        height: rect.height / zoom
-    };
-}
-
-function __isNodeMaximized(element) {
-    return !!(element && element.classList && element.classList.contains('canvas-node-maximized'));
-}
-
-function __isCanvasNodeMaximizedActive() {
-    try {
-        if (CanvasState && CanvasState.nodeMaximizedActive) return true;
-    } catch (_) { }
-    try {
-        if (document && document.body && document.body.classList && document.body.classList.contains('canvas-node-maximized-active')) return true;
-    } catch (_) { }
-    try {
-        return !!document.querySelector('.canvas-node-maximized');
-    } catch (_) {
-        return false;
-    }
-}
-
-function __serializeMaximizedNode(element) {
-    if (!element || !element.classList) return null;
-    const isPermanent = element.classList.contains('permanent-bookmark-section');
-    const isTemp = element.classList.contains('temp-canvas-node');
-    const isMd = element.classList.contains('md-canvas-node');
-
-    if (isPermanent) {
-        const copyId = element.dataset ? element.dataset.permanentSectionCopyId : null;
-        if (copyId) {
-            return { type: 'permanent-copy', copyId: String(copyId) };
-        }
-        return { type: 'permanent', id: 'permanentSection' };
-    }
-
-    if (isTemp) {
-        const id = element.id || (element.dataset ? element.dataset.sectionId : null);
-        if (id) return { type: 'temp-node', id: String(id) };
-    }
-
-    if (isMd) {
-        const id = element.id;
-        if (id) return { type: 'md-node', id: String(id) };
-    }
-
-    if (element.id) {
-        return { type: 'node', id: String(element.id) };
-    }
-    return null;
-}
-
-function __getActiveMaximizedNodeDescriptor() {
-    const activeNode = document.querySelector('.canvas-node-maximized');
-    if (!activeNode) return null;
-    return __serializeMaximizedNode(activeNode);
-}
-
-function __getMaximizedNodeStorageKey(partitionKey = null) {
-    return __buildCanvasPartitionedViewStateKey(
-        NODE_MAXIMIZED_VIEW_STATE_KIND,
-        NODE_MAXIMIZED_STORAGE_KEY,
-        partitionKey || __getCanvasViewPartitionKey()
-    );
-}
-
-function __saveMaximizedNodeToStorage(element) {
-    const payload = __serializeMaximizedNode(element);
-    if (!payload) return;
-    try {
-        const partitionKey = __getCanvasViewPartitionKey();
-        saveViewState(NODE_MAXIMIZED_VIEW_STATE_KIND, NODE_MAXIMIZED_STORAGE_KEY, payload, { partitionKey });
-    } catch (_) { }
-}
-
-function __saveLastMaximizedNodeToStorage(element) {
-    const payload = __serializeMaximizedNode(element);
-    if (!payload) return;
-    try {
-        const saved = saveSharedState(NODE_LAST_MAXIMIZED_STORAGE_KEY, payload);
-        if (saved && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-            window.dispatchEvent(new CustomEvent(LAST_MAXIMIZED_NODE_UPDATED_EVENT, {
-                detail: { descriptor: payload }
-            }));
-        }
-    } catch (_) { }
-}
-
-function __clearMaximizedNodeStorage() {
-    try {
-        localStorage.removeItem(__getMaximizedNodeStorageKey());
-    } catch (_) { }
-}
-
-function __loadMaximizedNodeFromStorage() {
-    try {
-        const key = __getMaximizedNodeStorageKey();
-        if (!key) return null;
-        const data = __readPartitionedViewJSON(key, null);
-        if (!data || typeof data !== 'object') return null;
-        return data;
-    } catch (_) {
-        return null;
-    }
-}
-
-function __loadLastMaximizedNodeFromStorage() {
-    try {
-        const raw = localStorage.getItem(NODE_LAST_MAXIMIZED_STORAGE_KEY);
-        if (!raw) return null;
-        const data = JSON.parse(raw);
-        if (!data || typeof data !== 'object') return null;
-        return data;
-    } catch (_) {
-        return null;
-    }
-}
-
-function __resolveMaximizedNode(descriptor) {
-    if (!descriptor || typeof descriptor !== 'object') return null;
-    if (descriptor.type === 'permanent') {
-        return document.getElementById('permanentSection');
-    }
-    if (descriptor.type === 'permanent-copy') {
-        const copyId = String(descriptor.copyId || '').trim();
-        if (!copyId) return null;
-        return document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`);
-    }
-    if (descriptor.id) {
-        return document.getElementById(String(descriptor.id));
-    }
-    return null;
-}
-
-function __isFullscreenPreloadRestoreActive() {
-    try {
-        const root = document.documentElement;
-        return !!(root && root.classList && root.classList.contains('layout-preload-node-maximized-active'));
-    } catch (_) {
-        return false;
-    }
-}
-
-function __setFullscreenPreloadReady(element, ready = true) {
-    if (!element || !element.dataset) return;
-    if (ready) {
-        element.dataset.fullscreenPreloadReady = 'true';
-    } else {
-        try { delete element.dataset.fullscreenPreloadReady; } catch (_) {
-            element.dataset.fullscreenPreloadReady = '';
-        }
-    }
-}
-
-function __setFullscreenBodyReady(element, ready = true) {
-    if (!element || !element.dataset) return;
-    if (ready) {
-        element.dataset.fullscreenBodyReady = 'true';
-    } else {
-        try { delete element.dataset.fullscreenBodyReady; } catch (_) {
-            element.dataset.fullscreenBodyReady = '';
-        }
-    }
-}
-
-function __resolveFullscreenPreloadTargetElement(target) {
-    if (!target || !target.closest) return target || null;
-    if (target.classList && (
-        target.classList.contains('permanent-bookmark-section')
-        || target.classList.contains('temp-canvas-node')
-        || target.classList.contains('md-canvas-node')
-    )) {
-        return target;
-    }
-    return target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
-}
-
-function __beginCanvasFullscreenBodyRestoreLock(target) {
-    const element = __resolveFullscreenPreloadTargetElement(target);
-    if (!element || !element.classList || !element.classList.contains('canvas-node-maximized')) return null;
-    if (!element.dataset || element.dataset.fullscreenPreloadReady !== 'true') return null;
-    if (element.dataset.fullscreenBodyReady !== 'true') return null;
-    __setFullscreenBodyReady(element, false);
-    let released = false;
-    return () => {
-        if (released) return;
-        released = true;
-        if (!element.isConnected) return;
-        __setFullscreenBodyReady(element, true);
-    };
-}
-window.__beginCanvasFullscreenBodyRestoreLock = __beginCanvasFullscreenBodyRestoreLock;
-
-function __shouldSuppressCanvasBootstrapRestore(target) {
-    const descriptor = CanvasState.pendingMaximizedDescriptor
-        || __getActiveMaximizedNodeDescriptor()
-        || __loadMaximizedNodeFromStorage();
-    if (!descriptor) return false;
-    const element = __resolveFullscreenPreloadTargetElement(target);
-    if (!element) return false;
-    const elementDescriptor = __serializeMaximizedNode(element);
-    if (!elementDescriptor) return false;
-    if (__getMaximizedDescriptorKey(descriptor) !== __getMaximizedDescriptorKey(elementDescriptor)) {
-        return false;
-    }
-    if (__isFullscreenPreloadRestoreActive()) return true;
-    try {
-        if (__isNodeMaximized(element)) return true;
-    } catch (_) { }
-    try {
-        if (element.dataset && element.dataset.fullscreenBodyReady !== 'true') return true;
-    } catch (_) { }
-    return false;
-}
-window.__shouldSuppressCanvasBootstrapRestore = __shouldSuppressCanvasBootstrapRestore;
-
-function __waitForNextAnimationFrame() {
-    return new Promise((resolve) => {
-        try {
-            requestAnimationFrame(() => resolve());
-        } catch (_) {
-            setTimeout(resolve, 16);
-        }
-    });
-}
-
-async function __waitForAnimationFrames(count = 1) {
-    const total = Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
-    for (let i = 0; i < total; i += 1) {
-        await __waitForNextAnimationFrame();
-    }
-}
-
-function __delayFullscreenRestore(ms) {
-    return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
-}
-
-async function __waitForFullscreenPreloadRelease(maxMs = 900) {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < maxMs) {
-        try {
-            const root = document.documentElement;
-            const preloadActive = !!(root && root.classList && (
-                root.classList.contains('layout-preload-active')
-                || root.classList.contains('layout-preload-node-maximized-active')
-            ));
-            if (!preloadActive) return;
-        } catch (_) {
-            return;
-        }
-        await __waitForAnimationFrames(1);
-        await __delayFullscreenRestore(16);
-    }
-}
-
-function __getFullscreenScrollableBody(target) {
-    if (!target || !target.querySelector) return null;
-    return target.querySelector('.permanent-section-body, .temp-node-body') || null;
-}
-
-function __shouldWaitForPermanentFullscreenQuiet() {
-    try {
-        if (typeof isRenderingTree !== 'undefined' && isRenderingTree) return true;
-    } catch (_) { }
-    try {
-        if (typeof pathBadgeRefreshInFlight !== 'undefined' && pathBadgeRefreshInFlight) return true;
-    } catch (_) { }
-    try {
-        if (typeof pendingPathBadgeRefreshTimer !== 'undefined' && pendingPathBadgeRefreshTimer) return true;
-    } catch (_) { }
-    return false;
-}
-
-async function __applyFullscreenScrollOnly(target, descriptor) {
-    if (!target || !descriptor) return;
-    const type = String(descriptor.type || '').toLowerCase();
-    const body = __getFullscreenScrollableBody(target);
-    if (!body) return;
-
-    if (type === 'permanent' || type === 'permanent-copy') {
-        try {
-            const key = __getPermanentSectionScrollKey(target);
-            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
-            if (persisted) {
-                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 2200 });
-            }
-        } catch (_) { }
-        return;
-    }
-
-    if (type === 'temp-node') {
-        try {
-            const sectionId = String(descriptor.id || target.id || '').trim();
-            const key = __getTempSectionScrollKey(sectionId);
-            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
-            if (persisted) {
-                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 1600 });
-            }
-        } catch (_) { }
-    }
-}
-
-async function __waitForFullscreenRevealStability(target, descriptor) {
-    if (!target || !descriptor) return;
-    const body = __getFullscreenScrollableBody(target);
-    const tree = target.querySelector ? target.querySelector('.bookmark-tree, .temp-bookmark-tree') : null;
-    const type = String(descriptor.type || '').toLowerCase();
-    const isPermanentTree = (type === 'permanent' || type === 'permanent-copy');
-    const idleMs = isPermanentTree ? 88 : 72;
-    const minDelayMs = isPermanentTree ? 108 : 84;
-    const maxMs = isPermanentTree ? 420 : 280;
-    const startedAt = Date.now();
-    let lastActivityAt = Date.now();
-    let observer = null;
-
-    const markActivity = () => {
-        lastActivityAt = Date.now();
-    };
-
-    try {
-        if (body && typeof body.addEventListener === 'function') {
-            body.addEventListener('scroll', markActivity, { passive: true });
-        }
-    } catch (_) { }
-
-    try {
-        if (tree && typeof MutationObserver !== 'undefined') {
-            observer = new MutationObserver(() => {
-                markActivity();
-            });
-            observer.observe(tree, {
-                subtree: true,
-                childList: true,
-                attributes: true,
-                attributeFilter: ['class', 'data-children-loaded', 'data-start-index']
-            });
-        }
-    } catch (_) { }
-
-    try {
-        await __delayFullscreenRestore(minDelayMs);
-        while (Date.now() - startedAt < maxMs) {
-            const quietEnough = (Date.now() - lastActivityAt) >= idleMs;
-            const permanentBusy = (type === 'permanent' || type === 'permanent-copy')
-                ? __shouldWaitForPermanentFullscreenQuiet()
-                : false;
-            if (quietEnough && !permanentBusy) {
-                break;
-            }
-            await __waitForAnimationFrames(1);
-            await __delayFullscreenRestore(16);
-        }
-    } finally {
-        try {
-            if (body && typeof body.removeEventListener === 'function') {
-                body.removeEventListener('scroll', markActivity);
-            }
-        } catch (_) { }
-        try {
-            if (observer) observer.disconnect();
-        } catch (_) { }
-    }
-}
-
-async function __waitForFullscreenBodyReveal(target, descriptor) {
-    if (!target || !descriptor) return;
-    const type = String(descriptor.type || '').toLowerCase();
-    const extraDelayMs = (type === 'permanent' || type === 'permanent-copy') ? 260 : 180;
-    const finalBufferMs = (type === 'permanent' || type === 'permanent-copy') ? 96 : 64;
-
-    await __delayFullscreenRestore(extraDelayMs);
-    await __waitForFullscreenPreloadRelease(1200);
-    await __waitForFullscreenRevealStability(target, descriptor);
-    await __applyFullscreenScrollOnly(target, descriptor);
-    await __delayFullscreenRestore(finalBufferMs);
-    await __waitForAnimationFrames(2);
-}
-
-function __applyPersistedScrollPayloadToBody(body, payload, options = {}) {
-    if (!body || !payload || typeof payload !== 'object') return false;
-    if (typeof payload.top === 'number') body.scrollTop = payload.top || 0;
-    if (typeof payload.left === 'number') body.scrollLeft = payload.left || 0;
-    if (options && options.guardMs && body.dataset) {
-        try {
-            body.dataset.scrollRestoreBlockUntil = String(Date.now() + Math.max(0, Number(options.guardMs) || 0));
-        } catch (_) { }
-    }
-    return true;
-}
-
-function __scheduleCanvasBodyScrollRestore(body, payload, options = {}) {
-    if (!body || !payload || typeof payload !== 'object') return false;
-
-    const target = options && options.target ? options.target : body;
-    const fallbackDelays = Array.isArray(options && options.fallbackDelays)
-        ? options.fallbackDelays
-            .map((delay) => Number(delay))
-            .filter((delay) => Number.isFinite(delay) && delay >= 0)
-        : [10, 50, 100];
-    const scheduleFollowUps = options && options.scheduleFollowUps === false ? false : true;
-    const isBlocked = (options && typeof options.isBlocked === 'function')
-        ? options.isBlocked
-        : () => {
-            try {
-                return !!(typeof window !== 'undefined'
-                    && typeof window.__isCanvasBodyScrollRestoreBlocked === 'function'
-                    && window.__isCanvasBodyScrollRestoreBlocked(body));
-            } catch (_) {
-                return false;
-            }
-        };
-    const apply = (force = false) => {
-        if (!force) {
-            try {
-                if (isBlocked()) return false;
-            } catch (_) { }
-        }
-        return __applyPersistedScrollPayloadToBody(body, payload, options);
-    };
-
-    let suppressBootstrapRestore = false;
-    if (options && Object.prototype.hasOwnProperty.call(options, 'suppressBootstrapRestore')) {
-        suppressBootstrapRestore = !!options.suppressBootstrapRestore;
-    } else {
-        try {
-            suppressBootstrapRestore = __shouldSuppressCanvasBootstrapRestore(target);
-        } catch (_) {
-            suppressBootstrapRestore = false;
-        }
-    }
-
-    let releaseBodyLock = null;
-    if (!(options && options.useFullscreenLock === false)) {
-        try {
-            releaseBodyLock = __beginCanvasFullscreenBodyRestoreLock(target);
-        } catch (_) {
-            releaseBodyLock = null;
-        }
-    }
-
-    if (releaseBodyLock) {
-        apply(true);
-        requestAnimationFrame(() => {
-            apply(true);
-            requestAnimationFrame(() => {
-                apply(true);
-                try { releaseBodyLock(); } catch (_) { }
-            });
-        });
-        return true;
-    }
-
-    apply();
-    if (!scheduleFollowUps || suppressBootstrapRestore) return true;
-
-    requestAnimationFrame(() => {
-        apply();
-        fallbackDelays.forEach((delay) => {
-            setTimeout(() => {
-                apply();
-            }, delay);
-        });
-    });
-
-    return true;
-}
-window.__scheduleCanvasBodyScrollRestore = __scheduleCanvasBodyScrollRestore;
-
-async function __settleFullscreenBodyScroll(body, payload, options = {}) {
-    if (!body || !payload || typeof payload !== 'object') return false;
-    const guardMs = Number.isFinite(options.guardMs) ? Math.max(0, Math.round(options.guardMs)) : 640;
-    __applyPersistedScrollPayloadToBody(body, payload, { guardMs });
-    await __waitForAnimationFrames(1);
-    __applyPersistedScrollPayloadToBody(body, payload, { guardMs });
-    return true;
-}
-
-async function __waitForPermanentTreeMaterialized(sectionEl) {
-    if (!sectionEl) return null;
-    const isCopy = __isPermanentSectionCopy(sectionEl);
-
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-        const tree = sectionEl.querySelector('.bookmark-tree');
-        if (tree && tree.querySelector('.tree-item[data-node-id]')) {
-            return tree;
-        }
-
-        try {
-            const renderSharedViews = window.__renderPermanentTreeSharedViews;
-            if (typeof renderSharedViews === 'function') {
-                renderSharedViews({
-                    includePrimary: !isCopy,
-                    includeCopies: isCopy,
-                    reason: 'fullscreen-preload-materialize'
-                });
-            }
-        } catch (_) { }
-
-        await __waitForAnimationFrames(1);
-        await __delayFullscreenRestore(16);
-    }
-
-    return sectionEl.querySelector('.bookmark-tree');
-}
-
-function __collectPermanentExpandedHydrationTargets(tree) {
-    if (!tree || typeof __shouldHydratePermanentFolderChildren !== 'function') return [];
-    const targets = [];
-    tree.querySelectorAll('.tree-item[data-node-id][data-node-type="folder"]').forEach((item) => {
-        try {
-            const node = item.closest('.tree-node');
-            const children = node ? node.querySelector(':scope > .tree-children') : null;
-            const toggle = item.querySelector(':scope > .tree-toggle');
-            if (!toggle || !toggle.classList.contains('expanded') || !children) return;
-            if (!__shouldHydratePermanentFolderChildren(item, children)) return;
-            targets.push({
-                nodeId: String(item.dataset.nodeId || ''),
-                children
-            });
-        } catch (_) { }
-    });
-    return targets.filter((entry) => !!entry.nodeId);
-}
-
-async function __hydratePermanentExpandedTreeForFullscreen(tree) {
-    if (!tree || typeof loadPermanentFolderChildrenLazy !== 'function') return;
-
-    for (let pass = 0; pass < 8; pass += 1) {
-        const targets = __collectPermanentExpandedHydrationTargets(tree);
-        if (!targets.length) break;
-
-        for (let i = 0; i < targets.length; i += 1) {
-            const entry = targets[i];
-            try {
-                await loadPermanentFolderChildrenLazy(entry.nodeId, entry.children, 0, null, false);
-            } catch (_) { }
-        }
-
-        await __waitForAnimationFrames(1);
-        await __delayFullscreenRestore(8);
-    }
-}
-
-async function __preparePermanentSectionForFullscreenRestore(sectionEl, options = {}) {
-    if (!sectionEl) return sectionEl;
-    const tree = await __waitForPermanentTreeMaterialized(sectionEl);
-    const includeScroll = options.includeScroll !== false;
-
-    if (tree && typeof restoreTreeExpandState === 'function') {
-        try { restoreTreeExpandState(tree); } catch (_) { }
-    }
-
-    await __hydratePermanentExpandedTreeForFullscreen(tree);
-    await __waitForAnimationFrames(1);
-
-    if (tree && typeof restoreTreeExpandState === 'function') {
-        try { restoreTreeExpandState(tree); } catch (_) { }
-    }
-
-    if (includeScroll) {
-        try {
-            const body = sectionEl.querySelector('.permanent-section-body');
-            const key = __getPermanentSectionScrollKey(sectionEl);
-            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
-            if (body && persisted) {
-                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 2200 });
-            }
-        } catch (_) { }
-    }
-
-    return sectionEl;
-}
-
-async function __prepareTempNodeForFullscreenRestore(nodeEl, descriptor, options = {}) {
-    if (!nodeEl || !descriptor) return nodeEl;
-    const sectionId = String(descriptor.id || nodeEl.id || '').trim();
-    if (!sectionId) return nodeEl;
-    const includeScroll = options.includeScroll !== false;
-
-    try {
-        const section = getTempSection(sectionId);
-        if (section) {
-            if (section.dormant && typeof wakeSection === 'function') {
-                try { wakeSection(section); } catch (_) { }
-            }
-            if (typeof __ensureTempSectionTreeLoadedInPlace === 'function') {
-                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
-            }
-            const refreshedNode = document.getElementById(sectionId) || nodeEl;
-            const refreshedTree = refreshedNode ? refreshedNode.querySelector('.temp-bookmark-tree') : null;
-            const treeLoaded = !!(refreshedTree && refreshedTree.querySelector('.tree-item[data-node-id], .tree-load-more'));
-            if (!treeLoaded && typeof renderTempNode === 'function') {
-                try { renderTempNode(section, { forceBuildTree: true }); } catch (_) { }
-            }
-        }
-    } catch (_) { }
-
-    const refreshedNode = document.getElementById(sectionId) || nodeEl;
-    if (includeScroll) {
-        try {
-            const body = refreshedNode ? refreshedNode.querySelector('.temp-node-body') : null;
-            const key = __getTempSectionScrollKey(sectionId);
-            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
-            if (body && persisted) {
-                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 1600 });
-            }
-        } catch (_) { }
-    }
-
-    return refreshedNode || nodeEl;
-}
-
-async function __prepareNodeForFullscreenRestore(target, descriptor, options = {}) {
-    if (!target || !descriptor) return target;
-    const type = String(descriptor.type || '').toLowerCase();
-
-    if (type === 'permanent' || type === 'permanent-copy') {
-        return __preparePermanentSectionForFullscreenRestore(target, options);
-    }
-
-    if (type === 'temp-node') {
-        return __prepareTempNodeForFullscreenRestore(target, descriptor, options);
-    }
-
-    return target;
-}
-
-function __runFullscreenPreloadRestore(target, descriptor) {
-    if (!target || !descriptor) return;
-    const taskKey = __getMaximizedDescriptorKey(descriptor) || '';
-    if (CanvasState.maximizedRestoreTaskKey && CanvasState.maximizedRestoreTaskKey === taskKey) {
-        return;
-    }
-    CanvasState.maximizedRestoreTaskKey = taskKey;
-
-    (async () => {
-        let resolvedTarget = target;
-        try {
-            __setFullscreenPreloadReady(resolvedTarget, false);
-            __setFullscreenBodyReady(resolvedTarget, false);
-            resolvedTarget = await __prepareNodeForFullscreenRestore(resolvedTarget, descriptor, { includeScroll: false });
-            resolvedTarget = __resolveMaximizedNode(descriptor) || resolvedTarget;
-            if (!resolvedTarget) return;
-            __setFullscreenPreloadReady(resolvedTarget, false);
-            __setFullscreenBodyReady(resolvedTarget, false);
-            maximizeCanvasNode(resolvedTarget, { suppressReadyNotify: true });
-            await __prepareNodeForFullscreenRestore(resolvedTarget, descriptor);
-            resolvedTarget = __resolveMaximizedNode(descriptor) || resolvedTarget;
-            if (!resolvedTarget) return;
-            await __waitForFullscreenRevealStability(resolvedTarget, descriptor);
-            await __applyFullscreenScrollOnly(resolvedTarget, descriptor);
-            await __waitForAnimationFrames(2);
-            resolvedTarget = __resolveMaximizedNode(descriptor) || resolvedTarget;
-            if (!resolvedTarget) return;
-            __setFullscreenBodyReady(resolvedTarget, true);
-            __notifyNodeFullscreenContextChange(resolvedTarget);
-            CanvasState.pendingMaximizedDescriptor = null;
-        } catch (_) {
-            try {
-                const fallbackTarget = __resolveMaximizedNode(descriptor) || resolvedTarget || target;
-                if (fallbackTarget) {
-                    maximizeCanvasNode(fallbackTarget);
-                    CanvasState.pendingMaximizedDescriptor = null;
-                }
-            } catch (_) { }
-        } finally {
-            if (CanvasState.maximizedRestoreTaskKey === taskKey) {
-                CanvasState.maximizedRestoreTaskKey = '';
-            }
-        }
-    })();
-}
-
-function __tryRestoreMaximizedNode({ clearIfMissing = false } = {}) {
-    if (!CanvasState.pendingMaximizedDescriptor) return;
-    const descriptor = CanvasState.pendingMaximizedDescriptor;
-    const target = __resolveMaximizedNode(descriptor);
-    if (target) {
-        if (__isFullscreenPreloadRestoreActive()) {
-            __runFullscreenPreloadRestore(target, descriptor);
-            return;
-        }
-        maximizeCanvasNode(target);
-        CanvasState.pendingMaximizedDescriptor = null;
-        CanvasState.maximizedRestoreTaskKey = '';
-        return;
-    }
-    if (clearIfMissing) {
-        CanvasState.pendingMaximizedDescriptor = null;
-        CanvasState.maximizedRestoreTaskKey = '';
-        __clearMaximizedNodeStorage();
-        __updateNodeMaximizedState();
-    }
-}
-
-function __tryRestorePendingMaximizedNodeForElement(element) {
-    if (!element || !CanvasState.pendingMaximizedDescriptor) return false;
-    const pendingKey = __getMaximizedDescriptorKey(CanvasState.pendingMaximizedDescriptor);
-    if (!pendingKey) return false;
-
-    const elementDescriptor = __serializeMaximizedNode(element);
-    if (!elementDescriptor) return false;
-    if (__getMaximizedDescriptorKey(elementDescriptor) !== pendingKey) return false;
-
-    try { __tryRestoreMaximizedNode({ clearIfMissing: false }); } catch (_) { }
-    return __isNodeMaximized(element);
-}
-
-function __primePendingCanvasFullscreenShell() {
-    let descriptor = CanvasState.pendingMaximizedDescriptor;
-    if (!descriptor) {
-        try {
-            descriptor = __loadMaximizedNodeFromStorage();
-        } catch (_) {
-            descriptor = null;
-        }
-        if (descriptor) {
-            CanvasState.pendingMaximizedDescriptor = descriptor;
-        }
-    }
-
-    if (!descriptor || typeof descriptor !== 'object') return false;
-
-    const type = String(descriptor.type || '').toLowerCase();
-    if (type === 'permanent' || type === 'permanent-copy') {
-        try {
-            const mainSection = document.getElementById('permanentSection');
-            if (mainSection) {
-                const copyId = type === 'permanent-copy'
-                    ? String(descriptor.copyId || '').trim()
-                    : '';
-                const shell = __buildPermanentViewShellProtocolFromStorage(copyId || null);
-                if (copyId) {
-                    let copySection = __resolvePermanentSectionElement(copyId);
-                    if (!copySection) {
-                        copySection = __createPermanentSectionCopyFromStorage({
-                            id: copyId,
-                            displayIndex: shell.displayIndex,
-                            ...(shell && shell.cardState && typeof shell.cardState === 'object' ? shell.cardState : {})
-                        });
-                    }
-                    if (copySection) {
-                        __applyPermanentViewShellToSectionElement(copySection, shell);
-                    }
-                } else {
-                    __applyPermanentViewShellToSectionElement(mainSection, shell);
-                }
-            }
-        } catch (_) { }
-    }
-
-    const target = __resolveMaximizedNode(descriptor);
-    if (!target) return false;
-
-    try { __tryRestoreMaximizedNode({ clearIfMissing: false }); } catch (_) { }
-    return __isNodeMaximized(target);
-}
-window.__primePendingCanvasFullscreenShell = __primePendingCanvasFullscreenShell;
-
-async function openLastMaximizedNode(options = {}) {
-    const parsedRetries = Number(options.retries);
-    const retries = Number.isFinite(parsedRetries) ? Math.max(0, Math.floor(parsedRetries)) : 18;
-    const parsedDelay = Number(options.retryDelayMs);
-    const retryDelayMs = Number.isFinite(parsedDelay) ? Math.max(16, Math.floor(parsedDelay)) : 100;
-    const descriptor = __loadLastMaximizedNodeFromStorage();
-
-    if (!descriptor) {
-        return { success: false, reason: 'empty' };
-    }
-
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
-        let target = __resolveMaximizedNode(descriptor);
-        if (!target) {
-            target = __materializeMaximizedNodeFromDescriptor(descriptor);
-        }
-        if (target) {
-            __wakeCanvasNodeFromLazyState(target);
-            if (__isNodeMaximized(target)) {
-                return { success: true, descriptor };
-            }
-            const rect = __getCanvasViewportRect();
-            if (rect && rect.width > 1 && rect.height > 1) {
-                maximizeCanvasNode(target);
-                if (__isNodeMaximized(target)) {
-                    return { success: true, descriptor };
-                }
-            }
-        }
-
-        if (attempt < retries) {
-            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-        }
-    }
-
-    return { success: false, reason: 'not-found', descriptor };
-}
-
-function __updateNodeMaximizedState() {
-    try {
-        const wasActive = CanvasState.nodeMaximizedActive;
-        CanvasState.nodeMaximizedActive = !!document.querySelector('.canvas-node-maximized');
-        if (document && document.body) {
-            document.body.classList.toggle('canvas-node-maximized-active', CanvasState.nodeMaximizedActive);
-        }
-
-        // Dispatch custom event to notify external listeners of the fullscreen state change
-        window.dispatchEvent(new CustomEvent('canvas-maximized-state-change', {
-            detail: {
-                active: CanvasState.nodeMaximizedActive,
-                element: document.querySelector('.canvas-node-maximized')
-            }
-        }));
-    } catch (_) {
-        CanvasState.nodeMaximizedActive = false;
-    }
-}
-
-function __notifyNodeFullscreenContextChange(targetElement = null) {
-    try {
-        const applySearchMode = window.__canvasApplyFullscreenSearchDefault;
-        let suppressAutoMode = false;
-        try {
-            const pendingCount = Number(window.__canvasSearchSuppressFullscreenAutoModeCounter || 0);
-            if (Number.isFinite(pendingCount) && pendingCount > 0) {
-                suppressAutoMode = true;
-                const nextCount = pendingCount - 1;
-                if (nextCount > 0) {
-                    window.__canvasSearchSuppressFullscreenAutoModeCounter = nextCount;
-                } else {
-                    delete window.__canvasSearchSuppressFullscreenAutoModeCounter;
-                }
-            }
-        } catch (_) { }
-        if (!suppressAutoMode && typeof applySearchMode === 'function') {
-            applySearchMode(targetElement, { onlyWhenInputEmpty: true });
-        }
-    } catch (_) { }
-
-    try {
-        const refreshCurrentViewAddBtn = window.__canvasRefreshCurrentViewAddButton;
-        if (typeof refreshCurrentViewAddBtn === 'function') {
-            refreshCurrentViewAddBtn();
-        }
-    } catch (_) { }
-
-    try {
-        if (targetElement && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-            __setFullscreenPreloadReady(targetElement, true);
-            window.dispatchEvent(new CustomEvent('canvas-maximized-node-ready', {
-                detail: {
-                    id: String(targetElement.id || ''),
-                    descriptor: __serializeMaximizedNode(targetElement)
-                }
-            }));
-        }
-    } catch (_) { }
-}
-
-function __mutationContainsRemovedMaximizedNode(mutationList) {
-    if (!Array.isArray(mutationList) || !mutationList.length) return false;
-
-    for (let i = 0; i < mutationList.length; i += 1) {
-        const mutation = mutationList[i];
-        if (!mutation || mutation.type !== 'childList' || !mutation.removedNodes || !mutation.removedNodes.length) {
-            continue;
-        }
-
-        for (let j = 0; j < mutation.removedNodes.length; j += 1) {
-            const removedNode = mutation.removedNodes[j];
-            if (!removedNode || removedNode.nodeType !== 1) continue;
-            if (removedNode.classList && removedNode.classList.contains('canvas-node-maximized')) return true;
-            if (removedNode.querySelector && removedNode.querySelector('.canvas-node-maximized')) return true;
-        }
-    }
-
-    return false;
-}
-
-function __syncNodeMaximizedStateAfterNodeRemoval() {
-    if (CanvasState.maximizedNodeRemovalObserverMuted) return;
-
-    const hadMaximizedContext = !!CanvasState.nodeMaximizedActive
-        || !!(document && document.body && document.body.classList && document.body.classList.contains('canvas-node-maximized-active'));
-
-    __updateNodeMaximizedState();
-
-    if (!CanvasState.nodeMaximizedActive) {
-        __clearMaximizedNodeStorage();
-        CanvasState.pendingMaximizedDescriptor = null;
-        CanvasState.maximizedRestoreTaskKey = '';
-    }
-
-    if (hadMaximizedContext && !CanvasState.nodeMaximizedActive) {
-        updateNodeFullscreenButtons();
-        __notifyNodeFullscreenContextChange(null);
-    }
-}
-
-function __scheduleNodeMaximizedStateSyncAfterRemoval() {
-    if (CanvasState.maximizedNodeRemovalSyncFrame) return;
-
-    const run = () => {
-        CanvasState.maximizedNodeRemovalSyncFrame = null;
-        if (CanvasState.maximizedNodeRemovalObserverMuted) return;
-        __syncNodeMaximizedStateAfterNodeRemoval();
-    };
-
-    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-        CanvasState.maximizedNodeRemovalSyncFrame = window.requestAnimationFrame(run);
-    } else {
-        CanvasState.maximizedNodeRemovalSyncFrame = setTimeout(run, 16);
-    }
-}
-
-function __bindMaximizedNodeRemovalSync() {
-    if (CanvasState.maximizedNodeRemovalObserver) return;
-    if (typeof MutationObserver === 'undefined') return;
-
-    const observeTarget = document.getElementById('canvasContent') || document.body || document.documentElement;
-    if (!observeTarget) return;
-
-    try {
-        const observer = new MutationObserver((mutationList) => {
-            if (CanvasState.maximizedNodeRemovalObserverMuted) return;
-            if (!__mutationContainsRemovedMaximizedNode(mutationList)) return;
-            __scheduleNodeMaximizedStateSyncAfterRemoval();
-        });
-        observer.observe(observeTarget, { childList: true, subtree: true });
-        CanvasState.maximizedNodeRemovalObserver = observer;
-    } catch (_) { }
-}
-
-function __clearOtherMaximizedNodes(except) {
-    document.querySelectorAll('.canvas-node-maximized').forEach((el) => {
-        if (except && el === except) return;
-        restoreCanvasNodeLayout(el, { locate: false });
-    });
-}
-
-function __isMaximizedNodeRectCurrent(element, rect) {
-    if (!element || !rect) return false;
-    const tolerance = 0.5;
-    const nearlyEqual = (raw, expected) => {
-        const value = parseFloat(String(raw || ''));
-        return Number.isFinite(value) && Math.abs(value - expected) <= tolerance;
-    };
-    return nearlyEqual(element.style.left, rect.x)
-        && nearlyEqual(element.style.top, rect.y)
-        && nearlyEqual(element.style.width, rect.width)
-        && nearlyEqual(element.style.height, rect.height);
-}
-
-function __stabilizeMaximizedNodeLayouts() {
-    if (!CanvasState.nodeMaximizedActive) return;
-    document.querySelectorAll('.canvas-node-maximized').forEach((element) => {
-        __scheduleNodeLayoutZoomStabilize(element);
-    });
-}
-
-function scheduleMaximizedNodesRefresh(options = {}) {
-    if (!__isCanvasNodeMaximizedActive()) return false;
-
-    const parsedDelay = Number(options && options.delayMs);
-    const delayMs = Number.isFinite(parsedDelay)
-        ? Math.max(0, parsedDelay)
-        : MAXIMIZED_NODE_RESIZE_REFRESH_DEBOUNCE_MS;
-    const parsedStabilizeDelay = Number(options && options.stabilizeDelayMs);
-    const stabilizeDelayMs = Number.isFinite(parsedStabilizeDelay)
-        ? Math.max(delayMs, parsedStabilizeDelay)
-        : Math.max(delayMs, MAXIMIZED_NODE_RESIZE_STABILIZE_DELAY_MS);
-
-    if (maximizedNodeResizeRefreshTimer) {
-        clearTimeout(maximizedNodeResizeRefreshTimer);
-    }
-    maximizedNodeResizeRefreshTimer = setTimeout(() => {
-        maximizedNodeResizeRefreshTimer = null;
-        if (!__isCanvasNodeMaximizedActive()) return;
-        refreshMaximizedNodes({ stabilize: false });
-    }, delayMs);
-
-    if (maximizedNodeResizeStabilizeTimer) {
-        clearTimeout(maximizedNodeResizeStabilizeTimer);
-    }
-    maximizedNodeResizeStabilizeTimer = setTimeout(() => {
-        maximizedNodeResizeStabilizeTimer = null;
-        if (!__isCanvasNodeMaximizedActive()) return;
-        refreshMaximizedNodes({ stabilize: false });
-        __stabilizeMaximizedNodeLayouts();
-    }, stabilizeDelayMs);
-
-    return true;
-}
-
-function maximizeCanvasNode(element, options = {}) {
-    if (!element) return;
-    if (__isNodeMaximized(element)) {
-        __wakeCanvasNodeFromLazyState(element);
-        if (refreshMaximizedNodes({ stabilize: false })) {
-            __scheduleNodeLayoutZoomStabilize(element);
-            updateNodeFullscreenButtons();
-        }
-        return;
-    }
-    const suppressReadyNotify = !!(options && options.suppressReadyNotify);
-    __wakeCanvasNodeFromLazyState(element);
-    __restoreTemporaryRaisedCanvasNode();
-    const rect = __getCanvasViewportRect({ viewportCoordinates: true });
-    if (!rect) return;
-    __clearOtherMaximizedNodes(element);
-
-    if (!element.dataset) return;
-    const computedStyle = (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function')
-        ? window.getComputedStyle(element)
-        : null;
-    const resolveLength = (inlineValue, computedValue, fallbackNumber) => {
-        const inline = String(inlineValue || '').trim();
-        if (inline) return inline;
-        const computed = String(computedValue || '').trim();
-        if (computed && computed !== 'auto') return computed;
-        if (Number.isFinite(fallbackNumber)) return `${Math.round(fallbackNumber * 1000) / 1000}px`;
-        return '';
-    };
-    element.dataset.maxPrevLeft = resolveLength(element.style.left, computedStyle && computedStyle.left, element.offsetLeft);
-    element.dataset.maxPrevTop = resolveLength(element.style.top, computedStyle && computedStyle.top, element.offsetTop);
-    element.dataset.maxPrevWidth = resolveLength(element.style.width, computedStyle && computedStyle.width, element.offsetWidth || rect.width);
-    element.dataset.maxPrevHeight = resolveLength(element.style.height, computedStyle && computedStyle.height, element.offsetHeight || rect.height);
-    element.dataset.maxPrevTransform = element.style.transform || '';
-    element.dataset.maxPrevZ = element.style.zIndex || '';
-
-    const globalSearchState = (typeof window !== 'undefined' && window.searchUiState) ? window.searchUiState : null;
-
-    // Save current search state before entering fullscreen
-    try {
-        element._preFullscreenSearchState = {
-            activeMode: globalSearchState ? globalSearchState.activeMode : null,
-            areaSearchScope: (globalSearchState && globalSearchState.areaSearchScope) 
-                ? JSON.parse(JSON.stringify(globalSearchState.areaSearchScope)) 
-                : null
-        };
-    } catch (_) { }
-
-    // Dynamically set search scope to the fullscreen card
-    try {
-        let searchMode = null;
-        let scopeData = null;
-        if (element.classList.contains('permanent-bookmark-section')) {
-            searchMode = 'bookmark';
-            const copyId = element.dataset.permanentSectionCopyId || element.getAttribute('data-permanent-section-copy-id');
-            const memberIds = ['permanentSection', 'permanent-section'];
-            if (copyId) {
-                memberIds.push(copyId, `permanent-section-copy-${copyId}`);
-            }
-            scopeData = {
-                kind: 'permanent',
-                id: copyId || 'permanentSection',
-                memberIds: memberIds
-            };
-        } else if (element.classList.contains('temp-canvas-node')) {
-            searchMode = 'bookmark';
-            const sectionId = element.dataset.sectionId;
-            if (sectionId) {
-                scopeData = {
-                    kind: 'temp',
-                    id: sectionId,
-                    memberIds: [sectionId]
-                };
-            }
-        } else if (element.classList.contains('md-canvas-node')) {
-            searchMode = 'description';
-            const nodeId = element.id;
-            if (nodeId) {
-                scopeData = {
-                    kind: 'blank',
-                    id: nodeId,
-                    memberIds: [nodeId]
-                };
-            }
-        }
-
-        if (searchMode && scopeData && typeof window.setSearchMode === 'function') {
-            try {
-                window.setSearchMode(searchMode, { source: 'auto' });
-            } catch (_) { }
-        }
-    } catch (_) { }
-
-    element.classList.add('canvas-node-maximized');
-    __setFullscreenPreloadReady(element, !suppressReadyNotify);
-    __setFullscreenBodyReady(element, !suppressReadyNotify);
-    element.style.transform = 'none';
-    element.style.left = `${rect.x}px`;
-    element.style.top = `${rect.y}px`;
-    element.style.width = `${rect.width}px`;
-    element.style.height = `${rect.height}px`;
-    element.style.zIndex = '10000';
-    __updateNodeMaximizedState();
-    __saveMaximizedNodeToStorage(element);
-    __saveLastMaximizedNodeToStorage(element);
-    __applyNodeLayoutZoom(element);
-    __scheduleNodeLayoutZoomStabilize(element);
-    updateNodeFullscreenButtons();
-    if (!suppressReadyNotify) {
-        __notifyNodeFullscreenContextChange(element);
-    }
-}
-
-function restoreCanvasNodeLayout(element, options = {}) {
-    if (!element || !element.dataset) return;
-    if (!__isNodeMaximized(element)) return;
-    __setFullscreenPreloadReady(element, false);
-    __setFullscreenBodyReady(element, false);
-    element.classList.remove('canvas-node-maximized');
-    element.style.left = element.dataset.maxPrevLeft || '';
-    element.style.top = element.dataset.maxPrevTop || '';
-    element.style.width = element.dataset.maxPrevWidth || '';
-    element.style.height = element.dataset.maxPrevHeight || '';
-    element.style.transform = element.dataset.maxPrevTransform || '';
-    element.style.zIndex = element.dataset.maxPrevZ || '';
-    delete element.dataset.maxPrevLeft;
-    delete element.dataset.maxPrevTop;
-    delete element.dataset.maxPrevWidth;
-    delete element.dataset.maxPrevHeight;
-    delete element.dataset.maxPrevTransform;
-    delete element.dataset.maxPrevZ;
-    __updateNodeMaximizedState();
-    if (!CanvasState.nodeMaximizedActive) {
-        try {
-            const globalState = (typeof window !== 'undefined' && window.searchUiState) ? window.searchUiState : null;
-            if (globalState) {
-                globalState.fullscreenAreaSearchDismissed = false;
-            }
-        } catch (_) { }
-        __clearMaximizedNodeStorage();
-        requestAnimationFrame(() => {
-            if (__isCanvasNodeMaximizedActive()) return;
-            try { updateCanvasScrollBounds({ recomputeBounds: true, initial: false }); } catch (_) { }
-            try { scheduleScrollbarUpdate(); } catch (_) { }
-            try { scheduleEdgesRender(0); } catch (_) { }
-        });
-    }
-    updateNodeFullscreenButtons();
-    __notifyNodeFullscreenContextChange(document.querySelector('.canvas-node-maximized'));
-
-    if (options.locate !== false) {
-        try {
-            locateToElement(element, CanvasState.zoom);
-        } catch (_) { }
-    }
-
-    // Restore pre-fullscreen search state if available
-    try {
-        if (element._preFullscreenSearchState) {
-            const preState = element._preFullscreenSearchState;
-            delete element._preFullscreenSearchState;
-
-            if (preState.activeMode && typeof window.setSearchMode === 'function') {
-                window.setSearchMode(preState.activeMode, { source: 'auto' });
-            }
-            if (preState.areaSearchScope) {
-                if (typeof window.triggerAreaSearch === 'function') {
-                    window.triggerAreaSearch(preState.areaSearchScope, { silent: true });
-                }
-            } else {
-                if (typeof window.exitAreaSearch === 'function') {
-                    window.exitAreaSearch();
-                }
-            }
-        }
-    } catch (_) { }
-}
-
-function toggleElementFullscreen(element) {
-    if (!element) return;
-    if (__isNodeMaximized(element)) {
-        restoreCanvasNodeLayout(element);
-    } else {
-        maximizeCanvasNode(element);
-    }
-    updateNodeFullscreenButtons();
-}
-
-function refreshMaximizedNodes(options = {}) {
-    if (!CanvasState.nodeMaximizedActive) return false;
-    const rect = __getCanvasViewportRect();
-    if (!rect) return false;
-    const shouldStabilize = !(options && options.stabilize === false);
-    let changed = false;
-    document.querySelectorAll('.canvas-node-maximized').forEach((element) => {
-        if (!element) return;
-        if (__isMaximizedNodeRectCurrent(element, rect)) return;
-        element.style.left = `${rect.x}px`;
-        element.style.top = `${rect.y}px`;
-        element.style.width = `${rect.width}px`;
-        element.style.height = `${rect.height}px`;
-        if (shouldStabilize) {
-            __scheduleNodeLayoutZoomStabilize(element);
-        }
-        changed = true;
-    });
-    return changed;
-}
-
-function updateNodeFullscreenButtons() {
-    __updateViewSyncExpandScrollButtonText();
-
-    const buttons = document.querySelectorAll('.canvas-node-fullscreen-btn');
-    if (!buttons.length) return;
-    const lang = getCanvasLanguage();
-
-    buttons.forEach((btn) => {
-        if (!btn) return;
-        const target = btn.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
-        if (!target) return;
-        const isFullscreen = __isNodeMaximized(target);
-        const labelKey = isFullscreen ? 'canvasFullscreenExit' : 'canvasFullscreenEnter';
-        const label = getFullscreenLabel(labelKey, lang);
-        __updateNodeLayoutZoomControls(target, lang);
-        btn.setAttribute('title', label);
-        btn.setAttribute('aria-label', label);
-        btn.setAttribute('data-tooltip', label);
-        btn.classList.toggle('fullscreen-active', isFullscreen);
-        const icon = btn.querySelector('i');
-        if (icon) {
-            icon.classList.toggle('fa-expand', !isFullscreen);
-            icon.classList.toggle('fa-compress', isFullscreen);
-        }
-    });
-}
-
-function shouldHandleCustomScroll(event) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace || !workspace.contains(event.target)) {
-        return false;
-    }
-
-    // 说明/管理弹窗内滚动：不拦截，让弹窗自身滚动
-    if (event.target.closest('.canvas-help-modal') ||
-        event.target.closest('.canvas-manage-modal')) {
-        return false;
-    }
-
-    // 在 Markdown 空白栏目内（查看/编辑区）时，不拦截滚轮，让其自身垂直滚动
-    // - .md-canvas-text: 查看态的滚动容器
-    // - .md-canvas-editor: 编辑态的文本域
-    if (event.target.closest('.md-canvas-text') || event.target.closest('.md-canvas-editor')) {
-        return false;
-    }
-
-    // 在临时/永久栏目说明区域内：默认让说明自身滚动
-    // 但如果触控板正在进行画布级滚动（快速滚动），则交给画布处理，避免被打断
-    const descTarget = event.target.closest('.temp-node-description');
-    const tipTarget = event.target.closest('.permanent-section-tip');
-    if (descTarget || tipTarget) {
-        const now = Date.now();
-        const recentCanvasScroll = CanvasState.lastCanvasScrollTime && (now - CanvasState.lastCanvasScrollTime < 180);
-        const isTouchpad = __isCanvasTouchpadLikeScrollInput(event);
-        if ((isTouchpad && CanvasState.touchpadState.isScrolling) || CanvasState.inertiaState.isActive || recentCanvasScroll) {
-            return true;
-        }
-        return false;
-    }
-
-    const scrollbarElement = event.target.closest('.canvas-scrollbar');
-    if (scrollbarElement) {
-        const axisKey = scrollbarElement.classList.contains('horizontal') ? 'horizontal' : 'vertical';
-        const axisState = CanvasState.scrollState[axisKey];
-        const controlsArea = event.target.closest('.scrollbar-controls');
-        if (!axisState) {
-            return false;
-        }
-        if (controlsArea) {
-            return false;
-        }
-        if (!axisState.hidden) {
-            return false;
-        }
-    }
-
-    // 在栏目内部：如果正在画布级滚动，或者按下了 Shift 键进行横向滚动，则拦截处理并交给画布
-    const sectionBody = event.target.closest('.permanent-section-body') || event.target.closest('.temp-node-body');
-    if (sectionBody) {
-        // Shift + 滚轮进行横向滚动的时候，无视栏目内部的滚动，拦截并交给画布处理
-        if (event.shiftKey) {
-            return true;
-        }
-
-        // 检测是否为触控板双指滑动
-        const isTouchpad = __isCanvasTouchpadLikeScrollInput(event);
-
-        // 触摸板横向滚动防误触：如果已锁定为横向滚动模式，直接拦截给画布
-        if (isTouchpad && CanvasState.touchpadState.horizontalScrollLocked) {
-            return true;
-        }
-
-        // 触摸板横向滑动意图检测：累积短窗口内的 deltaX/deltaY 来判断方向
-        if (isTouchpad) {
-            const absX = Math.abs(event.deltaX || 0);
-            const absY = Math.abs(event.deltaY || 0);
-
-            // 有明显水平分量时，累积判断
-            if (absX > 0.5) {
-                CanvasState.touchpadState.horizontalAccumDeltaX += absX;
-                CanvasState.touchpadState.horizontalAccumDeltaY += absY;
-
-                // 重置累积窗口定时器（80ms 窗口）
-                if (CanvasState.touchpadState.horizontalAccumTimer) {
-                    clearTimeout(CanvasState.touchpadState.horizontalAccumTimer);
-                }
-                CanvasState.touchpadState.horizontalAccumTimer = setTimeout(() => {
-                    // 窗口过期，重置累积
-                    CanvasState.touchpadState.horizontalAccumDeltaX = 0;
-                    CanvasState.touchpadState.horizontalAccumDeltaY = 0;
-                    CanvasState.touchpadState.horizontalAccumTimer = null;
-                }, 80);
-
-                const accumX = CanvasState.touchpadState.horizontalAccumDeltaX;
-                const accumY = CanvasState.touchpadState.horizontalAccumDeltaY;
-
-                // 判定：累积水平 > 阈值 且 水平明显大于垂直（ratio > 1.5）
-                if (accumX > 6 && (accumY < 0.5 || accumX / accumY > 1.5)) {
-                    // 锁定横向滚动模式
-                    CanvasState.touchpadState.horizontalScrollLocked = true;
-                    // 重置累积
-                    CanvasState.touchpadState.horizontalAccumDeltaX = 0;
-                    CanvasState.touchpadState.horizontalAccumDeltaY = 0;
-                    if (CanvasState.touchpadState.horizontalAccumTimer) {
-                        clearTimeout(CanvasState.touchpadState.horizontalAccumTimer);
-                        CanvasState.touchpadState.horizontalAccumTimer = null;
-                    }
-                    return true;
-                }
-            }
-        }
-
-        // 如果正在画布级滚动（双指滑动），拦截并让画布处理
-        const now = Date.now();
-        const recentCanvasScroll = CanvasState.lastCanvasScrollTime && (now - CanvasState.lastCanvasScrollTime < 180);
-        if ((isTouchpad && CanvasState.touchpadState.isScrolling) || CanvasState.inertiaState.isActive || recentCanvasScroll) {
-            return true; // 让画布处理滚动
-        }
-
-        // 否则让栏目自己处理滚动
-        return false;
-    }
-
-    if (CanvasState.scrollState.vertical.disabled && CanvasState.scrollState.horizontal.disabled) {
-        return false;
-    }
-
-    return true;
-}
-
-function handleCanvasCustomScroll(event) {
-    const horizontalEnabled = !CanvasState.scrollState.horizontal.disabled;
-    const verticalEnabled = !CanvasState.scrollState.vertical.disabled;
-
-    if (!horizontalEnabled && !verticalEnabled) {
-        return;
-    }
-
-    CanvasState.lastCanvasScrollTime = Date.now();
-
-    // 标记正在滚动
-    markScrolling();
-
-    // 取消之前的惯性滚动
-    cancelInertiaScroll();
-
-    const normalizedWheel = __normalizeCanvasWheelEventDeltas(event);
-    let horizontalDelta = normalizedWheel.deltaX;
-    let verticalDelta = normalizedWheel.deltaY;
-
-    if (event.shiftKey && horizontalEnabled) {
-        horizontalDelta = horizontalDelta !== 0 ? horizontalDelta : verticalDelta;
-        verticalDelta = 0;
-    }
-
-    // 检测是否为触控板（触控板的 delta 值较小且连续，deltaMode 通常为 0）
-    let isTouchpad = __isCanvasTouchpadLikeScrollInput(event, normalizedWheel);
-    if (isTouchpad && !__shouldTreatMacWheelAsTouchpad(event, normalizedWheel)) {
-        isTouchpad = false;
-    }
-    const isDiscretePanWheel = __isCanvasDiscretePanWheelEvent(event);
-    const panInertiaInputType = __resolveCanvasPanInertiaInputType(isTouchpad, isDiscretePanWheel);
-    __logCanvasWinInput('wheel-pan-input', {
-        event: __snapshotCanvasWheelEvent(event),
-        normalizedDeltaX: __roundCanvasDebugNumber(normalizedWheel.deltaX, 3),
-        normalizedDeltaY: __roundCanvasDebugNumber(normalizedWheel.deltaY, 3),
-        horizontalDelta: __roundCanvasDebugNumber(horizontalDelta, 3),
-        verticalDelta: __roundCanvasDebugNumber(verticalDelta, 3),
-        horizontalEnabled,
-        verticalEnabled,
-        isTouchpad,
-        isDiscretePanWheel,
-        panInertiaInputType
-    }, { throttleKey: 'wheel-pan-input', throttleMs: 80 });
-
-    // 双指滑动状态追踪：当检测到画布级别的滚动时，标记状态并设置超时清除
-    if (isTouchpad && (Math.abs(horizontalDelta) > 0.5 || Math.abs(verticalDelta) > 0.5)) {
-        CanvasState.touchpadState.isScrolling = true;
-        CanvasState.touchpadState.lastScrollTime = Date.now();
-
-        // 清除之前的超时
-        if (CanvasState.touchpadState.scrollTimeout) {
-            clearTimeout(CanvasState.touchpadState.scrollTimeout);
-        }
-
-        // 设置新的超时：滚动停止300ms后恢复栏目内滚动 & 解锁横向滚动
-        CanvasState.touchpadState.scrollTimeout = setTimeout(() => {
-            CanvasState.touchpadState.isScrolling = false;
-            // 解锁触摸板横向滚动模式
-            CanvasState.touchpadState.horizontalScrollLocked = false;
-        }, 300);
-    }
-
-    // 触控板连续输入保留原有缩放补偿；鼠标滚轮平移使用屏幕像素步长，避免低缩放跳太远、高缩放太慢。
-    const zoomForScroll = getCanvasZoomForScrollFactor();
-    let scrollFactor = 1.0;
-
-    const trackpadPanRate = getCanvasTrackpadPanRate();
-    const wheelVerticalPanRate = getCanvasWheelVerticalPanRate();
-    const wheelHorizontalPanRate = getCanvasWheelHorizontalPanRate();
-
-    const preferSnappyPan = __shouldPreferSnappyCanvasPan(
-        isTouchpad,
-        wheelVerticalPanRate,
-        wheelHorizontalPanRate,
-        trackpadPanRate
-    );
-
-    if (isTouchpad) {
-        if (preferSnappyPan) {
-            scrollFactor = 0.8 * trackpadPanRate;
-        } else {
-            scrollFactor = 1.0 / zoomForScroll;
-            scrollFactor *= Math.pow(zoomForScroll, 0.3);
-            scrollFactor *= 0.7 * trackpadPanRate;
-
-            const scrollSpeed = Math.sqrt(horizontalDelta * horizontalDelta + verticalDelta * verticalDelta);
-            if (scrollSpeed > 8) {
-                const speedBoost = Math.min(1.15, 1 + (scrollSpeed - 8) / 200);
-                scrollFactor *= speedBoost;
-            }
-        }
-    } else {
-        scrollFactor *= 0.8;
-        if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel) {
-            scrollFactor *= WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR;
-        }
-    }
-
-    // 累积滚动增量
-    let hasUpdate = false;
-    let panDeltaX = 0;
-    let panDeltaY = 0;
-
-    if (horizontalEnabled && horizontalDelta !== 0) {
-        const horizontalRate = isTouchpad ? 1 : wheelHorizontalPanRate;
-        panDeltaX -= horizontalDelta * scrollFactor * horizontalRate;
-        hasUpdate = true;
-    }
-
-    if (verticalEnabled && verticalDelta !== 0) {
-        const verticalRate = isTouchpad ? 1 : wheelVerticalPanRate;
-        panDeltaY -= verticalDelta * scrollFactor * verticalRate;
-        hasUpdate = true;
-    }
-
-    if (hasUpdate) {
-        if (panInertiaInputType !== PAN_INERTIA_INPUT_NONE) {
-            __updateCanvasPanInertiaSample(panInertiaInputType, panDeltaX, panDeltaY);
-        } else {
-            __resetCanvasPanInertiaSample();
-        }
-
-        const useSmoothPan = __shouldSmoothCanvasWheelPan(event, isTouchpad);
-        if (useSmoothPan) {
-            const baseTargetX = (CanvasState.scrollAnimation.frameId && Number.isFinite(CanvasState.scrollAnimation.targetX))
-                ? CanvasState.scrollAnimation.targetX
-                : CanvasState.panOffsetX;
-            const baseTargetY = (CanvasState.scrollAnimation.frameId && Number.isFinite(CanvasState.scrollAnimation.targetY))
-                ? CanvasState.scrollAnimation.targetY
-                : CanvasState.panOffsetY;
-
-            CanvasState.scrollAnimation.targetX = baseTargetX + panDeltaX;
-            CanvasState.scrollAnimation.targetY = baseTargetY + panDeltaY;
-            CanvasState.scrollAnimation.source = 'wheel';
-            if (!CanvasState.scrollAnimation.frameId) {
-                CanvasState.scrollAnimation.frameId = requestAnimationFrame(runScrollAnimation);
-            }
-        } else {
-            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel && CanvasState.scrollAnimation.frameId) {
-                cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
-                CanvasState.scrollAnimation.frameId = null;
-                CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
-                CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
-                CanvasState.scrollAnimation.source = null;
-            }
-            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel) {
-                winWheelPanAccumX += panDeltaX;
-                winWheelPanAccumY += panDeltaY;
-                __startWinWheelPanPump();
-            } else {
-                CanvasState.panOffsetX += panDeltaX;
-                CanvasState.panOffsetY += panDeltaY;
-                if (preferSnappyPan) {
-                    __syncCanvasPanVisualImmediate();
-                } else {
-                    CanvasState.scrollAnimation.source = 'direct';
-                    scheduleScrollUpdate();
-                }
-            }
-        }
-        __logCanvasWinInput('wheel-pan-apply', {
-            event: __snapshotCanvasWheelEvent(event),
-            route: useSmoothPan ? 'smooth-pan-animation' : 'direct-pan',
-            scrollFactor: __roundCanvasDebugNumber(scrollFactor, 5),
-            panDeltaX: __roundCanvasDebugNumber(panDeltaX, 4),
-            panDeltaY: __roundCanvasDebugNumber(panDeltaY, 4),
-            panOffsetX: __roundCanvasDebugNumber(CanvasState.panOffsetX, 3),
-            panOffsetY: __roundCanvasDebugNumber(CanvasState.panOffsetY, 3),
-            targetX: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetX, 3),
-            targetY: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetY, 3),
-            horizontalDelta: __roundCanvasDebugNumber(horizontalDelta, 3),
-            verticalDelta: __roundCanvasDebugNumber(verticalDelta, 3)
-        }, { throttleKey: 'wheel-pan-apply', throttleMs: 80 });
-        event.preventDefault();
-    } else {
-        __logCanvasWinInput('wheel-pan-no-update', {
-            event: __snapshotCanvasWheelEvent(event),
-            horizontalEnabled,
-            verticalEnabled,
-            horizontalDelta: __roundCanvasDebugNumber(horizontalDelta, 3),
-            verticalDelta: __roundCanvasDebugNumber(verticalDelta, 3)
-        }, { throttleKey: 'wheel-pan-no-update', throttleMs: 120 });
-        __resetCanvasPanInertiaSample();
-    }
-}
-
-// 性能优化：使用 RAF 去抖滚动更新（参考 scheduleZoomUpdate）
-function scheduleScrollUpdate() {
-    // 保存当前的滚动位置
-    pendingScrollRequest = {
-        panOffsetX: CanvasState.panOffsetX,
-        panOffsetY: CanvasState.panOffsetY
-    };
-
-    // 如果没有正在进行的渲染帧，调度一次
-    if (!scrollUpdateFrame) {
-        scrollUpdateFrame = requestAnimationFrame(() => {
-            scrollUpdateFrame = null;
-            if (!pendingScrollRequest) return;
-
-            // 应用累积的滚动位置（使用极速平移）
-            applyPanOffsetFast();
-
-            // 实时更新滚动条位置（轻量操作，只更新 transform）
-            updateScrollbarThumbsLightweight();
-
-            pendingScrollRequest = null;
-        });
-    }
-}
-
-// 轻量级滚动条更新：只更新 thumb 的 transform，不触发边界重计算
-function updateScrollbarThumbsLightweight() {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    const verticalBar = document.getElementById('canvasVerticalScrollbar');
-    const horizontalBar = document.getElementById('canvasHorizontalScrollbar');
-
-    // 更新垂直滚动条
-    if (verticalBar) {
-        const metrics = getCachedCanvasScrollbarMetrics('vertical');
-        if (metrics && metrics.thumb) {
-            const trackSize = metrics.trackSize;
-            const bounds = CanvasState.scrollBounds.vertical;
-            if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
-                const range = bounds.max - bounds.min;
-                const thumbSize = metrics.thumbSize || 20;
-                const maxTravel = Math.max(0, trackSize - thumbSize);
-                const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetY) / range;
-                const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
-
-                // 只更新 transform，极轻量
-                metrics.thumb.style.transform = `translateY(${position}px)`;
-            }
-        }
-    }
-
-    // 更新水平滚动条
-    if (horizontalBar) {
-        const metrics = getCachedCanvasScrollbarMetrics('horizontal');
-        if (metrics && metrics.thumb) {
-            const trackSize = metrics.trackSize;
-            const bounds = CanvasState.scrollBounds.horizontal;
-            if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
-                const range = bounds.max - bounds.min;
-                const thumbSize = metrics.thumbSize || 20;
-                const maxTravel = Math.max(0, trackSize - thumbSize);
-                const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetX) / range;
-                const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
-
-                // 只更新 transform，极轻量
-                metrics.thumb.style.transform = `translateX(${position}px)`;
-            }
-        }
-    }
-
-    persistCanvasScrollbarPreloadStateThrottled();
-}
-
-function adjustDragReferenceForPan(panDeltaX, panDeltaY, clientX, clientY) {
-    if (!CanvasState.dragState.isDragging) return;
-    const source = CanvasState.dragState.dragSource;
-    if (source !== 'temp-node' && source !== 'permanent-section') return;
-    if (!panDeltaX && !panDeltaY) return;
-
-    CanvasState.dragState.dragStartX += panDeltaX;
-    CanvasState.dragState.dragStartY += panDeltaY;
-    CanvasState.dragState.hasMoved = true;
-
-    updateActiveDragPosition(clientX, clientY);
-}
-
-function updateActiveDragPosition(clientX, clientY) {
-    if (!CanvasState.dragState.isDragging || !CanvasState.dragState.draggedElement) {
-        return false;
-    }
-
-    CanvasState.dragState.lastClientX = clientX;
-    CanvasState.dragState.lastClientY = clientY;
-
-    if (CanvasState.dragState.dragSource === 'temp-node') {
-        return applyTempNodeDragPosition(clientX, clientY);
-    }
-
-    if (CanvasState.dragState.dragSource === 'permanent-section') {
-        return applyPermanentSectionDragPosition(clientX, clientY);
-    }
-
-    return false;
-}
-
-function getActiveDraggedCanvasNodeData(nodeId) {
-    const id = String(nodeId || '').trim();
-    if (!id) return null;
-    const cached = CanvasState.dragState && CanvasState.dragState.draggedNodeData;
-    if (cached && cached.id === id) return cached;
-    return CanvasState.tempSections.find(n => n && n.id === id) ||
-        (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.find(n => n && n.id === id) : null);
-}
-
-// Import/export transfer logic moved to transfer_AI_sync/import-export-transfer-ui-support.js
-
-function applyTempNodeDragPosition(clientX, clientY) {
-    const element = CanvasState.dragState.draggedElement;
-    if (!element) return false;
-
-    const deltaX = clientX - CanvasState.dragState.dragStartX;
-    const deltaY = clientY - CanvasState.dragState.dragStartY;
-    const zoom = (CanvasState.zoom || 1);
-    const scaledDeltaX = deltaX / zoom;
-    const scaledDeltaY = deltaY / zoom;
-
-    if (!CanvasState.dragState.hasMoved) {
-        if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
-            CanvasState.dragState.hasMoved = true;
-        }
-    }
-
-    const newX = CanvasState.dragState.nodeStartX + scaledDeltaX;
-    const newY = CanvasState.dragState.nodeStartY + scaledDeltaY;
-
-    const nodeId = element.id;
-    const section = getActiveDraggedCanvasNodeData(nodeId);
-
-    const isCardGroupSection = !!(section && section.subtype === 'card-group');
-    if (isCardGroupSection && Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
-        const meta = (CanvasState.dragState.meta && typeof CanvasState.dragState.meta === 'object')
-            ? CanvasState.dragState.meta
-            : (CanvasState.dragState.meta = {});
-
-        if (!meta.cardGroupDrag) {
-            meta.cardGroupDrag = true;
-            meta.cardGroupDx = 0;
-            meta.cardGroupDy = 0;
-            meta.cardGroupEdgeRaf = 0;
-            try { __initCardGroupDragEdgeFollow(meta, section); } catch (_) { }
-            const content = getCachedContent();
-            if (content) {
-                content.classList.add('card-group-drag-active');
-            }
-            try { element.classList.add('card-group-dragging'); } catch (_) { }
-            CanvasState.dragState.childElements.forEach((child) => {
-                if (child && child.element) {
-                    try { child.element.classList.add('card-group-dragging'); } catch (_) { }
-                }
-            });
-        }
-
-        meta.cardGroupDx = scaledDeltaX;
-        meta.cardGroupDy = scaledDeltaY;
-
-        const content = getCachedContent();
-        if (content) {
-            try { content.style.setProperty('--card-group-dx', `${scaledDeltaX}px`); } catch (_) { }
-            try { content.style.setProperty('--card-group-dy', `${scaledDeltaY}px`); } catch (_) { }
-        }
-        try { __scheduleCardGroupMembershipRefreshForNodeIds(section.id, { renderFrames: false, renderEdges: false }); } catch (_) { }
-        try { __scheduleCardGroupDragEdgeUpdate(meta); } catch (_) { }
-        return true;
-    }
-
-    element.style.transform = `translate(${scaledDeltaX}px, ${scaledDeltaY}px)`;
-
-    if (section) {
-        section.x = newX;
-        section.y = newY;
-        try { __scheduleCardGroupMembershipRefreshForNodeIds(section.id, { renderFrames: false, renderEdges: false }); } catch (_) { }
-    }
-
-    try { __scheduleCanvasDragEdgeFollowForNodeIds(nodeId); } catch (_) { }
-
-    return true;
-}
-
-function applyPermanentSectionDragPosition(clientX, clientY) {
-    const element = CanvasState.dragState.draggedElement;
-    if (!element) return false;
-
-    const deltaX = clientX - CanvasState.dragState.dragStartX;
-    const deltaY = clientY - CanvasState.dragState.dragStartY;
-    const scaledDeltaX = deltaX / (CanvasState.zoom || 1);
-    const scaledDeltaY = deltaY / (CanvasState.zoom || 1);
-
-    if (!CanvasState.dragState.hasMoved) {
-        if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
-            CanvasState.dragState.hasMoved = true;
-        }
-    }
-
-    element.style.transform = `translate(${scaledDeltaX}px, ${scaledDeltaY}px)`;
-
-    try { __scheduleCanvasDragEdgeFollowForNodeIds(__getPermanentSectionCanvasNodeId(element)); } catch (_) { }
-
-    return true;
-}
-
-function finalizeTempNodeDrag() {
-    const element = CanvasState.dragState.draggedElement;
-    if (!element) return;
-
-    element.classList.remove('dragging');
-
-    const nodeId = element.id;
-    const section = getActiveDraggedCanvasNodeData(nodeId);
-
-    const meta = (CanvasState.dragState.meta && typeof CanvasState.dragState.meta === 'object') ? CanvasState.dragState.meta : null;
-    const isGroupLikeSection = !!(section && section.subtype === 'card-group');
-    const isCardGroupDrag = !!(meta && meta.cardGroupDrag && isGroupLikeSection);
-
-    if (isCardGroupDrag) {
-        const deltaX = (CanvasState.dragState.lastClientX || 0) - (CanvasState.dragState.dragStartX || 0);
-        const deltaY = (CanvasState.dragState.lastClientY || 0) - (CanvasState.dragState.dragStartY || 0);
-        const zoom = (CanvasState.zoom || 1);
-        const scaledDeltaX = deltaX / zoom;
-        const scaledDeltaY = deltaY / zoom;
-
-        if (meta && meta.cardGroupEdgeRaf) {
-            try { cancelAnimationFrame(meta.cardGroupEdgeRaf); } catch (_) { }
-            meta.cardGroupEdgeRaf = 0;
-        }
-
-        const content = getCachedContent();
-        if (content) {
-            try { content.style.setProperty('--card-group-dx', '0px'); } catch (_) { }
-            try { content.style.setProperty('--card-group-dy', '0px'); } catch (_) { }
-        }
-
-        const restoreTransitionEls = [];
-
-        section.x = (CanvasState.dragState.nodeStartX || 0) + scaledDeltaX;
-        section.y = (CanvasState.dragState.nodeStartY || 0) + scaledDeltaY;
-        restoreTransitionEls.push(element);
-        element.style.transition = 'none';
-        element.style.transform = 'none';
-        element.style.left = section.x + 'px';
-        element.style.top = section.y + 'px';
-
-        // Commit：组内成员（只移动成员，不更新成员关系）
-        if (Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
-            CanvasState.dragState.childElements.forEach((child) => {
-                if (!child || !child.data) return;
-                const cx = (child.startX || 0) + scaledDeltaX;
-                const cy = (child.startY || 0) + scaledDeltaY;
-                child.data.x = cx;
-                child.data.y = cy;
-
-                if (child.element) {
-                    restoreTransitionEls.push(child.element);
-                    child.element.style.transition = 'none';
-                    child.element.style.transform = 'none';
-                    child.element.style.left = cx + 'px';
-                    child.element.style.top = cy + 'px';
-                }
-            });
-        }
-
-        if (content) {
-            try { content.classList.remove('card-group-drag-active'); } catch (_) { }
-            try { content.style.removeProperty('--card-group-dx'); } catch (_) { }
-            try { content.style.removeProperty('--card-group-dy'); } catch (_) { }
-        }
-        try { element.classList.remove('card-group-dragging'); } catch (_) { }
-        if (Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
-            CanvasState.dragState.childElements.forEach((child) => {
-                if (child && child.element) {
-                    try { child.element.classList.remove('card-group-dragging'); } catch (_) { }
-                }
-            });
-        }
-
-        if (meta) {
-            meta.cardGroupDx = 0;
-            meta.cardGroupDy = 0;
-            meta.cardGroupDrag = false;
-        }
-
-        requestAnimationFrame(() => {
-            restoreTransitionEls.forEach((el) => {
-                try { el.style.transition = ''; } catch (_) { }
-            });
-        });
-    }
-
-    if (section) {
-        if (!isCardGroupDrag) {
-            element.style.transition = 'none';
-        }
-        element.style.transform = 'none';
-        element.style.left = section.x + 'px';
-        element.style.top = section.y + 'px';
-        if (!isCardGroupDrag) {
-            element.offsetHeight;
-            requestAnimationFrame(() => { element.style.transition = ''; });
-        }
-    }
-
-    try { scheduleEdgesRender(0); } catch (_) { }
-
-    saveCanvasManifestOnly();
-    scheduleBoundsUpdate();
-    scheduleScrollbarUpdate();
-    try {
-        const changedIds = [nodeId];
-        if (Array.isArray(CanvasState.dragState.childElements)) {
-            CanvasState.dragState.childElements.forEach((child) => {
-                if (child && child.data && child.data.id) changedIds.push(child.data.id);
-            });
-        }
-        __scheduleCardGroupMembershipRefreshForNodeIds(changedIds);
-    } catch (_) { }
-    try { __cancelCanvasDragEdgeFollow(meta); } catch (_) { }
-    CanvasState.dragState.meta = null;
-    CanvasState.dragState.draggedNodeData = null;
-    CanvasState.dragState.cardGroupOwnerIdsBeforeDrag = null;
-    CanvasState.dragState.hasMoved = false;
-
-}
-
-function finalizePermanentSectionDrag() {
-    const element = CanvasState.dragState.draggedElement;
-    if (!element) return;
-
-    element.classList.remove('dragging');
-    const meta = (CanvasState.dragState.meta && typeof CanvasState.dragState.meta === 'object') ? CanvasState.dragState.meta : null;
-
-    if (CanvasState.dragState.hasMoved) {
-        const deltaX = CanvasState.dragState.lastClientX - CanvasState.dragState.dragStartX;
-        const deltaY = CanvasState.dragState.lastClientY - CanvasState.dragState.dragStartY;
-        const scaledDeltaX = deltaX / (CanvasState.zoom || 1);
-        const scaledDeltaY = deltaY / (CanvasState.zoom || 1);
-        const finalX = CanvasState.dragState.nodeStartX + scaledDeltaX;
-        const finalY = CanvasState.dragState.nodeStartY + scaledDeltaY;
-        // 关闭过渡，避免落下时“果冻”弹动
-        element.style.transition = 'none';
-        element.style.transform = 'none';
-        element.style.left = finalX + 'px';
-        element.style.top = finalY + 'px';
-        // 强制重排，然后恢复 transition（下一帧再允许动画）
-        element.offsetHeight; // reflow
-        requestAnimationFrame(() => { element.style.transition = ''; });
-
-        try { scheduleEdgesRender(0); } catch (_) { }
-
-        savePermanentSectionPosition(element);
-        scheduleBoundsUpdate();
-        scheduleScrollbarUpdate();
-        try { __scheduleCardGroupMembershipRefreshForNodeIds(__getPermanentSectionCanvasNodeId(element)); } catch (_) { }
-    } else {
-        element.style.transform = 'none';
-    }
-
-    CanvasState.dragState.hasMoved = false;
-    try { __cancelCanvasDragEdgeFollow(meta); } catch (_) { }
-    CanvasState.dragState.meta = null;
-    CanvasState.dragState.draggedNodeData = null;
-    CanvasState.dragState.cardGroupOwnerIdsBeforeDrag = null;
-    element.style.transition = '';
-}
-
-function getScrollFactor(axis) {
-    // 极简计算，提升性能
-    const zoom = CanvasState.zoom || 1;
-    // 直接线性缩放，避免 Math.pow 计算
-    const base = axis === 'vertical' ? 1.0 : 1.0;
-    return base / zoom;
-}
-
-function getScrollEaseFactor(axis) {
-    const zoom = clampCanvasZoom(CanvasState.zoom || 1);
-    const windowsLike = CANVAS_RUNTIME_WINDOWS_LIKE;
-    const animationSource = CanvasState.scrollAnimation && CanvasState.scrollAnimation.source;
-    const isWindowsWheelMicroSmooth = windowsLike && animationSource === 'wheel';
-    const base = axis === 'horizontal'
-        ? (windowsLike ? 0.31 : 0.35)
-        : (windowsLike ? 0.30 : 0.33);
-    const zoomBoost = zoom > 1
-        ? Math.min(windowsLike ? 0.16 : 0.18, (zoom - 1) * (windowsLike ? 0.11 : 0.12))
-        : (1 - zoom) * (windowsLike ? 0.07 : 0.08);
-    let ease = Math.min(windowsLike ? 0.50 : 0.52, base + zoomBoost);
-    if (isWindowsWheelMicroSmooth) {
-        ease = Math.min(0.82, ease * WINDOWS_LINUX_WHEEL_PAN_EASE_MULTIPLIER);
-    }
-    if (animationSource === 'wheel') {
-        ease = Math.min(0.95, ease * __getCanvasWheelPanTailCompensation(axis));
-    }
-    return ease;
-}
-
-function schedulePanTo(targetX, targetY) {
-    if (typeof targetX === 'number') {
-        // 只在动画滚动到特定位置时才限制（比如双击居中），允许一定的边界
-        CanvasState.scrollAnimation.targetX = clampPan('horizontal', targetX);
-    }
-    if (typeof targetY === 'number') {
-        CanvasState.scrollAnimation.targetY = clampPan('vertical', targetY);
-    }
-    CanvasState.scrollAnimation.source = 'programmatic';
-
-    if (!CanvasState.scrollAnimation.frameId) {
-        CanvasState.scrollAnimation.frameId = requestAnimationFrame(runScrollAnimation);
-    }
-}
-
-function runScrollAnimation() {
-    let continueAnimation = false;
-    const source = (CanvasState.scrollAnimation && CanvasState.scrollAnimation.source) || 'unknown';
-    const isWindowsWheelMicroSmooth = CANVAS_RUNTIME_WINDOWS_LIKE && source === 'wheel';
-    const stopThreshold = isWindowsWheelMicroSmooth ? 1.0 : 0.5;
-
-    if (typeof CanvasState.scrollAnimation.targetX === 'number') {
-        const diffX = CanvasState.scrollAnimation.targetX - CanvasState.panOffsetX;
-        if (Math.abs(diffX) > stopThreshold) {
-            CanvasState.panOffsetX += diffX * getScrollEaseFactor('horizontal');
-            continueAnimation = true;
-        } else {
-            CanvasState.panOffsetX = CanvasState.scrollAnimation.targetX;
-        }
-    }
-
-    if (typeof CanvasState.scrollAnimation.targetY === 'number') {
-        const diffY = CanvasState.scrollAnimation.targetY - CanvasState.panOffsetY;
-        if (Math.abs(diffY) > stopThreshold) {
-            CanvasState.panOffsetY += diffY * getScrollEaseFactor('vertical');
-            continueAnimation = true;
-        } else {
-            CanvasState.panOffsetY = CanvasState.scrollAnimation.targetY;
-        }
-    }
-
-    // 优化：使用快速平移（不更新滚动条）
-    applyPanOffsetFast();
-    __logCanvasWinInput('wheel-pan-smooth-frame', {
-        continueAnimation,
-        source,
-        stopThreshold,
-        panOffsetX: __roundCanvasDebugNumber(CanvasState.panOffsetX, 3),
-        panOffsetY: __roundCanvasDebugNumber(CanvasState.panOffsetY, 3),
-        targetX: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetX, 3),
-        targetY: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetY, 3)
-    }, { throttleKey: 'wheel-pan-smooth-frame', throttleMs: 90 });
-
-    if (continueAnimation) {
-        CanvasState.scrollAnimation.frameId = requestAnimationFrame(runScrollAnimation);
-    } else {
-        __logCanvasWinInput('wheel-pan-smooth-finish', {
-            source,
-            stopThreshold,
-            panOffsetX: __roundCanvasDebugNumber(CanvasState.panOffsetX, 3),
-            panOffsetY: __roundCanvasDebugNumber(CanvasState.panOffsetY, 3),
-            targetX: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetX, 3),
-            targetY: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetY, 3)
-        }, { force: true, throttleMs: 0 });
-        CanvasState.scrollAnimation.frameId = null;
-        CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
-        CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
-        CanvasState.scrollAnimation.source = null;
-
-        // 动画结束后更新滚动条
-        scheduleScrollbarUpdate();
-        savePanOffsetThrottled();
-    }
-}
-
-function updateCanvasScrollBounds(options = {}) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    let initial = false;
-    let recomputeBounds = true;
-
-    if (typeof options === 'boolean') {
-        initial = options;
-    } else if (options && typeof options === 'object') {
-        initial = Boolean(options.initial);
-        if (Object.prototype.hasOwnProperty.call(options, 'recomputeBounds')) {
-            recomputeBounds = options.recomputeBounds;
-        }
-    }
-
-    let bounds = CanvasState.contentBounds;
-    if (recomputeBounds || !bounds) {
-        bounds = computeCanvasContentBounds();
-        CanvasState.contentBounds = bounds;
-    } else if (!bounds) {
-        bounds = computeCanvasContentBounds();
-        CanvasState.contentBounds = bounds;
-    }
-
-    const zoom = clampCanvasZoom(CanvasState.zoom || 1);
-    const workspaceWidth = workspace.clientWidth || 1;
-    const workspaceHeight = workspace.clientHeight || 1;
-
-    // 允许滚动到内容区域外的空白区域
-    const minPanX = workspaceWidth - CANVAS_SCROLL_MARGIN - bounds.maxX * zoom - CANVAS_SCROLL_EXTRA_SPACE;
-    const maxPanX = CANVAS_SCROLL_MARGIN - bounds.minX * zoom + CANVAS_SCROLL_EXTRA_SPACE;
-    const minPanY = workspaceHeight - CANVAS_SCROLL_MARGIN - bounds.maxY * zoom - CANVAS_SCROLL_EXTRA_SPACE;
-    const maxPanY = CANVAS_SCROLL_MARGIN - bounds.minY * zoom + CANVAS_SCROLL_EXTRA_SPACE;
-
-    CanvasState.scrollBounds.horizontal = normalizeScrollBounds(minPanX, maxPanX, workspaceWidth);
-    CanvasState.scrollBounds.vertical = normalizeScrollBounds(minPanY, maxPanY, workspaceHeight);
-
-    // 不要自动限制滚动位置，允许用户滚动到空白区域
-    // CanvasState.panOffsetX = clampPan('horizontal', CanvasState.panOffsetX);
-    // CanvasState.panOffsetY = clampPan('vertical', CanvasState.panOffsetY);
-
-    if (!initial) {
-        applyPanOffset();
-    }
-}
-
-function normalizeScrollBounds(min, max, fallbackSize) {
-    if (!isFinite(min) || !isFinite(max)) {
-        const half = fallbackSize * 0.5;
-        return { min: -half, max: half };
-    }
-
-    if (min === max) {
-        const half = Math.max(fallbackSize * 0.5, 200);
-        return { min: min - half, max: max + half };
-    }
-
-    if (min > max) {
-        const center = (min + max) / 2;
-        const half = Math.max(fallbackSize * 0.5, 200);
-        return { min: center - half, max: center + half };
-    }
-
-    const span = max - min;
-    if (span < fallbackSize * 0.3) {
-        const center = (min + max) / 2;
-        const half = Math.max(span / 2, fallbackSize * 0.3);
-        return { min: center - half, max: center + half };
-    }
-
-    return { min, max };
-}
-
-function computeCanvasContentBounds() {
-    let minX = 0;
-    let maxX = 0;
-    let minY = 0;
-    let maxY = 0;
-    let hasContent = false;
-
-    // 永久栏目（包含副本）也参与边界计算，直接读取内存/存储，避免虚拟化 DOM 被删除后滚动边界变小
-    const mainEl = document.getElementById('permanentSection');
-    if (mainEl) {
-        const left = parseFloat(mainEl.style.left) || 0;
-        const top = parseFloat(mainEl.style.top) || 0;
-        const size = getPermanentSectionBaseSize();
-        const width = mainEl.offsetWidth || size.width || 600;
-        const height = mainEl.offsetHeight || size.height || 600;
-        minX = Math.min(minX, left);
-        maxX = Math.max(maxX, left + width);
-        minY = Math.min(minY, top);
-        maxY = Math.max(maxY, top + height);
-        hasContent = true;
-    }
-
-    try {
-        const existingMeta = (__readPermanentSectionCopies() || []).filter((item) => item && item.id);
-        const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
-            ? CanvasState.permanentLayout.copiesById
-            : {};
-        existingMeta.forEach(meta => {
-            const copyId = meta.id;
-            const cardState = copyStateById[copyId];
-            if (!cardState) return;
-            const left = Number(cardState.left) || 0;
-            const top = Number(cardState.top) || 0;
-            const size = getPermanentSectionBaseSize();
-            const width = Number(cardState.width) || size.width || 600;
-            const height = Number(cardState.height) || size.height || 600;
-            minX = Math.min(minX, left);
-            maxX = Math.max(maxX, left + width);
-            minY = Math.min(minY, top);
-            maxY = Math.max(maxY, top + height);
-            hasContent = true;
-        });
-    } catch (_) { }
-
-    CanvasState.tempSections.forEach(section => {
-        const tempBaseSize = getTempSectionBaseSize(section);
-        const width = section.width || tempBaseSize.width;
-        const height = section.height || tempBaseSize.height;
-        minX = Math.min(minX, section.x);
-        maxX = Math.max(maxX, section.x + width);
-        minY = Math.min(minY, section.y);
-        maxY = Math.max(maxY, section.y + height);
-        hasContent = true;
-    });
-    // 计算 Markdown 文本节点范围
-    if (Array.isArray(CanvasState.mdNodes)) {
-        const mdBaseSize = getBlankNodeDefaultSize();
-        CanvasState.mdNodes.forEach(node => {
-            const width = node.width || mdBaseSize.width;
-            const height = node.height || mdBaseSize.height;
-            minX = Math.min(minX, node.x);
-            maxX = Math.max(maxX, node.x + width);
-            minY = Math.min(minY, node.y);
-            maxY = Math.max(maxY, node.y + height);
-            hasContent = true;
-        });
-    }
-
-    if (!hasContent) {
-        minX = -400;
-        maxX = 400;
-        minY = -300;
-        maxY = 300;
-    }
-
-    return {
-        minX: minX - 80,
-        maxX: maxX + 80,
-        minY: minY - 80,
-        maxY: maxY + 80
-    };
-}
-
-function clampPan(axis, value) {
-    const bounds = axis === 'horizontal'
-        ? CanvasState.scrollBounds.horizontal
-        : CanvasState.scrollBounds.vertical;
-
-    if (!bounds) return value;
-    if (value < bounds.min) return bounds.min;
-    if (value > bounds.max) return bounds.max;
-    return value;
-}
-
-function updateScrollbarThumbs() {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return;
-
-    const verticalBar = document.getElementById('canvasVerticalScrollbar');
-    const horizontalBar = document.getElementById('canvasHorizontalScrollbar');
-
-    if (verticalBar) {
-        const track = verticalBar.querySelector('.scrollbar-track');
-        const thumb = verticalBar.querySelector('.scrollbar-thumb');
-        if (track && thumb) {
-            const trackSize = track.clientHeight;
-            const bounds = CanvasState.scrollBounds.vertical;
-            if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
-                const range = bounds.max - bounds.min;
-                // 使用scrollBounds中的范围来计算可见比例，而不是contentBounds
-                const totalScrollableHeight = Math.abs(range);
-                // 内容总高度 = 滚动范围 + 可见窗口
-                const totalHeight = Math.max(1, totalScrollableHeight + workspace.clientHeight);
-                const visibleRatio = Math.max(0.05, Math.min(1, workspace.clientHeight / totalHeight));
-                const thumbSize = Math.max(20, trackSize * visibleRatio);
-                const maxTravel = Math.max(0, trackSize - thumbSize);
-                const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetY) / range;
-                const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
-
-                thumb.style.height = `${thumbSize}px`;
-                thumb.style.transform = `translateY(${position}px)`;
-                __setCanvasScrollbarMetricCache('vertical', track, thumb, trackSize, thumbSize);
-            }
-        }
-    }
-
-    if (horizontalBar) {
-        const track = horizontalBar.querySelector('.scrollbar-track');
-        const thumb = horizontalBar.querySelector('.scrollbar-thumb');
-        if (track && thumb) {
-            const trackSize = track.clientWidth;
-            const bounds = CanvasState.scrollBounds.horizontal;
-            if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
-                const range = bounds.max - bounds.min;
-                // 使用scrollBounds中的范围来计算可见比例，而不是contentBounds
-                const totalScrollableWidth = Math.abs(range);
-                // 内容总宽度 = 滚动范围 + 可见窗口
-                const totalWidth = Math.max(1, totalScrollableWidth + workspace.clientWidth);
-                const visibleRatio = Math.max(0.05, Math.min(1, workspace.clientWidth / totalWidth));
-                const thumbSize = Math.max(20, trackSize * visibleRatio);
-                const maxTravel = Math.max(0, trackSize - thumbSize);
-                const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetX) / range;
-                const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
-
-                thumb.style.width = `${thumbSize}px`;
-                thumb.style.transform = `translateX(${position}px)`;
-                __setCanvasScrollbarMetricCache('horizontal', track, thumb, trackSize, thumbSize);
-            }
-        }
-    }
-
-    persistCanvasScrollbarPreloadStateThrottled();
-}
-
-// =============================================================================
-// 定位到永久栏目
-// =============================================================================
+// =================================================================================
+// VIII. LOCATE, DRAG, RESIZE & PERMANENT SECTION MOTION (定位、拖动、缩放与永久栏目移动)
+// =================================================================================
 
 const CANVAS_LOCATE_DEFAULT_ZOOM = 1;
 
@@ -22420,9 +12538,9 @@ async function handlePermanentDragEnd(e) {
     scheduleClearTreeItemDragging();
 }
 
-// =============================================================================
-// 临时节点管理
-// =============================================================================
+// =================================================================================
+// IX. TEMP SECTION MANAGEMENT (临时节点/栏目管理)
+// =================================================================================
 
 function __normalizeOriginPermanentPayload(payload) {
     if (!payload || typeof payload !== 'object') return null;
@@ -22842,9 +12960,9 @@ function createEmptyTempSection(x, y, options = {}) {
     return sectionId;
 }
 
-// =============================================================================
-// Markdown 文本节点（Obsidian Canvas 风格）
-// =============================================================================
+// =================================================================================
+// X. MARKDOWN TEXT NODES & CARD GROUPS (Markdown 文本节点与卡片组)
+// =================================================================================
 
 function clearMdSelection() {
     try {
@@ -22869,7 +12987,7 @@ function selectMdNode(nodeId) {
     if (el) {
         el.classList.add('selected');
         CanvasState.selectedMdNodeId = nodeId;
-        
+
         try {
             if (typeof window.__BCSCardGroup !== 'undefined' && typeof window.__BCSCardGroup.getRecursiveGeometricMembers === 'function') {
                 const group = (CanvasState.mdNodes || []).find(n => n.id === nodeId);
@@ -23044,7 +13162,7 @@ function __getTitleFromDirectoryDom(nodeId) {
 function __getMdNodeLowDetailTitleAndIndex(node) {
     let title = __getTitleFromDirectoryDom(node.id);
     let indexText = '';
-    
+
     if (!title) {
         if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.getMdNodeTitle === 'function' && typeof window.CanvasSidebarDirectory.getSortedMdNodes === 'function') {
             title = window.CanvasSidebarDirectory.getMdNodeTitle(node);
@@ -23057,11 +13175,11 @@ function __getMdNodeLowDetailTitleAndIndex(node) {
             if (!title) title = '--';
         }
     }
-    
+
     if (title && title.length > 15) {
         title = title.slice(0, 15) + '...';
     }
-    
+
     return {
         titleText: title,
         indexText: indexText
@@ -23227,19 +13345,19 @@ function showCanvasNodeLoadError(element, data, errorMsg, isTemp) {
     try {
         element.innerHTML = '';
         element.classList.add('canvas-node-load-error');
-        
+
         const lang = typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : 'zh';
         const titleText = lang === 'en' ? 'Load Failed' : '加载失败';
         const retryText = lang === 'en' ? 'Retry' : '重试';
-        
+
         const titleEl = document.createElement('div');
         titleEl.className = 'canvas-node-load-error-title';
         titleEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i><span>${titleText}</span>`;
-        
+
         const msgEl = document.createElement('div');
         msgEl.className = 'canvas-node-load-error-msg';
         msgEl.textContent = errorMsg || (lang === 'en' ? 'Unknown error occurred' : '未知错误');
-        
+
         const retryBtn = document.createElement('button');
         retryBtn.className = 'canvas-node-load-error-retry';
         retryBtn.textContent = retryText;
@@ -23255,7 +13373,7 @@ function showCanvasNodeLoadError(element, data, errorMsg, isTemp) {
                 renderMdNode(data);
             }
         });
-        
+
         element.appendChild(titleEl);
         element.appendChild(msgEl);
         element.appendChild(retryBtn);
@@ -30539,7 +20657,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         }
     };
 
-    // Since we don't have the full `expandToMarkdown` implementation here (it's 200 lines), 
+    // Since we don't have the full `expandToMarkdown` implementation here (it's 200 lines),
     // we will implement a simplified version for common formats logic used in Blank Column.
 
     // 获取特殊格式元素的源码表示（与空白栏目 getSourceCode 功能一致）
@@ -33462,6 +23580,10 @@ function finishTempSectionTitleEdit(section, input, renameButton, commit) {
     }
 }
 
+// =================================================================================
+// XI. TEMP TREE LAZY LOADING & DORMANCY (临时树懒加载与栏目休眠)
+// =================================================================================
+
 // 性能优化：懒加载阈值配置
 const LAZY_LOAD_THRESHOLD = {
     maxInitialDepth: 1,      // 初始只渲染到第1层深度
@@ -35158,7 +25280,7 @@ function wakeSection(section) {
         const element = document.getElementById(sectionId);
         if (element) {
             // [MOD] 元素本身一直可见，只需移除 dormant 类
-            // element.style.display = ''; 
+            // element.style.display = '';
             element.classList.remove('dormant-content');
 
             const treeContainer = element.querySelector('.temp-bookmark-tree');
@@ -35439,9 +25561,9 @@ function removeTempNode(sectionId, options = {}) {
 }
 
 
-// =============================================================================
-// 清除全部（永久栏目除外）
-// =============================================================================
+// =================================================================================
+// XII. CLEAR MODES, PERMANENT TIP & DRAG BACK (清除模式、永久栏目提示与拖回永久栏目)
+// =================================================================================
 
 function clearAllExceptPermanent() {
     const lang = (typeof currentLang === 'string' && currentLang) ? currentLang : 'zh_CN';
@@ -35503,15 +25625,15 @@ function clearAllExceptPermanent() {
                 ? `, AND ${hl(copyCount)} Permanent Copies.`
                 : `、以及 ${hl(copyCount)} 个永久栏目副本。`;
         }
-        
+
         // Count card groups
         const groupCount = document.querySelectorAll('.card-group-canvas-node').length;
         if (groupCount > 0) {
-            msg += isEn 
+            msg += isEn
                 ? ` AND ${hl(groupCount)} Card Groups.`
                 : `、以及 ${hl(groupCount)} 个卡片组。`;
         }
-        
+
         if (statsDiv) statsDiv.innerHTML = msg;
     };
 
@@ -35726,7 +25848,7 @@ function handleClickToClearSelect(e) {
             if (add) path.classList.add('click-to-clear-selected');
             else path.classList.remove('click-to-clear-selected');
         }
-        
+
         const label = document.querySelector(`.canvas-edge-label[data-edge-id="${safeEdgeId}"]`);
         if (label) {
             if (add) label.classList.add('click-to-clear-selected');
@@ -35738,7 +25860,7 @@ function handleClickToClearSelect(e) {
         clickToClearSelectedIds.delete(id);
         el.classList.remove('click-to-clear-selected');
         if (el.dataset && el.dataset.edgeId) updateEdgeDomClass(id, false);
-        
+
         childIds.forEach(childId => {
             clickToClearSelectedIds.delete(childId);
             const childEl = document.getElementById(childId);
@@ -35748,7 +25870,7 @@ function handleClickToClearSelect(e) {
         clickToClearSelectedIds.add(id);
         el.classList.add('click-to-clear-selected');
         if (el.dataset && el.dataset.edgeId) updateEdgeDomClass(id, true);
-        
+
         childIds.forEach(childId => {
             clickToClearSelectedIds.add(childId);
             const childEl = document.getElementById(childId);
@@ -36914,9 +27036,9 @@ async function __writePermanentMetadataUpdatesForCreatedNodes(tagUpdates, noteUp
     }
 }
 
-// =============================================================================
-// 事件监听设置
-// =============================================================================
+// =================================================================================
+// XIII. EVENT LISTENERS & BCS RESTORE HOOKS (事件监听与 BCS 恢复钩子)
+// =================================================================================
 
 function setupCanvasEventListeners() {
     // 初始蒙版同步
@@ -37106,7 +27228,7 @@ function setupCanvasEventListeners() {
     const sidebarClearMenuOtherBtn = document.getElementById('clearMenuOtherBtn');
     const sidebarClearOtherDropdown = document.getElementById('canvasOtherClearDropdown');
     const sidebarClearOtherDropdownMenu = document.getElementById('clearDropdownOtherMenu');
-    
+
     if (sidebarClearMenuOtherBtn && sidebarClearOtherDropdownMenu && sidebarClearOtherDropdown) {
         sidebarClearMenuOtherBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -39130,9 +29252,9 @@ function loadTempNodes() {
     }
 }
 
-// =============================================================================
-// 连接线功能 (Obsidian Canvas 风格)
-// =============================================================================
+// =================================================================================
+// XIV. CONNECTION EDGES (连接线核心功能)
+// =================================================================================
 
 function setupCanvasEdgesLayer() {
     const content = document.getElementById('canvasContent');
@@ -39185,7 +29307,7 @@ function addAnchorsToNode(nodeElement, nodeId) {
     nodeElement.querySelectorAll('.canvas-node-anchor, .canvas-anchor-zone').forEach(el => el.remove());
 
     ['top', 'right', 'bottom', 'left'].forEach(side => {
-        // Create hover zone first (so it can affect anchor via sibling selector if needed, 
+        // Create hover zone first (so it can affect anchor via sibling selector if needed,
         // though we might use JS for more reliable hover handling if CSS is tricky)
         const zone = document.createElement('div');
         zone.className = `canvas-anchor-zone zone-${side}`;
@@ -39233,7 +29355,7 @@ function addAnchorsToNode(nodeElement, nodeId) {
         // 如果处于批量选择模式，或者按下了修饰键（Option/Alt/Shift）用于选择，屏蔽默认的打开逻辑
         const hasSelectModifier = e.altKey || e.shiftKey;
         const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-        if ((typeof window.selectMode !== 'undefined' && window.selectMode && !(isMac && e.ctrlKey)) || 
+        if ((typeof window.selectMode !== 'undefined' && window.selectMode && !(isMac && e.ctrlKey)) ||
             hasSelectModifier) {
             e.preventDefault();
             return;
@@ -39247,15 +29369,15 @@ function addAnchorsToNode(nodeElement, nodeId) {
         const tempNode = link.closest('.temp-canvas-node[data-section-id]');
         let scopedContext;
         if (tempNode) {
-            scopedContext = { 
-                treeType: 'temporary', 
+            scopedContext = {
+                treeType: 'temporary',
                 sectionId: tempNode.dataset.sectionId,
-                node: tempNode 
+                node: tempNode
             };
         } else {
             const permSection = link.closest('.permanent-bookmark-section');
             if (permSection) {
-                const copyId = permSection.dataset.permanentSectionCopyId || 
+                const copyId = permSection.dataset.permanentSectionCopyId ||
                                (permSection.id && permSection.id.startsWith('permanent-section-copy-') ? permSection.id.slice('permanent-section-copy-'.length) : null);
                 const displayIndex = permSection.dataset.permanentDisplayIndex || permSection.dataset.permanentSectionDisplayIndex || null;
                 scopedContext = {
@@ -39386,7 +29508,7 @@ function endConnection(e) {
     if (tempPath) tempPath.remove();
     __setConnectionTargetNode(null);
 
-    // Use composedPath if available to get all elements under cursor, 
+    // Use composedPath if available to get all elements under cursor,
     // or just elementFromPoint. elementFromPoint might hit the dragging line if not careful,
     // but we removed it just above.
     const target = document.elementFromPoint(e.clientX, e.clientY);
@@ -41147,9 +31269,9 @@ function hideEdgeToolbar() {
     }
 }
 
-// =============================================================================
-// 连接线工具栏功能实现
-// =============================================================================
+// =================================================================================
+// XV. EDGE TOOLBAR (连接线工具栏功能)
+// =================================================================================
 
 // 色盘弹层逻辑（完全复用空白栏目的实现）
 function ensureEdgeColorPopover(toolbar, edge) {
@@ -42078,9 +32200,9611 @@ function startEdgeLabelInlineEdit(edgeId) {
     });
 }
 
+// =================================================================================
+// XVI. SHORTCUTS, CTRL RESET & MODULE EXPORTS (快捷键、按键状态重置与模块导出)
+// =================================================================================
+function openCanvasShortcutsModal(options = {}) {
+    const modal = document.getElementById('canvasShortcutsModal');
+    if (!modal) return;
+    setupCanvasShortcutsModal();
+
+    const { anchorToSettings = true } = options;
+
+    // 先关闭帮助弹窗和管理弹窗
+    try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
+
+    modal.style.display = 'block';
+
+    if (anchorToSettings) {
+        window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(modal));
+    } else {
+        modal.style.position = '';
+        modal.style.left = '';
+        modal.style.top = '';
+    }
+
+    updateShortcutDisplays();
+    if (typeof updateShortcutsDisplay === 'function') {
+        updateShortcutsDisplay();
+    }
+}
+
+function closeCanvasShortcutsModal() {
+    const modal = document.getElementById('canvasShortcutsModal');
+    if (modal) modal.style.display = 'none';
+    stopShortcutRecording(null);
+}
+
+function openCanvasOpenSourceModal() {
+    const modal = document.getElementById('canvasOpenSourceModal');
+    if (!modal) return;
+    setupCanvasOpenSourceModal();
+
+    // 先关闭帮助弹窗、快捷键弹窗和管理弹窗
+    try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasShortcutsModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+
+    modal.style.display = 'block';
+
+    window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(modal));
+}
+
+function closeCanvasOpenSourceModal() {
+    const modal = document.getElementById('canvasOpenSourceModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function setupCanvasOpenSourceModal() {
+    const modal = document.getElementById('canvasOpenSourceModal');
+    if (!modal || modal.dataset.bound === 'true') return;
+    modal.dataset.bound = 'true';
+
+    const closeBtn = document.getElementById('canvasOpenSourceModalClose');
+    if (closeBtn) {
+        closeBtn.onclick = () => {
+            closeCanvasOpenSourceModal();
+        };
+    }
+}
+
+
 // =============================================================================
-// 重置 Ctrl/Space 等按键及平移状态函数，用于解决选择模式焦点切换时的按键卡死
+// 快捷键自定义功能
 // =============================================================================
+
+const CANVAS_SHORTCUTS_KEY = 'canvas-custom-shortcuts';
+const DEFAULT_SHORTCUTS = {
+    ctrlKey: 'Control',  // Control, Alt, Shift, Meta
+    spaceKey: 'Space'    // Space, or any other key
+};
+
+let canvasShortcuts = { ...DEFAULT_SHORTCUTS };
+let isRecordingShortcut = false;
+let recordingTarget = null; // 'ctrl' or 'space'
+
+function loadCanvasShortcuts() {
+    try {
+        const saved = localStorage.getItem(CANVAS_SHORTCUTS_KEY);
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            // 如果之前保存的是旧默认值 Alt，自动升级到新的默认值 Control，避免旧缓存导致冲突
+            if (parsed.ctrlKey === 'Alt') {
+                parsed.ctrlKey = 'Control';
+                try {
+                    localStorage.setItem(CANVAS_SHORTCUTS_KEY, JSON.stringify(parsed));
+                } catch (_) {}
+            }
+            canvasShortcuts = { ...DEFAULT_SHORTCUTS, ...parsed };
+        }
+    } catch (e) {
+        console.warn('[Canvas] 加载快捷键设置失败:', e);
+    }
+    updateShortcutDisplays();
+}
+
+function saveCanvasShortcuts() {
+    try {
+        saveSharedState(CANVAS_SHORTCUTS_KEY, canvasShortcuts);
+    } catch (e) {
+        console.warn('[Canvas] 保存快捷键设置失败:', e);
+    }
+}
+
+function getKeyDisplayName(keyCode, lang) {
+    const isZh = lang === 'zh_CN';
+    const isMac = /Mac|iPod|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+    const keyMap = {
+        'Control': 'Ctrl',
+        'Alt': isMac ? 'Option' : 'Alt',
+        'Shift': 'Shift',
+        'Meta': isMac ? 'Cmd' : 'Win',
+        'Space': isZh ? '空格' : 'Space',
+        'Tab': 'Tab'
+    };
+    if (keyMap[keyCode]) return keyMap[keyCode];
+    // KeyA -> A, Digit1 -> 1
+    if (/^Key([A-Z])$/.test(keyCode)) return keyCode.slice(3);
+    if (/^Digit([0-9])$/.test(keyCode)) return keyCode.slice(5);
+    return keyCode;
+}
+
+function updateShortcutDisplays() {
+    const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
+
+    // 更新 Ctrl 键显示
+    const ctrlName = getKeyDisplayName(canvasShortcuts.ctrlKey, lang);
+    document.querySelectorAll('[data-shortcut-display="ctrl"]').forEach(el => {
+        el.textContent = ctrlName;
+    });
+    const ctrlTitleSuffix = (lang === 'en') ? ' Key Operations' : '键操作';
+    document.querySelectorAll('[data-shortcut-title="ctrl"]').forEach(el => {
+        el.textContent = `${ctrlName}${ctrlTitleSuffix}`;
+    });
+
+    // 更新 Space 键显示
+    const spaceName = getKeyDisplayName(canvasShortcuts.spaceKey, lang);
+    document.querySelectorAll('[data-shortcut-display="space"]').forEach(el => {
+        el.textContent = spaceName;
+    });
+    const spaceTitleSuffix = (lang === 'en') ? ' Key Operations' : '键操作';
+    document.querySelectorAll('[data-shortcut-title="space"]').forEach(el => {
+        el.textContent = `${spaceName}${spaceTitleSuffix}`;
+    });
+}
+
+function startShortcutRecording(target) {
+    isRecordingShortcut = true;
+    recordingTarget = target;
+
+    const recorder = document.getElementById('canvasShortcutRecorder');
+    const recorderText = document.getElementById('recorderText');
+    const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
+
+    if (recorder) {
+        recorder.style.display = 'block';
+        if (recorderText) {
+            recorderText.textContent = lang === 'zh_CN' ? '请按下新的快捷键...' : 'Press a new shortcut key...';
+        }
+    }
+
+    // 高亮对应的键
+    if (target === 'ctrl') {
+        document.querySelectorAll('[data-shortcut-display="ctrl"]').forEach(el => {
+            el.classList.add('recording');
+        });
+    } else if (target === 'space') {
+        document.querySelectorAll('[data-shortcut-display="space"]').forEach(el => {
+            el.classList.add('recording');
+        });
+    }
+}
+
+function stopShortcutRecording(newKey) {
+    if (!isRecordingShortcut) return;
+
+    document.querySelectorAll('[data-shortcut-display]').forEach(el => {
+        el.classList.remove('recording');
+    });
+
+    const recorder = document.getElementById('canvasShortcutRecorder');
+    if (recorder) recorder.style.display = 'none';
+
+    if (newKey && recordingTarget) {
+        if (recordingTarget === 'ctrl') {
+            canvasShortcuts.ctrlKey = newKey;
+        } else if (recordingTarget === 'space') {
+            canvasShortcuts.spaceKey = newKey;
+        }
+        saveCanvasShortcuts();
+        updateShortcutDisplays();
+    }
+
+    isRecordingShortcut = false;
+    recordingTarget = null;
+}
+
+function isCustomCtrlKeyPressed(e) {
+    const key = canvasShortcuts.ctrlKey;
+    const now = Date.now();
+    const isModifierKey = ['Control', 'Alt', 'Shift', 'Meta'].includes(key);
+    if (isModifierKey && !CanvasState.physicalModifiers[key] && (now - (CanvasState.lastModifierKeyReleaseTime || 0) < 800)) {
+        return false;
+    }
+
+    // 修饰键使用事件属性检测
+    switch (key) {
+        case 'Control': return e.ctrlKey;
+        case 'Alt': return e.altKey;
+        case 'Shift': return e.shiftKey;
+        case 'Meta': return e.metaKey;
+    }
+    // 普通键使用状态检测
+    return CanvasState.isCtrlPressed;
+}
+
+function isCustomSpaceKeyPressed(keyCode) {
+    const key = canvasShortcuts.spaceKey;
+    return keyCode === key;
+}
+
+function getCustomCtrlKeyCode() {
+    return canvasShortcuts.ctrlKey;
+}
+
+function getCustomSpaceKeyCode() {
+    return canvasShortcuts.spaceKey;
+}
+
+function setupCanvasHelpModal() {
+    const helpBtn = document.getElementById('canvasHelpBtn');
+    const helpModal = document.getElementById('canvasHelpModal');
+    const helpModalClose = document.getElementById('canvasHelpModalClose');
+    const manageModal = document.getElementById('canvasManageModal');
+
+    if (!helpBtn || !helpModal) return;
+
+    const tabs = Array.from(helpModal.querySelectorAll('.canvas-help-tab'));
+    const panels = Array.from(helpModal.querySelectorAll('.canvas-help-panel'));
+
+    const setActiveTab = (tabName) => {
+        tabs.forEach(tab => {
+            const isActive = tab.dataset.helpTab === tabName;
+            tab.classList.toggle('active', isActive);
+            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        panels.forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.helpPanel === tabName);
+        });
+    };
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setActiveTab(tab.dataset.helpTab);
+        });
+    });
+
+    helpBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // 先关闭管理弹窗
+        if (manageModal) {
+            stopShortcutRecording(null);
+            manageModal.style.display = 'none';
+        }
+        // 切换帮助弹窗
+        const isVisible = helpModal.style.display === 'block';
+        helpModal.style.display = isVisible ? 'none' : 'block';
+        if (!isVisible) {
+            if (typeof updateShortcutDisplays === 'function') {
+                updateShortcutDisplays();
+            }
+            if (typeof updateShortcutsDisplay === 'function') {
+                updateShortcutsDisplay();
+            }
+        }
+        if (!isVisible && tabs.length && !tabs.some(tab => tab.classList.contains('active'))) {
+            setActiveTab(tabs[0].dataset.helpTab);
+        }
+    });
+
+    if (helpModalClose) {
+        helpModalClose.addEventListener('click', () => {
+            helpModal.style.display = 'none';
+        });
+    }
+
+    // 快捷键编辑按钮
+    const editCtrlBtn = document.getElementById('editCtrlKeyBtn');
+    const editSpaceBtn = document.getElementById('editSpaceKeyBtn');
+    const editCtrlBtnHelp = document.getElementById('editCtrlKeyBtnHelp');
+    const editSpaceBtnHelp = document.getElementById('editSpaceKeyBtnHelp');
+    const recorderCancelBtn = document.getElementById('recorderCancelBtn');
+
+    if (editCtrlBtn) {
+        editCtrlBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startShortcutRecording('ctrl');
+        });
+    }
+
+    if (editSpaceBtn) {
+        editSpaceBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startShortcutRecording('space');
+        });
+    }
+
+    if (editCtrlBtnHelp) {
+        editCtrlBtnHelp.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openCanvasShortcutsModal();
+            startShortcutRecording('ctrl');
+        });
+    }
+
+    if (editSpaceBtnHelp) {
+        editSpaceBtnHelp.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openCanvasShortcutsModal();
+            startShortcutRecording('space');
+        });
+    }
+
+    if (recorderCancelBtn) {
+        recorderCancelBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            stopShortcutRecording(null);
+        });
+    }
+
+    // 问号帮助按钮
+    const recorderHelpBtn = document.getElementById('recorderHelpBtn');
+    const recorderHelpTooltip = document.getElementById('recorderHelpTooltip');
+
+    if (recorderHelpBtn && recorderHelpTooltip) {
+        recorderHelpBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = recorderHelpTooltip.style.display === 'block';
+            recorderHelpTooltip.style.display = isVisible ? 'none' : 'block';
+        });
+
+        // 点击其他地方关闭提示
+        document.addEventListener('click', (e) => {
+            if (recorderHelpTooltip.style.display === 'block' &&
+                !recorderHelpTooltip.contains(e.target) &&
+                e.target !== recorderHelpBtn &&
+                !recorderHelpBtn.contains(e.target)) {
+                recorderHelpTooltip.style.display = 'none';
+            }
+        });
+    }
+
+    // 监听键盘事件进行录制
+    document.addEventListener('keydown', (e) => {
+        if (!isRecordingShortcut) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        const modifierKeys = ['Control', 'Alt', 'Shift', 'Meta'];
+        const specialKeys = ['Space', 'Tab'];
+
+        let newKey = null;
+
+        // 修饰键直接使用 e.key
+        if (modifierKeys.includes(e.key)) {
+            newKey = e.key;
+        }
+        // 特殊键使用 e.code
+        else if (specialKeys.includes(e.code)) {
+            newKey = e.code;
+        }
+        // 普通字母/数字键使用 e.code (如 KeyA, KeyB, Digit1)
+        else if (/^(Key[A-Z]|Digit[0-9])$/.test(e.code)) {
+            newKey = e.code;
+        }
+
+        if (newKey) stopShortcutRecording(newKey);
+    }, true);
+
+    // 点击其他地方关闭弹窗
+    document.addEventListener('click', (e) => {
+        if (helpModal.style.display === 'block' &&
+            !helpModal.contains(e.target) &&
+            e.target !== helpBtn &&
+            !helpBtn.contains(e.target)) {
+            helpModal.style.display = 'none';
+        }
+    });
+}
+
+function openCanvasHelpModal(tabName = 'shortcuts') {
+    const helpModal = document.getElementById('canvasHelpModal');
+    const manageModal = document.getElementById('canvasManageModal');
+    const shortcutsModal = document.getElementById('canvasShortcutsModal');
+    const otherManageModal = document.getElementById('canvasOtherManageModal');
+    if (!helpModal) return;
+
+    if (manageModal) {
+        stopShortcutRecording(null);
+        manageModal.style.display = 'none';
+    }
+    if (shortcutsModal) shortcutsModal.style.display = 'none';
+    if (otherManageModal) otherManageModal.style.display = 'none';
+    try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
+
+    const tabs = Array.from(helpModal.querySelectorAll('.canvas-help-tab'));
+    const panels = Array.from(helpModal.querySelectorAll('.canvas-help-panel'));
+
+    tabs.forEach(tab => {
+        const isActive = tab.dataset.helpTab === tabName;
+        tab.classList.toggle('active', isActive);
+        tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    panels.forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.helpPanel === tabName);
+    });
+
+    helpModal.style.display = 'block';
+
+    if (typeof positionManageModalUnderSettingsBtn === 'function') {
+        window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(helpModal));
+    }
+}
+
+function setCanvasScaleVars(container, scale, force = false) {
+    if (!container) return;
+
+    // [OPT] 缩放过程中停止更新CSS变量（防止网格/文字反向缩放的高频重绘）
+    // 用户明确要求：缩放时停止，结束时更新。使用 force 参数强制更新。
+    if (!force) {
+        const workspace = document.getElementById('canvasWorkspace');
+        if (workspace && workspace.classList.contains('is-zooming')) return;
+    }
+
+    const s = (typeof scale === 'number' && isFinite(scale) && scale > 0) ? scale : 1;
+    if (!force && cachedCanvasScaleVarsContainer === container && cachedCanvasScaleVarsValue === s) return;
+    cachedCanvasScaleVarsContainer = container;
+    cachedCanvasScaleVarsValue = s;
+    container.style.setProperty('--canvas-scale', s.toString());
+    container.style.setProperty('--canvas-scale-inv', (1 / s).toString());
+}
+
+function applyCanvasContentTransform(content, panX, panY, scale) {
+    if (!content) return;
+    const x = (typeof panX === 'number' && isFinite(panX)) ? panX : 0;
+    const y = (typeof panY === 'number' && isFinite(panY)) ? panY : 0;
+    const s = (typeof scale === 'number' && isFinite(scale) && scale > 0) ? scale : 1;
+    // 与 CSS 保持一致：translate(...) scale(...)（右侧先应用 scale，再应用 translate；平移不随缩放变化）
+    content.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
+    try { updateCanvasGridLayerTransform(x, y, s); } catch (_) { }
+    try {
+        if (__isCanvasNodeMaximizedActive()) {
+            scheduleMaximizedNodesRefresh({
+                delayMs: MAXIMIZED_NODE_RESIZE_REFRESH_DEBOUNCE_MS,
+                stabilizeDelayMs: MAXIMIZED_NODE_RESIZE_STABILIZE_DELAY_MS
+            });
+        } else {
+            refreshMaximizedNodes();
+        }
+    } catch (_) { }
+
+    // 解决在拖拽临时组（框选元素）时进行滚轮滚动，导致元素与鼠标吸附不稳定的问题
+    if (window.__BCSLassoTempGroup &&
+        typeof window.__BCSLassoTempGroup.isDragging === 'function' &&
+        window.__BCSLassoTempGroup.isDragging() &&
+        typeof window.__BCSLassoTempGroup.updateDragPositionForScroll === 'function') {
+        window.__BCSLassoTempGroup.updateDragPositionForScroll();
+    }
+    try { triggerCanvasViewportAutoRecord(x, y, s); } catch (_) { }
+}
+
+let canvasViewportAutoRecordTimer = null;
+function __isCanvasNodeMaximizedActiveForAnchorGuard() {
+    if (CanvasState.nodeMaximizedActive) return true;
+    try {
+        return !!document.querySelector('.canvas-node-maximized');
+    } catch (_) {
+        return false;
+    }
+}
+
+function triggerCanvasViewportAutoRecord(x, y, zoom) {
+    if (__isCanvasNodeMaximizedActiveForAnchorGuard()) {
+        return;
+    }
+    const settings = getCanvasOtherSettings();
+    if (!settings || settings.autoRecordAnchor !== true) {
+        return;
+    }
+    if (canvasViewportAutoRecordTimer) {
+        clearTimeout(canvasViewportAutoRecordTimer);
+    }
+    const intervalS = settings.autoRecordAnchorInterval || 15;
+    canvasViewportAutoRecordTimer = setTimeout(() => {
+        try {
+            checkAndRecordCanvasViewport(x, y, zoom);
+        } catch (_) {}
+    }, intervalS * 1000);
+}
+
+function checkAndRecordCanvasViewport(x, y, zoom) {
+    if (__isCanvasNodeMaximizedActiveForAnchorGuard()) {
+        return;
+    }
+    const last = CanvasState.lastAutoRecordAnchor;
+    if (last) {
+        const dx = Math.abs(x - last.x);
+        const dy = Math.abs(y - last.y);
+        const dz = Math.abs(zoom - last.zoom);
+        if (dx <= 1.0 && dy <= 1.0 && dz <= 0.001) {
+            return;
+        }
+    }
+
+    const anchor = {
+        x: x,
+        y: y,
+        zoom: zoom,
+        timestamp: Date.now()
+    };
+
+    CanvasState.lastAutoRecordAnchor = anchor;
+    saveSharedState('canvasAutoRecordedAnchor', anchor);
+
+    try {
+        let historyList = [];
+        const rawHistory = localStorage.getItem('canvasNavigationHistory');
+        if (rawHistory) {
+            historyList = JSON.parse(rawHistory);
+        }
+        if (!Array.isArray(historyList)) {
+            historyList = [];
+        }
+
+        historyList = historyList.filter(item => {
+            if (!item) return false;
+            const dx = Math.abs(item.x - x);
+            const dy = Math.abs(item.y - y);
+            const dz = Math.abs(item.zoom - zoom);
+            return !(dx <= 1.0 && dy <= 1.0 && dz <= 0.001);
+        });
+
+        historyList.unshift(anchor);
+        const settings = getCanvasOtherSettings();
+        const limit = settings ? (settings.autoRecordAnchorLimit || 5) : 5;
+        if (historyList.length > limit) {
+            historyList = historyList.slice(0, limit);
+        }
+
+        localStorage.setItem('canvasNavigationHistory', JSON.stringify(historyList));
+        window.dispatchEvent(new CustomEvent('canvas-navigation-history-updated', { detail: { list: historyList, newAnchor: anchor } }));
+    } catch (e) {
+        console.error('Failed to save navigation history:', e);
+    }
+}
+
+function __forceCanvasViewportVisualSync(options = {}) {
+    const opts = (options && typeof options === 'object') ? options : {};
+    const forceLowDetail = opts.forceLowDetail !== false;
+    const container = getCachedContainer();
+    const content = getCachedContent();
+    const z = clampCanvasZoom(CanvasState.zoom || CanvasState.baseZoom || 1);
+    CanvasState.zoom = z;
+    if (container) {
+        setCanvasScaleVars(container, z, true);
+        container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
+        container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+    }
+    if (content) {
+        applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, z);
+    }
+    try { updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, z, true); } catch (_) { }
+    try { updateCanvasLowDetailMode(forceLowDetail); } catch (_) { }
+    try { updateScrollbarThumbsLightweight(); } catch (_) { }
+}
+
+let __canvasViewportVisualSyncLifecycleBound = false;
+let __canvasViewportVisualSyncRaf = 0;
+let __canvasViewportVisualSyncSecondRaf = 0;
+
+function __scheduleCanvasViewportVisualSync() {
+    if (__canvasViewportVisualSyncRaf || __canvasViewportVisualSyncSecondRaf) return;
+    __canvasViewportVisualSyncRaf = requestAnimationFrame(() => {
+        __canvasViewportVisualSyncRaf = 0;
+        try { __forceCanvasViewportVisualSync({ forceLowDetail: false }); } catch (_) { }
+        __canvasViewportVisualSyncSecondRaf = requestAnimationFrame(() => {
+            __canvasViewportVisualSyncSecondRaf = 0;
+            try { __forceCanvasViewportVisualSync({ forceLowDetail: false }); } catch (_) { }
+        });
+    });
+}
+
+function __isCanvasViewportVisualSyncEligible() {
+    const root = document && document.documentElement ? document.documentElement : null;
+    if (root && !root.classList.contains('canvas-view-active')) return false;
+    return !!(document.getElementById('canvasWorkspace') && getCachedContainer() && getCachedContent());
+}
+
+function __bindCanvasViewportVisualSyncLifecycle() {
+    if (__canvasViewportVisualSyncLifecycleBound) return;
+    __canvasViewportVisualSyncLifecycleBound = true;
+
+    const syncIfReady = () => {
+        if (!__isCanvasViewportVisualSyncEligible()) return;
+        __scheduleCanvasViewportVisualSync();
+    };
+    try { window.addEventListener('focus', syncIfReady); } catch (_) { }
+    try { window.addEventListener('pageshow', syncIfReady); } catch (_) { }
+    try {
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') syncIfReady();
+        });
+    } catch (_) { }
+}
+
+function __scheduleCanvasPostViewportStateStabilization() {
+    const run = () => {
+        try { stabilizePermanentSectionAnchors({ syncBounds: false }); } catch (_) { }
+        try { updateCanvasScrollBounds({ recomputeBounds: true, initial: false }); } catch (_) { }
+        try { updateScrollbarThumbs(); } catch (_) { }
+        try { __forceCanvasViewportVisualSync({ forceLowDetail: false }); } catch (_) { }
+    };
+
+    run();
+    try { requestAnimationFrame(run); } catch (_) { }
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 260);
+}
+
+function getCanvasDisplayZoom() {
+    const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+    const z = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    return z / base;
+}
+
+function getCanvasZoomForScrollFactor() {
+    // [UX] 缩到极小时，滚动速度会因为 1/zoom 急剧变快；
+    // 用户反馈：显示缩放 < 25% 时速度不要再继续变快（保持曲率/速度一致）。
+    const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+    const minDisplayZoom = 0.25;
+    const minZoom = base * minDisplayZoom;
+    const z = clampCanvasZoom(CanvasState.zoom || 1);
+    return Math.max(z, minZoom);
+}
+
+function isCanvasZoomMagnetEnabled() {
+    const s = getCanvasZoomMagnetSettings();
+    return !!(s && s.enabled);
+}
+
+function getCanvasZoomMagnetSettings() {
+    // Defaults:
+    // - magnet enabled: true
+    // - safe zone magnet (70%): enabled
+    // - low-detail boundary magnet (M2): disabled by default (Y=1.0 = no slowdown)
+    const defaults = { enabled: true, enableSafeZone: true, enableLowDetailMid: false };
+
+    // New format
+    try {
+        const saved = localStorage.getItem('canvasZoomMagnetSettings');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed && typeof parsed === 'object') {
+                return {
+                    enabled: (typeof parsed.enabled === 'boolean') ? parsed.enabled : defaults.enabled,
+                    enableSafeZone: (typeof parsed.enableSafeZone === 'boolean') ? parsed.enableSafeZone : defaults.enableSafeZone,
+                    enableLowDetailMid: (typeof parsed.enableLowDetailMid === 'boolean') ? parsed.enableLowDetailMid : defaults.enableLowDetailMid
+                };
+            }
+        }
+    } catch (_) { }
+
+    return defaults;
+}
+
+function __writeCanvasZoomMagnetSettings(next) {
+    const cur = getCanvasZoomMagnetSettings();
+    const merged = {
+        enabled: (typeof next.enabled === 'boolean') ? next.enabled : cur.enabled,
+        enableSafeZone: (typeof next.enableSafeZone === 'boolean') ? next.enableSafeZone : cur.enableSafeZone,
+        enableLowDetailMid: (typeof next.enableLowDetailMid === 'boolean') ? next.enableLowDetailMid : cur.enableLowDetailMid
+    };
+    try { saveSharedState('canvasZoomMagnetSettings', merged); } catch (_) { }
+    return merged;
+}
+
+function __syncPerfMagnetTogglesFromSettings(settings) {
+    const modal = document.getElementById('canvasPerfSettingsModal');
+    if (!modal || modal.style.display === 'none') return;
+    const t = modal.querySelector('#perfToggleZoomMagnet');
+    const s = modal.querySelector('#perfToggleZoomMagnetSafe');
+    const m = modal.querySelector('#perfToggleZoomMagnetMid');
+    if (t && typeof settings.enabled === 'boolean') t.checked = settings.enabled;
+    if (s && typeof settings.enableSafeZone === 'boolean') s.checked = settings.enableSafeZone;
+    if (m && typeof settings.enableLowDetailMid === 'boolean') m.checked = settings.enableLowDetailMid;
+    if (t) {
+        try { t.dispatchEvent(new Event('change')); } catch (_) { }
+    }
+}
+
+function __syncOtherMagnetTogglesFromSettings(modal, settings) {
+    const target = modal || document.getElementById('canvasOtherSettingsModal');
+    if (!target || target.style.display === 'none') return;
+    const safeToggle = target.querySelector('#otherMagnetSafeToggle');
+    const midToggle = target.querySelector('#otherMagnetMidToggle');
+    if (safeToggle && typeof settings.enableSafeZone === 'boolean') safeToggle.checked = settings.enableSafeZone;
+    if (midToggle && typeof settings.enableLowDetailMid === 'boolean') midToggle.checked = settings.enableLowDetailMid;
+}
+
+function getCanvasZoomMagnetEffect(displayZoom, nextDisplayZoom) {
+    if (!isCanvasZoomMagnetEnabled()) return { factor: 1, strength: 0 };
+    const dz = (typeof displayZoom === 'number' && isFinite(displayZoom) && displayZoom > 0) ? displayZoom : 1;
+    const nextDz = (typeof nextDisplayZoom === 'number' && isFinite(nextDisplayZoom) && nextDisplayZoom > 0) ? nextDisplayZoom : dz;
+    const baseFactor = Math.max(0.005, getCanvasZoomSpeedFactor(dz));
+    const maxFactor = ZOOM_CURVE_ABS_MAX_FACTOR;
+    const travel = Math.abs(Math.log(nextDz / dz));
+    const speedBoost = Math.max(0, Math.min(1, travel / 0.08));
+    const widthBoost = 1 + speedBoost * 0.8;
+    const strengthBoost = 1 + speedBoost * 0.6;
+
+    const settings = getCanvasZoomMagnetSettings();
+    const magnetPoints = __normalizeMagnetPoints(getCanvasZoomMagnetPoints());
+    const magnets = [];
+
+    try {
+        if (settings.enableSafeZone) {
+            const axis = __getOtherCurveZoomAxis();
+            const safe = __percentFromNormX(axis, magnetPoints.m1.x) / 100;
+            if (Number.isFinite(safe) && safe > 0) {
+                // Safe Zone 附近更明显（范围更宽、减速更强）
+                const halfWidth = Math.min(0.16, 0.08 * widthBoost);
+                magnets.push({ center: safe, halfWidth, minFactor: magnetPoints.m1.y, boost: strengthBoost });
+            }
+        }
+    } catch (_) { }
+
+    try {
+        if (settings.enableLowDetailMid) {
+            const axis = __getOtherCurveZoomAxis();
+            const enter = __percentFromNormX(axis, magnetPoints.m2.x) / 100;
+            if (Number.isFinite(enter) && enter > 0) {
+                const enterLowDetail = getCanvasLowDetailDisplayZoomThreshold();
+                const exit = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+                const band = Math.max(0.01, Math.abs(enterLowDetail - exit));
+                // 中心精准卡在低细节切换点；缓慢区覆盖边界前后，给 DOM/低细节状态切换留反应时间。
+                const baseHalf = Math.min(0.12, Math.max(0.06, band * 2.5));
+                const halfWidth = Math.min(0.18, baseHalf * widthBoost);
+                magnets.push({ center: enter, halfWidth, minFactor: magnetPoints.m2.y, boost: strengthBoost });
+            }
+        }
+    } catch (_) { }
+
+    if (!magnets.length) return { factor: 1, strength: 0 };
+
+    // 在“磁矩”附近将缩放变得更缓慢或更快；离开附近则恢复正常曲线。
+    // factor: 1 = 不变；越接近 center 越接近 minFactor。
+    let factor = 1;
+    let strength = 0;
+    for (const m of magnets) {
+        const a = dz;
+        const b = nextDz;
+        const minD = (m.center >= Math.min(a, b) && m.center <= Math.max(a, b))
+            ? 0
+            : Math.min(Math.abs(a - m.center), Math.abs(b - m.center));
+        if (!Number.isFinite(minD) || minD >= m.halfWidth) continue;
+
+        const t = Math.max(0, Math.min(1, minD / m.halfWidth));
+        const smooth = t * t * (3 - 2 * t); // smoothstep
+        const localStrength = Math.min(1, (1 - smooth) * (Number.isFinite(m.boost) ? m.boost : 1));
+        const desired = (Number.isFinite(m.minFactor) ? m.minFactor : 1) / baseFactor;
+        const localFactor = 1 + localStrength * (desired - 1);
+        const minLocal = 0.005 / baseFactor;
+        const maxLocal = maxFactor / baseFactor;
+        const clampedLocal = Math.max(minLocal, Math.min(maxLocal, localFactor));
+
+        if (desired >= 1) {
+            if (clampedLocal > factor) factor = clampedLocal;
+        } else {
+            if (clampedLocal < factor) factor = clampedLocal;
+            if (localStrength > strength) strength = localStrength;
+        }
+    }
+    return {
+        factor: Math.max(0.005 / baseFactor, Math.min(maxFactor / baseFactor, factor)),
+        strength: Math.max(0, Math.min(1, strength))
+    };
+}
+
+function getCanvasZoomCurveSettings() {
+    const settings = getCanvasOtherSettings();
+    return (settings && settings.zoomCurve) ? settings.zoomCurve : __cloneDefaultOtherSettings().zoomCurve;
+}
+
+function getCanvasZoomMagnetPoints() {
+    const settings = getCanvasOtherSettings();
+    if (settings && settings.useDefaultZoomCurve !== false) return __getDefaultMagnetPointsFromPerf();
+    if (settings && settings.magnetPoints) return settings.magnetPoints;
+    return __getDefaultMagnetPointsFromPerf();
+}
+
+function __cubicBezierCoord(t, p0, p1, p2, p3) {
+    const u = 1 - t;
+    return (u * u * u * p0) + (3 * u * u * t * p1) + (3 * u * t * t * p2) + (t * t * t * p3);
+}
+
+function __scaleZoomCurveFactor(raw) {
+    const clamped = Math.max(0, Math.min(ZOOM_CURVE_RAW_MAX, raw));
+    const scaled = Math.pow(clamped, ZOOM_CURVE_EXPONENT) * ZOOM_CURVE_MAX_FACTOR;
+    return Math.max(0, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, scaled));
+}
+
+function __solveBezierTForX(x, x1, x2) {
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 24; i++) {
+        const mid = (lo + hi) / 2;
+        const midX = __cubicBezierCoord(mid, 0, x1, x2, 1);
+        if (midX < x) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+}
+
+function __getZoomSpeedFactorFromCurve(displayZoom, curve) {
+    if (!curve || !curve.p1 || !curve.p2) return 1;
+    const { minPercent, maxPercent, range } = __getOtherCurveZoomAxis();
+    const percent = Math.max(minPercent, Math.min(maxPercent, (displayZoom || 1) * 100));
+    const x = (percent - minPercent) / range;
+    const t = __solveBezierTForX(x, curve.p1.x, curve.p2.x);
+    const p0y = (curve.p0 && Number.isFinite(curve.p0.y)) ? curve.p0.y : 1;
+    const p3y = (curve.p3 && Number.isFinite(curve.p3.y)) ? curve.p3.y : 1;
+    const y = __cubicBezierCoord(t, p0y, curve.p1.y, curve.p2.y, p3y);
+    return Math.max(0.005, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, __scaleZoomCurveFactor(y)));
+}
+
+function getCanvasZoomSpeedFactor(displayZoom) {
+    const curve = getCanvasZoomCurveSettings();
+    return __getZoomSpeedFactorFromCurve(displayZoom, curve);
+}
+
+function getCanvasTrackpadZoomRate(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return __clampNumber(
+        settings && settings.trackpadZoomRate,
+        TRACKPAD_ZOOM_RATE_MIN,
+        TRACKPAD_ZOOM_RATE_MAX,
+        TRACKPAD_ZOOM_RATE_DEFAULT
+    );
+}
+
+function getCanvasWheelVerticalPanRate(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return __clampNumber(
+        settings && settings.wheelVerticalPanRate,
+        CANVAS_PAN_RATE_MIN,
+        CANVAS_PAN_RATE_MAX,
+        CANVAS_PAN_RATE_DEFAULT
+    );
+}
+
+function getCanvasWheelHorizontalPanRate(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return __clampNumber(
+        settings && settings.wheelHorizontalPanRate,
+        CANVAS_PAN_RATE_MIN,
+        CANVAS_PAN_RATE_MAX,
+        CANVAS_PAN_RATE_DEFAULT
+    );
+}
+
+function getCanvasTrackpadPanRate(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return __clampNumber(
+        settings && settings.trackpadPanRate,
+        CANVAS_PAN_RATE_MIN,
+        CANVAS_PAN_RATE_MAX,
+        CANVAS_PAN_RATE_DEFAULT
+    );
+}
+
+// 平面滚动速率 < 100% 时，加快拖尾收敛，避免“步进变小但惯性拖尾不变”的黏滞感。
+function __getCanvasPanTailCompensation(rate) {
+    const normalized = __clampNumber(rate, CANVAS_PAN_RATE_MIN, CANVAS_PAN_RATE_MAX, CANVAS_PAN_RATE_DEFAULT);
+    if (normalized >= 1) return 1;
+    return 1 / normalized;
+}
+
+function __getCanvasWheelPanTailCompensation(axis) {
+    const rate = axis === 'horizontal'
+        ? getCanvasWheelHorizontalPanRate()
+        : getCanvasWheelVerticalPanRate();
+    return __getCanvasPanTailCompensation(rate);
+}
+
+function __isCanvasDiscretePanWheelEvent(event) {
+    if (!event) return false;
+    return __isLikelyCanvasDiscreteWheelEvent(event);
+}
+
+function __shouldTreatMacWheelAsTouchpad(event, normalizedWheel) {
+    if (!CANVAS_RUNTIME_PLATFORM.isMac || !event) return true;
+    if (__isCanvasTouchpadPinch(event)) return true;
+    if (__isCanvasDiscretePanWheelEvent(event)) return false;
+    const absX = Math.abs(Number(normalizedWheel.deltaX) || 0);
+    const absY = Math.abs(Number(normalizedWheel.deltaY) || 0);
+    if (absX >= 1 && absY >= 1) return true;
+    return false;
+}
+
+function __shouldPreferSnappyCanvasPan(isTouchpad, wheelVerticalPanRate, wheelHorizontalPanRate, trackpadPanRate) {
+    if (isTouchpad) return trackpadPanRate <= 1;
+    // 鼠标滚轮始终同步直达；速率百分比只改变步进大小，不引入额外拖尾。
+    return true;
+}
+
+function __syncCanvasPanVisualImmediate() {
+    if (CanvasState.scrollAnimation.frameId) {
+        cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
+        CanvasState.scrollAnimation.frameId = null;
+    }
+    CanvasState.scrollAnimation.source = 'direct';
+    CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+    CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+    applyPanOffsetFast();
+    updateScrollbarThumbsLightweight();
+}
+
+function __getCanvasWheelDeltaModeScale(event) {
+    if (!event) return 1;
+    const mode = Number(event.deltaMode);
+    if (mode === 1) return CANVAS_WHEEL_LINE_PIXEL;
+    if (mode === 2) {
+        const viewportHeight = (typeof window !== 'undefined' && Number.isFinite(window.innerHeight))
+            ? window.innerHeight
+            : 800;
+        return Math.max(240, viewportHeight);
+    }
+    return 1;
+}
+
+function __normalizeCanvasWheelEventDeltas(event) {
+    if (!event) return { deltaX: 0, deltaY: 0 };
+    const scale = __getCanvasWheelDeltaModeScale(event);
+    return {
+        deltaX: (Number(event.deltaX) || 0) * scale,
+        deltaY: (Number(event.deltaY) || 0) * scale
+    };
+}
+
+function __isLikelyCanvasDiscreteWheelEvent(event) {
+    if (!event) return false;
+    const mode = Number(event.deltaMode);
+    if (mode === 1 || mode === 2) return true;
+    if (mode !== 0) return false;
+
+    const absDeltaX = Math.abs(Number(event.deltaX) || 0);
+    const absDeltaY = Math.abs(Number(event.deltaY) || 0);
+    const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
+    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return false;
+
+    if (primaryDelta >= DISCRETE_WHEEL_EVENT_DELTA_MIN) return true;
+
+    const hasFractional = (absDeltaX > 0 && !Number.isInteger(absDeltaX))
+        || (absDeltaY > 0 && !Number.isInteger(absDeltaY));
+    if (hasFractional) return false;
+
+    return (Number.isInteger(absDeltaX) && Number.isInteger(absDeltaY) && primaryDelta >= 8);
+}
+
+function __isCanvasDiscreteWheelEvent(event) {
+    if (!event || !CANVAS_RUNTIME_WINDOWS_LIKE) return false;
+    return __isLikelyCanvasDiscreteWheelEvent(event);
+}
+
+function __isCanvasTouchpadLikeScrollInput(event, normalizedDeltas = null) {
+    if (!event) return false;
+    if (Number(event.deltaMode) !== 0) return false;
+    if (__isCanvasDiscreteWheelEvent(event)) return false;
+
+    const source = (normalizedDeltas && typeof normalizedDeltas === 'object') ? normalizedDeltas : event;
+    const absDeltaX = Math.abs(Number(source.deltaX) || 0);
+    const absDeltaY = Math.abs(Number(source.deltaY) || 0);
+    const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
+    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return false;
+
+    if (primaryDelta <= ZOOM_INPUT_TOUCHPAD_DELTA_MAX) return true;
+
+    if (primaryDelta < ZOOM_INPUT_WHEEL_DELTA_MIN) {
+        const rawAbsDeltaX = Math.abs(Number(event.deltaX) || 0);
+        const rawAbsDeltaY = Math.abs(Number(event.deltaY) || 0);
+        const hasFractional = (rawAbsDeltaX > 0 && !Number.isInteger(rawAbsDeltaX))
+            || (rawAbsDeltaY > 0 && !Number.isInteger(rawAbsDeltaY));
+        if (hasFractional) return true;
+    }
+
+    return false;
+}
+
+function __shouldSmoothCanvasWheelZoom(event, zoomInputMode) {
+    if (zoomInputMode !== 'wheel') return false;
+    return __isCanvasDiscreteWheelEvent(event);
+}
+
+// [Fix-v7] Windows 滚轮缩放事件预处理：排队过期事件过滤 + 方向反转防抖
+// 返回 { delta: number, suppressed: boolean }
+// - delta: 缩放增量（保持原始量级，正=放大，负=缩小，与 rawDelta 同向）
+// - suppressed: true 表示此事件应被丢弃（过期排队/方向锁定中）
+// 注意：不对 delta 数值做归一化——Windows 每档 ±120 经下游公式约产生 ~9% 缩放，
+// 与主流应用的 Ctrl+滚轮步长一致。真正的问题是事件堆积和方向抖动，而非单步幅度。
+function __preprocessWindowsWheelZoomEvent(event, rawDelta) {
+    if (!CANVAS_RUNTIME_WINDOWS_LIKE) return { delta: rawDelta, suppressed: false };
+
+    const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now() : Date.now();
+
+    // ① 时间归一化：丢弃排队过期事件
+    // Windows 下高频滚轮 + 主线程卡顿 → 事件堆积；event.timeStamp 代表事件产生时间。
+    // 如果产生时间距当前已过太久，说明是排队滞后事件，丢弃以避免累积误差。
+    if (event && Number.isFinite(event.timeStamp) && event.timeStamp > 0) {
+        const eventAge = now - event.timeStamp;
+        if (eventAge > WINDOWS_WHEEL_ZOOM_STALE_EVENT_MS) {
+            __logCanvasWinInput('wheel-zoom-stale-drop', {
+                eventAge: __roundCanvasDebugNumber(eventAge, 1),
+                threshold: WINDOWS_WHEEL_ZOOM_STALE_EVENT_MS,
+                rawDelta: __roundCanvasDebugNumber(rawDelta, 3)
+            }, { throttleKey: 'wheel-zoom-stale-drop', throttleMs: 60 });
+            return { delta: 0, suppressed: true };
+        }
+    }
+
+    // ② 方向反转防抖锁（不修改 delta 数值，仅做过滤）
+    const sign = rawDelta > 0 ? 1 : (rawDelta < 0 ? -1 : 0);
+
+    if (sign !== 0) {
+        if (sign === winWheelZoomDirLockSign) {
+            // 同方向：累加计数
+            winWheelZoomDirConsecutive++;
+        } else {
+            // 方向改变
+            if (winWheelZoomDirLockSign !== 0 && winWheelZoomDirConsecutive >= WINDOWS_WHEEL_ZOOM_DIR_LOCK_MIN_EVENTS) {
+                // 之前已确立方向 → 启动反转锁
+                winWheelZoomDirLockTime = now;
+            }
+            winWheelZoomDirLockSign = sign;
+            winWheelZoomDirConsecutive = 1;
+        }
+
+        // 检查反转锁：在锁定窗口内且方向刚刚翻转（计数不足），抑制此事件
+        if (winWheelZoomDirLockTime > 0 && (now - winWheelZoomDirLockTime) < WINDOWS_WHEEL_ZOOM_DIR_LOCK_MS) {
+            if (winWheelZoomDirConsecutive < WINDOWS_WHEEL_ZOOM_DIR_LOCK_MIN_EVENTS) {
+                __logCanvasWinInput('wheel-zoom-dir-lock-drop', {
+                    sign,
+                    consecutive: winWheelZoomDirConsecutive,
+                    lockAge: __roundCanvasDebugNumber(now - winWheelZoomDirLockTime, 1),
+                    rawDelta: __roundCanvasDebugNumber(rawDelta, 4)
+                }, { throttleKey: 'wheel-zoom-dir-lock-drop', throttleMs: 60 });
+                return { delta: 0, suppressed: true };
+            }
+        }
+
+        // 锁定窗口已过期 → 清除
+        if (winWheelZoomDirLockTime > 0 && (now - winWheelZoomDirLockTime) >= WINDOWS_WHEEL_ZOOM_DIR_LOCK_MS) {
+            winWheelZoomDirLockTime = 0;
+        }
+    }
+
+    winWheelZoomLastEventNow = now;
+    return { delta: rawDelta, suppressed: false };
+}
+
+// [Fix-v7] 重置 Windows 滚轮缩放方向锁状态（缩放结束 / 切换输入模式时调用）
+function __resetWindowsWheelZoomDirLock() {
+    winWheelZoomDirLockSign = 0;
+    winWheelZoomDirLockTime = 0;
+    winWheelZoomDirConsecutive = 0;
+    winWheelZoomLastEventNow = 0;
+}
+
+function __shouldSmoothCanvasWheelPan(event, isTouchpad) {
+    if (isTouchpad) return false;
+    if (!__isCanvasDiscretePanWheelEvent(event)) return false;
+    // 平面滚动速率已直接缩放步进；再叠平滑追赶会在 >100% 时产生“目标跑在前、画面在后”的果冻拖尾。
+    // Windows/Linux 如需实验性微平滑，仅由平台常量打开。
+    return CANVAS_RUNTIME_WINDOWS_LIKE && WINDOWS_LINUX_WHEEL_PAN_MICRO_SMOOTH_ENABLED;
+}
+
+function __isCanvasTouchpadPinch(e) {
+    if (!e) return false;
+    // Touchpad pinch always sends a wheel event with ctrlKey: true.
+    // And the physical Ctrl key is not pressed on the keyboard.
+    // Also, it is not a discrete/step-wise wheel event.
+    return !!(e.ctrlKey && !CanvasState.isCtrlPressed && !__isLikelyCanvasDiscreteWheelEvent(e));
+}
+
+function resolveCanvasZoomInputMode(event) {
+    if (!event || event.deltaMode !== 0) return 'wheel';
+
+    const now = Date.now();
+    const commitMode = (mode) => {
+        CanvasState.touchpadState.lastZoomInputMode = mode;
+        CanvasState.touchpadState.lastZoomInputTime = now;
+        return mode;
+    };
+
+    if (__isCanvasTouchpadPinch(event)) {
+        return commitMode('touchpad');
+    }
+
+    const absDeltaX = Math.abs(Number(event.deltaX) || 0);
+    const absDeltaY = Math.abs(Number(event.deltaY) || 0);
+    const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
+    if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return commitMode('wheel');
+
+    // 物理按下缩放修饰键时，一律视为 Scrolling（Wheel / Swipe zoom）路径。
+    // 这样可以保证磁矩/曲线仅作用于滚轮与双指滑动缩放，不干扰 Pinch 独立速率。
+    if (CanvasState.isCtrlPressed) {
+        return commitMode('wheel');
+    }
+    if (event.metaKey && !event.ctrlKey) {
+        return commitMode('wheel');
+    }
+
+    if (canvasShortcuts && canvasShortcuts.ctrlKey === 'Control' && event.ctrlKey && !CanvasState.isCtrlPressed) {
+        const rawDeltaX = Number(event.deltaX);
+        const rawDeltaY = Number(event.deltaY);
+        const looksDiscreteWheel = Number.isFinite(rawDeltaX)
+            && Number.isFinite(rawDeltaY)
+            && Number.isInteger(rawDeltaX)
+            && Number.isInteger(rawDeltaY);
+        if (__isLikelyCanvasDiscreteWheelEvent(event)) {
+            return commitMode('wheel');
+        }
+        const likelyWindowsLinuxCtrlSynthPinch = CANVAS_RUNTIME_WINDOWS_LIKE
+            && primaryDelta <= WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_MAX
+            && absDeltaX <= WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_X_MAX
+            && absDeltaY <= WINDOWS_LINUX_CTRL_SYNTH_PINCH_DELTA_MAX;
+
+        const mode = likelyWindowsLinuxCtrlSynthPinch
+            ? 'touchpad'
+            : ((looksDiscreteWheel && primaryDelta >= 1)
+                ? 'wheel'
+                : ((primaryDelta <= ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX
+                    && absDeltaX <= ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX
+                    && absDeltaY <= ZOOM_INPUT_CTRL_SYNTH_PINCH_DELTA_MAX)
+                    ? 'touchpad'
+                    : 'wheel'));
+
+        return commitMode(mode);
+    }
+
+    const state = CanvasState.touchpadState || {};
+    let mode = 'wheel';
+
+    if (primaryDelta <= ZOOM_INPUT_TOUCHPAD_DELTA_MAX) {
+        mode = 'touchpad';
+    } else if (primaryDelta >= ZOOM_INPUT_WHEEL_DELTA_MIN) {
+        mode = 'wheel';
+    } else {
+        const hasRecentMode = typeof state.lastZoomInputMode === 'string'
+            && (now - (Number(state.lastZoomInputTime) || 0)) <= ZOOM_INPUT_MODE_STICKY_MS;
+        mode = hasRecentMode ? state.lastZoomInputMode : 'wheel';
+    }
+
+    return commitMode(mode);
+}
+
+function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
+    const delta = Number(rawDelta);
+    if (!Number.isFinite(delta) || delta === 0) return 1;
+
+    const absDelta = Math.abs(delta);
+    const rateFactor = getCanvasTrackpadZoomRate() * TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER;
+
+    // 与 Chromium 的 pinch->wheel 映射保持一致：scale = exp(-deltaY / 100)
+    // 这里 rawDelta = -deltaY，因此 nativeLogDelta = rawDelta / 100
+    const nativeLogDelta = delta / TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR;
+    // 触控板捏合遵循滚轮曲线与磁矩
+    const curveFactor = getCanvasZoomSpeedFactor(_displayZoom);
+    const nextDisplayZoomNoMagnet = _displayZoom * Math.exp(nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER);
+    const magnet = getCanvasZoomMagnetEffect(_displayZoom, nextDisplayZoomNoMagnet);
+    const magnetFactor = magnet.factor;
+    let targetLogDelta = nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER * curveFactor * magnetFactor;
+
+    const prevLogDelta = Number.isFinite(CanvasState.touchpadState.lastZoomDelta)
+        ? CanvasState.touchpadState.lastZoomDelta
+        : 0;
+
+    // 方向切换时快速衰减残留，避免“反向捏合被黏住”的阻尼感
+    const hasPrev = Math.abs(prevLogDelta) > 0.000001;
+    const hasTarget = Math.abs(targetLogDelta) > 0.000001;
+    const directionFlip = hasPrev && hasTarget && ((prevLogDelta > 0) !== (targetLogDelta > 0));
+    const carriedPrev = directionFlip ? (prevLogDelta * 0.22) : prevLogDelta;
+
+    const alphaBase = Math.max(
+        TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN,
+        Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, 0.36 + absDelta / 26)
+    );
+    const alpha = directionFlip
+        ? Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, alphaBase + 0.12)
+        : alphaBase;
+
+    let smoothedLogDelta = hasPrev
+        ? carriedPrev + (targetLogDelta - carriedPrev) * alpha
+        : targetLogDelta;
+
+    // 手势趋近停止时快速贴近目标，避免尾巴拖拽造成“粘手”
+    if (Math.abs(targetLogDelta) < 0.0012 && Math.abs(smoothedLogDelta) < 0.0022) {
+        smoothedLogDelta = targetLogDelta;
+    }
+
+    CanvasState.touchpadState.lastZoomDelta = smoothedLogDelta;
+    if (CanvasState.touchpadState.zoomDeltaTimer) {
+        clearTimeout(CanvasState.touchpadState.zoomDeltaTimer);
+    }
+    CanvasState.touchpadState.zoomDeltaTimer = setTimeout(() => {
+        CanvasState.touchpadState.lastZoomDelta = 0;
+        CanvasState.touchpadState.zoomDeltaTimer = null;
+    }, TRACKPAD_ZOOM_IDLE_RESET_MS);
+
+    let zoomFactor = Math.exp(smoothedLogDelta);
+    let stepCap = Math.max(
+        TRACKPAD_ZOOM_STEP_CAP_MIN,
+        Math.min(TRACKPAD_ZOOM_STEP_CAP_MAX, 1.022 + Math.min(24, absDelta) / 260)
+    );
+
+    if (zoomFactor > stepCap) zoomFactor = stepCap;
+    if (zoomFactor < (1 / stepCap)) zoomFactor = 1 / stepCap;
+    return zoomFactor;
+}
+
+function getCanvasLowDetailDisplayZoomThreshold() {
+    // 动态阈值：从 localStorage 读取，默认 70% 启用低细节模式
+    try {
+        const saved = localStorage.getItem('canvasZoomThresholds');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed && Number.isFinite(parsed.enterLowDetail)) {
+                return parsed.enterLowDetail;
+            }
+        }
+    } catch (_) { }
+    return 0.70;
+}
+
+function getCanvasLowDetailPrewarmDisplayZoomThreshold() {
+    // 预热阈值不再作为用户独立参数暴露，固定由“低细节切换阈值”向下派生。
+    return __deriveCanvasLowDetailPrewarmThreshold(getCanvasLowDetailDisplayZoomThreshold());
+}
+
+/**
+ * 获取安全区阈值 - 第一优先级
+ * 当缩放 >= 此阈值时，绝对不进入低细节模式
+ * 默认 70%
+ */
+/**
+ * 获取缩放下限配置
+ * 默认 10%
+ */
+function getCanvasMinZoomLimit() {
+    try {
+        const saved = localStorage.getItem('canvasMinZoomLimit');
+        if (saved) {
+            const val = parseFloat(saved);
+            if (Number.isFinite(val)) {
+                const normalized = Math.min(100, Math.max(1, val));
+                if (normalized !== val) {
+                    saveSharedState('canvasMinZoomLimit', String(normalized), { asJSON: false });
+                }
+                return normalized;
+            }
+        }
+    } catch (_) { }
+    return 10; // Default 10%
+}
+
+function getCanvasMaxZoomLimit() {
+    try {
+        const saved = localStorage.getItem('canvasMaxZoomLimit');
+        if (saved) {
+            const val = parseFloat(saved);
+            if (Number.isFinite(val)) {
+                const normalized = Math.min(1000, Math.max(100, val));
+                if (normalized !== val) {
+                    saveSharedState('canvasMaxZoomLimit', String(normalized), { asJSON: false });
+                }
+                return normalized;
+            }
+        }
+    } catch (_) { }
+    return 300; // Default 300%
+}
+
+/**
+ * 获取安全区阈值 - 第一优先级
+ * 当缩放 >= 此阈值时，绝对不进入低细节模式
+ * 默认 70%
+ */
+function getCanvasSafeZoneThreshold() {
+    try {
+        const saved = localStorage.getItem('canvasSafeZoneSettings');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed && Number.isFinite(parsed.threshold)) {
+                return parsed.threshold;
+            }
+        }
+    } catch (_) { }
+    return 0.70; // 默认 70%
+}
+
+function isCanvasSafeZoneEnabled() {
+    return false;
+}
+
+function isCanvasHugeData() {
+    const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
+    const mdCount = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.length : 0;
+    const edgeCount = Array.isArray(CanvasState.edges) ? CanvasState.edges.length : 0;
+    return tempCount > 180 || (tempCount + mdCount + edgeCount) > 420;
+}
+
+/**
+ * 递归计算书签项的总数量（包括文件夹内嵌套的所有子书签）
+ * 这统计的是"数据量"而非"已渲染DOM数量"，因此包括懒加载未展开的书签
+ */
+/**
+ * 递归计算书签项的总数量（包括文件夹内嵌套的所有子书签）
+ * 这统计的是"数据量"而非"已渲染DOM数量"，因此包括懒加载未展开的书签
+ */
+function countBookmarksRecursive(items) {
+    if (!Array.isArray(items)) return 0;
+    let count = 0;
+    for (const item of items) {
+        if (!item) continue;
+        // 每个item都算一个
+        count++;
+        // 递归计算子项（文件夹内部的书签）
+        if (Array.isArray(item.children) && item.children.length > 0) {
+            count += countBookmarksRecursive(item.children);
+        }
+    }
+    return count;
+}
+
+function __countBookmarksAndFoldersRecursive(items, acc) {
+    if (!Array.isArray(items) || !acc) return;
+    for (const item of items) {
+        if (!item) continue;
+
+        const hasChildren = Array.isArray(item.children) && item.children.length > 0;
+        const isBookmark = !!(item.url || item.type === 'bookmark');
+        const isFolder = !isBookmark;
+
+        if (isBookmark) acc.bookmarks++;
+        else if (isFolder) acc.folders++;
+
+        if (hasChildren) {
+            __countBookmarksAndFoldersRecursive(item.children, acc);
+        }
+    }
+}
+
+function __getBookmarkAndFolderStats(items) {
+    const acc = { bookmarks: 0, folders: 0 };
+    __countBookmarksAndFoldersRecursive(items, acc);
+    return acc;
+}
+
+function __getPermanentColumnCountForPerfTotals() {
+    let count = 0;
+    if (document.getElementById('permanentSection')) {
+        count += 1;
+    }
+    try {
+        const copies = __readPermanentSectionCopies() || [];
+        count += copies.filter(c => c && c.id).length;
+    } catch (_) { }
+    return count;
+}
+
+function __getCanvasTotalDataStatsSync() {
+    if (!CanvasState.__perfTotalStats) {
+        CanvasState.__perfTotalStats = {
+            permanentBase: { bookmarks: 0, folders: 0 },
+            permanentFetchedAt: 0,
+            totalColumnCount: 0,
+            totalBookmarkCount: 0,
+            totalFolderCount: 0,
+            _signature: '',
+            _computedAt: 0
+        };
+    }
+    const cache = CanvasState.__perfTotalStats;
+    const now = Date.now();
+
+    const permanentColumnCount = __getPermanentColumnCountForPerfTotals();
+    const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
+    const mdNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [];
+    const mdNodeCount = mdNodes.filter(Boolean).length;
+
+    const signature = `${permanentColumnCount}|${tempCount}|${mdNodes.length}|${CanvasState.tempSectionCounter || 0}|${CanvasState.mdNodeCounter || 0}`;
+    const needsRecompute = (signature !== cache._signature) || ((now - (cache._computedAt || 0)) > 800);
+
+    if (!needsRecompute) return cache;
+
+    // Total columns = permanent (incl copies) + temp + markdown cards/groups.
+    const totalColumnCount = permanentColumnCount + tempCount + mdNodeCount;
+
+    // Total bookmarks/folders:
+    // - Permanent section copies render the same underlying tree multiple times, so totals should
+    //   reflect that (main + copies). We compute the permanent tree stats ONCE, then multiply by
+    //   the number of permanent columns.
+    // - Temporary sections are stored as independent canvas data, so count all of them.
+    const permBase = cache.permanentBase || { bookmarks: 0, folders: 0 };
+    const permBookmarks = (permBase.bookmarks || 0) * permanentColumnCount;
+    const permFolders = (permBase.folders || 0) * permanentColumnCount;
+
+    let tempBookmarks = 0;
+    let tempFolders = 0;
+    try {
+        (CanvasState.tempSections || []).forEach((section) => {
+            if (!section || !Array.isArray(section.items)) return;
+            const s = __getBookmarkAndFolderStats(section.items);
+            tempBookmarks += (s.bookmarks || 0);
+            tempFolders += (s.folders || 0);
+        });
+    } catch (_) { }
+
+    cache.totalColumnCount = totalColumnCount;
+    cache.totalBookmarkCount = permBookmarks + tempBookmarks;
+    cache.totalFolderCount = permFolders + tempFolders;
+    cache._signature = signature;
+    cache._computedAt = now;
+    return cache;
+}
+
+async function __refreshCanvasPermanentBaseStatsForPerfTotals() {
+    if (!CanvasState.__perfTotalStats) __getCanvasTotalDataStatsSync();
+    const cache = CanvasState.__perfTotalStats;
+
+    const now = Date.now();
+    if (cache.permanentFetchedAt && (now - cache.permanentFetchedAt) < 30000) return;
+
+    try {
+        const tree = await __readPermanentTreeSnapshotFromBcs();
+        const root = Array.isArray(tree) ? tree[0] : null;
+        const items = (root && Array.isArray(root.children)) ? root.children : tree;
+        const stats = __getBookmarkAndFolderStats(items);
+        cache.permanentBase = stats;
+        cache.permanentFetchedAt = Date.now();
+        cache._signature = '';
+
+        // If modal is open, refresh numbers immediately
+        try { updateCanvasPerfSettingsUI(); } catch (_) { }
+    } catch (_) { }
+}
+
+/**
+ * 统计当前栏目在 DOM 中实际渲染的节点数量（可视书签 + 文件夹）
+ * 排除已折叠的内容
+ * @returns {{ bookmarks: number, folders: number }}
+ */
+function countVisibleDOMNodes(sectionId) {
+    const secEl = (typeof sectionId === 'string')
+        ? document.getElementById(sectionId)
+        : sectionId;
+    if (!secEl || !secEl.querySelectorAll) return { bookmarks: 0, folders: 0 };
+
+    // 尝试查询 .tree-item 并通过 data-node-type 区分
+    const items = secEl.querySelectorAll('.tree-item');
+    if (items.length > 0) {
+        let b = 0, f = 0;
+        items.forEach(item => {
+            // 只统计可见的（如果隐藏在折叠父级下，通常不渲染或 display:none）
+            if (item.dataset.nodeType === 'folder') f++;
+            else b++;
+        });
+        return { bookmarks: b, folders: f };
+    }
+
+    // Fallback: 尝试查询 class
+    const b = secEl.querySelectorAll('.bookmark-node, .tree-bookmark').length;
+    const f = secEl.querySelectorAll('.folder-node, .tree-folder').length;
+
+    // Fallback 2: 如果都找不到，默认全是书签混合
+    if (b === 0 && f === 0) {
+        const aggr = secEl.querySelectorAll('li').length;
+        return { bookmarks: aggr, folders: 0 };
+    }
+
+    return { bookmarks: b, folders: f };
+}
+
+
+
+/**
+ * 计算当前视界窗口内的数据统计
+ * @returns {{ visibleSectionCount: number, totalBookmarkCount: number, avgBookmarksPerSection: number }}
+ */
+function getCanvasViewportDataStats() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return {
+        visibleSectionCount: 0,
+        loadedSectionCount: 0,
+        totalVisibleNodeCount: 0,
+        visibleBookmarkCount: 0,
+        visibleFolderCount: 0,
+        loadedBookmarkCount: 0,
+        loadedFolderCount: 0,
+        avgBookmarksPerSection: 0
+    };
+
+    // 如果处于低细节模式（内容被简化/隐藏），则认为可视书签/文件夹数为 0
+    const isLowDetail = CanvasState.lowDetailEnabled && CanvasState.lowDetailActive;
+    if (isLowDetail) {
+        // 我们继续计算 visibleSectionCount，但不计算书签内容
+        // 所以不需要在这里立刻 return，而是下面的循环里跳过 countVisibleDOMNodes
+    }
+
+    const rect = getCachedCanvasWorkspaceRect(workspace, true);
+    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const panX = CanvasState.panOffsetX || 0;
+    const panY = CanvasState.panOffsetY || 0;
+
+    // 视口边界（canvas坐标系）
+    const viewportLeft = (0 - panX) / zoom;
+    const viewportRight = (rect.width - panX) / zoom;
+    const viewportTop = (0 - panY) / zoom;
+    const viewportBottom = (rect.height - panY) / zoom;
+
+    let visibleSectionCount = 0;
+    let totalVisibleNodeCount = 0;
+    let visibleBookmarkCount = 0;
+    let visibleFolderCount = 0;
+    let loadedSectionCount = 0; // count of sections with DOM loaded
+    // 已加载书签/文件夹：统计所有 DOM 实际加载的栏目中的节点（不限于视口）
+    let loadedBookmarkCount = 0;
+    let loadedFolderCount = 0;
+
+    for (const section of (CanvasState.tempSections || [])) {
+        if (!section || !section.id) continue;
+        const baseSize = getTempSectionBaseSize(section);
+        const x = Number(section.x);
+        const y = Number(section.y);
+        const w = Number(section.width || baseSize.width);
+        const h = Number(section.height || baseSize.height);
+        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
+
+        // 严格检查 DOM 是否存在（不限于视口范围——用于"已加载"计数）
+        const secEl = document.getElementById(section.id);
+        const isContentUnloaded = CanvasState.unloadedTempSectionTrees.has(section.id);
+        const isDomLoaded = !!(secEl && !isContentUnloaded);
+
+        // 统计已加载 DOM 节点（只查询一次，视口内的可视计数复用同一结果）
+        let counts = null;
+        if (isDomLoaded && !isLowDetail) {
+            counts = countVisibleDOMNodes(section.id);
+            loadedBookmarkCount += counts.bookmarks;
+            loadedFolderCount += counts.folders;
+        }
+
+        // 检测是否在视口内（有任意交集即算可见）
+        const inViewport = !(
+            x + w < viewportLeft ||
+            x > viewportRight ||
+            y + h < viewportTop ||
+            y > viewportBottom
+        );
+
+        if (inViewport) {
+            visibleSectionCount++;
+
+            if (isDomLoaded) {
+                loadedSectionCount++;
+
+                if (counts) {
+                    // 复用已计算的 counts，避免重复 DOM 查询
+                    visibleBookmarkCount += counts.bookmarks;
+                    visibleFolderCount += counts.folders;
+                    totalVisibleNodeCount += (counts.bookmarks + counts.folders);
+                }
+            }
+        }
+    }
+
+    // 永久书签栏目（含副本）也算
+    try {
+        const permSections = Array.from(document.querySelectorAll('.permanent-bookmark-section'));
+        permSections.forEach((permEl) => {
+            if (!permEl) return;
+            const x = parseFloat(permEl.style.left) || 0;
+            const y = parseFloat(permEl.style.top) || 0;
+            const w = parseFloat(permEl.style.width) || permEl.offsetWidth || 0;
+            const h = parseFloat(permEl.style.height) || permEl.offsetHeight || 0;
+            if (w <= 0 || h <= 0) return;
+
+            // 永久栏目 DOM 始终加载，只查询一次复用结果
+            let counts = null;
+            if (!isLowDetail) {
+                counts = countVisibleDOMNodes(permEl);
+                loadedBookmarkCount += counts.bookmarks;
+                loadedFolderCount += counts.folders;
+            }
+
+            const isPermVisible = !(
+                x + w < viewportLeft ||
+                x > viewportRight ||
+                y + h < viewportTop ||
+                y > viewportBottom
+            );
+            if (!isPermVisible) return;
+
+            visibleSectionCount++;
+            loadedSectionCount++;
+            if (counts) {
+                // 复用已计算的 counts
+                visibleBookmarkCount += counts.bookmarks;
+                visibleFolderCount += counts.folders;
+                totalVisibleNodeCount += (counts.bookmarks + counts.folders);
+            }
+        });
+    } catch (_) { }
+
+    // 空白栏目和卡片组也计入“可视栏目数”。
+    try {
+        const mdBaseSize = getBlankNodeDefaultSize();
+        for (const node of (CanvasState.mdNodes || [])) {
+            if (!node || !node.id) continue;
+            const x = Number(node.x);
+            const y = Number(node.y);
+            const w = Number(node.width || mdBaseSize.width);
+            const h = Number(node.height || mdBaseSize.height);
+            if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
+
+            const inViewport = !(
+                x + w < viewportLeft ||
+                x > viewportRight ||
+                y + h < viewportTop ||
+                y > viewportBottom
+            );
+            if (!inViewport) continue;
+
+            visibleSectionCount++;
+        }
+    } catch (_) { }
+
+    // 避免除以0
+    const avgBookmarksPerSection = loadedSectionCount > 0
+        ? Math.round(totalVisibleNodeCount / loadedSectionCount)
+        : 0;
+
+    // 同步更新缓存，避免运行时 __isViewportLowDetailEffective() 发起额外 DOM 查询
+    CanvasState._loadedNodeCount = loadedBookmarkCount + loadedFolderCount;
+    CanvasState._loadedNodeCountAt = Date.now();
+
+    return {
+        visibleSectionCount,
+        loadedSectionCount,
+        totalVisibleNodeCount,
+        visibleBookmarkCount,
+        visibleFolderCount,
+        loadedBookmarkCount,
+        loadedFolderCount,
+        avgBookmarksPerSection
+    };
+}
+
+/**
+ * 更新数据密集模式状态
+ * 使用节流机制避免高频计算
+ * @param {boolean} force - 是否强制更新（跳过节流）
+ * @param {Object} options - 可选项
+ * @param {boolean} options.useCached - 是否只使用缓存状态
+ * @returns {boolean} 是否处于数据密集模式
+ */
+function updateDataIntensiveMode(force = false, options = {}) {
+    const dim = CanvasState.dataIntensiveMode;
+    if (!dim) return false;
+    dim.active = false;
+    dim.totalAlwaysActive = false;
+    return false;
+}
+
+/**
+ * 检查是否应该即时触发低细节模式
+ * 在数据密集模式下，缩放开始的瞬间就进入低细节
+ */
+function shouldInstantLowDetailOnZoom() {
+    // 检查数据密集模式状态
+    const dim = CanvasState.dataIntensiveMode;
+    if (!dim) return false;
+
+    // [Highest Priority] 安全区：缩放 >= 阈值时，绝对不进入低细节模式
+    const displayZoom = getCanvasDisplayZoom();
+    if (isCanvasSafeZoneEnabled()) {
+        const safeZoneThreshold = getCanvasSafeZoneThreshold();
+        if (displayZoom >= safeZoneThreshold) {
+            return false;
+        }
+    }
+
+    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
+    const safetyFloor = 0.15;
+    if (!(displayZoom <= enterThreshold || displayZoom < safetyFloor)) {
+        return false;
+    }
+
+    // 只有在数据量过大(active) 且用户按住 Ctrl 键缩放时，才提前进入低细节；
+    // Ctrl 不能越过用户设置的低细节阈值，否则阈值~安全区之间会反复闪成色块。
+    const isCtrl = !!(CanvasState.isCtrlPressed || (CanvasState.dragState && CanvasState.dragState.meta && CanvasState.dragState.meta.ctrlOverlay));
+
+    // 使用缓存的active状态（避免在缩放热路径上做重计算）
+    return dim.active && isCtrl;
+}
+
+function isCanvasVirtualizationEnabled() {
+    const mode = CanvasState.virtualizationEnabled;
+    if (mode === 'off') return false;
+    if (mode === 'on') return true;
+    // 'auto': 保留原有自动判断逻辑（栏目数阈值）
+
+    try {
+        const totals = __getCanvasTotalDataStatsSync();
+        const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && isFinite(CanvasState.virtualizationMinColumns))
+            ? CanvasState.virtualizationMinColumns
+            : 25;
+        if (totals && totals.totalColumnCount < minCols) {
+            return false;
+        }
+    } catch (_) {}
+
+    return true;
+}
+
+function getCanvasVirtualizationBudget() {
+    const displayZoom = getCanvasDisplayZoom();
+    const huge = isCanvasHugeData();
+    const isLowDetail = !!CanvasState.lowDetailActive;
+
+    // 低细节：只显示叠层文字，不加载树 DOM
+    if (isLowDetail) {
+        return { marginPx: 240, maxLoaded: 0 };
+    }
+
+    // [数据密集模式] 严格控制加载预算：只加载视界窗口内的栏目
+    // 这样放大时只加载当前看得到的内容，其他保持低细节/未加载状态
+    // [Fix] 预算控制仅依赖"数据量是否过大"，而不依赖"是否按了Ctrl"(shouldInstantLowDetailOnZoom)
+    // 即使不按Ctrl进入低细节模式，只要数据量大，就必须限制DOM加载数量，否则会卡顿
+    const dataIntensive = CanvasState.dataIntensiveMode && CanvasState.dataIntensiveMode.active;
+    if (dataIntensive) {
+        const z = Math.max(0.01, Math.min(2, displayZoom));
+        let maxLoaded = 6;  // 更严格的预算
+        let marginPx = 60;  // 更小的margin，严格限制在视界窗口内
+
+        if (z < 0.50) {
+            maxLoaded = 3;
+            marginPx = 30;
+        } else if (z < 0.80) {
+            maxLoaded = 5;
+            marginPx = 50;
+        } else if (z < 1.20) {
+            maxLoaded = 8;
+            marginPx = 80;
+        } else {
+            maxLoaded = 12;
+            marginPx = 120;
+        }
+
+        return { marginPx, maxLoaded };
+    }
+
+    // 统一自适应预算策略（非数据密集模式）
+    const z = Math.max(0.01, Math.min(2, displayZoom));
+    let maxLoaded = 10;
+    let marginPx = 220;
+
+    if (z < 0.40) {
+        maxLoaded = huge ? 5 : 7;
+        marginPx = 180;
+    } else if (z < 0.70) {
+        maxLoaded = huge ? 8 : 12;
+        marginPx = 240;
+    } else if (z < 1.00) {
+        maxLoaded = huge ? 12 : 18;
+        marginPx = 360;
+    } else if (z < 1.40) {
+        maxLoaded = huge ? 18 : 28;
+        marginPx = 520;
+    } else {
+        maxLoaded = huge ? 24 : 36;
+        marginPx = 680;
+    }
+
+    return { marginPx, maxLoaded };
+}
+
+let canvasVirtualizationTimer = null;
+let canvasVirtualizationPending = false;
+let lastCanvasVirtualizationRunAt = 0;
+let canvasVirtualizationUnloadTimer = null;
+let canvasLowDetailDomPruneTimer = null;
+let canvasLowDetailDomRestoreTimer = null;
+let canvasLowDetailSafeZoneAuditTimer = null;
+let canvasZoomPerformanceModeRestoreTimer = null;
+const CANVAS_LOW_DETAIL_DOM_PRUNE_DEBOUNCE_MS = 80;
+const CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS = 360;
+const CANVAS_LOW_DETAIL_DOM_PRUNE_GRACE_MS = 12000;
+const CANVAS_LOW_DETAIL_DOM_PRUNE_BUSY_RETRY_MS = 1000;
+const CANVAS_LOW_DETAIL_DOM_RESTORE_GRACE_MS = 520;
+const CANVAS_LOW_DETAIL_DOM_RESTORE_BUSY_RETRY_MS = 180;
+const CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS = 1200;
+const CANVAS_ZOOM_PERFORMANCE_MODE_RESTORE_MS = 140;
+const CANVAS_ZOOM_PERFORMANCE_MODE_TOTAL_CARD_THRESHOLD = 80;
+const CANVAS_ZOOM_PERFORMANCE_MODE_VISIBLE_CARD_THRESHOLD = 14;
+const CANVAS_ZOOM_PERFORMANCE_MODE_MIN_DISPLAY_THRESHOLD = 0.45;
+
+function __getCanvasCardCountForInteractionPerf() {
+    const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
+    const mdCount = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(Boolean).length : 0;
+    if (tempCount + mdCount >= CANVAS_ZOOM_PERFORMANCE_MODE_TOTAL_CARD_THRESHOLD) {
+        return tempCount + mdCount;
+    }
+    let permanentCount = 0;
+    try {
+        permanentCount = document.querySelectorAll('.permanent-bookmark-section').length;
+    } catch (_) {
+        permanentCount = document.getElementById('permanentSection') ? 1 : 0;
+    }
+    return tempCount + mdCount + permanentCount;
+}
+
+function __isCanvasHotInteractionActive(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    return !!(ws && (
+        ws.classList.contains('is-zooming') ||
+        ws.classList.contains('is-scrolling') ||
+        CanvasState.isPanning ||
+        (CanvasState.inertiaState && CanvasState.inertiaState.isActive) ||
+        (CanvasState.dragState && CanvasState.dragState.isDragging)
+    ));
+}
+
+function __getCanvasZoomPerformanceDisplayThreshold() {
+    const enter = getCanvasLowDetailDisplayZoomThreshold();
+    const safe = isCanvasSafeZoneEnabled() ? getCanvasSafeZoneThreshold() : 1;
+    const safeBound = Math.max(0.25, safe - 0.08);
+    const preferred = Math.max(CANVAS_ZOOM_PERFORMANCE_MODE_MIN_DISPLAY_THRESHOLD, enter + 0.12);
+    return Math.min(preferred, safeBound);
+}
+
+function shouldUseCanvasZoomPerformanceMode() {
+    if (__isCanvasNodeMaximizedActive()) return false;
+    const displayZoom = getCanvasDisplayZoom();
+    if (displayZoom > __getCanvasZoomPerformanceDisplayThreshold()) return false;
+
+    const dim = CanvasState.dataIntensiveMode || {};
+    const stats = dim.cachedStats || {};
+    const visibleCards = Number(stats.visibleSectionCount) || 0;
+    const totalCards = __getCanvasCardCountForInteractionPerf();
+
+    return !!(
+        CanvasState.lowDetailActive ||
+        dim.active ||
+        isCanvasHugeData() ||
+        visibleCards >= CANVAS_ZOOM_PERFORMANCE_MODE_VISIBLE_CARD_THRESHOLD ||
+        totalCards >= CANVAS_ZOOM_PERFORMANCE_MODE_TOTAL_CARD_THRESHOLD
+    );
+}
+
+function setCanvasZoomPerformanceModeActive(active) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+    const next = !!active;
+    if (canvasZoomPerformanceModeRestoreTimer) {
+        clearTimeout(canvasZoomPerformanceModeRestoreTimer);
+        canvasZoomPerformanceModeRestoreTimer = null;
+    }
+    if (CanvasState.zoomPerformanceModeActive === next &&
+        workspace.classList.contains('canvas-zoom-performance') === next) {
+        return;
+    }
+    CanvasState.zoomPerformanceModeActive = next;
+    if (next) {
+        try { __clearCanvasTreeFadeInClasses(workspace); } catch (_) { }
+    }
+    workspace.classList.toggle('canvas-zoom-performance', next);
+}
+
+function updateCanvasZoomPerformanceMode(options = {}) {
+    const opts = (options && typeof options === 'object') ? options : {};
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    if (opts.forceOff) {
+        setCanvasZoomPerformanceModeActive(false);
+        return;
+    }
+
+    const shouldActive = __isCanvasHotInteractionActive(workspace) && shouldUseCanvasZoomPerformanceMode();
+    if (shouldActive) {
+        setCanvasZoomPerformanceModeActive(true);
+        return;
+    }
+
+    if (!CanvasState.zoomPerformanceModeActive) return;
+
+    const delay = opts.deferOff === false
+        ? 0
+        : CANVAS_ZOOM_PERFORMANCE_MODE_RESTORE_MS;
+    if (delay <= 0) {
+        setCanvasZoomPerformanceModeActive(false);
+        return;
+    }
+    if (canvasZoomPerformanceModeRestoreTimer) return;
+    canvasZoomPerformanceModeRestoreTimer = setTimeout(() => {
+        canvasZoomPerformanceModeRestoreTimer = null;
+        const ws = document.getElementById('canvasWorkspace');
+        if (__isCanvasHotInteractionActive(ws) && shouldUseCanvasZoomPerformanceMode()) {
+            updateCanvasZoomPerformanceMode({ deferOff: true });
+            return;
+        }
+        setCanvasZoomPerformanceModeActive(false);
+    }, delay);
+}
+
+function __isCanvasInteractionBusyForDomRestore() {
+    const ws = document.getElementById('canvasWorkspace');
+    return !!(ws && (
+        ws.classList.contains('is-zooming') ||
+        ws.classList.contains('is-scrolling') ||
+        CanvasState.isPanning ||
+        (CanvasState.dragState && CanvasState.dragState.isDragging)
+    ));
+}
+
+function __getPermanentSectionTreeUnloadKey(sectionEl) {
+    try { return __getPermanentSectionCanvasNodeId(sectionEl); } catch (_) { }
+    if (!sectionEl) return '';
+    return sectionEl.id || (sectionEl.dataset && sectionEl.dataset.permanentSectionCopyId) || '';
+}
+
+function __getPermanentSectionTreeTargets() {
+    try {
+        const scope = document.getElementById('canvasContent') || document;
+        return Array.from(scope.querySelectorAll('.permanent-bookmark-section'));
+    } catch (_) {
+        return [];
+    }
+}
+
+function __unloadPermanentSectionTreeInPlace(sectionEl) {
+    if (!sectionEl || !sectionEl.querySelector) return false;
+    if (sectionEl.classList && sectionEl.classList.contains('canvas-node-maximized')) return false;
+
+    const tree = sectionEl.querySelector('.bookmark-tree');
+    if (!tree) return false;
+
+    const alreadyUnloaded = (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
+        (sectionEl.classList && sectionEl.classList.contains('permanent-tree-unloaded'));
+    if (alreadyUnloaded) return false;
+
+    try { __flushPermanentSectionViewState(sectionEl); } catch (_) { }
+
+    try { tree.replaceChildren(); } catch (_) { tree.innerHTML = ''; }
+    try { tree.style.display = 'none'; } catch (_) { }
+    try { tree.dataset.contentHidden = 'true'; } catch (_) { }
+    try { tree.dataset.contentUnloaded = 'true'; } catch (_) { }
+
+    const body = sectionEl.querySelector('.permanent-section-body');
+    if (body && body.dataset) {
+        try { body.dataset.contentHidden = 'true'; } catch (_) { }
+        try { body.dataset.contentUnloaded = 'true'; } catch (_) { }
+    }
+
+    try { sectionEl.classList.add('permanent-tree-unloaded'); } catch (_) { }
+    const key = __getPermanentSectionTreeUnloadKey(sectionEl);
+    if (key) {
+        try { CanvasState.unloadedPermanentSectionTrees.add(key); } catch (_) { }
+    }
+    return true;
+}
+
+function __unloadPermanentSectionTreesForLowDetail() {
+    let changed = false;
+    __getPermanentSectionTreeTargets().forEach((sectionEl) => {
+        try {
+            if (__unloadPermanentSectionTreeInPlace(sectionEl)) changed = true;
+        } catch (_) { }
+    });
+    return changed;
+}
+
+function __ensurePermanentSectionTreeLoadedInPlace(sectionEl) {
+    if (!sectionEl || !sectionEl.querySelector) return false;
+    const tree = sectionEl.querySelector('.bookmark-tree');
+    if (!tree) return false;
+
+    const isUnloaded = (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
+        (sectionEl.classList && sectionEl.classList.contains('permanent-tree-unloaded'));
+    if (!isUnloaded) return false;
+
+    try { tree.style.display = ''; } catch (_) { }
+    try { tree.dataset.contentHidden = 'false'; } catch (_) { }
+    try { tree.dataset.contentUnloaded = 'false'; } catch (_) { }
+
+    const body = sectionEl.querySelector('.permanent-section-body');
+    if (body && body.dataset) {
+        try { body.dataset.contentHidden = 'false'; } catch (_) { }
+        try { body.dataset.contentUnloaded = 'false'; } catch (_) { }
+    }
+
+    try { sectionEl.classList.remove('permanent-tree-unloaded'); } catch (_) { }
+    const key = __getPermanentSectionTreeUnloadKey(sectionEl);
+    if (key) {
+        try { CanvasState.unloadedPermanentSectionTrees.delete(key); } catch (_) { }
+    }
+
+    let rendered = false;
+    try {
+        if (tree && typeof window.__renderPermanentTreeIntoTree === 'function') {
+            rendered = !!window.__renderPermanentTreeIntoTree(tree, { force: true, reason: 'viewport-lazy-load' });
+        }
+    } catch (_) { }
+    if (!rendered) {
+        try {
+            if (typeof window.__renderPermanentTreeSharedViews === 'function') {
+                rendered = !!window.__renderPermanentTreeSharedViews({
+                    includePrimary: true,
+                    includeCopies: true,
+                    force: true,
+                    reason: 'viewport-lazy-load'
+                });
+            }
+        } catch (_) { }
+    }
+    return rendered;
+}
+
+function __restorePermanentSectionTreesAfterLowDetail() {
+    const targets = __getPermanentSectionTreeTargets().filter((sectionEl) => {
+        const tree = sectionEl && sectionEl.querySelector ? sectionEl.querySelector('.bookmark-tree') : null;
+        return !!(tree && (
+            (tree.dataset && tree.dataset.contentUnloaded === 'true') ||
+            (sectionEl.classList && sectionEl.classList.contains('permanent-tree-unloaded'))
+        ));
+    });
+    if (!targets.length) return false;
+
+    targets.forEach((sectionEl) => {
+        try {
+            const tree = sectionEl.querySelector('.bookmark-tree');
+            if (tree) {
+                tree.style.display = '';
+                tree.dataset.contentHidden = 'false';
+                tree.dataset.contentUnloaded = 'false';
+            }
+            const body = sectionEl.querySelector('.permanent-section-body');
+            if (body && body.dataset) {
+                body.dataset.contentHidden = 'false';
+                body.dataset.contentUnloaded = 'false';
+            }
+        } catch (_) { }
+    });
+
+    let rendered = false;
+    try {
+        if (typeof window.__renderPermanentTreeSharedViews === 'function') {
+            rendered = !!window.__renderPermanentTreeSharedViews({
+                includePrimary: true,
+                includeCopies: true,
+                force: true,
+                reason: 'low-detail-exit'
+            });
+        }
+    } catch (_) { }
+
+    if (!rendered) {
+        targets.forEach((sectionEl) => {
+            try {
+                const tree = sectionEl.querySelector('.bookmark-tree');
+                if (tree && typeof window.__renderPermanentTreeIntoTree === 'function') {
+                    if (window.__renderPermanentTreeIntoTree(tree, { force: true, reason: 'low-detail-exit' })) {
+                        rendered = true;
+                    }
+                }
+            } catch (_) { }
+        });
+    }
+
+    targets.forEach((sectionEl) => {
+        try {
+            sectionEl.classList.remove('permanent-tree-unloaded');
+            const key = __getPermanentSectionTreeUnloadKey(sectionEl);
+            if (key) CanvasState.unloadedPermanentSectionTrees.delete(key);
+        } catch (_) { }
+    });
+
+    return rendered;
+}
+
+function __scheduleCanvasLowDetailDomPrune(delayMs = CANVAS_LOW_DETAIL_DOM_PRUNE_GRACE_MS, options = {}) {
+    if (canvasLowDetailDomRestoreTimer) {
+        clearTimeout(canvasLowDetailDomRestoreTimer);
+        canvasLowDetailDomRestoreTimer = null;
+    }
+    if (CanvasState.lowDetailDomPruned && CanvasState.lowDetailActive) return;
+    if (canvasLowDetailDomPruneTimer) {
+        clearTimeout(canvasLowDetailDomPruneTimer);
+        canvasLowDetailDomPruneTimer = null;
+    }
+    const now = Date.now();
+    const sinceLast = now - (Number(CanvasState.lowDetailDomLastPruneAt || 0) || 0);
+    const throttleDelay = sinceLast >= CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS
+        ? 0
+        : (CANVAS_LOW_DETAIL_DOM_PRUNE_THROTTLE_MS - sinceLast);
+    const opts = (options && typeof options === 'object') ? options : {};
+    const minDelay = opts.allowShortDelay ? 0 : CANVAS_LOW_DETAIL_DOM_PRUNE_GRACE_MS;
+    const requestedDelay = Math.max(minDelay, Number(delayMs) || 0);
+    const delay = Math.max(requestedDelay, CanvasState.lowDetailDomPruned ? throttleDelay : Math.min(throttleDelay, CANVAS_LOW_DETAIL_DOM_PRUNE_DEBOUNCE_MS));
+    const generation = (Number(CanvasState.lowDetailDomPruneGeneration || 0) || 0) + 1;
+    CanvasState.lowDetailDomPruneGeneration = generation;
+    canvasLowDetailDomPruneTimer = setTimeout(() => {
+        canvasLowDetailDomPruneTimer = null;
+        if (!CanvasState.lowDetailActive) return;
+        if (CanvasState.lowDetailDomPruneGeneration !== generation) return;
+        if (__isCanvasInteractionBusyForDomRestore()) {
+            __scheduleCanvasLowDetailDomPrune(CANVAS_LOW_DETAIL_DOM_PRUNE_BUSY_RETRY_MS, { allowShortDelay: true });
+            return;
+        }
+        try { __unloadPermanentSectionTreesForLowDetail(); } catch (_) { }
+        if (isCanvasVirtualizationEnabled()) {
+            try { runCanvasVirtualizationUpdate({ force: true, doLoad: false, doUnload: true, lowDetailPrune: true }); } catch (_) { }
+        } else {
+            try { startCanvasLowDetailUnloadJob(); } catch (_) { }
+        }
+        CanvasState.lowDetailDomPruned = true;
+        CanvasState.lowDetailDomLastPruneAt = Date.now();
+    }, delay);
+}
+
+function __scheduleCanvasLowDetailDomRestore(delayMs = CANVAS_LOW_DETAIL_DOM_RESTORE_GRACE_MS) {
+    if (canvasLowDetailDomPruneTimer) {
+        clearTimeout(canvasLowDetailDomPruneTimer);
+        canvasLowDetailDomPruneTimer = null;
+    }
+    const hasUnloadedTemp = CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.size > 0;
+    const hasUnloadedPerm = CanvasState.unloadedPermanentSectionTrees && CanvasState.unloadedPermanentSectionTrees.size > 0;
+    if (!CanvasState.lowDetailDomPruned && !hasUnloadedTemp && !hasUnloadedPerm) {
+        return;
+    }
+    if (canvasLowDetailDomRestoreTimer) {
+        clearTimeout(canvasLowDetailDomRestoreTimer);
+        canvasLowDetailDomRestoreTimer = null;
+    }
+    canvasLowDetailDomRestoreTimer = setTimeout(() => {
+        canvasLowDetailDomRestoreTimer = null;
+        if (CanvasState.lowDetailActive) return;
+        if (__isCanvasInteractionBusyForDomRestore()) {
+            __scheduleCanvasLowDetailDomRestore(CANVAS_LOW_DETAIL_DOM_RESTORE_BUSY_RETRY_MS);
+            return;
+        }
+        try { __restorePermanentSectionTreesAfterLowDetail(); } catch (_) { }
+        if (!isCanvasVirtualizationEnabled()) {
+            try { __restoreAllVirtualisedNodes(); } catch (_) { }
+        }
+        CanvasState.lowDetailDomPruned = false;
+        CanvasState.lowDetailDomLastRestoreAt = Date.now();
+        try { scheduleCanvasVirtualizationUpdate(0); } catch (_) { }
+    }, Math.max(0, Number(delayMs) || 0));
+}
+
+function __updateNodeOffScreenState(id, isOffScreen) {
+    if (!CanvasState.offScreenNodesTime) {
+        CanvasState.offScreenNodesTime = new Map();
+    }
+    if (isOffScreen) {
+        if (!CanvasState.offScreenNodesTime.has(id)) {
+            CanvasState.offScreenNodesTime.set(id, Date.now());
+        }
+    } else {
+        CanvasState.offScreenNodesTime.delete(id);
+    }
+}
+
+/**
+ * 轻量级缓存：获取当前 DOM 中已加载的书签+文件夹节点总数
+ * 使用 3 秒 TTL 缓存避免频繁 DOM 查询
+ */
+function __getLoadedNodeCountFast() {
+    try {
+        const totals = __getCanvasTotalDataStatsSync();
+        return (totals.totalBookmarkCount || 0) + (totals.totalFolderCount || 0);
+    } catch (_) {
+        return 0;
+    }
+}
+
+/**
+ * 判断视野外低细节模式是否在运行时实际生效：
+ * - 用户开关必须打开
+ * - 已加载节点数（书签+文件夹）必须 >= 自动触发阈值
+ */
+function __isViewportLowDetailEffective() {
+    if (CanvasState.lowDetailEnabled === false) return false;
+
+    const mode = CanvasState.viewportLowDetailEnabled;
+    if (mode === 'off') return false;
+    if (mode === 'on') return true;
+    // 'auto': 保留原有自动判断逻辑
+
+    const minNodes = (typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' &&
+                      Number.isFinite(CanvasState.viewportLowDetailMinLoadedNodes))
+        ? CanvasState.viewportLowDetailMinLoadedNodes
+        : 100;
+
+    return __getLoadedNodeCountFast() >= minNodes;
+}
+
+function __shouldNodeBeLowDetail(id, defaultIsLowDetail) {
+    if (!defaultIsLowDetail) {
+        return false;
+    }
+    if (CanvasState.lowDetailActive) {
+        return true;
+    }
+    const delayS = CanvasState.viewportLowDetailDelayS;
+    if (typeof delayS !== 'number' || delayS <= 0) {
+        return true;
+    }
+    const offScreenTime = CanvasState.offScreenNodesTime ? CanvasState.offScreenNodesTime.get(id) : null;
+    if (offScreenTime === null) {
+        return false;
+    }
+    return (Date.now() - offScreenTime) >= (delayS * 1000);
+}
+
+function __shouldNodeBeUnloaded(id) {
+    const delayS = CanvasState.virtualizationUnloadDelayS;
+    if (typeof delayS !== 'number' || delayS <= 0) {
+        return true;
+    }
+    const offScreenTime = CanvasState.offScreenNodesTime ? CanvasState.offScreenNodesTime.get(id) : null;
+    if (offScreenTime === null) {
+        return false;
+    }
+    return (Date.now() - offScreenTime) >= (delayS * 1000);
+}
+
+let canvasVirtualizationWakeupTimer = null;
+function __scheduleCanvasVirtualizationWakeup(delayMs) {
+    if (canvasVirtualizationWakeupTimer) {
+        clearTimeout(canvasVirtualizationWakeupTimer);
+        canvasVirtualizationWakeupTimer = null;
+    }
+    if (Number.isFinite(delayMs) && delayMs > 0 && delayMs !== Infinity) {
+        canvasVirtualizationWakeupTimer = setTimeout(() => {
+            canvasVirtualizationWakeupTimer = null;
+            try {
+                runCanvasVirtualizationUpdate({ force: true });
+            } catch (_) {}
+        }, delayMs + 50);
+    }
+}
+
+function __updateVirtualizationWakeupScheduler() {
+    let minWakeup = Infinity;
+    const nowTime = Date.now();
+    if (CanvasState.offScreenNodesTime && CanvasState.offScreenNodesTime.size > 0) {
+        const lowDetailDelayMs = (CanvasState.viewportLowDetailDelayS || 5.0) * 1000;
+        const unloadDelayMs = (CanvasState.virtualizationUnloadDelayS || 10.0) * 1000;
+
+        for (const [id, offScreenTime] of CanvasState.offScreenNodesTime.entries()) {
+            const elapsed = nowTime - offScreenTime;
+
+            if (__isViewportLowDetailEffective() && elapsed < lowDetailDelayMs) {
+                const rem = lowDetailDelayMs - elapsed;
+                if (rem < minWakeup) minWakeup = rem;
+            }
+            if (isCanvasVirtualizationEnabled() && elapsed < unloadDelayMs) {
+                const rem = unloadDelayMs - elapsed;
+                if (rem < minWakeup) minWakeup = rem;
+            }
+        }
+    }
+    __scheduleCanvasVirtualizationWakeup(minWakeup);
+}
+
+function cancelCanvasVirtualizationUnloadUpdate() {
+    if (!canvasVirtualizationUnloadTimer) return;
+    clearTimeout(canvasVirtualizationUnloadTimer);
+    canvasVirtualizationUnloadTimer = null;
+}
+
+function cancelAllCanvasVirtualizationTimers() {
+    if (canvasVirtualizationUnloadTimer) {
+        clearTimeout(canvasVirtualizationUnloadTimer);
+        canvasVirtualizationUnloadTimer = null;
+    }
+    if (canvasVirtualizationWakeupTimer) {
+        clearTimeout(canvasVirtualizationWakeupTimer);
+        canvasVirtualizationWakeupTimer = null;
+    }
+    if (canvasVirtualizationTimer) {
+        clearTimeout(canvasVirtualizationTimer);
+        canvasVirtualizationTimer = null;
+        canvasVirtualizationPending = false;
+    }
+}
+
+if (!window.__canvasVirtualizationVisibilityBound) {
+    window.__canvasVirtualizationVisibilityBound = true;
+    document.addEventListener('visibilitychange', () => {
+        try {
+            if (document.visibilityState === 'hidden') {
+                cancelAllCanvasVirtualizationTimers();
+            } else if (document.visibilityState === 'visible') {
+                if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
+                    scheduleCanvasVirtualizationUpdate(60);
+                }
+            }
+        } catch (_) { }
+    });
+}
+
+// 虚拟化：卸载额外防抖（避免频繁缩放/窗口变化导致树内容反复卸载/重建）
+function scheduleCanvasVirtualizationUnloadUpdate(delayMs = null) {
+    if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective()) return;
+
+    cancelCanvasVirtualizationUnloadUpdate();
+
+    const configured = (typeof CanvasState.virtualizationUnloadDebounceMs === 'number' && isFinite(CanvasState.virtualizationUnloadDebounceMs))
+        ? Math.max(0, CanvasState.virtualizationUnloadDebounceMs)
+        : 1000;
+    const delay = (typeof delayMs === 'number' && isFinite(delayMs))
+        ? Math.max(0, delayMs)
+        : (isCanvasHugeData() ? (configured + 300) : configured);
+
+    canvasVirtualizationUnloadTimer = setTimeout(() => {
+        canvasVirtualizationUnloadTimer = null;
+        const ws = document.getElementById('canvasWorkspace');
+        const isInteracting = ws && (isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || ws.classList.contains('is-zooming'));
+        if (isInteracting) {
+            scheduleCanvasVirtualizationUnloadUpdate(configured);
+            return;
+        }
+        try { runCanvasVirtualizationUpdate({ doLoad: false, doUnload: true }); } catch (_) { }
+    }, delay);
+}
+
+function scheduleCanvasVirtualizationUpdate(delayMs = null) {
+    if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective()) {
+        cancelAllCanvasVirtualizationTimers();
+        return;
+    }
+    cancelCanvasVirtualizationUnloadUpdate();
+    if (canvasVirtualizationPending) return;
+    canvasVirtualizationPending = true;
+
+    if (canvasVirtualizationTimer) {
+        clearTimeout(canvasVirtualizationTimer);
+        canvasVirtualizationTimer = null;
+    }
+
+    const delay = typeof delayMs === 'number'
+        ? delayMs
+        : (isCanvasHugeData() ? 260 : 120);
+
+    canvasVirtualizationTimer = setTimeout(() => {
+        canvasVirtualizationTimer = null;
+        canvasVirtualizationPending = false;
+        // 低细节：先切视觉，重 DOM 延迟卸载，避免边界附近来回缩放反复构建/销毁。
+        if (CanvasState.lowDetailActive) {
+            try { __updateNonTempNodesViewportVisibility(); } catch (_) { }
+            try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
+            return;
+        }
+        // 正常：先补加载（稳定体验），再延迟卸载（避免抖动）
+        try { runCanvasVirtualizationUpdate({ doLoad: true, doUnload: false }); } catch (_) { }
+        scheduleCanvasVirtualizationUnloadUpdate();
+    }, delay);
+}
+
+let __canvasLazyLoadQueue = {
+    generation: 0,
+    frameId: null,
+    queue: []
+};
+
+function __clearCanvasLazyLoadQueue() {
+    __canvasLazyLoadQueue.generation++;
+    if (__canvasLazyLoadQueue.frameId) {
+        try { cancelAnimationFrame(__canvasLazyLoadQueue.frameId); } catch (_) { }
+        __canvasLazyLoadQueue.frameId = null;
+    }
+    __canvasLazyLoadQueue.queue = [];
+}
+
+function __enqueueCanvasLazyLoadNode(nodeInfo) {
+    __canvasLazyLoadQueue.queue.push(nodeInfo);
+}
+
+function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoomIn, viewportCenterX, viewportCenterY, options = {}) {
+    const generation = __canvasLazyLoadQueue.generation;
+    const queue = __canvasLazyLoadQueue.queue;
+    if (!queue.length) return;
+
+    // Calculate distance and sort the queue
+    queue.forEach(item => {
+        item.distance = Math.hypot(
+            item.x + item.w / 2 - viewportCenterX,
+            item.y + item.h / 2 - viewportCenterY
+        );
+    });
+
+    if (sortMode === 'x-asc') {
+        queue.sort((a, b) => a.x - b.x);
+    } else if (sortMode === 'x-desc') {
+        queue.sort((a, b) => b.x - a.x);
+    } else if (sortMode === 'y-asc') {
+        queue.sort((a, b) => a.y - b.y);
+    } else if (sortMode === 'y-desc') {
+        queue.sort((a, b) => b.y - a.y);
+    } else {
+        queue.sort((a, b) => a.distance - b.distance);
+    }
+
+    const LAZY_LOAD_MAX_PER_FRAME = 4;
+    let index = 0;
+
+    const renderItem = (item) => {
+        const type = item.type;
+        const data = item.data;
+        const id = item.id;
+
+        if (type === 'temp') {
+            try { renderTempNode(data, { skipTree: true }); } catch (_) { }
+            const el = document.getElementById(id);
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                if (CanvasState.lowDetailActive) {
+                    try { __unloadTempSectionTreeInPlace(id); } catch (_) { }
+                } else {
+                    try { __ensureTempSectionTreeLoadedInPlace(data); } catch (_) { }
+                }
+            }
+        } else if (type === 'md') {
+            try { renderMdNode(data, { shellOnly: item.shouldActive }); } catch (_) { }
+            const el = document.getElementById(id);
+            if (el) {
+                if (item.shouldActive) {
+                    try { __unloadMdNodeContentInPlace(data); } catch (_) { }
+                } else {
+                    try { __ensureMdNodeContentLoadedInPlace(data); } catch (_) { }
+                }
+                __setCanvasViewportLazyShellClass(el, false);
+                el.classList.toggle('low-detail-active', item.shouldActive);
+                if (item.shouldActive) {
+                    try { __ensureMdNodeLowDetailOverlay(el, data); } catch (_) { }
+                }
+            }
+        } else if (type === 'copy') {
+            try {
+                __createPermanentSectionCopyFromStorage({
+                    id: item.copyId,
+                    displayIndex: item.displayIndex,
+                    ...data
+                });
+            } catch (_) { }
+            const el = document.getElementById(id);
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                if (!CanvasState.lowDetailActive && !item.shouldActive) {
+                    try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
+                }
+                el.classList.toggle('low-detail-active', item.shouldActive);
+                if (item.shouldActive) {
+                    try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
+                }
+            }
+        } else if (type === 'group') {
+            try { renderMdNode(data); } catch (_) { }
+            const el = document.getElementById(id);
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                el.classList.toggle('low-detail-active', item.shouldActive);
+                if (item.shouldActive && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
+                    try { window.__BCSCardGroup.ensureLowDetailOverlay(el, data); } catch (_) { }
+                }
+            }
+        }
+    };
+
+    const step = () => {
+        if (__canvasLazyLoadQueue.generation !== generation) return;
+        let count = 0;
+
+        const currentBounds = __getCanvasViewportBounds(workspace, 0);
+
+        while (index < queue.length && count < LAZY_LOAD_MAX_PER_FRAME) {
+            const item = queue[index];
+            const inViewport = !__isCanvasRectOutsideBounds(item.x, item.y, item.w, item.h, currentBounds);
+
+            renderItem(item);
+            index++;
+
+            if (!inViewport) {
+                count++;
+            }
+        }
+        if (index < queue.length) {
+            __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
+        } else {
+            __canvasLazyLoadQueue.frameId = null;
+            try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+            try { scheduleEdgesRender(0); } catch (_) { }
+        }
+    };
+
+    __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
+}
+
+
+function runCanvasVirtualizationUpdate(options = {}) {
+    const enabled = isCanvasVirtualizationEnabled();
+    const viewportLowDetail = __isViewportLowDetailEffective();
+    if (!enabled && !viewportLowDetail) {
+        if (CanvasState.__virtualizationWasEnabled !== false || CanvasState.__viewportLowDetailWasActive) {
+            CanvasState.__virtualizationWasEnabled = false;
+            CanvasState.__viewportLowDetailWasActive = false;
+            cancelAllCanvasVirtualizationTimers();
+            if (CanvasState.offScreenNodesTime) {
+                CanvasState.offScreenNodesTime.clear();
+            }
+            try { __restoreAllVirtualisedNodes(); } catch (_) {}
+        }
+        return;
+    }
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    // Block virtualization updates during low-detail visual ripple transition to avoid conflicts
+    if (workspace.classList && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)) return;
+
+    if (typeof options !== 'object' || options === null) {
+        options = {};
+    }
+    let {
+        force = false,
+        doUnload = true, // 不在预算内/低细节：卸载树 DOM
+        doLoad = true    // 在预算内：加载树 DOM
+    } = options;
+
+    const allowLowDetailPrune = !!options.lowDetailPrune;
+    if (CanvasState.lowDetailActive) {
+        doLoad = false;
+        if (!allowLowDetailPrune) {
+            try { __updateNonTempNodesViewportVisibility({ doLoad: false, doUnload: doUnload }); } catch (_) { }
+            if (doUnload) {
+                try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
+            }
+            return;
+        }
+        try { __unloadPermanentSectionTreesForLowDetail(); } catch (_) { }
+        doUnload = true;
+    }
+
+    // 交互中不做 DOM 装载/卸载（只做 transform），保证缩放/拖动过程流畅
+    const isInteracting = (CanvasState.touchpadState && CanvasState.touchpadState.isScrolling) || CanvasState.isPanning || CanvasState.dragState.isDragging || workspace.classList.contains('is-zooming');
+    if (isInteracting && !force) {
+        if (!doLoad && doUnload) {
+            scheduleCanvasVirtualizationUnloadUpdate(isCanvasHugeData() ? 320 : 180);
+        } else {
+            scheduleCanvasVirtualizationUpdate(isCanvasHugeData() ? 320 : 180);
+        }
+        return;
+    }
+
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const minInterval = isCanvasHugeData() ? 260 : 140;
+    if (now - lastCanvasVirtualizationRunAt < minInterval) {
+        if (!doLoad && doUnload) {
+            scheduleCanvasVirtualizationUnloadUpdate(minInterval);
+        } else {
+            scheduleCanvasVirtualizationUpdate(minInterval);
+        }
+        return;
+    }
+    lastCanvasVirtualizationRunAt = now;
+
+    if (!enabled) {
+        CanvasState.__virtualizationWasEnabled = false;
+        CanvasState.__viewportLowDetailWasActive = true;
+        const bounds = __getCanvasViewportBounds(workspace, 0);
+        const cards = Array.from(workspace.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
+        const isGlobalLowDetail = !!CanvasState.lowDetailActive;
+        cards.forEach(card => {
+            const cardId = card.id;
+            const isOutside = __isCardOutsideViewportBounds(card, bounds);
+            __updateNodeOffScreenState(cardId, isOutside);
+
+            let shouldBeLowDetail = isGlobalLowDetail;
+            if (!shouldBeLowDetail && viewportLowDetail) {
+                shouldBeLowDetail = __shouldNodeBeLowDetail(cardId, isOutside);
+            }
+            if (card.classList && card.classList.contains('canvas-node-maximized')) {
+                shouldBeLowDetail = false;
+            }
+            const wasActive = card.classList.contains('low-detail-active');
+            if (shouldBeLowDetail !== wasActive) {
+                card.classList.toggle('low-detail-active', shouldBeLowDetail);
+            }
+            if (shouldBeLowDetail) {
+                __ensureLowDetailOverlayForCard(card);
+            } else {
+                const sectionId = card.id;
+                if (card.classList.contains('temp-canvas-node')) {
+                    const section = (CanvasState.tempSections || []).find(s => s && s.id === sectionId);
+                    if (section) {
+                        try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
+                    }
+                } else if (card.classList.contains('permanent-bookmark-section')) {
+                    try { __ensurePermanentSectionTreeLoadedInPlace(card); } catch (_) { }
+                } else if (card.classList.contains('md-canvas-node')) {
+                    const node = (CanvasState.mdNodes || []).find(n => n && n.id === sectionId);
+                    if (node) {
+                        try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
+                    }
+                }
+            }
+        });
+        try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+
+        // Wakeup logic for non-virtualized delay low detail transitions
+        let minWakeup = Infinity;
+        const nowTime = Date.now();
+        if (CanvasState.offScreenNodesTime && CanvasState.offScreenNodesTime.size > 0) {
+            const lowDetailDelayMs = (CanvasState.viewportLowDetailDelayS || 5.0) * 1000;
+            for (const [id, offScreenTime] of CanvasState.offScreenNodesTime.entries()) {
+                const elapsed = nowTime - offScreenTime;
+                if (viewportLowDetail && elapsed < lowDetailDelayMs) {
+                    const rem = lowDetailDelayMs - elapsed;
+                    if (rem < minWakeup) minWakeup = rem;
+                }
+            }
+        }
+        __scheduleCanvasVirtualizationWakeup(minWakeup);
+        return;
+    }
+    CanvasState.__virtualizationWasEnabled = true;
+
+    // Detect movement directions for sequential queue loading
+    const prevZoom = CanvasState.previousZoom !== null ? CanvasState.previousZoom : (CanvasState.zoom || 1);
+    const currentZoom = CanvasState.zoom || 1;
+    const prevPanX = CanvasState.previousPanOffsetX !== null ? CanvasState.previousPanOffsetX : (CanvasState.panOffsetX || 0);
+    const currentPanX = CanvasState.panOffsetX || 0;
+    const prevPanY = CanvasState.previousPanOffsetY !== null ? CanvasState.previousPanOffsetY : (CanvasState.panOffsetY || 0);
+    const currentPanY = CanvasState.panOffsetY || 0;
+
+    const zoomChanged = prevZoom !== currentZoom;
+    const panChanged = prevPanX !== currentPanX || prevPanY !== currentPanY;
+
+    let sortMode = 'distance';
+    let zoomIn = false;
+
+    if (zoomChanged) {
+        sortMode = 'distance';
+        zoomIn = currentZoom > prevZoom;
+    } else if (panChanged) {
+        const dx = currentPanX - prevPanX;
+        const dy = currentPanY - prevPanY;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            sortMode = dx < 0 ? 'x-asc' : 'x-desc';
+        } else {
+            sortMode = dy < 0 ? 'y-asc' : 'y-desc';
+        }
+    }
+
+    // Clear previous queued frames
+    __clearCanvasLazyLoadQueue();
+
+    const { marginPx, maxLoaded } = getCanvasVirtualizationBudget();
+
+    const rect = workspace.getBoundingClientRect();
+    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const panX = CanvasState.panOffsetX || 0;
+    const panY = CanvasState.panOffsetY || 0;
+
+    const margin = marginPx / zoom;
+    const viewportLeft0 = (0 - panX) / zoom;
+    const viewportRight0 = (rect.width - panX) / zoom;
+    const viewportTop0 = (0 - panY) / zoom;
+    const viewportBottom0 = (rect.height - panY) / zoom;
+
+    const viewportLeft = viewportLeft0 - margin;
+    const viewportRight = viewportRight0 + margin;
+    const viewportTop = viewportTop0 - margin;
+    const viewportBottom = viewportBottom0 + margin;
+    const viewportCenterX = (rect.width / 2 - panX) / zoom;
+    const viewportCenterY = (rect.height / 2 - panY) / zoom;
+
+    const visualBounds = __getCanvasViewportBounds(workspace, 0);
+
+    const candidates = [];
+    const mustLoad = new Set(); // 视界内：必须保持树内容加载（减少“可见区域闪烁”）
+    for (const section of (CanvasState.tempSections || [])) {
+        if (!section || !section.id) continue;
+        const baseSize = getTempSectionBaseSize(section);
+        const x = Number(section.x);
+        const y = Number(section.y);
+        const w = Number(section.width || baseSize.width);
+        const h = Number(section.height || baseSize.height);
+        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
+        const inViewport = !(
+            x + w < viewportLeft0 ||
+            x > viewportRight0 ||
+            y + h < viewportTop0 ||
+            y > viewportBottom0
+        );
+        if (inViewport) mustLoad.add(section.id);
+        __updateNodeOffScreenState(section.id, !inViewport);
+        const inRange = !(
+            x + w < viewportLeft ||
+            x > viewportRight ||
+            y + h < viewportTop ||
+            y > viewportBottom
+        );
+        if (!inRange) continue;
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        const dx_center = cx - viewportCenterX;
+        const dy_center = cy - viewportCenterY;
+        candidates.push({ section, dist2: dx_center * dx_center + dy_center * dy_center });
+    }
+
+    candidates.sort((a, b) => a.dist2 - b.dist2);
+
+    const desired = new Set();
+    let effectiveMaxLoaded = Math.max(0, maxLoaded);
+    if (mustLoad.size > effectiveMaxLoaded) {
+        effectiveMaxLoaded = mustLoad.size;
+    }
+
+    // 1) 视界内必须加载
+    for (const id of mustLoad) {
+        desired.add(id);
+    }
+
+    const isLoadedNow = (id) => !!id && !(CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(id));
+
+    // 2) 优先保留已经加载过的（避免频繁缩放时“换一批栏目反复加载/卸载”造成闪烁）
+    for (let i = 0; i < candidates.length && desired.size < effectiveMaxLoaded; i++) {
+        const id = candidates[i].section.id;
+        if (!id || desired.has(id)) continue;
+        if (!isLoadedNow(id)) continue;
+        desired.add(id);
+    }
+
+    // 3) 再补齐最近的
+    for (let i = 0; i < candidates.length && desired.size < effectiveMaxLoaded; i++) {
+        const id = candidates[i].section.id;
+        if (!id || desired.has(id)) continue;
+        desired.add(id);
+    }
+
+    const isRippleOrLowDetail = !!CanvasState.lowDetailActive || (workspace && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS));
+
+    for (const section of (CanvasState.tempSections || [])) {
+        if (!section || !section.id) continue;
+        let shouldLoad = desired.has(section.id);
+        if (!shouldLoad) {
+            // 兜底：严格视口内永远不卸载
+            const baseSize = getTempSectionBaseSize(section);
+            const x = Number(section.x);
+            const y = Number(section.y);
+            const w = Number(section.width || baseSize.width);
+            const h = Number(section.height || baseSize.height);
+            const hasRect = [x, y, w, h].every(v => typeof v === 'number' && isFinite(v));
+            const inViewportStrict = hasRect ? !(
+                x + w < viewportLeft0 ||
+                x > viewportRight0 ||
+                y + h < viewportTop0 ||
+                y > viewportBottom0
+            ) : true;
+            if (inViewportStrict) shouldLoad = true;
+        }
+
+        let element = document.getElementById(section.id);
+        const shouldKeepLoaded = element && __shouldKeepLazyCardDomLoaded(element);
+
+        if (!shouldLoad && !shouldKeepLoaded) {
+            const canUnload = __shouldNodeBeUnloaded(section.id);
+            if (doUnload && element && canUnload) {
+                try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+                try { element.remove(); } catch (_) { }
+                element = null;
+            }
+            continue;
+        }
+
+        const baseSize = getTempSectionBaseSize(section);
+        const x = Number(section.x);
+        const y = Number(section.y);
+        const w = Number(section.width || baseSize.width);
+        const h = Number(section.height || baseSize.height);
+        const inViewportStrict = !(
+            x + w < viewportLeft0 ||
+            x > viewportRight0 ||
+            y + h < viewportTop0 ||
+            y > viewportBottom0
+        );
+
+        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
+
+        if (!element) {
+            if (shouldInstantLoad) {
+                try { renderTempNode(section, { skipTree: isRippleOrLowDetail }); } catch (_) { }
+                element = document.getElementById(section.id);
+            } else {
+                __enqueueCanvasLazyLoadNode({
+                    type: 'temp',
+                    id: section.id,
+                    x: x,
+                    y: y,
+                    w: w,
+                    h: h,
+                    data: section
+                });
+            }
+        }
+
+        if (element) {
+            __setCanvasViewportLazyShellClass(element, false);
+            let isLowDetail = !!CanvasState.lowDetailActive;
+            if (!isLowDetail && __isViewportLowDetailEffective()) {
+                const baseSize = getTempSectionBaseSize(section);
+                const x = Number(section.x);
+                const y = Number(section.y);
+                const w = Number(section.width || baseSize.width);
+                const h = Number(section.height || baseSize.height);
+                const isOutside = __isCanvasRectOutsideBounds(x, y, w, h, visualBounds);
+                isLowDetail = __shouldNodeBeLowDetail(section.id, isOutside);
+            }
+            if (element.classList && element.classList.contains('canvas-node-maximized')) {
+                isLowDetail = false;
+            }
+
+            const wasActive = element.classList.contains('low-detail-active');
+            if (isLowDetail !== wasActive) {
+                element.classList.toggle('low-detail-active', isLowDetail);
+            }
+
+            if (isLowDetail) {
+                const canUnload = __shouldNodeBeUnloaded(section.id);
+                if (doUnload && canUnload) {
+                    try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+                }
+            } else if (doLoad) {
+                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
+            }
+        }
+    }
+
+    try {
+        __updateNonTempNodesViewportVisibility(options);
+    } catch (_) {}
+
+    // Start sequential loading of enqueued items
+    try {
+        __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoomIn, viewportCenterX, viewportCenterY, options);
+    } catch (_) {}
+
+    // Save state for next interaction check
+    CanvasState.previousZoom = currentZoom;
+    CanvasState.previousPanOffsetX = currentPanX;
+    CanvasState.previousPanOffsetY = currentPanY;
+
+    try { __updateVirtualizationWakeupScheduler(); } catch (_) { }
+}
+
+function __restoreAllVirtualisedNodes() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    // 清除所有卡片的低细节样式与屏蔽状态
+    try {
+        workspace.querySelectorAll('.low-detail-active').forEach(el => el.classList.remove('low-detail-active'));
+        workspace.querySelectorAll('.card-group-low-detail-child-hidden').forEach(el => el.classList.remove('card-group-low-detail-child-hidden'));
+        __clearCardGroupLowDetailMembershipState();
+    } catch (_) {}
+
+    // 1. Temp sections
+    if (Array.isArray(CanvasState.tempSections)) {
+        CanvasState.tempSections.forEach(section => {
+            if (!section || !section.id) return;
+            let el = document.getElementById(section.id);
+            if (!el) {
+                try { renderTempNode(section); } catch (_) {}
+                el = document.getElementById(section.id);
+            }
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) {}
+            }
+        });
+    }
+
+    // 2. MD Nodes & Groups
+    if (Array.isArray(CanvasState.mdNodes)) {
+        CanvasState.mdNodes.forEach(node => {
+            if (!node || !node.id) return;
+            let el = document.getElementById(node.id);
+            if (!el) {
+                try { renderMdNode(node); } catch (_) {}
+                el = document.getElementById(node.id);
+            }
+            if (el) {
+                __setCanvasViewportLazyShellClass(el, false);
+                if (node.subtype !== 'card-group') {
+                    try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) {}
+                }
+            }
+        });
+    }
+
+    // 3. Permanent section
+    const mainEl = document.getElementById('permanentSection');
+    if (mainEl) {
+        __setCanvasViewportLazyShellClass(mainEl, false);
+        try { __ensurePermanentSectionTreeLoadedInPlace(mainEl); } catch (_) {}
+    }
+
+    // 4. Copies
+    const existingMeta = (__readPermanentSectionCopies() || []).filter(item => item && item.id);
+    const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+        ? CanvasState.permanentLayout.copiesById
+        : {};
+    existingMeta.forEach(meta => {
+        const copyId = meta.id;
+        const displayIndex = meta.displayIndex;
+        const cardState = copyStateById[copyId];
+        if (!cardState) return;
+        const elId = 'permanent-section-copy-' + copyId;
+        let el = document.getElementById(elId);
+        if (!el) {
+            try {
+                el = __createPermanentSectionCopyFromStorage({
+                    id: copyId,
+                    displayIndex,
+                    ...cardState
+                });
+            } catch (_) {}
+        }
+        if (el) {
+            __setCanvasViewportLazyShellClass(el, false);
+            try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) {}
+        }
+    });
+
+    try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) {}
+}
+
+function isCanvasBlockDormancyEnabled() {
+    // 统一废弃旧的 Block Dormancy，全部由 Virtualization 接管
+    return false;
+}
+
+function __getCanvasBlockDormancyActiveRange(workspaceRect) {
+    if (!workspaceRect || !isFinite(workspaceRect.width) || !isFinite(workspaceRect.height) || workspaceRect.width <= 0 || workspaceRect.height <= 0) {
+        return null;
+    }
+
+    const fixedDisplayZoom = (typeof CanvasState.blockDormancyDisplayZoom === 'number' && isFinite(CanvasState.blockDormancyDisplayZoom))
+        ? Math.max(0.01, CanvasState.blockDormancyDisplayZoom)
+        : 0.20;
+    const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+    const fixedRawZoom = Math.max(0.0001, base * fixedDisplayZoom);
+
+    // 区块尺寸：以“显示缩放 fixedDisplayZoom”时的一屏为一个区块（转为 canvas 坐标）
+    const cellW = workspaceRect.width / fixedRawZoom;
+    const cellH = workspaceRect.height / fixedRawZoom;
+    if (!isFinite(cellW) || !isFinite(cellH) || cellW <= 0 || cellH <= 0) return null;
+
+    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const panX = CanvasState.panOffsetX || 0;
+    const panY = CanvasState.panOffsetY || 0;
+
+    const viewLeft = (0 - panX) / zoom;
+    const viewRight = (workspaceRect.width - panX) / zoom;
+    const viewTop = (0 - panY) / zoom;
+    const viewBottom = (workspaceRect.height - panY) / zoom;
+
+    const left = Math.min(viewLeft, viewRight);
+    const right = Math.max(viewLeft, viewRight);
+    const top = Math.min(viewTop, viewBottom);
+    const bottom = Math.max(viewTop, viewBottom);
+
+    const pad = (typeof CanvasState.blockDormancyPaddingBlocks === 'number' && isFinite(CanvasState.blockDormancyPaddingBlocks))
+        ? Math.max(0, Math.floor(CanvasState.blockDormancyPaddingBlocks))
+        : 0;
+
+    const minBlockX = Math.floor(left / cellW) - pad;
+    const maxBlockX = Math.floor(right / cellW) + pad;
+    const minBlockY = Math.floor(top / cellH) - pad;
+    const maxBlockY = Math.floor(bottom / cellH) + pad;
+
+    return {
+        cellW,
+        cellH,
+        minBlockX,
+        maxBlockX,
+        minBlockY,
+        maxBlockY,
+        zoom,
+        viewportLeft: left,
+        viewportRight: right,
+        viewportTop: top,
+        viewportBottom: bottom
+    };
+}
+
+function __isTempSectionInBlockRange(section, range) {
+    if (!section || !section.id || !range) return false;
+    const baseSize = getTempSectionBaseSize(section);
+    const x = Number(section.x);
+    const y = Number(section.y);
+    const w = Number(section.width || baseSize.width);
+    const h = Number(section.height || baseSize.height);
+    if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) return false;
+    const minBx = Math.floor(x / range.cellW);
+    const maxBx = Math.floor((x + w) / range.cellW);
+    const minBy = Math.floor(y / range.cellH);
+    const maxBy = Math.floor((y + h) / range.cellH);
+    return (
+        maxBx >= range.minBlockX &&
+        minBx <= range.maxBlockX &&
+        maxBy >= range.minBlockY &&
+        minBy <= range.maxBlockY
+    );
+}
+
+function runCanvasBlockDormancyUpdate(options = {}) {
+    if (!isCanvasBlockDormancyEnabled()) return;
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    if (typeof options !== 'object' || options === null) {
+        options = {};
+    }
+    const {
+        force = false,
+        doUnload = true, // 区块外卸载树 DOM + dormant-content
+        doLoad = true    // 区块内视口附近按需加载树 DOM
+    } = options;
+
+    // 交互中不做大规模 DOM 卸载/恢复，避免掉帧；停止交互后再执行
+    const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || workspace.classList.contains('is-zooming');
+    if (isInteracting && !force) return;
+
+    const rect = workspace.getBoundingClientRect();
+    const range = __getCanvasBlockDormancyActiveRange(rect);
+    if (!range) return;
+
+    // 区块休眠启用时：避免旧的“延迟休眠定时器”在后台触发，造成状态冲突
+    try { cancelAllDormancyTimers(); } catch (_) { }
+
+    const marginPx = 80;
+    const margin = marginPx / range.zoom;
+
+    for (const section of (CanvasState.tempSections || [])) {
+        if (!section || !section.id) continue;
+
+        // 置顶栏目：保持常驻（不参与区块外卸载），体验与旧休眠一致
+        const pinned = !!section.pinned;
+        const x = Number(section.x);
+        const y = Number(section.y);
+        const w = Number(section.width || baseSize.width);
+        const h = Number(section.height || baseSize.height);
+        const hasRect = [x, y, w, h].every(v => typeof v === 'number' && isFinite(v));
+        const inViewportStrict = hasRect ? !(
+            x + w < range.viewportLeft ||
+            x > range.viewportRight ||
+            y + h < range.viewportTop ||
+            y > range.viewportBottom
+        ) : true;
+        // 兜底：视口内必须视为“活跃区块”（防止 Resize/边界误差导致可见栏目被误卸载而闪烁）
+        const inBlock = pinned ? true : (__isTempSectionInBlockRange(section, range) || inViewportStrict);
+        let element = document.getElementById(section.id);
+
+        if (!inBlock) {
+            if (doUnload && element) {
+                try { element.classList.add('dormant-content'); } catch (_) { }
+                // 区块外：强制卸载树 DOM（保持壳体与叠层文字可见）
+                try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+            }
+            continue;
+        }
+
+        // 区块内：确保可见（防止旧逻辑遗留 display:none）
+        if (element && element.style && element.style.display === 'none') {
+            try { element.style.display = ''; } catch (_) { }
+        }
+
+        // 兼容旧的持久化休眠标记：区块内遇到 dormant 则直接唤醒
+        if (section.dormant) {
+            try { wakeSection(section); } catch (_) { }
+        }
+
+        if (!element) {
+            // 没有壳体：先渲染壳体（不构建树内容）
+            try { renderTempNode(section, { skipTree: true }); } catch (_) { }
+            element = document.getElementById(section.id);
+        }
+
+        if (element) {
+            try { element.classList.remove('dormant-content'); } catch (_) { }
+        }
+
+        // 区块内：进入视口附近时按需加载树内容（保持“只在需要时加载”）
+        if (!doLoad) continue;
+        if (CanvasState.lowDetailActive) continue;
+        if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.has(section.id)) continue;
+
+        if (!hasRect) continue;
+
+        const nearViewport = !(
+            x + w < range.viewportLeft - margin ||
+            x > range.viewportRight + margin ||
+            y + h < range.viewportTop - margin ||
+            y > range.viewportBottom + margin
+        );
+        if (!nearViewport) continue;
+
+        try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
+    }
+}
+
+let lowDetailUnloadJobRunning = false;
+let lowDetailUnloadJobIndex = 0;
+let lowDetailUnloadJobQueue = null;
+
+function __ensureTempTreeSkeleton(element) {
+    if (!element || !element.querySelector) return null;
+    const body = element.classList && element.classList.contains('temp-node-body')
+        ? element
+        : element.querySelector('.temp-node-body');
+    if (!body) return null;
+
+    let skeleton = body.querySelector('.temp-tree-skeleton');
+    if (skeleton) return skeleton;
+
+    skeleton = document.createElement('div');
+    skeleton.className = 'temp-tree-skeleton';
+    skeleton.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < 7; i += 1) {
+        const line = document.createElement('div');
+        line.className = 'temp-tree-skeleton-line';
+        skeleton.appendChild(line);
+    }
+    body.appendChild(skeleton);
+    return skeleton;
+}
+
+function cancelCanvasLowDetailUnloadJob() {
+    lowDetailUnloadJobRunning = false;
+    lowDetailUnloadJobIndex = 0;
+    lowDetailUnloadJobQueue = null;
+}
+
+function __unloadTempSectionTreeInPlace(sectionId) {
+    if (!sectionId) return false;
+    const element = document.getElementById(sectionId);
+    if (!element) return false;
+    const treeContainer = element.querySelector('.temp-bookmark-tree');
+    if (!treeContainer) return false;
+
+    const alreadyUnloaded = (treeContainer.dataset && treeContainer.dataset.contentUnloaded === 'true') ||
+        (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(sectionId));
+    if (alreadyUnloaded) return false;
+
+    // 保存滚动位置，避免卸载 DOM 后 scrollTop 重置丢失
+    const body = element.querySelector('.temp-node-body');
+    if (body && typeof __flushCanvasSectionScrollPersistence === 'function') {
+        const scrollBaseKey = __getTempSectionScrollBaseKey(sectionId);
+        if (scrollBaseKey) {
+            try {
+                __flushCanvasSectionScrollPersistence(body, {
+                    baseKey: scrollBaseKey,
+                    readFromDom: true
+                });
+            } catch (_) { }
+        }
+    }
+
+    // 卸载 DOM（释放大量节点的布局/样式/事件负担）；后续可通过 renderTempNode / __ensureTempSectionTreeLoadedInPlace 恢复
+    try { treeContainer.innerHTML = ''; } catch (_) { }
+    try { treeContainer.style.display = 'none'; } catch (_) { }
+    try { treeContainer.dataset.contentHidden = 'true'; } catch (_) { }
+    try { treeContainer.dataset.contentUnloaded = 'true'; } catch (_) { }
+    try { __ensureTempTreeSkeleton(element); } catch (_) { }
+    try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.add(sectionId); } catch (_) { }
+    try { element.classList.add('temp-tree-unloaded'); } catch (_) { }
+    return true;
+}
+
+function __scheduleCanvasLowDetailUnloadChunk() {
+    if (!lowDetailUnloadJobRunning) return;
+    const run = () => {
+        try { __runCanvasLowDetailUnloadChunk(); } catch (_) { }
+    };
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(run);
+    } else {
+        setTimeout(run, 60);
+    }
+}
+
+function __runCanvasLowDetailUnloadChunk() {
+    if (!lowDetailUnloadJobRunning) return;
+    if (!CanvasState.lowDetailActive) {
+        cancelCanvasLowDetailUnloadJob();
+        return;
+    }
+
+    // 用户交互中：不要做 DOM 卸载/重排，避免掉帧；等停止交互后继续
+    const ws = document.getElementById('canvasWorkspace');
+    const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || (ws && ws.classList && ws.classList.contains('is-zooming'));
+    if (isInteracting) {
+        __scheduleCanvasLowDetailUnloadChunk();
+        return;
+    }
+
+    if (!Array.isArray(lowDetailUnloadJobQueue) || !lowDetailUnloadJobQueue.length) {
+        const ids = Array.isArray(CanvasState.tempSections)
+            ? CanvasState.tempSections.map(s => (s && s.id ? s.id : null)).filter(Boolean)
+            : [];
+        lowDetailUnloadJobQueue = ids;
+        lowDetailUnloadJobIndex = 0;
+    }
+
+    const queue = lowDetailUnloadJobQueue || [];
+    let idx = lowDetailUnloadJobIndex || 0;
+
+    const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const budgetMs = 10;
+    const maxPerChunk = 12;
+    let unloaded = 0;
+
+    while (idx < queue.length) {
+        if (unloaded >= maxPerChunk) break;
+        const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        if (now - start > budgetMs) break;
+
+        const sectionId = queue[idx++];
+        if (__unloadTempSectionTreeInPlace(sectionId)) unloaded += 1;
+    }
+
+    lowDetailUnloadJobIndex = idx;
+
+    if (idx >= queue.length) {
+        cancelCanvasLowDetailUnloadJob();
+        return;
+    }
+
+    __scheduleCanvasLowDetailUnloadChunk();
+}
+
+function startCanvasLowDetailUnloadJob() {
+    // 低细节模式的目标之一是“缩小后不加载重内容”；如果之前已经渲染过大量树 DOM，
+    // 仅靠 CSS display:none 仍可能带来较高的样式/内存负担。进入低细节后用 idle 分片卸载树 DOM。
+    if (!CanvasState.lowDetailActive) return;
+    // 启用虚拟化时：runCanvasVirtualizationUpdate() 会统一做“加载预算/卸载”，避免两套机制叠加
+    if (isCanvasVirtualizationEnabled()) return;
+    if (lowDetailUnloadJobRunning) return;
+    lowDetailUnloadJobRunning = true;
+    lowDetailUnloadJobQueue = null;
+    lowDetailUnloadJobIndex = 0;
+    __scheduleCanvasLowDetailUnloadChunk();
+}
+
+function __cleanupCanvasTreeFadeInClass(treeContainer) {
+    if (!treeContainer || !treeContainer.classList) return;
+    const handler = treeContainer.__canvasFadeInCleanupHandler;
+    if (handler) {
+        try { treeContainer.removeEventListener('animationend', handler); } catch (_) { }
+    }
+    const timer = treeContainer.__canvasFadeInCleanupTimer;
+    if (timer) {
+        try { clearTimeout(timer); } catch (_) { }
+    }
+    treeContainer.__canvasFadeInCleanupHandler = null;
+    treeContainer.__canvasFadeInCleanupTimer = null;
+    try { treeContainer.classList.remove('animate-fade-in'); } catch (_) { }
+}
+
+function __scheduleCanvasTreeFadeInCleanup(treeContainer) {
+    if (!treeContainer || !treeContainer.classList) return;
+    const previousHandler = treeContainer.__canvasFadeInCleanupHandler;
+    if (previousHandler) {
+        try { treeContainer.removeEventListener('animationend', previousHandler); } catch (_) { }
+    }
+    const previousTimer = treeContainer.__canvasFadeInCleanupTimer;
+    if (previousTimer) {
+        try { clearTimeout(previousTimer); } catch (_) { }
+    }
+
+    const cleanup = (event) => {
+        if (event && event.target !== treeContainer) return;
+        __cleanupCanvasTreeFadeInClass(treeContainer);
+    };
+    treeContainer.__canvasFadeInCleanupHandler = cleanup;
+    try { treeContainer.addEventListener('animationend', cleanup); } catch (_) { }
+    treeContainer.__canvasFadeInCleanupTimer = setTimeout(cleanup, 420);
+}
+
+function __clearCanvasTreeFadeInClasses(scope = null) {
+    const root = scope && scope.querySelectorAll ? scope : document;
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('.bookmark-tree.animate-fade-in').forEach(tree => {
+        try { __cleanupCanvasTreeFadeInClass(tree); } catch (_) { }
+    });
+}
+
+function __ensureTempSectionTreeLoadedInPlace(section) {
+    if (!section || !section.id) return false;
+
+    const element = document.getElementById(section.id);
+    if (!element) return false;
+    if (element.classList && element.classList.contains('dormant-content')) return false;
+    if (section.dormant) return false;
+
+    const treeContainer = element.querySelector('.temp-bookmark-tree');
+    if (!treeContainer) return false;
+
+    const isUnloaded = (treeContainer.dataset && treeContainer.dataset.contentUnloaded === 'true') ||
+        (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(section.id));
+    if (!isUnloaded) return false;
+
+    // 清空并重建（只重建树内容，不重建整个卡片，避免闪烁/黑屏）
+    try { treeContainer.innerHTML = ''; } catch (_) { }
+
+    if (Array.isArray(section.items)) {
+        const treeFragment = document.createDocumentFragment();
+        const total = section.items.length;
+        const rootVisible = getTempSectionRootVisibleCount(section, total);
+        const initialItems = rootVisible >= total ? section.items : section.items.slice(0, rootVisible);
+
+        initialItems.forEach((item) => {
+            try {
+                const node = buildTempTreeNode(section, item, 0);
+                if (node) treeFragment.appendChild(node);
+            } catch (_) { }
+        });
+
+        if (rootVisible < total) {
+            try {
+                const loadMoreBtn = createTempRootLoadMoreButton(section, rootVisible, total, treeContainer);
+                if (loadMoreBtn) treeFragment.appendChild(loadMoreBtn);
+            } catch (_) { }
+        }
+
+        try { treeContainer.appendChild(treeFragment); } catch (_) { }
+    }
+
+    try { treeContainer.style.display = ''; } catch (_) { }
+    try { treeContainer.style.height = ''; } catch (_) { }
+    try { treeContainer.dataset.contentHidden = 'false'; } catch (_) { }
+    try { treeContainer.dataset.contentUnloaded = 'false'; } catch (_) { }
+    try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.delete(section.id); } catch (_) { }
+    try { element.classList.remove('temp-tree-unloaded'); } catch (_) { }
+    try {
+        const skeleton = element.querySelector('.temp-tree-skeleton');
+        if (skeleton) skeleton.remove();
+    } catch (_) { }
+
+    // 为新生成的节点补绑定拖拽/点击事件（避免预热后操作失效）
+    try { if (typeof attachTreeEvents === 'function') attachTreeEvents(treeContainer); } catch (_) { }
+    try { if (typeof attachDragEvents === 'function') attachDragEvents(treeContainer); } catch (_) { }
+    try { if (typeof attachPointerDragEvents === 'function') attachPointerDragEvents(treeContainer); } catch (_) { }
+
+    // 恢复滚动位置，避免懒加载重新渲染后页面重置到顶部
+    const persisted = typeof __readPartitionedViewJSON === 'function' ? __readPartitionedViewJSON(__getTempSectionScrollKey(section.id), null) : null;
+    if (persisted && typeof persisted.top === 'number') {
+        const body = element.querySelector('.temp-node-body');
+        if (body && typeof __scheduleCanvasBodyScrollRestore === 'function') {
+            try {
+                __scheduleCanvasBodyScrollRestore(body, {
+                    top: persisted.top || 0,
+                    left: persisted.left || 0
+                }, {
+                    target: element,
+                    fallbackDelays: [10, 50, 100]
+                });
+            } catch (_) { }
+        }
+    }
+
+    // 小数据加载时保留淡入；大数据/刚退出低细节时避免批量 opacity/transform 动画放大闪烁。
+    try {
+        treeContainer.classList.remove('animate-fade-in');
+        const suppressUntil = Number(CanvasState.suppressTreeLoadAnimationUntil || 0) || 0;
+        const shouldAnimate = !isCanvasHugeData() && Date.now() >= suppressUntil;
+        if (shouldAnimate) {
+            treeContainer.classList.add('animate-fade-in');
+            __scheduleCanvasTreeFadeInCleanup(treeContainer);
+        }
+    } catch (_) { }
+
+    return true;
+}
+
+function __buildTempSectionTreeFragment(section, treeContainer, options = {}) {
+    const fragment = document.createDocumentFragment();
+    if (!section || !Array.isArray(section.items)) return fragment;
+
+    const total = section.items.length;
+    const rootVisible = getTempSectionRootVisibleCount(section, total);
+    const initialItems = rootVisible >= total ? section.items : section.items.slice(0, rootVisible);
+
+    initialItems.forEach((item) => {
+        try {
+            const node = buildTempTreeNode(section, item, 0, options);
+            if (node) fragment.appendChild(node);
+        } catch (_) { }
+    });
+
+    if (rootVisible < total) {
+        try {
+            const loadMoreBtn = createTempRootLoadMoreButton(section, rootVisible, total, treeContainer);
+            if (loadMoreBtn) fragment.appendChild(loadMoreBtn);
+        } catch (_) { }
+    }
+
+    return fragment;
+}
+
+function refreshTempSectionTreeInPlace(section, options = {}) {
+    if (!section || !section.id) return false;
+
+    let element = document.getElementById(section.id);
+    if (!element) {
+        try {
+            renderTempNode(section, (isCanvasVirtualizationEnabled() || isCanvasBlockDormancyEnabled()) ? { skipTree: true } : {});
+            element = document.getElementById(section.id);
+        } catch (_) { }
+        return !!element;
+    }
+
+    const treeContainer = element.querySelector('.temp-bookmark-tree');
+    if (!treeContainer) {
+        try { renderTempNode(section, { skipTree: !!(options && options.skipTree) }); } catch (_) { }
+        return !!document.getElementById(section.id);
+    }
+
+    const isUnloaded = (treeContainer.dataset && treeContainer.dataset.contentUnloaded === 'true') ||
+        (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(section.id));
+    const shouldKeepUnloaded = !!(
+        section.dormant ||
+        CanvasState.lowDetailActive ||
+        (isUnloaded && !(options && options.forceBuildTree))
+    );
+
+    if (shouldKeepUnloaded) {
+        try { treeContainer.innerHTML = ''; } catch (_) { }
+        try { treeContainer.style.display = 'none'; } catch (_) { }
+        try { treeContainer.dataset.contentHidden = 'true'; } catch (_) { }
+        try { treeContainer.dataset.contentUnloaded = 'true'; } catch (_) { }
+        try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.add(section.id); } catch (_) { }
+        try { element.classList.add('temp-tree-unloaded'); } catch (_) { }
+        return true;
+    }
+
+    const existingLoadedCounts = scanExpandedFolderCounts(treeContainer);
+    try { treeContainer.innerHTML = ''; } catch (_) { }
+    try { treeContainer.appendChild(__buildTempSectionTreeFragment(section, treeContainer, { existingLoadedCounts })); } catch (_) { }
+    try { treeContainer.style.display = ''; } catch (_) { }
+    try { treeContainer.style.height = ''; } catch (_) { }
+    try { treeContainer.dataset.contentHidden = 'false'; } catch (_) { }
+    try { treeContainer.dataset.contentUnloaded = 'false'; } catch (_) { }
+    try { if (CanvasState.unloadedTempSectionTrees) CanvasState.unloadedTempSectionTrees.delete(section.id); } catch (_) { }
+    try { element.classList.remove('temp-tree-unloaded'); } catch (_) { }
+
+    try { setupTempSectionTreeInteractions(treeContainer, section); } catch (_) { }
+    try { if (typeof attachTreeEvents === 'function') attachTreeEvents(treeContainer); } catch (_) { }
+    try { if (typeof attachDragEvents === 'function' && treeContainer.querySelector('.tree-item[data-node-id]')) attachDragEvents(treeContainer); } catch (_) { }
+    try { if (typeof attachPointerDragEvents === 'function') attachPointerDragEvents(treeContainer); } catch (_) { }
+    try { if (typeof window.__updateTraceHighlights === 'function') window.__updateTraceHighlights(); } catch (_) { }
+
+    return true;
+}
+window.refreshTempSectionTreeInPlace = refreshTempSectionTreeInPlace;
+
+let lastLowDetailPrewarmAt = 0;
+
+function prewarmCanvasLowDetailVisibleTrees(options = {}) {
+    const {
+        maxWarm = 12,
+        margin = 120
+    } = (options && typeof options === 'object') ? options : {};
+
+    if (!CanvasState.lowDetailEnabled || !CanvasState.lowDetailActive) return 0;
+    // 虚拟化启用时：按需加载逻辑接管，避免 prewarm 造成“一屏全加载”的不适
+    if (isCanvasVirtualizationEnabled()) return 0;
+
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (now - lastLowDetailPrewarmAt < 900) return 0;
+    lastLowDetailPrewarmAt = now;
+
+    const threshold = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+    const displayZoom = getCanvasDisplayZoom();
+    if (threshold > 0 && displayZoom < threshold) return 0;
+
+    if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) return 0;
+
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return 0;
+
+    const workspaceRect = workspace.getBoundingClientRect();
+    const visibleArea = {
+        left: workspaceRect.left - margin,
+        right: workspaceRect.right + margin,
+        top: workspaceRect.top - margin,
+        bottom: workspaceRect.bottom + margin
+    };
+
+    const scale = CanvasState.zoom || 1;
+    let warmed = 0;
+
+    // 以“当前视口中心”为基准，仅预热中心附近少量栏目，避免低细节临界视界一屏全部一起加载
+    const centerScreenX = workspaceRect.left + (workspaceRect.width / 2);
+    const centerScreenY = workspaceRect.top + (workspaceRect.height / 2);
+    const candidates = [];
+
+    for (const section of CanvasState.tempSections) {
+        if (!section || !section.id) continue;
+        if (section.dormant) continue;
+        if (!CanvasState.unloadedTempSectionTrees.has(section.id)) continue;
+
+        const element = document.getElementById(section.id);
+        if (!element) continue; // 只预热已存在的栏目，避免离屏创建大量DOM
+
+        const x = section.x * scale + CanvasState.panOffsetX + workspaceRect.left;
+        const y = section.y * scale + CanvasState.panOffsetY + workspaceRect.top;
+        const width = (section.width || 360) * scale;
+        const height = (section.height || 280) * scale;
+
+        const isInViewport = !(
+            x + width < visibleArea.left ||
+            x > visibleArea.right ||
+            y + height < visibleArea.top ||
+            y > visibleArea.bottom
+        );
+        if (!isInViewport) continue;
+
+        const cx = x + width / 2;
+        const cy = y + height / 2;
+        const dx = cx - centerScreenX;
+        const dy = cy - centerScreenY;
+        candidates.push({ section, dist2: dx * dx + dy * dy });
+    }
+
+    candidates.sort((a, b) => a.dist2 - b.dist2);
+
+    const limit = Math.max(0, Math.min(maxWarm, 24)); // 双保险：避免用户传入过大
+    for (let i = 0; i < candidates.length && warmed < limit; i++) {
+        const section = candidates[i].section;
+        try {
+            if (__ensureTempSectionTreeLoadedInPlace(section)) warmed += 1;
+        } catch (_) { }
+    }
+
+    return warmed;
+}
+
+function cancelCanvasLowDetailPrewarmJob() {
+    CanvasState.lowDetailPrewarmRunning = false;
+    CanvasState.lowDetailPrewarmQueue = null;
+    CanvasState.lowDetailPrewarmIndex = 0;
+    if (CanvasState.lowDetailPrewarmTimer) {
+        clearTimeout(CanvasState.lowDetailPrewarmTimer);
+        CanvasState.lowDetailPrewarmTimer = null;
+    }
+}
+
+function buildCanvasLowDetailPrewarmQueue(options = {}) {
+    const {
+        margin = 240
+    } = (options && typeof options === 'object') ? options : {};
+
+    if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) return [];
+
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return [];
+
+    const workspaceRect = workspace.getBoundingClientRect();
+    const visibleArea = {
+        left: workspaceRect.left - margin,
+        right: workspaceRect.right + margin,
+        top: workspaceRect.top - margin,
+        bottom: workspaceRect.bottom + margin
+    };
+
+    const scale = CanvasState.zoom || 1;
+    const queue = [];
+
+    for (const section of CanvasState.tempSections) {
+        if (!section || !section.id) continue;
+        if (section.dormant) continue;
+        if (!CanvasState.unloadedTempSectionTrees.has(section.id)) continue;
+
+        const element = document.getElementById(section.id);
+        if (!element) continue;
+
+        const x = section.x * scale + CanvasState.panOffsetX + workspaceRect.left;
+        const y = section.y * scale + CanvasState.panOffsetY + workspaceRect.top;
+        const width = (section.width || 360) * scale;
+        const height = (section.height || 280) * scale;
+
+        const isInViewport = !(
+            x + width < visibleArea.left ||
+            x > visibleArea.right ||
+            y + height < visibleArea.top ||
+            y > visibleArea.bottom
+        );
+        if (!isInViewport) continue;
+
+        queue.push(section);
+    }
+
+    return queue;
+}
+
+function __scheduleCanvasLowDetailPrewarmChunk() {
+    if (!CanvasState.lowDetailPrewarmRunning) return;
+
+    const run = (deadline) => {
+        try { __runCanvasLowDetailPrewarmChunk(deadline); } catch (_) { }
+    };
+
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(run);
+    } else {
+        setTimeout(() => run(null), 60);
+    }
+}
+
+function __runCanvasLowDetailPrewarmChunk(deadline) {
+    if (!CanvasState.lowDetailPrewarmRunning) return;
+
+    // 用户交互中：暂停预热（会触发 DOM 构建），等停止交互后继续
+    const ws = document.getElementById('canvasWorkspace');
+    const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || (ws && ws.classList && ws.classList.contains('is-zooming'));
+    if (isInteracting) {
+        __scheduleCanvasLowDetailPrewarmChunk();
+        return;
+    }
+
+    // 大数据量场景：预热会反复扫描队列并逐步构建大量 DOM，容易导致缩放/拖动掉帧；
+    // 这里选择直接禁用预热，以保证交互流畅（放大退出低细节时再按需渲染）。
+    if (isCanvasHugeData()) {
+        cancelCanvasLowDetailPrewarmJob();
+        return;
+    }
+    if (isCanvasVirtualizationEnabled()) {
+        cancelCanvasLowDetailPrewarmJob();
+        return;
+    }
+
+    if (!CanvasState.lowDetailEnabled || !CanvasState.lowDetailActive) {
+        cancelCanvasLowDetailPrewarmJob();
+        return;
+    }
+
+    const threshold = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+    const displayZoom = getCanvasDisplayZoom();
+    if (threshold > 0 && displayZoom < threshold) {
+        // 还没到预热区间：暂停但不清空（后续可能继续放大触发）
+        cancelCanvasLowDetailPrewarmJob();
+        return;
+    }
+
+    if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) {
+        cancelCanvasLowDetailPrewarmJob();
+        // 内部缓冲加载完成后尝试退出低细节（如果已超过显示切换阈值）
+        try { updateCanvasLowDetailMode(true); } catch (_) { }
+        return;
+    }
+
+    if (!Array.isArray(CanvasState.lowDetailPrewarmQueue) || !CanvasState.lowDetailPrewarmQueue.length) {
+        CanvasState.lowDetailPrewarmQueue = buildCanvasLowDetailPrewarmQueue({ margin: 240 });
+        CanvasState.lowDetailPrewarmIndex = 0;
+    }
+
+    const queue = CanvasState.lowDetailPrewarmQueue || [];
+    let idx = CanvasState.lowDetailPrewarmIndex || 0;
+
+    const maxPerChunk = 3;
+    const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    let warmed = 0;
+
+    while (idx < queue.length) {
+        if (warmed >= maxPerChunk) break;
+
+        // 时间预算：尽量避免卡顿（没有 idle deadline 时使用 12ms 预算）
+        if (deadline && typeof deadline.timeRemaining === 'function') {
+            if (deadline.timeRemaining() < 6) break;
+        } else {
+            const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            if (now - start > 12) break;
+        }
+
+        const section = queue[idx++];
+        if (!section || !section.id) continue;
+        if (section.dormant) continue;
+        if (!CanvasState.unloadedTempSectionTrees.has(section.id)) continue;
+        if (!document.getElementById(section.id)) continue;
+
+        try {
+            if (__ensureTempSectionTreeLoadedInPlace(section)) {
+                warmed += 1;
+            }
+        } catch (_) { }
+    }
+
+    CanvasState.lowDetailPrewarmIndex = idx;
+
+    if (idx >= queue.length) {
+        // 队列跑完：如果仍有未加载（可能视口变化），重建一次；否则结束
+        if (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.size) {
+            CanvasState.lowDetailPrewarmQueue = buildCanvasLowDetailPrewarmQueue({ margin: 240 });
+            CanvasState.lowDetailPrewarmIndex = 0;
+            if (CanvasState.lowDetailPrewarmQueue && CanvasState.lowDetailPrewarmQueue.length) {
+                __scheduleCanvasLowDetailPrewarmChunk();
+                return;
+            }
+        }
+
+        cancelCanvasLowDetailPrewarmJob();
+        try { updateCanvasLowDetailMode(true); } catch (_) { }
+        return;
+    }
+
+    __scheduleCanvasLowDetailPrewarmChunk();
+}
+
+function maybeStartCanvasLowDetailPrewarmJob() {
+    if (!CanvasState.lowDetailEnabled || !CanvasState.lowDetailActive) {
+        cancelCanvasLowDetailPrewarmJob();
+        return;
+    }
+
+    if (isCanvasHugeData()) return;
+    if (isCanvasVirtualizationEnabled()) return;
+
+    const threshold = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+    const displayZoom = getCanvasDisplayZoom();
+    if (threshold > 0 && displayZoom < threshold) return;
+
+    if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) return;
+
+    if (CanvasState.lowDetailPrewarmRunning) return;
+
+    // 防抖：合并多次触发（尤其是滚轮缩放）
+    if (CanvasState.lowDetailPrewarmTimer) return;
+    CanvasState.lowDetailPrewarmTimer = setTimeout(() => {
+        CanvasState.lowDetailPrewarmTimer = null;
+        if (!CanvasState.lowDetailEnabled || !CanvasState.lowDetailActive) return;
+        if (!CanvasState.unloadedTempSectionTrees || !CanvasState.unloadedTempSectionTrees.size) return;
+        const t = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+        if (t > 0 && getCanvasDisplayZoom() < t) return;
+
+        CanvasState.lowDetailPrewarmRunning = true;
+        CanvasState.lowDetailPrewarmQueue = buildCanvasLowDetailPrewarmQueue({ margin: 240 });
+        CanvasState.lowDetailPrewarmIndex = 0;
+        __scheduleCanvasLowDetailPrewarmChunk();
+    }, 80);
+}
+
+function __getCanvasViewportBounds(workspace, marginPx = 250) {
+    if (!workspace) return null;
+    const rect = workspace.getBoundingClientRect();
+    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const panX = CanvasState.panOffsetX || 0;
+    const panY = CanvasState.panOffsetY || 0;
+
+    const safeMarginPx = Math.max(0, Number(marginPx) || 0);
+    const margin = safeMarginPx / zoom;
+    return {
+        left: (0 - panX) / zoom - margin,
+        right: (rect.width - panX) / zoom + margin,
+        top: (0 - panY) / zoom - margin,
+        bottom: (rect.height - panY) / zoom + margin
+    };
+}
+
+function __isCardOutsideViewportBounds(el, bounds) {
+    if (!el || !bounds) return false;
+    const x = parseFloat(el.style.left) || 0;
+    const y = parseFloat(el.style.top) || 0;
+    const w = parseFloat(el.style.width) || el.offsetWidth || 0;
+    const h = parseFloat(el.style.height) || el.offsetHeight || 0;
+
+    return (
+        x + w < bounds.left ||
+        x > bounds.right ||
+        y + h < bounds.top ||
+        y > bounds.bottom
+    );
+}
+
+function __isCanvasRectOutsideBounds(x, y, width, height, bounds) {
+    if (!bounds) return false;
+    const nx = Number(x) || 0;
+    const ny = Number(y) || 0;
+    const w = Number(width) || 0;
+    const h = Number(height) || 0;
+    return (
+        nx + w < bounds.left ||
+        nx > bounds.right ||
+        ny + h < bounds.top ||
+        ny > bounds.bottom
+    );
+}
+
+function __getCanvasViewportLazyMarginPx() {
+    if (CanvasState.lowDetailActive) return 0;
+    try {
+        const dim = CanvasState.dataIntensiveMode || {};
+        if (dim.active || isCanvasHugeData()) return 0;
+        const budget = getCanvasVirtualizationBudget();
+        const margin = Number(budget && budget.marginPx);
+        return Number.isFinite(margin) ? Math.max(0, Math.min(160, margin)) : 80;
+    } catch (_) {
+        return 0;
+    }
+}
+
+function __getMdNodeRectForViewport(node, el = null) {
+    if (!node && !el) return null;
+    const mdBaseSize = getBlankNodeDefaultSize();
+    const x = Number(node && node.x);
+    const y = Number(node && node.y);
+    const w = Number(node && node.width) || (el ? (parseFloat(el.style.width) || el.offsetWidth) : 0) || mdBaseSize.width;
+    const h = Number(node && node.height) || (el ? (parseFloat(el.style.height) || el.offsetHeight) : 0) || mdBaseSize.height;
+    const left = Number.isFinite(x) ? x : (el ? (parseFloat(el.style.left) || 0) : 0);
+    const top = Number.isFinite(y) ? y : (el ? (parseFloat(el.style.top) || 0) : 0);
+    if (![left, top, w, h].every(v => typeof v === 'number' && isFinite(v))) return null;
+    return { x: left, y: top, width: w, height: h };
+}
+
+function __isMdNodeInViewportBounds(node, bounds, el = null) {
+    const rect = __getMdNodeRectForViewport(node, el);
+    if (!rect || !bounds) return true;
+    return !__isCanvasRectOutsideBounds(rect.x, rect.y, rect.width, rect.height, bounds);
+}
+
+function __setCanvasViewportLazyShellClass(el, active) {
+    if (!el || !el.classList) return;
+    const next = !!active;
+    try { el.classList.toggle(CANVAS_VIEWPORT_LAZY_SHELL_CLASS, next); } catch (_) { }
+    try {
+        if (el.dataset) {
+            if (next) el.dataset.viewportLazy = 'true';
+            else delete el.dataset.viewportLazy;
+        }
+    } catch (_) { }
+}
+
+function __shouldKeepLazyCardDomLoaded(el) {
+    if (!el || !el.classList) return false;
+    if (el.classList.contains('selected') ||
+        el.classList.contains('editing') ||
+        el.classList.contains('dragging') ||
+        el.classList.contains('resizing') ||
+        el.classList.contains('canvas-node-maximized')) {
+        return true;
+    }
+    if (el.dataset && el.dataset.editing === 'true') return true;
+    try {
+        const active = document.activeElement;
+        if (active && el.contains(active)) return true;
+    } catch (_) { }
+    return false;
+}
+
+function __getCardGroupLowDetailNodeById(id) {
+    const groupId = String(id || '').trim();
+    if (!groupId || !Array.isArray(CanvasState.mdNodes)) return null;
+    return CanvasState.mdNodes.find(node => node && node.id === groupId && node.subtype === 'card-group') || null;
+}
+
+function __resolveCardGroupLowDetailMemberElement(member) {
+    if (!member || !member.data) return null;
+    const id = String(member.data.id || '').trim();
+    if (!id) return null;
+    if (member.type === 'permanent-section') {
+        return member.data._permanentElement
+            || (typeof __resolveCanvasNodeElementById === 'function' ? __resolveCanvasNodeElementById(id) : null)
+            || document.getElementById(id);
+    }
+    return document.getElementById(id);
+}
+
+let __cardGroupLowDetailMembershipSignature = '';
+let __cardGroupLowDetailMembershipDirty = true;
+
+function __markCardGroupLowDetailMembershipDirty() {
+    __cardGroupLowDetailMembershipDirty = true;
+}
+
+function __isCardGroupLowDetailMembershipHotInteraction() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return false;
+    const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
+    return !!(
+        workspace.classList.contains('is-zooming') ||
+        workspace.classList.contains('is-scrolling') ||
+        (CanvasState.touchpadState && CanvasState.touchpadState.isScrolling) ||
+        CanvasState.isPanning ||
+        (CanvasState.dragState && CanvasState.dragState.isDragging) ||
+        (resizeState && resizeState.active)
+    );
+}
+
+function __getCardGroupLowDetailElementKey(el) {
+    if (!el) return '';
+    const id = String(el.id || '').trim();
+    if (id) return id;
+    try {
+        if (el.dataset && el.dataset.permanentSectionCopyId) {
+            return `permanent-section-copy-${String(el.dataset.permanentSectionCopyId || '').trim()}`;
+        }
+    } catch (_) { }
+    return '';
+}
+
+function __clearCardGroupLowDetailMembershipState() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return false;
+
+    const hostedClass = 'card-group-low-detail-child-hidden';
+    const nestedVisibleClass = 'card-group-low-detail-nested-visible';
+    let changed = false;
+
+    try {
+        workspace.querySelectorAll(`.${hostedClass}, .${nestedVisibleClass}, [data-low-detail-host-group-id]`).forEach(el => {
+            try {
+                if (el.classList.contains(hostedClass)) {
+                    el.classList.remove(hostedClass);
+                    changed = true;
+                }
+                if (el.classList.contains(nestedVisibleClass)) {
+                    el.classList.remove(nestedVisibleClass);
+                    changed = true;
+                }
+                if (el.dataset && el.dataset.lowDetailHostGroupId) {
+                    delete el.dataset.lowDetailHostGroupId;
+                    changed = true;
+                }
+            } catch (_) { }
+        });
+    } catch (_) { }
+
+    __cardGroupLowDetailMembershipSignature = '';
+    __cardGroupLowDetailMembershipDirty = false;
+    if (changed) {
+        try { scheduleEdgesRender(0); } catch (_) { }
+    }
+    return changed;
+}
+
+function __isCardGroupLowDetailMembershipDomSynced(desiredHosted, desiredNestedGroups, desiredGroupDepths, desiredGroupNodes) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return true;
+
+    const hostedClass = 'card-group-low-detail-child-hidden';
+    const nestedVisibleClass = 'card-group-low-detail-nested-visible';
+
+    try {
+        for (const [el, hostGroupId] of desiredHosted.entries()) {
+            if (!el || !el.classList || !el.classList.contains(hostedClass)) return false;
+            if (el.classList.contains('low-detail-active')) return false;
+            if (!el.dataset || el.dataset.lowDetailHostGroupId !== hostGroupId) return false;
+        }
+        for (const el of desiredNestedGroups) {
+            if (!el || !el.classList || !el.classList.contains(nestedVisibleClass)) return false;
+            if (el.classList.contains(hostedClass)) return false;
+            if (el.dataset && el.dataset.lowDetailHostGroupId) return false;
+        }
+        for (const [el, node] of desiredGroupNodes.entries()) {
+            if (!el || !el.classList || !el.classList.contains('low-detail-active')) return false;
+            if (!el.querySelector('.card-group-low-detail-overlay')) return false;
+        }
+        for (const [el, depth] of desiredGroupDepths.entries()) {
+            const opacity = Math.max(0.48, 1 - depth * 0.16).toFixed(2);
+            if (!el || !el.style || el.style.getPropertyValue('--card-group-low-detail-title-opacity') !== opacity) return false;
+        }
+        const staleNodes = workspace.querySelectorAll(`.${hostedClass}, .${nestedVisibleClass}, [data-low-detail-host-group-id]`);
+        for (const stale of staleNodes) {
+            const staleHosted = stale.classList && stale.classList.contains(hostedClass);
+            const staleNested = stale.classList && stale.classList.contains(nestedVisibleClass);
+            if (staleHosted && !desiredHosted.has(stale)) return false;
+            if (staleNested && !desiredNestedGroups.has(stale)) return false;
+            if (stale.dataset && stale.dataset.lowDetailHostGroupId && !desiredHosted.has(stale)) return false;
+        }
+    } catch (_) {
+        return false;
+    }
+
+    return true;
+}
+
+function __applyCardGroupLowDetailMembershipState(options = {}) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return false;
+
+    const opts = (options && typeof options === 'object') ? options : {};
+    const force = !!opts.force;
+
+    const hostedClass = 'card-group-low-detail-child-hidden';
+    const nestedVisibleClass = 'card-group-low-detail-nested-visible';
+
+    const groupApi = (typeof window !== 'undefined') ? window.__BCSCardGroup : null;
+    if (!groupApi || typeof groupApi.getRecursiveGeometricMembers !== 'function') {
+        return __clearCardGroupLowDetailMembershipState();
+    }
+
+    const groupSelector = CanvasState.lowDetailActive
+        ? `.card-group-canvas-node:not(.${CANVAS_VIEWPORT_LAZY_SHELL_CLASS})`
+        : `.card-group-canvas-node.low-detail-active:not(.${CANVAS_VIEWPORT_LAZY_SHELL_CLASS})`;
+    const activeGroups = Array.from(workspace.querySelectorAll(groupSelector))
+        .map((element) => {
+            const node = __getCardGroupLowDetailNodeById(element.id);
+            if (!node) return null;
+            const width = Number(node.width) || parseFloat(element.style.width) || element.offsetWidth || 0;
+            const height = Number(node.height) || parseFloat(element.style.height) || element.offsetHeight || 0;
+            return { element, node, area: Math.max(1, width * height) };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.area - a.area);
+
+    if (!activeGroups.length) {
+        return __clearCardGroupLowDetailMembershipState();
+    }
+
+    const desiredHosted = new Map();
+    const desiredNestedGroups = new Set();
+    const desiredGroupDepths = new Map();
+    const desiredGroupNodes = new Map();
+    const desiredTempUnloads = new Set();
+    const setGroupLowDetailDepth = (element, depth) => {
+        if (!element) return;
+        const safeDepth = Math.max(0, Math.min(8, Math.floor(Number(depth) || 0)));
+        const prevDepth = desiredGroupDepths.has(element) ? desiredGroupDepths.get(element) : -1;
+        if (prevDepth >= safeDepth) return;
+        desiredGroupDepths.set(element, safeDepth);
+    };
+    const markHosted = (element, hostGroupId) => {
+        if (!element || !hostGroupId) return;
+        desiredHosted.set(element, String(hostGroupId));
+    };
+
+    activeGroups.forEach((entry) => {
+        if (!entry || !entry.node || !entry.element) return;
+        if (desiredHosted.has(entry.element)) return;
+        desiredGroupNodes.set(entry.element, entry.node);
+        if (!desiredGroupDepths.has(entry.element)) setGroupLowDetailDepth(entry.element, 0);
+        const entryDepth = desiredGroupDepths.get(entry.element) || 0;
+
+        if (typeof groupApi.getDirectGeometricMembers === 'function') {
+            try {
+                const directMembers = groupApi.getDirectGeometricMembers(entry.node) || [];
+                directMembers.forEach((member) => {
+                    if (!member || member.type !== 'md-node' || !member.data || member.data.subtype !== 'card-group') return;
+                    const memberEl = __resolveCardGroupLowDetailMemberElement(member);
+                    if (memberEl) setGroupLowDetailDepth(memberEl, entryDepth + 1);
+                });
+            } catch (_) { }
+        }
+
+        let members = [];
+        try { members = groupApi.getRecursiveGeometricMembers(entry.node) || []; } catch (_) { members = []; }
+        members.forEach((member) => {
+            if (!member || !member.data) return;
+            const memberId = String(member.data.id || '').trim();
+            if (!memberId || memberId === entry.node.id) return;
+            const memberEl = __resolveCardGroupLowDetailMemberElement(member);
+            if (!memberEl) return;
+
+            if (member.type === 'md-node' && member.data && member.data.subtype === 'card-group') {
+                try {
+                    setGroupLowDetailDepth(memberEl, entryDepth + 1);
+                    desiredGroupNodes.set(memberEl, member.data);
+                    desiredNestedGroups.add(memberEl);
+                } catch (_) { }
+                return;
+            }
+
+            markHosted(memberEl, entry.node.id);
+
+            if (member.type === 'temp-section') {
+                desiredTempUnloads.add(memberId);
+            }
+        });
+    });
+
+    const activeKey = activeGroups
+        .map(({ element, node }) => {
+            const id = __getCardGroupLowDetailElementKey(element);
+            return `${id}:${Number(node.x) || 0},${Number(node.y) || 0},${Number(node.width) || 0},${Number(node.height) || 0}:${String(node.label || '')}`;
+        })
+        .sort()
+        .join('|');
+    const hostedKey = Array.from(desiredHosted.entries())
+        .map(([el, host]) => `${__getCardGroupLowDetailElementKey(el)}>${host}`)
+        .sort()
+        .join('|');
+    const nestedKey = Array.from(desiredNestedGroups)
+        .map(el => __getCardGroupLowDetailElementKey(el))
+        .sort()
+        .join('|');
+    const depthKey = Array.from(desiredGroupDepths.entries())
+        .map(([el, depth]) => `${__getCardGroupLowDetailElementKey(el)}:${depth}`)
+        .sort()
+        .join('|');
+    const signature = `${CanvasState.lowDetailActive ? '1' : '0'}::${activeKey}::${hostedKey}::${nestedKey}::${depthKey}`;
+    if (!force &&
+        signature === __cardGroupLowDetailMembershipSignature &&
+        __isCardGroupLowDetailMembershipDomSynced(desiredHosted, desiredNestedGroups, desiredGroupDepths, desiredGroupNodes)) {
+        __cardGroupLowDetailMembershipDirty = false;
+        return false;
+    }
+
+    let changed = false;
+    __cardGroupLowDetailMembershipSignature = signature;
+
+    desiredGroupNodes.forEach((node, el) => {
+        try {
+            if (el.classList.contains('canvas-node-maximized') && el.classList.contains('low-detail-active')) {
+                el.classList.remove('low-detail-active');
+                changed = true;
+            } else if (!el.classList.contains('low-detail-active') && !el.classList.contains('canvas-node-maximized')) {
+                el.classList.add('low-detail-active');
+                changed = true;
+            }
+            if (typeof groupApi.ensureLowDetailOverlay === 'function') {
+                groupApi.ensureLowDetailOverlay(el, node);
+            }
+        } catch (_) { }
+    });
+
+    desiredGroupDepths.forEach((depth, el) => {
+        try {
+            const opacity = Math.max(0.48, 1 - depth * 0.16).toFixed(2);
+            if (el.style.getPropertyValue('--card-group-low-detail-title-opacity') !== opacity) {
+                el.style.setProperty('--card-group-low-detail-title-opacity', opacity);
+                changed = true;
+            }
+        } catch (_) { }
+    });
+
+    desiredTempUnloads.forEach((memberId) => {
+        try {
+            if (__unloadTempSectionTreeInPlace(memberId)) changed = true;
+        } catch (_) { }
+    });
+
+    try {
+        workspace.querySelectorAll(`.${hostedClass}, [data-low-detail-host-group-id]`).forEach(el => {
+            if (desiredHosted.has(el)) return;
+            try {
+                if (el.classList.contains(hostedClass)) {
+                    el.classList.remove(hostedClass);
+                    changed = true;
+                    // 当离开卡片组低细节屏蔽状态时，如果全局低细节模式未开启，则立即加载卡片树内容
+                    if (!CanvasState.lowDetailActive) {
+                        const sectionId = el.id;
+                        if (el.classList.contains('temp-canvas-node')) {
+                            const section = (CanvasState.tempSections || []).find(s => s && s.id === sectionId);
+                            if (section) {
+                                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
+                            }
+                        } else if (el.classList.contains('permanent-bookmark-section')) {
+                            try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
+                        } else if (el.classList.contains('md-canvas-node')) {
+                            const node = (CanvasState.mdNodes || []).find(n => n && n.id === sectionId);
+                            if (node) {
+                                try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
+                            }
+                        }
+                    }
+                }
+                if (el.dataset && el.dataset.lowDetailHostGroupId) {
+                    delete el.dataset.lowDetailHostGroupId;
+                    changed = true;
+                }
+            } catch (_) { }
+        });
+    } catch (_) { }
+
+    try {
+        workspace.querySelectorAll(`.${nestedVisibleClass}`).forEach(el => {
+            if (desiredNestedGroups.has(el)) return;
+            try {
+                el.classList.remove(nestedVisibleClass);
+                changed = true;
+            } catch (_) { }
+        });
+    } catch (_) { }
+
+    desiredNestedGroups.forEach(el => {
+        try {
+            if (!el.classList.contains(nestedVisibleClass)) {
+                el.classList.add(nestedVisibleClass);
+                changed = true;
+            }
+            if (el.classList.contains(hostedClass)) {
+                el.classList.remove(hostedClass);
+                changed = true;
+            }
+            if (el.dataset && el.dataset.lowDetailHostGroupId) {
+                delete el.dataset.lowDetailHostGroupId;
+                changed = true;
+            }
+        } catch (_) { }
+    });
+
+    desiredHosted.forEach((hostGroupId, el) => {
+        try {
+            if (!el.classList.contains(hostedClass)) {
+                el.classList.add(hostedClass);
+                changed = true;
+            }
+            if (el.classList.contains('low-detail-active')) {
+                el.classList.remove('low-detail-active');
+                changed = true;
+            }
+            if (el.dataset && el.dataset.lowDetailHostGroupId !== hostGroupId) {
+                el.dataset.lowDetailHostGroupId = hostGroupId;
+                changed = true;
+            }
+        } catch (_) { }
+    });
+
+    if (changed) {
+        try { scheduleEdgesRender(0); } catch (_) { }
+    }
+    __cardGroupLowDetailMembershipDirty = false;
+    return changed;
+}
+
+function __maybeApplyCardGroupLowDetailMembershipState(options = {}) {
+    const opts = (options && typeof options === 'object') ? options : {};
+    if (!opts.force &&
+        CanvasState.lowDetailActive &&
+        !__cardGroupLowDetailMembershipDirty &&
+        __cardGroupLowDetailMembershipSignature) {
+        return false;
+    }
+    if (!opts.force &&
+        CanvasState.lowDetailActive &&
+        __cardGroupLowDetailMembershipDirty &&
+        __isCardGroupLowDetailMembershipHotInteraction()) {
+        return false;
+    }
+    return __applyCardGroupLowDetailMembershipState(opts);
+}
+
+function __updateNonTempNodesViewportVisibility(options = {}) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+    if (workspace.classList && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)) return;
+
+    if (typeof options !== 'object' || options === null) {
+        options = {};
+    }
+    const { doLoad = true, doUnload = true, force = false } = options;
+
+    const visualBounds = __getCanvasViewportBounds(workspace, 0);
+    const lazyBounds = __getCanvasViewportBounds(workspace, __getCanvasViewportLazyMarginPx());
+    const isGlobalLowDetail = !!CanvasState.lowDetailActive;
+    const allowViewportLowDetail = __isViewportLowDetailEffective();
+
+    const isRippleOrLowDetail = isGlobalLowDetail || (workspace && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS));
+
+    // 1) 空白栏目 (mdNodes)
+    const mdNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(node => node && node.id && node.subtype !== 'card-group') : [];
+    mdNodes.forEach(node => {
+        let el = document.getElementById(node.id);
+        const inLazyRange = __isMdNodeInViewportBounds(node, lazyBounds, el);
+        const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
+
+        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
+        __updateNodeOffScreenState(node.id, !inViewportStrict);
+
+        let shouldActive = isGlobalLowDetail;
+        if (!shouldActive && allowViewportLowDetail) {
+            const isOutside = !__isMdNodeInViewportBounds(node, visualBounds, el);
+            shouldActive = __shouldNodeBeLowDetail(node.id, isOutside);
+        }
+        if (el && el.classList.contains('canvas-node-maximized')) {
+            shouldActive = false;
+        }
+
+        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
+        if (!inLazyRange && !shouldKeepLoaded) {
+            const canUnload = __shouldNodeBeUnloaded(node.id);
+            if (doUnload && el && canUnload) {
+                try { el.remove(); } catch (_) { }
+                el = null;
+            }
+            return;
+        }
+
+        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
+
+        if (!el) {
+            if (shouldInstantLoad) {
+                try { renderMdNode(node, { shellOnly: shouldActive }); } catch (_) { }
+                el = document.getElementById(node.id);
+            } else {
+                __enqueueCanvasLazyLoadNode({
+                    type: 'md',
+                    id: node.id,
+                    x: Number(node.x) || 0,
+                    y: Number(node.y) || 0,
+                    w: Number(node.width) || 100,
+                    h: Number(node.height) || 100,
+                    shouldActive: shouldActive,
+                    data: node
+                });
+            }
+        }
+
+        if (el) {
+            if (el.classList.contains('card-group-low-detail-child-hidden')) return;
+
+            if (shouldActive && !shouldKeepLoaded) {
+                const canUnload = __shouldNodeBeUnloaded(node.id);
+                if (doUnload && canUnload) {
+                    try { __unloadMdNodeContentInPlace(node); } catch (_) { }
+                    el = document.getElementById(node.id) || el;
+                }
+            } else if (!shouldActive) {
+                if (doLoad) {
+                    try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
+                    el = document.getElementById(node.id) || el;
+                }
+            }
+
+            __setCanvasViewportLazyShellClass(el, false);
+
+            const wasActive = el.classList.contains('low-detail-active');
+            if (shouldActive !== wasActive) {
+                el.classList.toggle('low-detail-active', shouldActive);
+            }
+
+            // 进入低细节时，刷新文字叠层内容
+            if (shouldActive) {
+                try {
+                    if (node) {
+                        __ensureMdNodeLowDetailOverlay(el, node);
+                    }
+                } catch (_) {}
+            }
+        }
+    });
+
+    // 2) 永久栏目 (permanentSections)
+    // 2a) 主永久栏目 (permanentSection) - 静态存在，不删除 DOM，仅卸载树
+    const mainEl = document.getElementById('permanentSection');
+    if (mainEl) {
+        const outsideLazyRange = __isCardOutsideViewportBounds(mainEl, lazyBounds);
+        const shouldKeepLoaded = __shouldKeepLazyCardDomLoaded(mainEl);
+
+        const inViewportStrict = !__isCardOutsideViewportBounds(mainEl, visualBounds);
+        __updateNodeOffScreenState('permanentSection', !inViewportStrict);
+
+        let shouldActive = isGlobalLowDetail;
+        if (!shouldActive && allowViewportLowDetail) {
+            const isOutside = __isCardOutsideViewportBounds(mainEl, visualBounds);
+            shouldActive = __shouldNodeBeLowDetail('permanentSection', isOutside);
+        }
+        if (mainEl.classList.contains('canvas-node-maximized')) {
+            shouldActive = false;
+        }
+
+        if (outsideLazyRange && !shouldKeepLoaded) {
+            const canUnload = __shouldNodeBeUnloaded('permanentSection');
+            if (doUnload && canUnload) {
+                try { __unloadPermanentSectionTreeInPlace(mainEl); } catch (_) { }
+                __setCanvasViewportLazyShellClass(mainEl, true);
+            }
+        } else {
+            __setCanvasViewportLazyShellClass(mainEl, false);
+            if ((!CanvasState.lowDetailActive || mainEl.classList.contains('canvas-node-maximized')) && !shouldActive) {
+                if (doLoad) {
+                    try { __ensurePermanentSectionTreeLoadedInPlace(mainEl); } catch (_) { }
+                }
+            }
+        }
+
+        const wasActive = mainEl.classList.contains('low-detail-active');
+        if (shouldActive !== wasActive) {
+            mainEl.classList.toggle('low-detail-active', shouldActive);
+        }
+
+        if (shouldActive) {
+            try { __ensurePermanentSectionLowDetailOverlay(mainEl); } catch (_) { }
+        }
+    }
+
+    // 2b) 永久栏目副本 (copies)
+    const existingMeta = (__readPermanentSectionCopies() || []).filter((item) => item && item.id);
+    const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+        ? CanvasState.permanentLayout.copiesById
+        : {};
+
+    existingMeta.forEach(meta => {
+        const copyId = meta.id;
+        const displayIndex = meta.displayIndex;
+        const cardState = copyStateById[copyId];
+        if (!cardState) return;
+
+        const outsideLazyRange = __isCanvasRectOutsideBounds(cardState.left, cardState.top, cardState.width, cardState.height, lazyBounds);
+        const elId = 'permanent-section-copy-' + copyId;
+        let el = document.getElementById(elId);
+        const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
+
+        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(cardState.left), Number(cardState.top), Number(cardState.width || 100), Number(cardState.height || 100), visualBounds);
+        __updateNodeOffScreenState(elId, !inViewportStrict);
+
+        let shouldActive = isGlobalLowDetail;
+        if (!shouldActive && allowViewportLowDetail) {
+            const isOutside = __isCanvasRectOutsideBounds(cardState.left, cardState.top, cardState.width, cardState.height, visualBounds);
+            shouldActive = __shouldNodeBeLowDetail(elId, isOutside);
+        }
+        if (el && el.classList.contains('canvas-node-maximized')) {
+            shouldActive = false;
+        }
+
+        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
+        if (outsideLazyRange && !shouldKeepLoaded) {
+            const canUnload = __shouldNodeBeUnloaded(elId);
+            if (doUnload && el && canUnload) {
+                try { __unloadPermanentSectionTreeInPlace(el); } catch (_) { }
+                try { el.remove(); } catch (_) { }
+                el = null;
+            }
+            return;
+        }
+
+        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
+
+        if (!el) {
+            if (shouldInstantLoad) {
+                try {
+                    el = __createPermanentSectionCopyFromStorage({
+                        id: copyId,
+                        displayIndex,
+                        ...cardState
+                    });
+                } catch (_) { }
+            } else {
+                __enqueueCanvasLazyLoadNode({
+                    type: 'copy',
+                    id: elId,
+                    x: Number(cardState.left) || 0,
+                    y: Number(cardState.top) || 0,
+                    w: Number(cardState.width) || 100,
+                    h: Number(cardState.height) || 100,
+                    shouldActive: shouldActive,
+                    copyId: copyId,
+                    displayIndex: displayIndex,
+                    data: cardState
+                });
+            }
+        }
+
+        if (el) {
+            if (el.classList.contains('card-group-low-detail-child-hidden')) return;
+
+            __setCanvasViewportLazyShellClass(el, false);
+            if ((!CanvasState.lowDetailActive || el.classList.contains('canvas-node-maximized')) && !shouldActive) {
+                if (doLoad) {
+                    try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
+                }
+            }
+
+            const wasActive = el.classList.contains('low-detail-active');
+            if (shouldActive !== wasActive) {
+                el.classList.toggle('low-detail-active', shouldActive);
+            }
+
+            if (shouldActive) {
+                try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
+            }
+        }
+    });
+
+    // 3) 卡片组
+    const cardGroupNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(node => node && node.id && node.subtype === 'card-group') : [];
+    cardGroupNodes.forEach(node => {
+        let el = document.getElementById(node.id);
+        const inLazyRange = __isMdNodeInViewportBounds(node, lazyBounds, el);
+        const shouldKeepLoaded = el && __shouldKeepLazyCardDomLoaded(el);
+
+        const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
+        __updateNodeOffScreenState(node.id, !inViewportStrict);
+
+        let shouldActive = isGlobalLowDetail;
+        if (!shouldActive && allowViewportLowDetail) {
+            const isOutside = !__isMdNodeInViewportBounds(node, visualBounds, el);
+            shouldActive = __shouldNodeBeLowDetail(node.id, isOutside);
+        }
+        if (el && el.classList.contains('canvas-node-maximized')) {
+            shouldActive = false;
+        }
+
+        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
+        if (!inLazyRange && !shouldKeepLoaded) {
+            const canUnload = __shouldNodeBeUnloaded(node.id);
+            if (doUnload && el && canUnload) {
+                try { el.remove(); } catch (_) { }
+                el = null;
+            }
+            return;
+        }
+
+        const shouldInstantLoad = force || isRippleOrLowDetail || inViewportStrict;
+
+        if (!el) {
+            if (shouldInstantLoad) {
+                try { renderMdNode(node); } catch (_) { }
+                el = document.getElementById(node.id);
+            } else {
+                __enqueueCanvasLazyLoadNode({
+                    type: 'group',
+                    id: node.id,
+                    x: Number(node.x) || 0,
+                    y: Number(node.y) || 0,
+                    w: Number(node.width) || 100,
+                    h: Number(node.height) || 100,
+                    shouldActive: shouldActive,
+                    data: node
+                });
+            }
+        }
+
+        if (el) {
+            __setCanvasViewportLazyShellClass(el, false);
+
+            const wasActive = el.classList.contains('low-detail-active');
+            if (shouldActive !== wasActive) {
+                el.classList.toggle('low-detail-active', shouldActive);
+            }
+
+            if (shouldActive) {
+                try {
+                    if (window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
+                        window.__BCSCardGroup.ensureLowDetailOverlay(el, node);
+                    }
+                } catch (_) { }
+            }
+        }
+    });
+
+    try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+    try { __updateVirtualizationWakeupScheduler(); } catch (_) { }
+}
+
+function __ensureCanvasLowDetailOverlaysReady(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return;
+
+    try {
+        const sections = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [];
+        sections.forEach(section => {
+            if (!section || !section.id) return;
+            const el = document.getElementById(section.id);
+            if (el) __ensureTempSectionLowDetailOverlay(section, el);
+        });
+    } catch (_) { }
+
+    try {
+        ws.querySelectorAll('.permanent-bookmark-section').forEach(el => {
+            try { __ensurePermanentSectionLowDetailOverlay(el); } catch (_) { }
+        });
+    } catch (_) { }
+
+    try { __updateAllMdNodeLowDetailOverlays(); } catch (_) { }
+
+    try {
+        ws.querySelectorAll('.card-group-canvas-node').forEach(el => {
+            try {
+                const node = __getCardGroupLowDetailNodeById(el.id);
+                if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
+                    window.__BCSCardGroup.ensureLowDetailOverlay(el, node);
+                }
+            } catch (_) { }
+        });
+    } catch (_) { }
+}
+
+function __cancelCanvasLowDetailRipple(workspace = null, options = {}) {
+    const hasRunningFrame = !!CanvasState.lowDetailRippleFrame;
+    CanvasState.lowDetailRippleGeneration = (Number(CanvasState.lowDetailRippleGeneration || 0) || 0) + 1;
+    if (CanvasState.lowDetailRippleFrame) {
+        try { cancelAnimationFrame(CanvasState.lowDetailRippleFrame); } catch (_) { }
+        CanvasState.lowDetailRippleFrame = null;
+    }
+    const opts = (options && typeof options === 'object') ? options : {};
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (hasRunningFrame && !CanvasState.lowDetailActive && !opts.startingNew) {
+        try { __finalizeCanvasLowDetailExitVisualState(ws); } catch (_) { }
+    }
+    if (opts.keepClass) return;
+    if (ws && ws.classList) {
+        try { ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS); } catch (_) { }
+    }
+}
+
+function __clearCanvasLowDetailFreezeInv() {
+    CanvasState.lowDetailFreezeInv = null;
+    try {
+        const container = getCachedContainer();
+        if (container) container.style.removeProperty('--canvas-low-detail-freeze-inv');
+    } catch (_) { }
+}
+
+function __isCanvasSafeZoneActive(displayZoom = null) {
+    const zoom = (typeof displayZoom === 'number' && isFinite(displayZoom))
+        ? displayZoom
+        : getCanvasDisplayZoom();
+
+    if (isCanvasSafeZoneEnabled()) {
+        const threshold = getCanvasSafeZoneThreshold();
+        return Number.isFinite(zoom) && Number.isFinite(threshold) && threshold > 0 && zoom >= threshold;
+    }
+
+    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
+    const exitThreshold = enterThreshold + CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS;
+    return Number.isFinite(zoom) && zoom >= exitThreshold;
+}
+
+function __hasCanvasGlobalLowDetailResidue(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws || !ws.classList) return !!CanvasState.lowDetailActive;
+    return !!(
+        CanvasState.lowDetailActive ||
+        CanvasState.lowDetailFreezeInv !== null ||
+        ws.classList.contains('canvas-low-detail') ||
+        ws.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)
+    );
+}
+
+function __hasCanvasSafeZoneLowDetailResidue(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return !!CanvasState.lowDetailActive;
+    if (__hasCanvasGlobalLowDetailResidue(ws)) return true;
+    try {
+        if (ws.querySelector('.card-group-low-detail-child-hidden, .card-group-low-detail-nested-visible, [data-low-detail-host-group-id]')) {
+            return true;
+        }
+        const bounds = __getCanvasViewportBounds(ws, 0);
+        const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR + '.low-detail-active'));
+        for (const card of cards) {
+            if (!__isCardOutsideViewportBounds(card, bounds)) {
+                return true;
+            }
+        }
+    } catch (_) { }
+    return false;
+}
+
+function __forceCanvasLowDetailVisualExit(workspace = null, options = {}) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    const opts = (options && typeof options === 'object') ? options : {};
+    const clearAllCards = opts.clearAllCards === true;
+
+    __clearCanvasLazyLoadQueue();
+    CanvasState.lowDetailActive = false;
+    CanvasState.suppressTreeLoadAnimationUntil = Date.now() + CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS;
+    try { __cancelCanvasLowDetailRipple(ws); } catch (_) { }
+    if (ws && ws.classList) {
+        try {
+            ws.classList.remove('canvas-low-detail');
+            ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+        } catch (_) { }
+        if (clearAllCards) {
+            try { ws.querySelectorAll('.low-detail-active').forEach(el => el.classList.remove('low-detail-active')); } catch (_) { }
+            try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
+        } else {
+            const bounds = __getCanvasViewportBounds(ws, 0);
+            const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
+            cards.forEach(card => {
+                const activeForCard = __shouldKeepCardLowDetailAfterGlobalExit(card, bounds);
+                if (card.classList && !card.classList.contains('card-group-low-detail-child-hidden')) {
+                    card.classList.toggle('low-detail-active', activeForCard);
+                }
+            });
+        }
+    }
+    __clearCanvasLowDetailFreezeInv();
+    try { cancelCanvasLowDetailPrewarmJob(); } catch (_) { }
+    try {
+        const edgeToolbar = document.getElementById('edge-toolbar');
+        if (edgeToolbar) edgeToolbar.style.display = '';
+    } catch (_) { }
+    if (opts.restoreDom !== false) {
+        try { __scheduleCanvasLowDetailDomRestore(0); } catch (_) { }
+    }
+    if (clearAllCards) {
+        try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: false }); } catch (_) { }
+    } else {
+        try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: true }); } catch (_) { }
+    }
+    if (opts.scheduleVirtualization !== false) {
+        try { scheduleCanvasVirtualizationUpdate(0); } catch (_) { }
+    }
+    try { scheduleEdgesRender(0); } catch (_) { }
+}
+
+function __auditCanvasLowDetailSafeZoneExit(reason = 'safe-zone-audit') {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace || !__isCanvasSafeZoneActive()) return false;
+    if (!__hasCanvasSafeZoneLowDetailResidue(workspace)) return false;
+    __forceCanvasLowDetailVisualExit(workspace, {
+        clearAllCards: true,
+        restoreDom: true,
+        scheduleVirtualization: true,
+        reason
+    });
+    return true;
+}
+
+function __scheduleCanvasLowDetailSafeZoneAudit(reason = 'safe-zone-audit', delayMs = 90) {
+    if (canvasLowDetailSafeZoneAuditTimer) {
+        clearTimeout(canvasLowDetailSafeZoneAuditTimer);
+        canvasLowDetailSafeZoneAuditTimer = null;
+    }
+    if (!__isCanvasSafeZoneActive()) return;
+    canvasLowDetailSafeZoneAuditTimer = setTimeout(() => {
+        canvasLowDetailSafeZoneAuditTimer = null;
+        try { __auditCanvasLowDetailSafeZoneExit(reason); } catch (_) { }
+    }, Math.max(0, Number(delayMs) || 0));
+}
+
+function __getCanvasLowDetailRippleViewportRect(workspace) {
+    const container = getCachedContainer() || (workspace && workspace.parentElement) || workspace;
+    if (!container || typeof container.getBoundingClientRect !== 'function') return null;
+    try {
+        const rect = container.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+        return rect;
+    } catch (_) {
+        return null;
+    }
+}
+
+function __isRectNearLowDetailRippleViewport(rect, viewportRect) {
+    if (!rect || !viewportRect) return false;
+    const m = CANVAS_LOW_DETAIL_RIPPLE_NEAR_MARGIN;
+    return !(
+        rect.right < viewportRect.left - m ||
+        rect.left > viewportRect.right + m ||
+        rect.bottom < viewportRect.top - m ||
+        rect.top > viewportRect.bottom + m
+    );
+}
+
+function __isCardAlreadyLowDetailIntrinsic(card) {
+    if (!card || !card.classList) return false;
+    return !!(
+        card.classList.contains('low-detail-active') ||
+        card.classList.contains('dormant-content') ||
+        card.classList.contains('temp-tree-unloaded') ||
+        card.classList.contains('permanent-tree-unloaded') ||
+        card.classList.contains('card-group-low-detail-child-hidden')
+    );
+}
+
+function __ensureLowDetailOverlayForCard(card) {
+    if (!card || !card.classList) return;
+    try {
+        if (card.classList.contains('temp-canvas-node')) {
+            const sectionId = card.dataset ? (card.dataset.sectionId || card.id) : card.id;
+            const section = (typeof getTempSection === 'function') ? getTempSection(sectionId) : null;
+            if (section) __ensureTempSectionLowDetailOverlay(section, card);
+            return;
+        }
+    } catch (_) { }
+    try {
+        if (card.classList.contains('permanent-bookmark-section')) {
+            __ensurePermanentSectionLowDetailOverlay(card);
+            return;
+        }
+    } catch (_) { }
+    try {
+        if (card.classList.contains('card-group-canvas-node')) {
+            const node = __getCardGroupLowDetailNodeById(card.id);
+            if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
+                window.__BCSCardGroup.ensureLowDetailOverlay(card, node);
+            }
+            return;
+        }
+    } catch (_) { }
+    try {
+        if (card.classList.contains('md-canvas-node')) {
+            const node = (typeof getMdNodeById === 'function') ? getMdNodeById(card.id) : null;
+            if (node) __ensureMdNodeLowDetailOverlay(card, node);
+        }
+    } catch (_) { }
+}
+
+function __shouldKeepCardLowDetailAfterGlobalExit(card, bounds) {
+    if (!card || !card.classList) return false;
+    if (card.classList.contains('card-group-low-detail-child-hidden')) return true;
+    if (card.classList.contains('canvas-node-maximized')) return false;
+
+    if (card.classList.contains('md-canvas-node') ||
+        card.classList.contains('permanent-bookmark-section') ||
+        card.classList.contains('card-group-canvas-node') ||
+        card.classList.contains('temp-canvas-node')) {
+        if (__isViewportLowDetailEffective()) {
+            return __isCardOutsideViewportBounds(card, bounds);
+        }
+    }
+
+    if (card.classList.contains('dormant-content')) return true;
+    return false;
+}
+
+function __collectCanvasLowDetailRippleCards(workspace, shouldActive) {
+    const viewportRect = __getCanvasLowDetailRippleViewportRect(workspace);
+    if (!workspace || !viewportRect) return [];
+    const centerX = viewportRect.left + viewportRect.width / 2;
+    const centerY = viewportRect.top + viewportRect.height / 2;
+    const bounds = __getCanvasViewportBounds(workspace, 0);
+    const cards = Array.from(workspace.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
+    const entries = [];
+
+    cards.forEach(card => {
+        if (!card || !card.classList) return;
+        if (card.classList.contains('card-group-low-detail-child-hidden')) return;
+        const rect = (typeof card.getBoundingClientRect === 'function') ? card.getBoundingClientRect() : null;
+        if (!rect || rect.width <= 0 || rect.height <= 0) return;
+        if (!__isRectNearLowDetailRippleViewport(rect, viewportRect)) return;
+
+        if (shouldActive) {
+            if (__isCardAlreadyLowDetailIntrinsic(card)) return;
+        } else {
+            if (__shouldKeepCardLowDetailAfterGlobalExit(card, bounds)) return;
+        }
+
+        const cardX = rect.left + rect.width / 2;
+        const cardY = rect.top + rect.height / 2;
+        const distance = Math.hypot(cardX - centerX, cardY - centerY);
+        entries.push({ card, distance });
+    });
+
+    if (!entries.length) return [];
+    const maxDistance = Math.max(1, ...entries.map(entry => entry.distance));
+    entries.forEach(entry => {
+        // Enter: outside -> viewport center. Exit: viewport center -> outside.
+        entry.wave = shouldActive ? (maxDistance - entry.distance) : entry.distance;
+    });
+    entries.sort((a, b) => a.wave - b.wave);
+    return entries;
+}
+
+function __finalizeCanvasLowDetailExitVisualState(workspace) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return;
+
+    ws.classList.remove('canvas-low-detail');
+    ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+    try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
+
+    const bounds = __getCanvasViewportBounds(ws, 0);
+    const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
+    cards.forEach(card => {
+        const activeForCard = __shouldKeepCardLowDetailAfterGlobalExit(card, bounds);
+        if (card.classList && !card.classList.contains('card-group-low-detail-child-hidden')) {
+            card.classList.toggle('low-detail-active', activeForCard);
+        }
+        if (activeForCard) {
+            __ensureLowDetailOverlayForCard(card);
+        }
+    });
+
+    try { __maybeApplyCardGroupLowDetailMembershipState({ force: false }); } catch (_) { }
+}
+
+function __startCanvasLowDetailVisualRipple(shouldActive, workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws || !ws.classList) return false;
+
+    __clearCanvasLazyLoadQueue();
+    __cancelCanvasLowDetailRipple(ws, { startingNew: true });
+    const generation = (Number(CanvasState.lowDetailRippleGeneration || 0) || 0) + 1;
+    CanvasState.lowDetailRippleGeneration = generation;
+
+    if (shouldActive) {
+        __ensureCanvasLowDetailOverlaysReady(ws);
+        ws.classList.add(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+        ws.classList.add('canvas-low-detail');
+    } else {
+        __ensureCanvasLowDetailOverlaysReady(ws);
+        ws.classList.add(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+    }
+
+    const entries = __collectCanvasLowDetailRippleCards(ws, shouldActive);
+    if (!shouldActive) {
+        entries.forEach(entry => {
+            try {
+                __ensureLowDetailOverlayForCard(entry.card);
+                entry.card.classList.add('low-detail-active');
+            } catch (_) { }
+        });
+        ws.classList.remove('canvas-low-detail');
+    }
+
+    const finish = () => {
+        if (CanvasState.lowDetailRippleGeneration !== generation) return;
+        CanvasState.lowDetailRippleFrame = null;
+        if (shouldActive) {
+            ws.classList.remove(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
+            ws.classList.add('canvas-low-detail');
+            try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
+            try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+            try { runCanvasVirtualizationUpdate({ force: true, doLoad: false, doUnload: true, lowDetailPrune: true }); } catch (_) { }
+        } else {
+            __finalizeCanvasLowDetailExitVisualState(ws);
+            try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: true }); } catch (_) { }
+        }
+        try { scheduleEdgesRender(0); } catch (_) { }
+    };
+
+    if (!entries.length) {
+        finish();
+        return true;
+    }
+
+    const maxWave = Math.max(1, ...entries.map(entry => entry.wave));
+    const duration = Math.min(
+        CANVAS_LOW_DETAIL_RIPPLE_MAX_MS,
+        Math.max(CANVAS_LOW_DETAIL_RIPPLE_MIN_MS, 140 + entries.length * 8)
+    );
+    const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    let index = 0;
+
+    const applyEntry = (entry) => {
+        if (!entry || !entry.card || !entry.card.classList) return;
+        try {
+            if (shouldActive) {
+                __ensureLowDetailOverlayForCard(entry.card);
+                entry.card.classList.add('low-detail-active');
+            } else {
+                entry.card.classList.remove('low-detail-active');
+            }
+        } catch (_) { }
+    };
+
+    const step = (now) => {
+        if (CanvasState.lowDetailRippleGeneration !== generation) return;
+        const current = (typeof now === 'number') ? now : Date.now();
+        const t = Math.max(0, Math.min(1, (current - start) / duration));
+        const threshold = maxWave * t;
+        let applied = 0;
+        while (index < entries.length &&
+            (entries[index].wave <= threshold || (t >= 1 && applied < CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME)) &&
+            applied < CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME) {
+            applyEntry(entries[index]);
+            index++;
+            applied++;
+        }
+        if (index >= entries.length) {
+            finish();
+            return;
+        }
+        CanvasState.lowDetailRippleFrame = requestAnimationFrame(step);
+    };
+
+    CanvasState.lowDetailRippleFrame = requestAnimationFrame(step);
+    return true;
+}
+
+function __enterCanvasLowDetailVisualState(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return;
+
+    __ensureCanvasLowDetailOverlaysReady(ws);
+    try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
+    try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+    ws.classList.add('canvas-low-detail');
+}
+
+function __exitCanvasLowDetailVisualState(workspace = null) {
+    const ws = workspace || document.getElementById('canvasWorkspace');
+    if (!ws) return;
+
+    __cancelCanvasLowDetailRipple(ws);
+    ws.classList.remove('canvas-low-detail');
+    try { __clearCardGroupLowDetailMembershipState(); } catch (_) { }
+}
+
+function __applyLowDetailStateVisualSync(shouldActive, options = {}) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    if (!shouldActive && isCanvasSafeZoneEnabled() && __isCanvasSafeZoneActive()) {
+        __forceCanvasLowDetailVisualExit(workspace, {
+            clearAllCards: true,
+            restoreDom: true,
+            scheduleVirtualization: true,
+            reason: 'safe-zone-visual-sync'
+        });
+        __scheduleCanvasLowDetailSafeZoneAudit('safe-zone-visual-sync-post', 90);
+        return;
+    }
+
+    const opts = (options && typeof options === 'object') ? options : {};
+    if (!opts.skipRipple && __startCanvasLowDetailVisualRipple(shouldActive, workspace)) {
+        return;
+    }
+
+    if (shouldActive) __enterCanvasLowDetailVisualState(workspace);
+    else __finalizeCanvasLowDetailExitVisualState(workspace);
+}
+
+function updateCanvasLowDetailMode(force = false) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    const container = getCachedContainer();
+    const clearFreezeInv = () => {
+        __clearCanvasLowDetailFreezeInv();
+    };
+    const ensureFreezeInv = () => {
+        if (typeof CanvasState.lowDetailFreezeInv === 'number' && isFinite(CanvasState.lowDetailFreezeInv) && CanvasState.lowDetailFreezeInv > 0) {
+            try {
+                if (container && !container.style.getPropertyValue('--canvas-low-detail-freeze-inv')) {
+                    container.style.setProperty('--canvas-low-detail-freeze-inv', CanvasState.lowDetailFreezeInv.toString());
+                }
+            } catch (_) { }
+            return;
+        }
+        const z = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+        const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+        const displayThreshold = getCanvasLowDetailDisplayZoomThreshold();
+        const refZoom = (typeof displayThreshold === 'number' && isFinite(displayThreshold) && displayThreshold > 0)
+            ? (base * displayThreshold)
+            : z;
+        // 固定在“阈值那一刻”的补偿（避免继续缩小时文字相对栏目不断变大）
+        const inv = 1 / Math.max(z, refZoom);
+        CanvasState.lowDetailFreezeInv = inv;
+        try { if (container) container.style.setProperty('--canvas-low-detail-freeze-inv', inv.toString()); } catch (_) { }
+    };
+
+    if (!CanvasState.lowDetailEnabled) {
+        if (force || __hasCanvasSafeZoneLowDetailResidue(workspace)) {
+            __forceCanvasLowDetailVisualExit(workspace, {
+                clearAllCards: true,
+                restoreDom: true,
+                scheduleVirtualization: true,
+                reason: 'low-detail-disabled'
+            });
+        }
+        return;
+    }
+
+    const enterThreshold = getCanvasLowDetailDisplayZoomThreshold();
+    const exitThreshold = enterThreshold + CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS;
+    const displayZoom = getCanvasDisplayZoom();
+    const wasActive = CanvasState.lowDetailActive;
+
+    // 交互状态检测
+    const isZoomingClass = workspace.classList.contains('is-zooming');
+    const isScrolling = CanvasState.touchpadState.isScrolling || false;
+    const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
+    const isResizing = !!((resizeState && resizeState.active) || (workspace.querySelector && workspace.querySelector('.resizing')));
+    const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || isZoomingClass || isResizing;
+
+    // 稳定低细节交互帧只需要保持 transform/CSS 变量，不要重算数据量或组成员。
+    const safeZoneEnabled = isCanvasSafeZoneEnabled();
+    const safeZoneThreshold = getCanvasSafeZoneThreshold();
+    const safeZoneActive = safeZoneEnabled && displayZoom >= safeZoneThreshold;
+    if (safeZoneActive) {
+        try { updateDataIntensiveMode(force, { useCached: !force && isInteracting }); } catch (_) { }
+        if (force || __hasCanvasSafeZoneLowDetailResidue(workspace)) {
+            __forceCanvasLowDetailVisualExit(workspace, {
+                clearAllCards: true,
+                restoreDom: true,
+                scheduleVirtualization: true,
+                reason: 'safe-zone'
+            });
+        }
+        __scheduleCanvasLowDetailSafeZoneAudit('safe-zone-post-update', force ? 0 : 90);
+        return;
+    }
+    if (!force &&
+        wasActive &&
+        isInteracting &&
+        enterThreshold > 0 &&
+        displayZoom <= exitThreshold) {
+        ensureFreezeInv();
+        if (!workspace.classList.contains('canvas-low-detail')) {
+            __enterCanvasLowDetailVisualState(workspace);
+        }
+        return;
+    }
+
+    // [Fix Priority] 数据密集模式判断；交互中只读缓存，避免缩放/拖拽帧扫描可视 DOM。
+    updateDataIntensiveMode(force, { useCached: !force && isInteracting });
+    const dim = CanvasState.dataIntensiveMode;
+    const isTotalAlwaysActive = !!(dim && dim.totalAlwaysEnabled && dim.totalAlwaysActive);
+    const isDataOrange = !!(dim && dim.active);
+
+    // [Fix Priority] 优先级逻辑重构
+    let shouldActive;
+
+    if (isTotalAlwaysActive) {
+        const zoomSaysLowDetail = wasActive
+            ? ((enterThreshold > 0) ? (displayZoom <= exitThreshold) : false)
+            : ((enterThreshold > 0) ? (displayZoom <= enterThreshold) : false);
+        const safetyFloor = 0.15;
+        shouldActive = zoomSaysLowDetail || (displayZoom < safetyFloor);
+    } else if (isDataOrange) {
+        const zoomSaysLowDetail = wasActive
+            ? ((enterThreshold > 0) ? (displayZoom <= exitThreshold) : false)
+            : ((enterThreshold > 0) ? (displayZoom <= enterThreshold) : false);
+        const safetyFloor = 0.15;
+        shouldActive = zoomSaysLowDetail || (displayZoom < safetyFloor);
+    } else {
+        if (wasActive) {
+            shouldActive = (enterThreshold > 0) ? (displayZoom <= exitThreshold) : false;
+        } else {
+            shouldActive = (enterThreshold > 0) ? (displayZoom <= enterThreshold) : false;
+        }
+    }
+
+    // [Fix] 交互门控逻辑
+    if (!force && isInteracting) {
+        if (enterThreshold > 0 && displayZoom > exitThreshold && !shouldActive && wasActive) {
+            // Allow Exit: the configured low-detail threshold is the visible boundary.
+        } else if (shouldActive && !wasActive) {
+            // Allow Entry
+        } else {
+            if (shouldActive === wasActive) return;
+            if (!shouldActive && wasActive) return;
+            if (!isDataOrange) return;
+        }
+    }
+
+    if (shouldActive === wasActive) {
+        if (shouldActive) {
+            ensureFreezeInv();
+            if (!workspace.classList.contains('canvas-low-detail')) {
+                __enterCanvasLowDetailVisualState(workspace);
+            } else {
+                try { __maybeApplyCardGroupLowDetailMembershipState(); } catch (_) { }
+            }
+            try { __scheduleCanvasLowDetailDomPrune(0); } catch (_) { }
+            try { maybeStartCanvasLowDetailPrewarmJob(); } catch (_) { }
+        } else if (!shouldActive && (force || __hasCanvasGlobalLowDetailResidue(workspace))) {
+            __forceCanvasLowDetailVisualExit(workspace, {
+                clearAllCards: !__isViewportLowDetailEffective(),
+                restoreDom: true,
+                scheduleVirtualization: force,
+                reason: force ? 'force-state-sync' : 'visual-residue-sync'
+            });
+        }
+        return;
+    }
+
+    if (shouldActive !== wasActive) {
+        __clearCanvasLazyLoadQueue();
+    }
+    CanvasState.lowDetailActive = shouldActive;
+
+    // 进入低细节：隐藏连接线工具栏（避免“悬空工具条”）
+    if (shouldActive) {
+        CanvasState.suppressTreeLoadAnimationUntil = Date.now() + CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS;
+        ensureFreezeInv();
+        const edgeToolbar = document.getElementById('edge-toolbar');
+        if (edgeToolbar) edgeToolbar.style.display = 'none';
+        try { __scheduleCanvasLowDetailDomPrune(0); } catch (_) { }
+    } else {
+        // 退出低细节
+        CanvasState.suppressTreeLoadAnimationUntil = Date.now() + CANVAS_LOW_DETAIL_DOM_ANIMATION_SUPPRESS_MS;
+        clearFreezeInv();
+        try { cancelCanvasLowDetailPrewarmJob(); } catch (_) { }
+        const edgeToolbar = document.getElementById('edge-toolbar');
+        if (edgeToolbar) edgeToolbar.style.display = '';
+        try { __scheduleCanvasLowDetailDomRestore(0); } catch (_) { }
+
+        // 如果不在交互中，可以尝试加载视口内内容
+        if (!isInteracting) {
+            requestAnimationFrame(() => {
+                if (!CanvasState.lowDetailActive) {
+                    try { runCanvasVirtualizationUpdate({ force: true, doLoad: true, doUnload: !__isViewportLowDetailEffective() }); } catch (_) { }
+                }
+            });
+        }
+        try { scheduleEdgesRender(0); } catch (_) { }
+    }
+
+    // 低细节视觉状态必须同步切换，避免出现“先隐藏内容、后补文字层”的中间态。
+    try {
+        __applyLowDetailStateVisualSync(shouldActive, { skipRipple: force });
+    } catch (_) {
+        if (shouldActive) {
+            try { __enterCanvasLowDetailVisualState(workspace); } catch (_) {
+                workspace.classList.add('canvas-low-detail');
+                try { __updateAllMdNodeLowDetailOverlays(); } catch (_) {}
+            }
+        } else {
+            try { __exitCanvasLowDetailVisualState(workspace); } catch (_) {
+                workspace.classList.remove('canvas-low-detail');
+            }
+        }
+        if (shouldActive) {
+            try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
+        }
+        try { __maybeApplyCardGroupLowDetailMembershipState({ force: shouldActive }); } catch (_) { }
+    }
+}
+
+function setCanvasZoom(zoom, centerX = null, centerY = null, options = {}) {
+    const container = getCachedContainer();
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!container || !workspace) return;
+
+    const oldZoom = CanvasState.zoom;
+
+    if (typeof options !== 'object' || options === null) {
+        options = {};
+    }
+    const {
+        recomputeBounds = false,
+        skipSave = false,
+        silent = false,
+        skipScrollbarUpdate = false, // 新增：跳过滚动条更新（滚动时使用）
+        forceScaleVars = false
+    } = options;
+
+    // 限制缩放范围（最小显示 1%）
+    zoom = clampCanvasZoom(zoom);
+
+    // 如果没有指定中心点，使用 workspace 的中心点
+    if (centerX === null || centerY === null) {
+        const workspaceRect = workspace.getBoundingClientRect();
+        centerX = workspaceRect.width / 2;
+        centerY = workspaceRect.height / 2;
+    }
+
+    // 计算中心点在 canvas-content 坐标系中的位置
+    const canvasCenterX = (centerX - CanvasState.panOffsetX) / oldZoom;
+    const canvasCenterY = (centerY - CanvasState.panOffsetY) / oldZoom;
+
+    // 应用新的缩放
+    CanvasState.zoom = zoom;
+    if (CanvasState.physicalModifiers && (CanvasState.physicalModifiers.Control || CanvasState.physicalModifiers.Meta || CanvasState.physicalModifiers.Alt || CanvasState.physicalModifiers.Shift)) {
+        CanvasState.zoomOccurredWithModifier = true;
+    }
+
+    // 调整平移偏移，使中心点保持在相同的视觉位置
+    CanvasState.panOffsetX = centerX - canvasCenterX * zoom;
+    CanvasState.panOffsetY = centerY - canvasCenterY * zoom;
+
+    // 优化：滚动时延迟更新边界
+    if (!skipScrollbarUpdate) {
+        setCanvasScaleVars(container, zoom, forceScaleVars);
+        updateCanvasScrollBounds({ initial: false, recomputeBounds });
+        savePanOffsetThrottled();
+    } else {
+        // 滚动/滚轮缩放时：仍需同步缩放变量（供低缩放文字/连线标签使用），但跳过边界计算
+        setCanvasScaleVars(container, zoom, forceScaleVars);
+        // 滚动时使用极速平移（直接 transform）
+        applyPanOffsetFast();
+    }
+
+    // 缩放阈值降级：用已经更新后的 pan/transform 判断，避免快速缩放时新 zoom + 旧 pan 造成模式抖动。
+    updateCanvasLowDetailMode();
+    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
+
+    if (!skipScrollbarUpdate) {
+        // [Fix] 缩放后检查唤醒状态：交互中/低细节/大数据时用节流，避免每次缩放都全量扫描导致掉帧
+        const isZooming = workspace.classList.contains('is-zooming');
+        if (CanvasState.lowDetailActive || (isZooming && isCanvasHugeData())) {
+            scheduleDormancyUpdate();
+        } else {
+            scheduleDormancyUpdate(0);
+        }
+    }
+
+    // 更新显示
+    const zoomValue = document.getElementById('zoomValue');
+    if (zoomValue) {
+        const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+        const displayZoom = zoom / base;
+        zoomValue.textContent = (displayZoom * 100).toFixed(0) + '%';
+        // [Fix] 如果小于 10%，显示一位小数
+        if (displayZoom < 0.1) {
+            zoomValue.textContent = (displayZoom * 100).toFixed(1) + '%';
+        } else {
+            zoomValue.textContent = Math.round(displayZoom * 100) + '%';
+        }
+    }
+
+    // 保存缩放级别
+    if (!skipSave) {
+        saveZoomThrottled(zoom);
+    }
+
+    // 移除缩放日志以减少控制台输出
+    // if (!silent) {
+    //     console.log('[Canvas] 缩放:', Math.round(zoom * 100) + '%', '中心点:', { canvasCenterX, canvasCenterY });
+    // }
+
+    // 缩放变化后，更新连接线工具栏位置以保持固定像素偏移
+    updateEdgeToolbarPosition();
+}
+
+function applyPanOffset() {
+    const container = getCachedContainer();
+    const content = getCachedContent();
+    if (!container || !content) return;
+
+    // 不要自动限制滚动位置，允许用户自由滚动到空白区域
+    // CanvasState.panOffsetX = clampPan('horizontal', CanvasState.panOffsetX);
+    // CanvasState.panOffsetY = clampPan('vertical', CanvasState.panOffsetY);
+
+    const scale = CanvasState.zoom;
+    applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, scale);
+
+    // 同步 CSS 变量：用于背景网格、以及其它依赖变量的样式
+    container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
+    container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+
+    // 调度滚动条更新（RAF 去抖）
+    scheduleScrollbarUpdate();
+
+    if (!CanvasState.scrollAnimation.frameId) {
+        CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+        CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+    }
+}
+
+// 性能优化：极速平移（使用 transform，完全跳过边界检查和滚动条）
+function applyPanOffsetFast() {
+    const container = getCachedContainer();
+    const content = getCachedContent();
+    if (!content) return;
+
+    // 直接使用 transform，跳过 clampPan（transform 只触发合成，性能最优）
+    const scale = CanvasState.zoom;
+    applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, scale);
+
+    // [Fix] 移除交互过程中的实时唤醒检查，通过 onScrollStop 在停止时统一处理
+    // 之前尝试的 150ms 节流检查会导致高频 DOM 操作引发闪烁
+
+    // [OPT] 只有在非快速缩放模式下才更新背景网格变量
+    // 如果正在缩放(is-zooming)，网格是隐藏的，更新变量纯属浪费性能
+    const workspace = document.getElementById('canvasWorkspace');
+    const isZooming = workspace && workspace.classList.contains('is-zooming');
+
+    if (!isZooming && container) {
+        setCanvasScaleVars(container, scale);
+        // 不在高频交互过程中更新 --canvas-pan-*，避免触发 background-position repaint。
+        // 网格层由 #canvasGridLayer 的 transform 接管，停止交互后由 onScrollStop 统一同步变量即可。
+    }
+}
+
+// 性能优化：标记正在滚动
+function markScrolling() {
+    isScrolling = true;
+    try {
+        const ws = document.getElementById('canvasWorkspace');
+        if (ws) ws.classList.add('is-scrolling');
+    } catch (_) { }
+    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
+
+    // 清除之前的停止计时器
+    if (scrollStopTimer) {
+        clearTimeout(scrollStopTimer);
+    }
+
+    // 设置新的停止计时器
+    scrollStopTimer = setTimeout(() => {
+        isScrolling = false;
+        try {
+            const ws = document.getElementById('canvasWorkspace');
+            if (ws) ws.classList.remove('is-scrolling');
+        } catch (_) { }
+        onScrollStop();
+    }, SCROLL_STOP_DELAY);
+}
+
+// 性能优化：滚动停止后的处理
+function onScrollStop() {
+    // 滚动停止后：同步 CSS 变量（用于背景网格），但不再切换渲染模式（避免闪烁）
+    const container = getCachedContainer();
+    const content = getCachedContent();
+
+    if (container && content) {
+        setCanvasScaleVars(container, CanvasState.zoom);
+        container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
+        container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+        applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom);
+    }
+
+    // 启动惯性滚动（拖尾阻尼效果）
+    startInertiaScroll();
+
+    // 更新边界和滚动条
+    scheduleBoundsUpdate();
+    scheduleScrollbarUpdate();
+    savePanOffsetThrottled();
+
+    // [数据密集模式] 平移停止后更新状态（视口变化可能影响可见数据量）
+    try { updateDataIntensiveMode(); } catch (_) { }
+
+    // 更新休眠/按需加载状态
+    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
+        scheduleCanvasVirtualizationUpdate();
+    } else if (!CanvasState.lowDetailActive || !isCanvasHugeData()) {
+        scheduleDormancyUpdate();
+    }
+    try { scheduleEdgesRender(isCanvasHugeData() ? 120 : 40); } catch (_) { }
+    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
+}
+
+function cancelCanvasBlockDormancyUnloadUpdate() {
+    if (!canvasBlockDormancyUnloadTimer) return;
+    clearTimeout(canvasBlockDormancyUnloadTimer);
+    canvasBlockDormancyUnloadTimer = null;
+}
+
+// 区块休眠：区块外卸载额外防抖（避免频繁操作造成反复卸载/重建）
+function scheduleCanvasBlockDormancyUnloadUpdate(delayMs = null) {
+    if (!isCanvasBlockDormancyEnabled()) return;
+
+    cancelCanvasBlockDormancyUnloadUpdate();
+
+    const configured = (typeof CanvasState.blockDormancyUnloadDebounceMs === 'number' && isFinite(CanvasState.blockDormancyUnloadDebounceMs))
+        ? Math.max(0, CanvasState.blockDormancyUnloadDebounceMs)
+        : 900;
+    const delay = (typeof delayMs === 'number' && isFinite(delayMs))
+        ? Math.max(0, delayMs)
+        : (isCanvasHugeData() ? (configured + 300) : configured);
+
+    canvasBlockDormancyUnloadTimer = setTimeout(() => {
+        canvasBlockDormancyUnloadTimer = null;
+        try { runCanvasBlockDormancyUpdate({ doLoad: false, doUnload: true }); } catch (_) { }
+    }, delay);
+}
+
+// 性能优化：调度休眠管理更新（节流）
+function scheduleDormancyUpdate(delayMs = null) {
+    if (__isCanvasNodeMaximizedActive()) return;
+    if (dormancyUpdatePending) return;
+
+    // 极限/大数据：用虚拟化按需加载替代 dormancy 全量扫描
+    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
+        cancelCanvasBlockDormancyUnloadUpdate();
+        scheduleCanvasVirtualizationUpdate();
+        return;
+    }
+
+    dormancyUpdatePending = true;
+
+    if (dormancyUpdateTimer) {
+        clearTimeout(dormancyUpdateTimer);
+    }
+
+    const delay = (typeof delayMs === 'number' && isFinite(delayMs))
+        ? Math.max(0, delayMs)
+        : (isCanvasHugeData() ? 420 : 200); // 大数据量时加大节流，避免频繁全量扫描
+
+    dormancyUpdateTimer = setTimeout(() => {
+        dormancyUpdateTimer = null;
+        dormancyUpdatePending = false;
+        if (__isCanvasNodeMaximizedActive()) return;
+        if (isCanvasBlockDormancyEnabled()) {
+            // 快速：先恢复/按需加载“区块内+视口附近”的内容
+            runCanvasBlockDormancyUpdate({ doLoad: true, doUnload: false });
+            // 稳定：区块外卸载额外防抖，避免用户频繁操作时抖动
+            scheduleCanvasBlockDormancyUnloadUpdate();
+        }
+    }, delay);
+}
+
+// 惯性滚动相关函数
+function __resolveCanvasPanInertiaInputType(isTouchpad, isDiscreteWheel) {
+    if (!isTouchpad && CANVAS_RUNTIME_WINDOWS_LIKE && isDiscreteWheel) {
+        const resolved = WINDOWS_LINUX_WHEEL_PAN_INERTIA_ENABLED
+            ? PAN_INERTIA_INPUT_WHEEL
+            : PAN_INERTIA_INPUT_NONE;
+        __logCanvasWinInput('wheel-pan-inertia-route', {
+            isTouchpad,
+            isDiscreteWheel,
+            inertiaEnabled: WINDOWS_LINUX_WHEEL_PAN_INERTIA_ENABLED,
+            resolvedInputType: resolved
+        }, { throttleKey: 'wheel-pan-inertia-route', throttleMs: 120 });
+        return resolved;
+    }
+    return PAN_INERTIA_INPUT_NONE;
+}
+
+function __resetCanvasPanInertiaSample() {
+    CanvasState.inertiaState.lastDeltaX = 0;
+    CanvasState.inertiaState.lastDeltaY = 0;
+    CanvasState.inertiaState.lastTime = 0;
+    CanvasState.inertiaState.inputType = PAN_INERTIA_INPUT_NONE;
+}
+
+function __updateCanvasPanInertiaSample(inputType, panDeltaX, panDeltaY) {
+    if (inputType !== PAN_INERTIA_INPUT_WHEEL) {
+        __resetCanvasPanInertiaSample();
+        return;
+    }
+
+    const sampleX = Number(panDeltaX) || 0;
+    const sampleY = Number(panDeltaY) || 0;
+    const blend = WHEEL_PAN_INERTIA_SAMPLE_BLEND;
+    if (blend >= 1) {
+        CanvasState.inertiaState.lastDeltaX = sampleX;
+        CanvasState.inertiaState.lastDeltaY = sampleY;
+    } else {
+        CanvasState.inertiaState.lastDeltaX = (CanvasState.inertiaState.lastDeltaX * (1 - blend)) + (sampleX * blend);
+        CanvasState.inertiaState.lastDeltaY = (CanvasState.inertiaState.lastDeltaY * (1 - blend)) + (sampleY * blend);
+    }
+    CanvasState.inertiaState.lastTime = Date.now();
+    CanvasState.inertiaState.inputType = inputType;
+}
+
+function __getCanvasPanInertiaParams(inputType) {
+    if (inputType === PAN_INERTIA_INPUT_WHEEL) {
+        return {
+            maxStartAgeMs: WHEEL_PAN_INERTIA_MAX_START_AGE_MS,
+            minSpeed: WHEEL_PAN_INERTIA_MIN_SPEED,
+            multiplier: WHEEL_PAN_INERTIA_MULTIPLIER,
+            damping: WHEEL_PAN_INERTIA_DAMPING,
+            stopThreshold: WHEEL_PAN_INERTIA_STOP_THRESHOLD
+        };
+    }
+    return null;
+}
+
+function startInertiaScroll() {
+    const inputType = CanvasState.inertiaState.inputType || PAN_INERTIA_INPUT_NONE;
+    const params = __getCanvasPanInertiaParams(inputType);
+    if (!params) {
+        __logCanvasWinInput('wheel-pan-inertia-skip', {
+            reason: 'no-params',
+            inputType
+        }, { throttleKey: 'wheel-pan-inertia-skip', throttleMs: 120 });
+        return;
+    }
+    const timeSinceLastScroll = Date.now() - (Number(CanvasState.inertiaState.lastTime) || 0);
+    if (!Number.isFinite(timeSinceLastScroll) || timeSinceLastScroll > params.maxStartAgeMs) {
+        __logCanvasWinInput('wheel-pan-inertia-skip', {
+            reason: 'sample-expired',
+            inputType,
+            timeSinceLastScroll: __roundCanvasDebugNumber(timeSinceLastScroll, 2),
+            maxStartAgeMs: params.maxStartAgeMs
+        }, { throttleKey: 'wheel-pan-inertia-skip', throttleMs: 120 });
+        __resetCanvasPanInertiaSample();
+        return;
+    }
+
+    const absVelocityX = Math.abs(Number(CanvasState.inertiaState.lastDeltaX) || 0);
+    const absVelocityY = Math.abs(Number(CanvasState.inertiaState.lastDeltaY) || 0);
+
+    // 如果速度太小，不启动惯性滚动
+    if (absVelocityX < params.minSpeed && absVelocityY < params.minSpeed) {
+        __logCanvasWinInput('wheel-pan-inertia-skip', {
+            reason: 'below-min-speed',
+            inputType,
+            absVelocityX: __roundCanvasDebugNumber(absVelocityX, 5),
+            absVelocityY: __roundCanvasDebugNumber(absVelocityY, 5),
+            minSpeed: params.minSpeed
+        }, { throttleKey: 'wheel-pan-inertia-skip', throttleMs: 120 });
+        __resetCanvasPanInertiaSample();
+        return;
+    }
+
+    // 速度单位使用 panDelta（像素偏移），保证滚轮/触控板同一套惯性模型可控
+    CanvasState.inertiaState.velocityX = CanvasState.inertiaState.lastDeltaX * params.multiplier;
+    CanvasState.inertiaState.velocityY = CanvasState.inertiaState.lastDeltaY * params.multiplier;
+    CanvasState.inertiaState.isActive = true;
+    __logCanvasWinInput('wheel-pan-inertia-start', {
+        inputType,
+        lastDeltaX: __roundCanvasDebugNumber(CanvasState.inertiaState.lastDeltaX, 5),
+        lastDeltaY: __roundCanvasDebugNumber(CanvasState.inertiaState.lastDeltaY, 5),
+        multiplier: params.multiplier,
+        startVelocityX: __roundCanvasDebugNumber(CanvasState.inertiaState.velocityX, 5),
+        startVelocityY: __roundCanvasDebugNumber(CanvasState.inertiaState.velocityY, 5)
+    }, { force: true, throttleMs: 0 });
+
+    // 启动惯性滚动动画
+    runInertiaScroll();
+}
+
+function runInertiaScroll() {
+    if (!CanvasState.inertiaState.isActive) {
+        return;
+    }
+
+    const inputType = CanvasState.inertiaState.inputType || PAN_INERTIA_INPUT_NONE;
+    const params = __getCanvasPanInertiaParams(inputType);
+    if (!params) {
+        cancelInertiaScroll();
+        return;
+    }
+    const damping = params.damping;
+    const stopThreshold = params.stopThreshold;
+
+    // 应用速度
+    if (Math.abs(CanvasState.inertiaState.velocityX) > stopThreshold) {
+        CanvasState.panOffsetX += CanvasState.inertiaState.velocityX;
+    }
+    if (Math.abs(CanvasState.inertiaState.velocityY) > stopThreshold) {
+        CanvasState.panOffsetY += CanvasState.inertiaState.velocityY;
+    }
+
+    // 应用阻尼
+    CanvasState.inertiaState.velocityX *= damping;
+    CanvasState.inertiaState.velocityY *= damping;
+
+    // 更新显示
+    applyPanOffsetFast();
+    updateScrollbarThumbsLightweight();
+
+    // 检查是否应该停止
+    const absVelocityX = Math.abs(CanvasState.inertiaState.velocityX);
+    const absVelocityY = Math.abs(CanvasState.inertiaState.velocityY);
+
+    if (absVelocityX < stopThreshold && absVelocityY < stopThreshold) {
+        // 停止惯性滚动
+        CanvasState.inertiaState.isActive = false;
+        CanvasState.inertiaState.velocityX = 0;
+        CanvasState.inertiaState.velocityY = 0;
+        CanvasState.inertiaState.animationId = null;
+        __resetCanvasPanInertiaSample();
+
+        // 惯性滚动结束后，进行最终更新
+        const container = getCachedContainer();
+        const content = getCachedContent();
+        if (container && content) {
+            setCanvasScaleVars(container, CanvasState.zoom);
+            container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
+            container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+            applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom);
+        }
+        scheduleScrollbarUpdate();
+        savePanOffsetThrottled();
+        try { updateCanvasZoomPerformanceMode({ deferOff: false }); } catch (_) { }
+        return;
+    }
+
+    // 继续动画
+    CanvasState.inertiaState.animationId = requestAnimationFrame(runInertiaScroll);
+}
+
+function cancelInertiaScroll() {
+    const wasActive = !!CanvasState.inertiaState.isActive;
+    if (CanvasState.inertiaState.animationId) {
+        cancelAnimationFrame(CanvasState.inertiaState.animationId);
+        CanvasState.inertiaState.animationId = null;
+    }
+    CanvasState.inertiaState.isActive = false;
+    CanvasState.inertiaState.velocityX = 0;
+    CanvasState.inertiaState.velocityY = 0;
+    __resetCanvasPanInertiaSample();
+    if (wasActive) {
+        __logCanvasWinInput('wheel-pan-inertia-cancel', {
+            reason: 'cancelInertiaScroll'
+        }, { force: true, throttleMs: 0 });
+        try { updateCanvasZoomPerformanceMode({ deferOff: false }); } catch (_) { }
+    }
+}
+
+function __cancelCanvasPendingScrollUpdate() {
+    if (scrollUpdateFrame) {
+        cancelAnimationFrame(scrollUpdateFrame);
+        scrollUpdateFrame = null;
+    }
+    pendingScrollRequest = null;
+}
+
+function __cancelCanvasScrollAnimationFrame() {
+    if (CanvasState.scrollAnimation.frameId) {
+        cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
+        CanvasState.scrollAnimation.frameId = null;
+    }
+    CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+    CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+    CanvasState.scrollAnimation.source = null;
+}
+
+function __startWinWheelPanPump() {
+    if (winWheelPanPumpFrame) return;
+
+    const pump = () => {
+        winWheelPanPumpFrame = null;
+        const residualX = WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL
+            * Math.min(1, getCanvasWheelHorizontalPanRate());
+        const residualY = WINDOWS_LINUX_WHEEL_PAN_PUMP_MIN_RESIDUAL
+            * Math.min(1, getCanvasWheelVerticalPanRate());
+        if (Math.abs(winWheelPanAccumX) < residualX &&
+            Math.abs(winWheelPanAccumY) < residualY) {
+            winWheelPanAccumX = 0;
+            winWheelPanAccumY = 0;
+            return;
+        }
+
+        const drainX = Math.min(
+            0.9,
+            WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN * __getCanvasWheelPanTailCompensation('horizontal')
+        );
+        const drainY = Math.min(
+            0.9,
+            WINDOWS_LINUX_WHEEL_PAN_EXPONENTIAL_DRAIN * __getCanvasWheelPanTailCompensation('vertical')
+        );
+        const stepX = winWheelPanAccumX * drainX;
+        const stepY = winWheelPanAccumY * drainY;
+
+        winWheelPanAccumX -= stepX;
+        winWheelPanAccumY -= stepY;
+
+        CanvasState.scrollAnimation.source = 'direct';
+        CanvasState.panOffsetX += stepX;
+        CanvasState.panOffsetY += stepY;
+        CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+        CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+
+        applyPanOffsetFast();
+        updateScrollbarThumbsLightweight();
+
+        if (Math.abs(winWheelPanAccumX) >= residualX ||
+            Math.abs(winWheelPanAccumY) >= residualY) {
+            winWheelPanPumpFrame = requestAnimationFrame(pump);
+        } else {
+            winWheelPanAccumX = 0;
+            winWheelPanAccumY = 0;
+            scheduleScrollUpdate();
+        }
+    };
+    winWheelPanPumpFrame = requestAnimationFrame(pump);
+}
+
+function __cancelCanvasWheelPanMotion() {
+    if (winWheelPanPumpFrame) {
+        cancelAnimationFrame(winWheelPanPumpFrame);
+        winWheelPanPumpFrame = null;
+    }
+    winWheelPanAccumX = 0;
+    winWheelPanAccumY = 0;
+    cancelInertiaScroll();
+    __cancelCanvasPendingScrollUpdate();
+    __cancelCanvasScrollAnimationFrame();
+}
+
+// 边缘自动滚动相关函数
+function checkEdgeAutoScroll(clientX, clientY) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    const rect = workspace.getBoundingClientRect();
+    const edgeThreshold = 100; // 触发自动滚动的边缘距离（像素）
+    const maxSpeed = 8;        // 最大滚动速度 - 降低到8，使操作更温和
+    const minSpeed = 1.5;      // 最小滚动速度
+
+    // 计算距离边缘 of the viewport/workspace
+    const distLeft = clientX - rect.left;
+    const distRight = rect.right - clientX;
+    const distTop = clientY - rect.top;
+    const distBottom = rect.bottom - clientY;
+
+    let targetVelocityX = 0;
+    let targetVelocityY = 0;
+
+    // 匀速化：使用线性比率，使速度随着越靠近边缘而均匀地、缓慢地增加，避免突然的加速抖动
+    // 横向滚动
+    if (distLeft < edgeThreshold && distLeft > 0) {
+        const ratio = 1 - (distLeft / edgeThreshold);
+        targetVelocityX = minSpeed + (maxSpeed - minSpeed) * ratio;
+    } else if (distRight < edgeThreshold && distRight > 0) {
+        const ratio = 1 - (distRight / edgeThreshold);
+        targetVelocityX = -(minSpeed + (maxSpeed - minSpeed) * ratio);
+    }
+
+    // 纵向滚动
+    if (distTop < edgeThreshold && distTop > 0) {
+        const ratio = 1 - (distTop / edgeThreshold);
+        targetVelocityY = minSpeed + (maxSpeed - minSpeed) * ratio;
+    } else if (distBottom < edgeThreshold && distBottom > 0) {
+        const ratio = 1 - (distBottom / edgeThreshold);
+        targetVelocityY = -(minSpeed + (maxSpeed - minSpeed) * ratio);
+    }
+
+    // 启动或更新自动滚动
+    if (targetVelocityX !== 0 || targetVelocityY !== 0) {
+        startEdgeAutoScroll(targetVelocityX, targetVelocityY);
+    } else {
+        stopEdgeAutoScroll();
+    }
+}
+
+function startEdgeAutoScroll(targetVelocityX, targetVelocityY) {
+    // 更新目标速度
+    CanvasState.autoScrollState.targetVelocityX = targetVelocityX;
+    CanvasState.autoScrollState.targetVelocityY = targetVelocityY;
+
+    // 如果已经在自动滚动，只更新目标速度
+    if (CanvasState.autoScrollState.isActive) {
+        return;
+    }
+
+    // 首次启动时，将当前速度设置为目标速度的一半，实现平滑启动
+    CanvasState.autoScrollState.velocityX = targetVelocityX * 0.5;
+    CanvasState.autoScrollState.velocityY = targetVelocityY * 0.5;
+    CanvasState.autoScrollState.isActive = true;
+    runEdgeAutoScroll();
+}
+
+function runEdgeAutoScroll() {
+    if (!CanvasState.autoScrollState.isActive) {
+        return;
+    }
+
+    const state = CanvasState.autoScrollState;
+    const scrollFactor = 1.0 / getCanvasZoomForScrollFactor();
+
+    // 使用线性插值（lerp）平滑地过渡到目标速度，避免抖动
+    // velocityX = velocityX + (targetVelocityX - velocityX) * smoothing
+    const smoothing = state.smoothing;
+    state.velocityX += (state.targetVelocityX - state.velocityX) * smoothing;
+    state.velocityY += (state.targetVelocityY - state.velocityY) * smoothing;
+
+    // 应用滚动
+    CanvasState.panOffsetX += state.velocityX * scrollFactor;
+    CanvasState.panOffsetY += state.velocityY * scrollFactor;
+
+    // 更新显示
+    applyPanOffsetFast();
+    updateScrollbarThumbsLightweight();
+
+    // 同步更新拖动元素的位置
+    if (CanvasState.dragState.isDragging && CanvasState.dragState.draggedElement) {
+        const panDeltaX = state.velocityX * scrollFactor;
+        const panDeltaY = state.velocityY * scrollFactor;
+        adjustDragReferenceForPan(panDeltaX, panDeltaY, CanvasState.dragState.lastClientX, CanvasState.dragState.lastClientY);
+    }
+
+    // 同步更新框选临时组拖动位置
+    if (window.__BCSLassoTempGroup && typeof window.__BCSLassoTempGroup.updateDragPositionForScroll === 'function') {
+        window.__BCSLassoTempGroup.updateDragPositionForScroll();
+    }
+
+    // 继续动画
+    state.intervalId = requestAnimationFrame(runEdgeAutoScroll);
+}
+
+function stopEdgeAutoScroll() {
+    const state = CanvasState.autoScrollState;
+
+    if (state.intervalId) {
+        cancelAnimationFrame(state.intervalId);
+        state.intervalId = null;
+    }
+
+    // 重置所有状态
+    state.isActive = false;
+    state.velocityX = 0;
+    state.velocityY = 0;
+    state.targetVelocityX = 0;
+    state.targetVelocityY = 0;
+
+    // 停止后进行最终更新
+    const isTempGroupDragging = window.__BCSLassoTempGroup &&
+                               typeof window.__BCSLassoTempGroup.isDragging === 'function' &&
+                               window.__BCSLassoTempGroup.isDragging();
+    if (CanvasState.dragState.isDragging || isTempGroupDragging) {
+        const container = getCachedContainer();
+        const content = getCachedContent();
+        if (container && content) {
+            setCanvasScaleVars(container, CanvasState.zoom);
+            container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
+            container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+            applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom);
+        }
+        scheduleScrollbarUpdate();
+    }
+}
+if (typeof window !== 'undefined') {
+    window.checkEdgeAutoScroll = checkEdgeAutoScroll;
+    window.stopEdgeAutoScroll = stopEdgeAutoScroll;
+}
+
+// 性能优化：调度滚动条更新（使用 RAF 去抖）
+function scheduleScrollbarUpdate() {
+    if (__isCanvasNodeMaximizedActive()) return;
+    if (scrollbarUpdatePending) return;
+
+    scrollbarUpdatePending = true;
+
+    if (scrollbarUpdateFrame) {
+        cancelAnimationFrame(scrollbarUpdateFrame);
+    }
+
+    scrollbarUpdateFrame = requestAnimationFrame(() => {
+        scrollbarUpdateFrame = null;
+        scrollbarUpdatePending = false;
+        if (__isCanvasNodeMaximizedActive()) return;
+        updateScrollbarThumbs();
+    });
+}
+
+// 性能优化：调度边界更新（使用 RAF 去抖）
+function scheduleBoundsUpdate() {
+    if (__isCanvasNodeMaximizedActive()) return;
+    if (boundsUpdatePending) return;
+
+    boundsUpdatePending = true;
+
+    if (boundsUpdateFrame) {
+        cancelAnimationFrame(boundsUpdateFrame);
+    }
+
+    boundsUpdateFrame = requestAnimationFrame(() => {
+        boundsUpdateFrame = null;
+        boundsUpdatePending = false;
+        if (__isCanvasNodeMaximizedActive()) return;
+        updateCanvasScrollBounds({ initial: false, recomputeBounds: true });
+    });
+}
+
+
+function __getCanvasViewSurfaceKey() {
+    try {
+        const key = window.__CANVAS_VIEW_SURFACE_KEY__;
+        if (typeof key === 'string' && key) return key;
+    } catch (_) { }
+    return null;
+}
+
+function __detectCanvasSidePanelModeFromUrl() {
+    try {
+        const params = new URLSearchParams(window.location.search || '');
+        const flag = params.get('sidepanel') || params.get('side_panel') || params.get('panel');
+        return flag === '1' || flag === 'true';
+    } catch (_) {
+        return false;
+    }
+}
+
+function __getCanvasViewPartitionKey() {
+    try {
+        const key = window.__CANVAS_VIEW_PARTITION_KEY__;
+        if (key === 'page' || key === 'sidepanel') return key;
+    } catch (_) { }
+    try {
+        if (window.__SIDE_PANEL_MODE__ === true) return 'sidepanel';
+    } catch (_) { }
+    return __detectCanvasSidePanelModeFromUrl() ? 'sidepanel' : 'page';
+}
+
+function __buildCanvasCameraStorageKey(partitionKey, field) {
+    if (!partitionKey || !field) return '';
+    return `${CANVAS_CAMERA_VIEW_STORAGE_NS}:${partitionKey}:${field}`;
+}
+
+function __getCanvasCameraStorageKeys() {
+    const partitionKey = __getCanvasViewPartitionKey();
+    const surfaceKey = __getCanvasViewSurfaceKey();
+
+    return {
+        partitionKey,
+        surfaceKey,
+        zoomKey: __buildCanvasCameraStorageKey(partitionKey, 'zoom'),
+        panKey: __buildCanvasCameraStorageKey(partitionKey, 'pan')
+    };
+}
+
+function __readCanvasCameraZoomFromStorage(keys) {
+    const key = keys && keys.zoomKey;
+    if (!key) return null;
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const zoom = parseFloat(raw);
+        return Number.isFinite(zoom) ? zoom : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function __readCanvasCameraPanFromStorage(keys) {
+    const key = keys && keys.panKey;
+    if (!key) return null;
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        return {
+            x: Number(parsed.x) || 0,
+            y: Number(parsed.y) || 0
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
+function loadCanvasZoom() {
+    try {
+        const keys = __getCanvasCameraStorageKeys();
+
+        const savedZoom = __readCanvasCameraZoomFromStorage(keys);
+        let zoomLoaded = false;
+        if (Number.isFinite(savedZoom)) {
+            setCanvasZoom(savedZoom, null, null, { recomputeBounds: false, skipSave: true, silent: true });
+            zoomLoaded = true;
+        }
+
+        // 新安装/无历史缩放：默认使用 baseZoom（旧 60% 视图）
+        if (!zoomLoaded && CanvasState.baseZoom && CanvasState.baseZoom !== 1) {
+            setCanvasZoom(CanvasState.baseZoom, null, null, { recomputeBounds: false, skipSave: true, silent: true });
+        }
+
+        // 加载平移位置
+        const pan = __readCanvasCameraPanFromStorage(keys);
+        if (pan) {
+            CanvasState.panOffsetX = pan.x;
+            CanvasState.panOffsetY = pan.y;
+            applyPanOffset();
+        } else {
+            // 首次安装，或者无历史平移
+            try {
+                locateToIntroCardsCenter();
+            } catch (_) { }
+        }
+    } catch (error) {
+        console.error('[Canvas] 加载画布状态失败:', error);
+    }
+
+    updateCanvasScrollBounds(true);
+    updateScrollbarThumbs();
+    __scheduleCanvasPostViewportStateStabilization();
+}
+
+function savePanOffset() {
+    saveViewState('camera', 'pan', {
+        x: CanvasState.panOffsetX,
+        y: CanvasState.panOffsetY
+    });
+}
+
+function savePanOffsetThrottled() {
+    if (panSaveTimeout) {
+        clearTimeout(panSaveTimeout);
+    }
+    panSaveTimeout = setTimeout(() => {
+        savePanOffset();
+        panSaveTimeout = null;
+    }, 160);
+}
+
+function saveZoomThrottled(zoom) {
+    if (zoomSaveTimeout) {
+        clearTimeout(zoomSaveTimeout);
+    }
+    zoomSaveTimeout = setTimeout(() => {
+        saveViewState('camera', 'zoom', zoom, { asJSON: false });
+        zoomSaveTimeout = null;
+    }, 160);
+}
+
+function scheduleZoomUpdate(zoom, centerX, centerY, options = {}) {
+    pendingZoomRequest = {
+        zoom,
+        centerX,
+        centerY,
+        options
+    };
+
+    if (!zoomUpdateFrame) {
+        zoomUpdateFrame = requestAnimationFrame(() => {
+            zoomUpdateFrame = null;
+            if (!pendingZoomRequest) return;
+
+            const { zoom, centerX, centerY, options } = pendingZoomRequest;
+            pendingZoomRequest = null;
+            setCanvasZoom(zoom, centerX, centerY, options);
+        });
+    }
+}
+
+function __getCanvasSmoothWheelZoomTarget() {
+    return Number.isFinite(smoothWheelZoomTarget) ? smoothWheelZoomTarget : null;
+}
+
+function __cancelCanvasSmoothWheelZoom() {
+    if (smoothWheelZoomFrame) {
+        cancelAnimationFrame(smoothWheelZoomFrame);
+        smoothWheelZoomFrame = null;
+    }
+    smoothWheelZoomTarget = null;
+    smoothWheelZoomCenterX = null;
+    smoothWheelZoomCenterY = null;
+    smoothWheelZoomOptions = null;
+    __resetWindowsWheelZoomDirLock();
+}
+
+function __runCanvasSmoothWheelZoomStep() {
+    smoothWheelZoomFrame = null;
+
+    const targetZoom = __getCanvasSmoothWheelZoomTarget();
+    if (!Number.isFinite(targetZoom)) return;
+
+    const currentZoom = Number.isFinite(pendingZoomRequest && pendingZoomRequest.zoom)
+        ? pendingZoomRequest.zoom
+        : (Number.isFinite(CanvasState.zoom) ? CanvasState.zoom : 1);
+    const diff = targetZoom - currentZoom;
+
+    if (!Number.isFinite(diff)) {
+        __logCanvasWinInput('wheel-zoom-smooth-invalid', {
+            targetZoom: __roundCanvasDebugNumber(targetZoom, 5),
+            currentZoom: __roundCanvasDebugNumber(currentZoom, 5),
+            diff
+        }, { force: true, throttleMs: 0 });
+        smoothWheelZoomTarget = null;
+        smoothWheelZoomOptions = null;
+        return;
+    }
+
+    if (Math.abs(diff) <= 0.0004) {
+        __logCanvasWinInput('wheel-zoom-smooth-finish', {
+            targetZoom: __roundCanvasDebugNumber(targetZoom, 5),
+            currentZoom: __roundCanvasDebugNumber(currentZoom, 5),
+            diff: __roundCanvasDebugNumber(diff, 7)
+        }, { force: true, throttleMs: 0 });
+        scheduleZoomUpdate(targetZoom, smoothWheelZoomCenterX, smoothWheelZoomCenterY, smoothWheelZoomOptions || {});
+        smoothWheelZoomTarget = null;
+        smoothWheelZoomOptions = null;
+        smoothWheelZoomCenterX = null;
+        smoothWheelZoomCenterY = null;
+        return;
+    }
+
+    const baseZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+    const displayCurrent = currentZoom / baseZoom;
+    const displayTarget = targetZoom / baseZoom;
+    const curveFactor = Math.max(0.2, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, getCanvasZoomSpeedFactor(displayCurrent)));
+    const magnet = getCanvasZoomMagnetEffect(displayCurrent, displayTarget);
+    const wheelStepMultiplierRaw = Number(smoothWheelZoomOptions && smoothWheelZoomOptions.wheelSmoothStepMultiplier);
+    const wheelStepMultiplier = Number.isFinite(wheelStepMultiplierRaw)
+        ? Math.max(0.7, Math.min(1.8, wheelStepMultiplierRaw))
+        : 1;
+    const responseFromCurve = Math.pow(curveFactor, 0.32);
+    const clampedMagnetFactor = Math.max(0.35, Math.min(1.35, magnet.factor));
+    const responseFromMagnet = 0.84 + (0.16 * clampedMagnetFactor);
+
+    const fastStep = 0.34;
+    const slowStep = 0.26;
+    const baseStep = (Math.abs(diff) > 0.06 ? fastStep : slowStep) * wheelStepMultiplier;
+    const stepFactor = Math.max(0.10, Math.min(0.38, baseStep * responseFromCurve * responseFromMagnet));
+    const nextZoom = currentZoom + diff * stepFactor;
+    __logCanvasWinInput('wheel-zoom-smooth-step', {
+        currentZoom: __roundCanvasDebugNumber(currentZoom, 5),
+        targetZoom: __roundCanvasDebugNumber(targetZoom, 5),
+        diff: __roundCanvasDebugNumber(diff, 6),
+        wheelStepMultiplier: __roundCanvasDebugNumber(wheelStepMultiplier, 4),
+        curveFactor: __roundCanvasDebugNumber(curveFactor, 5),
+        magnetFactor: __roundCanvasDebugNumber(magnet.factor, 5),
+        stepFactor: __roundCanvasDebugNumber(stepFactor, 6),
+        nextZoom: __roundCanvasDebugNumber(nextZoom, 5)
+    }, { throttleKey: 'wheel-zoom-smooth-step', throttleMs: 90 });
+    scheduleZoomUpdate(nextZoom, smoothWheelZoomCenterX, smoothWheelZoomCenterY, smoothWheelZoomOptions || {});
+    smoothWheelZoomFrame = requestAnimationFrame(__runCanvasSmoothWheelZoomStep);
+}
+
+function __queueCanvasSmoothWheelZoom(targetZoom, centerX, centerY, options = {}) {
+    const clampedTarget = clampCanvasZoom(targetZoom);
+    if (!Number.isFinite(clampedTarget)) return;
+
+    smoothWheelZoomTarget = clampedTarget;
+    if (Number.isFinite(centerX)) smoothWheelZoomCenterX = centerX;
+    if (Number.isFinite(centerY)) smoothWheelZoomCenterY = centerY;
+    smoothWheelZoomOptions = options;
+
+    if (!smoothWheelZoomFrame) {
+        smoothWheelZoomFrame = requestAnimationFrame(__runCanvasSmoothWheelZoomStep);
+    }
+}
+
+function __cancelCanvasTrackpadZoomInertia(options = {}) {
+    const keepVelocity = !!(options && options.keepVelocity === true);
+    if (trackpadZoomInertiaFrame) {
+        cancelAnimationFrame(trackpadZoomInertiaFrame);
+        trackpadZoomInertiaFrame = null;
+    }
+    if (!keepVelocity) {
+        trackpadZoomInertiaVelocity = 0;
+    }
+    trackpadZoomInertiaLastInputTime = 0;
+    trackpadZoomInertiaCenterX = null;
+    trackpadZoomInertiaCenterY = null;
+    trackpadZoomInertiaOptions = null;
+}
+
+function __cancelCanvasPendingZoomUpdate() {
+    if (zoomUpdateFrame) {
+        cancelAnimationFrame(zoomUpdateFrame);
+        zoomUpdateFrame = null;
+    }
+    pendingZoomRequest = null;
+}
+
+function __onCanvasZoomEndCleanup() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+    workspace.classList.remove('is-zooming');
+    invalidateCanvasWorkspaceRectCache();
+
+    // [OPT] 缩放结束：更新网格和CSS变量 (FORCE UPDATE)
+    try {
+        const container = getCachedContainer();
+        if (container) setCanvasScaleVars(container, CanvasState.zoom, true);
+        updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom, true);
+    } catch (_) { }
+
+    // [数据密集模式] 缩放结束：更新数据密集模式状态（为下一次缩放准备）
+    try { updateDataIntensiveMode(true); } catch (_) { }
+
+    // 强制刷新低细节模式（可能退出），确保逻辑发生在 is-zooming 解除之后
+    try { updateCanvasLowDetailMode(true); } catch (_) { }
+    try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
+    // 低细节区间（65%~70%）：只预热“视口中心附近少量栏目”，避免一屏全加载
+    if (!isCanvasVirtualizationEnabled()) {
+        try { prewarmCanvasLowDetailVisibleTrees(); } catch (_) { }
+    }
+    // 缩放真正停止后再统一恢复/按需加载（避免 is-zooming 阶段被判定为交互中而跳过补渲染）
+    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
+        try { scheduleCanvasVirtualizationUpdate(); } catch (_) { }
+    } else {
+        try { scheduleDormancyUpdate(); } catch (_) { }
+    }
+    // Wheel 缩放过程中会跳过滚动条/边界更新；缩放停止后统一补一次，避免中途反复触发布局计算导致闪烁
+    try { updateCanvasScrollBounds({ recomputeBounds: false, initial: false }); } catch (_) { }
+    try { updateScrollbarThumbs(); } catch (_) { }
+    try { savePanOffsetThrottled(); } catch (_) { }
+    try { scheduleEdgesRender(0); } catch (_) { }
+    try { __updateCanvasPerfHud(); } catch (_) { }
+}
+
+function __startWinWheelZoomPump() {
+    if (winWheelZoomPumpFrame) return;
+
+    const pump = () => {
+        winWheelZoomPumpFrame = null;
+        if (Math.abs(winWheelZoomAccumDelta) < 0.01) {
+            winWheelZoomAccumDelta = 0;
+            const workspace = document.getElementById('canvasWorkspace');
+            if (workspace && !workspace._zoomEndTimer) {
+                __onCanvasZoomEndCleanup();
+            }
+            return;
+        }
+
+        const rawDelta = winWheelZoomAccumDelta;
+        const zoomSpeed = WINDOWS_LINUX_WHEEL_ZOOM_PUMP_SPEED; // 0.001
+
+        const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+        const currentZoom = CanvasState.zoom;
+        const displayZoomForCalc = currentZoom / base;
+
+        const scaledDelta = rawDelta * WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR;
+
+        const nextDisplayZoomNoMagnet = (currentZoom * Math.exp(scaledDelta * zoomSpeed)) / base;
+        const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
+        const magnetFactor = (1 + (magnet.factor - 1) * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
+        const magnetStrength = (magnet.strength * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
+        const wheelCurveSpeedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
+        const effectiveDelta = scaledDelta * magnetFactor * wheelCurveSpeedFactor
+            * ZOOM_SPEED_GLOBAL_MULTIPLIER * SCROLLING_ZOOM_SPEED_BOOST
+            * WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST;
+
+        let zoomFactor = Math.exp(effectiveDelta * zoomSpeed);
+        const limitCap = WINDOWS_LINUX_WHEEL_ZOOM_MAX_FACTOR_PER_FRAME;
+
+        let cappedFactor = zoomFactor;
+        if (cappedFactor > limitCap) cappedFactor = limitCap;
+        if (cappedFactor < (1 / limitCap)) cappedFactor = 1 / limitCap;
+
+        if (magnet && magnetStrength > 0) {
+            const maxCap = 1.16;
+            const minCap = 1.05;
+            const capDrop = 0.05;
+            const cap = Math.max(minCap, Math.min(maxCap, maxCap - capDrop * magnetStrength));
+            if (cappedFactor > cap) cappedFactor = cap;
+            if (cappedFactor < (1 / cap)) cappedFactor = 1 / cap;
+        }
+
+        const effectiveDeltaCapped = Math.log(cappedFactor) / zoomSpeed;
+        const multiplier = WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR * magnetFactor * wheelCurveSpeedFactor
+            * ZOOM_SPEED_GLOBAL_MULTIPLIER * SCROLLING_ZOOM_SPEED_BOOST
+            * WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST;
+
+        const rawDeltaConsumed = effectiveDeltaCapped / multiplier;
+
+        winWheelZoomAccumDelta -= rawDeltaConsumed;
+        if (rawDelta > 0 && winWheelZoomAccumDelta < 0) winWheelZoomAccumDelta = 0;
+        if (rawDelta < 0 && winWheelZoomAccumDelta > 0) winWheelZoomAccumDelta = 0;
+
+        let newZoom = currentZoom * cappedFactor;
+        newZoom = clampCanvasZoom(newZoom);
+
+        setCanvasZoom(newZoom, winWheelZoomPumpCenterX, winWheelZoomPumpCenterY, winWheelZoomPumpOptions);
+
+        if (Math.abs(winWheelZoomAccumDelta) > 0.01) {
+            winWheelZoomPumpFrame = requestAnimationFrame(pump);
+        } else {
+            winWheelZoomAccumDelta = 0;
+            const workspace = document.getElementById('canvasWorkspace');
+            if (workspace && !workspace._zoomEndTimer) {
+                __onCanvasZoomEndCleanup();
+            }
+        }
+    };
+    winWheelZoomPumpFrame = requestAnimationFrame(pump);
+}
+
+function __cancelCanvasActiveZoomGesture(reason = 'interrupt') {
+    const workspace = document.getElementById('canvasWorkspace');
+    const hasActiveZoom = !!(
+        smoothWheelZoomFrame ||
+        trackpadZoomInertiaFrame ||
+        zoomUpdateFrame ||
+        pendingZoomRequest ||
+        winWheelZoomPumpFrame ||
+        (workspace && (workspace.classList.contains('is-zooming') || workspace._zoomEndTimer))
+    );
+    if (!hasActiveZoom) return false;
+
+    if (winWheelZoomPumpFrame) {
+        cancelAnimationFrame(winWheelZoomPumpFrame);
+        winWheelZoomPumpFrame = null;
+        winWheelZoomAccumDelta = 0;
+    }
+    __cancelCanvasSmoothWheelZoom();
+    __cancelCanvasTrackpadZoomInertia();
+    __cancelCanvasPendingZoomUpdate();
+    __resetWindowsWheelZoomDirLock();
+
+    if (workspace && workspace._zoomEndTimer) {
+        clearTimeout(workspace._zoomEndTimer);
+        workspace._zoomEndTimer = null;
+    }
+    if (workspace) {
+        workspace.classList.remove('is-zooming');
+    }
+
+    try {
+        const container = getCachedContainer();
+        if (container) {
+            setCanvasScaleVars(container, CanvasState.zoom, true);
+        }
+        updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom, true);
+        updateCanvasLowDetailMode(true);
+        updateCanvasZoomPerformanceMode({ deferOff: true });
+    } catch (_) { }
+
+    __logCanvasWinInput('zoom-interrupt', { reason }, {
+        throttleKey: `zoom-interrupt-${reason}`,
+        throttleMs: 160
+    });
+    return true;
+}
+
+function __runCanvasTrackpadZoomInertiaStep() {
+    trackpadZoomInertiaFrame = null;
+
+    if (!Number.isFinite(trackpadZoomInertiaVelocity)) {
+        __cancelCanvasTrackpadZoomInertia();
+        return;
+    }
+
+    const now = Date.now();
+    const sinceInput = now - (trackpadZoomInertiaLastInputTime || 0);
+    if (sinceInput < TRACKPAD_ZOOM_INERTIA_START_DELAY_MS) {
+        trackpadZoomInertiaFrame = requestAnimationFrame(__runCanvasTrackpadZoomInertiaStep);
+        return;
+    }
+
+    trackpadZoomInertiaVelocity *= TRACKPAD_ZOOM_INERTIA_DAMPING;
+    if (Math.abs(trackpadZoomInertiaVelocity) < TRACKPAD_ZOOM_INERTIA_MIN_LOG_DELTA) {
+        __cancelCanvasTrackpadZoomInertia();
+        return;
+    }
+
+    const currentZoom = Number.isFinite(pendingZoomRequest && pendingZoomRequest.zoom)
+        ? pendingZoomRequest.zoom
+        : (Number.isFinite(CanvasState.zoom) ? CanvasState.zoom : 1);
+    const logStep = Math.max(
+        -TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP,
+        Math.min(TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP, trackpadZoomInertiaVelocity)
+    );
+    const targetZoom = clampCanvasZoom(currentZoom * Math.exp(logStep));
+    if (!Number.isFinite(targetZoom) || Math.abs(targetZoom - currentZoom) < 0.000001) {
+        __cancelCanvasTrackpadZoomInertia();
+        return;
+    }
+
+    scheduleZoomUpdate(
+        targetZoom,
+        trackpadZoomInertiaCenterX,
+        trackpadZoomInertiaCenterY,
+        trackpadZoomInertiaOptions || { recomputeBounds: false, skipSave: false, skipScrollbarUpdate: true }
+    );
+    trackpadZoomInertiaFrame = requestAnimationFrame(__runCanvasTrackpadZoomInertiaStep);
+}
+
+function __pushCanvasTrackpadZoomInertiaFromFactor(zoomFactor, centerX, centerY, options = {}) {
+    const factor = Number(zoomFactor);
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    const logDelta = Math.log(factor);
+    if (!Number.isFinite(logDelta) || Math.abs(logDelta) < 0.000001) return;
+
+    const clampedLogDelta = Math.max(
+        -TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP,
+        Math.min(TRACKPAD_ZOOM_INERTIA_MAX_LOG_STEP, logDelta)
+    );
+
+    trackpadZoomInertiaVelocity = Number.isFinite(trackpadZoomInertiaVelocity) && Math.abs(trackpadZoomInertiaVelocity) > 0.000001
+        ? (trackpadZoomInertiaVelocity * (1 - TRACKPAD_ZOOM_INERTIA_INPUT_BLEND))
+            + (clampedLogDelta * TRACKPAD_ZOOM_INERTIA_INPUT_BLEND)
+        : clampedLogDelta;
+    trackpadZoomInertiaLastInputTime = Date.now();
+    if (Number.isFinite(centerX)) trackpadZoomInertiaCenterX = centerX;
+    if (Number.isFinite(centerY)) trackpadZoomInertiaCenterY = centerY;
+    trackpadZoomInertiaOptions = options;
+
+    if (!trackpadZoomInertiaFrame) {
+        trackpadZoomInertiaFrame = requestAnimationFrame(__runCanvasTrackpadZoomInertiaStep);
+    }
+}
+
+function loadCanvasScrollPreferences() {
+    try {
+        const stored = localStorage.getItem('canvas-scroll-preferences');
+        if (!stored) return;
+
+        const parsed = JSON.parse(stored);
+        ['vertical', 'horizontal'].forEach(axis => {
+            if (parsed[axis]) {
+                CanvasState.scrollState[axis].hidden = Boolean(parsed[axis].hidden);
+                CanvasState.scrollState[axis].disabled = Boolean(parsed[axis].disabled);
+            }
+        });
+    } catch (error) {
+        console.error('[Canvas] 加载滚动条偏好失败:', error);
+    }
+}
+
+function persistCanvasScrollPreferences() {
+    try {
+        const payload = {
+            vertical: {
+                hidden: CanvasState.scrollState.vertical.hidden,
+                disabled: CanvasState.scrollState.vertical.disabled
+            },
+            horizontal: {
+                hidden: CanvasState.scrollState.horizontal.hidden,
+                disabled: CanvasState.scrollState.horizontal.disabled
+            }
+        };
+        saveSharedState('canvas-scroll-preferences', payload);
+    } catch (error) {
+        console.error('[Canvas] 保存滚动条偏好失败:', error);
+    }
+}
+
+function persistCanvasScrollbarPreloadState() {
+    try {
+        const payload = {
+            panX: Number.isFinite(CanvasState.panOffsetX) ? CanvasState.panOffsetX : 0,
+            panY: Number.isFinite(CanvasState.panOffsetY) ? CanvasState.panOffsetY : 0,
+            horizontal: {
+                min: Number.isFinite(CanvasState.scrollBounds.horizontal?.min) ? CanvasState.scrollBounds.horizontal.min : 0,
+                max: Number.isFinite(CanvasState.scrollBounds.horizontal?.max) ? CanvasState.scrollBounds.horizontal.max : 0
+            },
+            vertical: {
+                min: Number.isFinite(CanvasState.scrollBounds.vertical?.min) ? CanvasState.scrollBounds.vertical.min : 0,
+                max: Number.isFinite(CanvasState.scrollBounds.vertical?.max) ? CanvasState.scrollBounds.vertical.max : 0
+            },
+            ts: Date.now()
+        };
+        saveSharedState(CANVAS_SCROLLBAR_PRELOAD_KEY, payload);
+    } catch (_) { }
+}
+
+function persistCanvasScrollbarPreloadStateThrottled() {
+    if (scrollbarPreloadSaveTimeout) {
+        clearTimeout(scrollbarPreloadSaveTimeout);
+    }
+    scrollbarPreloadSaveTimeout = setTimeout(() => {
+        persistCanvasScrollbarPreloadState();
+        scrollbarPreloadSaveTimeout = null;
+    }, 120);
+}
+
+function setupCanvasScrollbars() {
+    const verticalBar = document.getElementById('canvasVerticalScrollbar');
+    const horizontalBar = document.getElementById('canvasHorizontalScrollbar');
+
+    if (!verticalBar && !horizontalBar) return;
+
+    const bars = [
+        { axis: 'vertical', element: verticalBar },
+        { axis: 'horizontal', element: horizontalBar }
+    ];
+
+    bars.forEach(({ axis, element }) => {
+        if (!element) return;
+
+        element.classList.toggle('is-hidden', CanvasState.scrollState[axis].hidden);
+        element.classList.toggle('is-disabled', CanvasState.scrollState[axis].disabled);
+        element.classList.remove('show-controls');
+
+        const hideBtn = element.querySelector('.scrollbar-btn.scroll-hide');
+        const disableBtn = element.querySelector('.scrollbar-btn.scroll-disable');
+        const thumb = element.querySelector('.scrollbar-thumb');
+        const controls = element.querySelector('.scrollbar-controls');
+
+        if (hideBtn) {
+            hideBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                toggleScrollbarHidden(axis);
+                flashScrollbarControls(element);
+            });
+        }
+
+        if (disableBtn) {
+            disableBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                toggleScrollbarDisabled(axis);
+                flashScrollbarControls(element);
+            });
+        }
+
+        if (thumb) {
+            thumb.addEventListener('mousedown', (event) => startScrollbarThumbDrag(event, axis));
+        }
+
+        attachScrollbarHoverHandlers(element, axis);
+    });
+
+    if (!CanvasState.scrollState.handlersAttached) {
+        document.addEventListener('mousemove', handleScrollbarThumbDrag);
+        document.addEventListener('mouseup', stopScrollbarThumbDrag);
+        CanvasState.scrollState.handlersAttached = true;
+    }
+
+    updateScrollbarControls('vertical');
+    updateScrollbarControls('horizontal');
+    updateScrollbarThumbs();
+}
+
+function toggleScrollbarHidden(axis) {
+    CanvasState.scrollState[axis].hidden = !CanvasState.scrollState[axis].hidden;
+    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
+    if (bar) {
+        bar.classList.toggle('is-hidden', CanvasState.scrollState[axis].hidden);
+    }
+    updateScrollbarControls(axis);
+    updateScrollbarThumbs();
+    persistCanvasScrollPreferences();
+}
+
+function toggleScrollbarDisabled(axis) {
+    CanvasState.scrollState[axis].disabled = !CanvasState.scrollState[axis].disabled;
+    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
+    if (bar) {
+        bar.classList.toggle('is-disabled', CanvasState.scrollState[axis].disabled);
+    }
+    updateScrollbarControls(axis);
+    persistCanvasScrollPreferences();
+}
+
+function updateScrollbarControls(axis) {
+    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
+    if (!bar) return;
+
+    const hideBtn = bar.querySelector('.scrollbar-btn.scroll-hide');
+    const hideIcon = hideBtn ? hideBtn.querySelector('i') : null;
+    const disableBtn = bar.querySelector('.scrollbar-btn.scroll-disable');
+    const disableIcon = disableBtn ? disableBtn.querySelector('i') : null;
+    const axisLabel = axis === 'vertical' ? '纵向' : '横向';
+
+    bar.classList.toggle('is-hidden', CanvasState.scrollState[axis].hidden);
+    bar.classList.toggle('is-disabled', CanvasState.scrollState[axis].disabled);
+
+    if (hideBtn) {
+        const label = CanvasState.scrollState[axis].hidden ? `显示${axisLabel}滚动条` : `隐藏${axisLabel}滚动条`;
+        hideBtn.setAttribute('aria-label', label);
+        hideBtn.removeAttribute('title');
+    }
+    if (hideIcon) {
+        hideIcon.className = CanvasState.scrollState[axis].hidden ? 'fas fa-eye' : 'fas fa-eye-slash';
+    }
+    if (disableBtn) {
+        const label = CanvasState.scrollState[axis].disabled ? `启用${axisLabel}滚动` : `禁用${axisLabel}滚动`;
+        disableBtn.setAttribute('aria-label', label);
+        disableBtn.removeAttribute('title');
+    }
+    if (disableIcon) {
+        disableIcon.className = CanvasState.scrollState[axis].disabled ? 'fas fa-unlock' : 'fas fa-ban';
+    }
+}
+
+function startScrollbarThumbDrag(event, axis) {
+    if (CanvasState.scrollState[axis].disabled) return;
+
+    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
+    if (!bar) return;
+
+    const track = bar.querySelector('.scrollbar-track');
+    const thumb = bar.querySelector('.scrollbar-thumb');
+    if (!track || !thumb) return;
+
+    event.preventDefault();
+
+    const trackRect = track.getBoundingClientRect();
+    const thumbRect = thumb.getBoundingClientRect();
+    const offset = axis === 'vertical' ? event.clientY - thumbRect.top : event.clientX - thumbRect.left;
+    const trackStart = axis === 'vertical' ? trackRect.top : trackRect.left;
+
+    __cancelCanvasWheelPanMotion();
+
+    CanvasState.scrollState.activeDragAxis = axis;
+    CanvasState.scrollState.dragInfo = {
+        offset,
+        trackStart,
+        trackSize: axis === 'vertical' ? trackRect.height : trackRect.width,
+        thumbSize: axis === 'vertical' ? thumbRect.height : thumbRect.width
+    };
+    __setCanvasScrollbarMetricCache(axis, track, thumb, CanvasState.scrollState.dragInfo.trackSize, CanvasState.scrollState.dragInfo.thumbSize);
+
+    CanvasState.scrollState[axis].dragging = true;
+    thumb.classList.add('dragging');
+}
+
+function handleScrollbarThumbDrag(event) {
+    const axis = CanvasState.scrollState.activeDragAxis;
+    if (!axis) return;
+
+    if (CanvasState.scrollState[axis].disabled) return;
+
+    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
+    if (!bar) return;
+
+    const track = bar.querySelector('.scrollbar-track');
+    const thumb = bar.querySelector('.scrollbar-thumb');
+    const info = CanvasState.scrollState.dragInfo;
+    if (!track || !thumb || !info) return;
+
+    event.preventDefault();
+
+    const coord = axis === 'vertical'
+        ? event.clientY - info.trackStart - info.offset
+        : event.clientX - info.trackStart - info.offset;
+    const maxTravel = Math.max(0, info.trackSize - info.thumbSize);
+    const clampedCoord = Math.min(Math.max(coord, 0), maxTravel);
+    const ratio = maxTravel === 0 ? 0 : clampedCoord / maxTravel;
+    const bounds = axis === 'vertical' ? CanvasState.scrollBounds.vertical : CanvasState.scrollBounds.horizontal;
+    const target = bounds.max - ratio * (bounds.max - bounds.min);
+
+    if (axis === 'vertical') {
+        CanvasState.panOffsetY = target;
+    } else {
+        CanvasState.panOffsetX = target;
+    }
+
+    applyPanOffset();
+}
+
+function stopScrollbarThumbDrag() {
+    const axis = CanvasState.scrollState.activeDragAxis;
+    if (!axis) return;
+
+    const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
+    const thumb = bar ? bar.querySelector('.scrollbar-thumb') : null;
+
+    if (thumb) {
+        thumb.classList.remove('dragging');
+    }
+
+    CanvasState.scrollState[axis].dragging = false;
+    CanvasState.scrollState.activeDragAxis = null;
+    CanvasState.scrollState.dragInfo = null;
+    savePanOffsetThrottled();
+}
+
+function attachScrollbarHoverHandlers(bar, axis) {
+    if (!bar) return;
+    const controls = bar.querySelector('.scrollbar-controls');
+    if (!controls || scrollbarHoverState.has(bar)) return;
+
+    const state = {
+        axis,
+        hideTimer: null,
+        flashTimer: null,
+        pointerInside: false
+    };
+
+    const showControls = () => {
+        if (state.hideTimer) {
+            clearTimeout(state.hideTimer);
+            state.hideTimer = null;
+        }
+        bar.classList.add('show-controls');
+    };
+
+    const hideControls = () => {
+        if (state.hideTimer) {
+            clearTimeout(state.hideTimer);
+        }
+        state.hideTimer = setTimeout(() => {
+            if (state.pointerInside) return;
+            bar.classList.remove('show-controls');
+            state.hideTimer = null;
+        }, 220);
+    };
+
+    const enterControls = () => {
+        state.pointerInside = true;
+        showControls();
+    };
+
+    const leaveControls = () => {
+        state.pointerInside = false;
+        hideControls();
+    };
+
+    controls.addEventListener('mouseenter', enterControls);
+    controls.addEventListener('focusin', enterControls);
+    controls.addEventListener('mouseleave', leaveControls);
+    controls.addEventListener('focusout', leaveControls);
+    bar.addEventListener('mouseleave', leaveControls);
+
+    state.show = showControls;
+    state.hide = hideControls;
+
+    scrollbarHoverState.set(bar, state);
+}
+
+function flashScrollbarControls(bar, duration = 900) {
+    const state = scrollbarHoverState.get(bar);
+    if (!state) return;
+
+    state.show();
+    if (state.flashTimer) {
+        clearTimeout(state.flashTimer);
+    }
+    state.flashTimer = setTimeout(() => {
+        if (!state.pointerInside) {
+            bar.classList.remove('show-controls');
+        }
+        state.flashTimer = null;
+    }, duration);
+}
+
+function setupCanvasFullscreenControls() {
+    const btn = document.getElementById('canvasFullscreenBtn');
+    const container = document.querySelector('.canvas-main-container');
+    if (!btn || !container) return;
+
+    const inSidePanelMode = window.__SIDE_PANEL_MODE__ === true;
+    const canRequestFullscreen = document.documentElement.requestFullscreen ||
+        document.documentElement.webkitRequestFullscreen ||
+        document.documentElement.mozRequestFullScreen ||
+        document.documentElement.msRequestFullscreen;
+    if (!canRequestFullscreen && !inSidePanelMode) {
+        btn.style.display = 'none';
+        return;
+    }
+
+    if (!CanvasState.fullscreenHandlersBound) {
+        btn.addEventListener('click', toggleCanvasFullscreen);
+        document.addEventListener('fullscreenchange', handleCanvasFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleCanvasFullscreenChange);
+        document.addEventListener('mozfullscreenchange', handleCanvasFullscreenChange);
+        document.addEventListener('MSFullscreenChange', handleCanvasFullscreenChange);
+
+        // Listen to window resize events to detect Chrome window fullscreen state changes
+        window.addEventListener('resize', () => {
+            if (window.__canvasResizeTimeout) clearTimeout(window.__canvasResizeTimeout);
+            window.__canvasResizeTimeout = setTimeout(() => {
+                handleCanvasFullscreenChange();
+            }, 120);
+        });
+
+        // ESC key listener to exit fullscreen mode safely without conflicting with overlays/selectMode
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const isCurrentlyFullscreen = !!getCurrentFullscreenElement() || (CanvasState.isFullscreen === true);
+                if (!isCurrentlyFullscreen) return;
+
+                // 1. If pointer drag is active, let drag-and-drop handle it
+                if (window.pointerDragState && window.pointerDragState.isDragging) {
+                    return;
+                }
+
+                // 2. If selectMode is active (batch operations), let selectMode handle it
+                if (typeof window.selectMode !== 'undefined' && window.selectMode === true) {
+                    return;
+                }
+
+                // 3. If context menu is open, let context menu handle it
+                const contextMenu = document.getElementById('bookmark-context-menu');
+                if (contextMenu && contextMenu.style.display !== 'none') {
+                    return;
+                }
+
+                // 4. If settingsMenu or quickAddMenu is open, let them handle it
+                const settingsMenu = document.getElementById('settingsMenu');
+                if (settingsMenu && !settingsMenu.hasAttribute('hidden')) {
+                    return;
+                }
+                const quickAddMenu = document.getElementById('quickAddMenu');
+                if (quickAddMenu && !quickAddMenu.hasAttribute('hidden')) {
+                    return;
+                }
+
+                // 5. If tag popover is open, let tag popover handle it
+                const tagPopover = document.querySelector('.tag-popover');
+                if (tagPopover && !tagPopover.hidden) {
+                    return;
+                }
+
+                // 6. If any modal / dialog is active, let them handle it
+                const hasVisibleModal = Array.from(document.querySelectorAll('.modal, .canvas-manage-modal, .canvas-help-modal')).some(el => {
+                    return el.classList.contains('show') || (el.style.display && el.style.display !== 'none');
+                });
+                if (hasVisibleModal) {
+                    return;
+                }
+
+                // 7. If typing in an input or textarea, let that handle it (e.g. revert / blur)
+                const activeEl = document.activeElement;
+                if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+                    return;
+                }
+
+                toggleCanvasFullscreen();
+            }
+        });
+
+        CanvasState.fullscreenHandlersBound = true;
+    }
+
+    updateFullscreenButtonState();
+}
+
+function toggleCanvasFullscreen() {
+    if (window.__SIDE_PANEL_MODE__ === true) {
+        const bridgeOpenOrFocus = window.__canvasSidePanelOpenOrFocusPage;
+        const sidePanelFullscreenGetter = window.__canvasSidePanelGetFullscreenState;
+        const mirroredFullscreen = typeof sidePanelFullscreenGetter === 'function'
+            ? sidePanelFullscreenGetter() === true
+            : false;
+        const fullscreenIntent = mirroredFullscreen ? 'exit' : 'enter';
+
+        if (typeof bridgeOpenOrFocus === 'function') {
+            Promise.resolve(bridgeOpenOrFocus({ requestFullscreen: true, fullscreenIntent })).catch(error => {
+                console.warn('[Canvas] 侧边栏跳转 HTML 全屏失败:', error);
+            });
+        } else {
+            try {
+                const runtimeUrl = (typeof chrome !== 'undefined' && chrome?.runtime?.getURL)
+                    ? chrome.runtime.getURL('history_html/history.html?view=canvas')
+                    : 'history_html/history.html?view=canvas';
+                window.open(runtimeUrl, '_blank');
+            } catch (_) { }
+        }
+        return;
+    }
+
+    const target = document.documentElement;
+    const fullscreenElement = getCurrentFullscreenElement();
+    const isCurrentlyFullscreen = !!fullscreenElement || (CanvasState.isFullscreen === true);
+
+    if (isCurrentlyFullscreen) {
+        const exit = document.exitFullscreen ||
+            document.webkitExitFullscreen ||
+            document.mozCancelFullScreen ||
+            document.msExitFullscreen;
+        if (exit && fullscreenElement) {
+            Promise.resolve(exit.call(document)).catch(error => {
+                console.warn('[Canvas] HTML5 退出全屏失败:', error);
+            });
+        }
+        if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.getCurrent === 'function') {
+            chrome.windows.getCurrent((win) => {
+                if (win && win.state === 'fullscreen') {
+                    const prevState = localStorage.getItem('canvas-pre-fullscreen-window-state') || 'normal';
+                    const targetState = (prevState === 'fullscreen') ? 'normal' : prevState;
+                    chrome.windows.update(win.id, { state: targetState });
+                }
+            });
+        }
+        return;
+    }
+
+    const request = target.requestFullscreen ||
+        target.webkitRequestFullscreen ||
+        target.mozRequestFullScreen ||
+        target.msRequestFullscreen;
+
+    const hasTransientActivation = (typeof navigator !== 'undefined' && navigator.userActivation)
+        ? navigator.userActivation.isActive === true
+        : true;
+
+    if (request && hasTransientActivation) {
+        Promise.resolve(request.call(target)).catch(error => {
+            console.warn('[Canvas] HTML5 进入全屏失败, 尝试使用 Chrome 窗口全屏 API:', error);
+            enterExtensionWindowFullscreen();
+        });
+    } else {
+        console.warn('[Canvas] 无用户手势激活或 API 不可用, 尝试使用 Chrome 窗口全屏 API');
+        enterExtensionWindowFullscreen();
+    }
+}
+
+function enterExtensionWindowFullscreen() {
+    if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.getCurrent === 'function') {
+        chrome.windows.getCurrent((win) => {
+            if (win && typeof win.id === 'number') {
+                const prevState = win.state || 'normal';
+                localStorage.setItem('canvas-pre-fullscreen-window-state', prevState);
+                chrome.windows.update(win.id, { state: 'fullscreen' });
+            }
+        });
+    }
+}
+
+function handleCanvasFullscreenChange() {
+    const fullscreenElement = getCurrentFullscreenElement();
+    const isHtmlFullscreen = !!fullscreenElement;
+
+    if (typeof chrome !== 'undefined' && chrome.windows && typeof chrome.windows.getCurrent === 'function') {
+        chrome.windows.getCurrent((win) => {
+            const isWindowFullscreen = win && win.state === 'fullscreen';
+            applyCanvasFullscreenState(isHtmlFullscreen || isWindowFullscreen);
+        });
+    } else {
+        applyCanvasFullscreenState(isHtmlFullscreen);
+    }
+}
+
+function applyCanvasFullscreenState(nextIsFullscreen) {
+    CanvasState.isFullscreen = nextIsFullscreen;
+
+    // Toggle page-level CSS classes so styles adjust correctly
+    if (CanvasState.isFullscreen) {
+        document.documentElement.classList.add('canvas-page-fullscreen-active');
+        document.body.classList.add('canvas-page-fullscreen-active');
+    } else {
+        document.documentElement.classList.remove('canvas-page-fullscreen-active');
+        document.body.classList.remove('canvas-page-fullscreen-active');
+    }
+
+    updateFullscreenButtonState();
+    updateNodeFullscreenButtons();
+
+    // Force recalculation of canvas layout, scroll limits, and offsets immediately when fullscreen state toggles
+    try {
+        updateCanvasScrollBounds({ recomputeBounds: true, initial: false });
+        stabilizePermanentSectionAnchors({ syncBounds: true });
+    } catch (_) { }
+
+    try {
+        const fullscreenStatePublisher = window.__canvasSidePanelPublishFullscreenStateFromModule;
+        if (typeof fullscreenStatePublisher === 'function') {
+            fullscreenStatePublisher(CanvasState.isFullscreen);
+        }
+    } catch (_) { }
+}
+
+function updateFullscreenButtonState() {
+    const btn = document.getElementById('canvasFullscreenBtn');
+    if (!btn) return;
+
+    const lang = getCanvasLanguage();
+    const enterLabel = getFullscreenLabel('canvasFullscreenEnter', lang);
+    const exitLabel = getFullscreenLabel('canvasFullscreenExit', lang);
+    let isFullscreen = CanvasState.isFullscreen === true;
+    if (window.__SIDE_PANEL_MODE__ === true) {
+        const sidePanelFullscreenGetter = window.__canvasSidePanelGetFullscreenState;
+        if (typeof sidePanelFullscreenGetter === 'function') {
+            isFullscreen = sidePanelFullscreenGetter() === true;
+        }
+    }
+
+    CanvasState.isFullscreen = isFullscreen;
+    const text = isFullscreen ? exitLabel : enterLabel;
+    btn.textContent = text;
+    btn.setAttribute('aria-label', text);
+    btn.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
+    btn.classList.toggle('fullscreen-active', isFullscreen);
+}
+
+function getCanvasLanguage() {
+    if (typeof window !== 'undefined' && window.currentLang) {
+        return window.currentLang;
+    }
+    return 'zh_CN';
+}
+
+function getFullscreenLabel(key, lang) {
+    if (window.i18n && window.i18n[key] && window.i18n[key][lang]) {
+        return window.i18n[key][lang];
+    }
+    if (key === 'canvasFullscreenExit') {
+        return lang === 'en' ? 'Exit' : '退出';
+    }
+    return lang === 'en' ? 'Fullscreen' : '全屏';
+}
+
+function getLayoutZoomLabel(kind, lang) {
+    const isEn = lang === 'en';
+    if (kind === 'in') return isEn ? 'Increase layout zoom' : '放大排版';
+    if (kind === 'out') return isEn ? 'Decrease layout zoom' : '缩小排版';
+    if (kind === 'value') return isEn ? 'Layout zoom' : '排版比例';
+    return '';
+}
+
+function __getNodeLayoutZoomKey(element) {
+    const descriptor = __serializeMaximizedNode(element);
+    if (!descriptor) return null;
+    return __getMaximizedDescriptorKey(descriptor);
+}
+
+function __getMaximizedDescriptorKey(descriptor) {
+    if (!descriptor || typeof descriptor !== 'object') return null;
+    if (descriptor.type === 'permanent-copy') {
+        return `permanent-copy:${descriptor.copyId || ''}`;
+    }
+    if (descriptor.id) {
+        return `${descriptor.type || 'node'}:${descriptor.id}`;
+    }
+    return descriptor.type ? `type:${descriptor.type}` : null;
+}
+
+function __normalizeLayoutZoomPercent(value, fallback) {
+    const safe = __clampNumber(value, NODE_LAYOUT_ZOOM_MIN, NODE_LAYOUT_ZOOM_MAX, fallback);
+    return Math.round(safe);
+}
+
+function __getLayoutZoomPlatformKey() {
+    if (CANVAS_RUNTIME_PLATFORM && CANVAS_RUNTIME_PLATFORM.isWindows) return 'windows';
+    if (CANVAS_RUNTIME_PLATFORM && CANVAS_RUNTIME_PLATFORM.isLinux) return 'linux';
+    if (CANVAS_RUNTIME_PLATFORM && CANVAS_RUNTIME_PLATFORM.isMac) return 'mac';
+    return 'other';
+}
+
+function __getDefaultLayoutZoomPercentByElement(element) {
+    const isMdNode = !!(element && element.classList && element.classList.contains('md-canvas-node'));
+    const settings = getCanvasAppearanceSettings();
+    const fullScreenZoom = __normalizeAppearanceFullscreenZoom(
+        settings && settings.fullScreenZoom,
+        __getDefaultAppearanceFullscreenZoomSettings()
+    );
+    return isMdNode ? fullScreenZoom.mdNode : fullScreenZoom.section;
+}
+
+function __parseLayoutZoomInput(value, fallback) {
+    const raw = String(value || '').trim().replace(/%/g, '');
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return fallback;
+    return __normalizeLayoutZoomPercent(num, fallback);
+}
+
+function __getNodeLayoutZoomPercent(element) {
+    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
+    const key = __getNodeLayoutZoomKey(element);
+    if (!key) {
+        if (element && element.dataset && element.dataset.layoutZoomPercent) {
+            const parsed = Number(element.dataset.layoutZoomPercent);
+            if (Number.isFinite(parsed)) {
+                return __normalizeLayoutZoomPercent(parsed, defaultPercent);
+            }
+        }
+        return defaultPercent;
+    }
+    const map = __readJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, {});
+    const hasValue = !!(map && typeof map === 'object' && Object.prototype.hasOwnProperty.call(map, key));
+    if (!hasValue) return defaultPercent;
+    const raw = map[key];
+    return __normalizeLayoutZoomPercent(raw, defaultPercent);
+}
+
+function __applyNodeLayoutZoom(element, percent) {
+    if (!element) return;
+    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
+    const safe = __normalizeLayoutZoomPercent(
+        typeof percent === 'number' ? percent : __getNodeLayoutZoomPercent(element),
+        defaultPercent
+    );
+    try {
+        element.style.setProperty('--canvas-node-layout-zoom', String(safe / 100));
+    } catch (_) { }
+    if (element.dataset) {
+        element.dataset.layoutZoomPercent = String(safe);
+    }
+    __updateNodeLayoutZoomDisplay(element, safe);
+}
+
+function __setNodeLayoutZoomPercent(element, percent) {
+    if (!element) return;
+    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
+    const safe = __normalizeLayoutZoomPercent(percent, defaultPercent);
+    const key = __getNodeLayoutZoomKey(element);
+    if (key) {
+        const map = __readJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, {});
+        const nextMap = map && typeof map === 'object' ? map : {};
+        nextMap[key] = safe;
+        __writeJSON(NODE_LAYOUT_ZOOM_STORAGE_KEY, nextMap);
+    }
+    __applyNodeLayoutZoom(element, safe);
+}
+
+function __updateNodeLayoutZoomDisplay(element, percent) {
+    if (!element) return;
+    const display = element.querySelector('.canvas-layout-zoom-input, .canvas-layout-zoom-value');
+    if (!display) return;
+    const defaultPercent = __getDefaultLayoutZoomPercentByElement(element);
+    const safe = __normalizeLayoutZoomPercent(
+        typeof percent === 'number' ? percent : __getNodeLayoutZoomPercent(element),
+        defaultPercent
+    );
+    if (display.tagName === 'INPUT') {
+        if (document.activeElement === display) return;
+        display.value = `${safe}%`;
+    } else {
+        display.textContent = `${safe}%`;
+    }
+}
+
+function __scheduleNodeLayoutZoomStabilize(element) {
+    if (!element) return;
+
+    const reapply = () => {
+        if (!element || !element.isConnected) return;
+        if (!__isNodeMaximized(element)) return;
+        __applyNodeLayoutZoom(element);
+    };
+
+    reapply();
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+            reapply();
+        });
+    }
+
+    const prevTimer = nodeLayoutZoomStabilizeTimerMap.get(element);
+    if (prevTimer) {
+        clearTimeout(prevTimer);
+    }
+
+    const timerId = setTimeout(() => {
+        nodeLayoutZoomStabilizeTimerMap.delete(element);
+        reapply();
+    }, NODE_LAYOUT_ZOOM_STABILIZE_DELAY_MS);
+
+    nodeLayoutZoomStabilizeTimerMap.set(element, timerId);
+}
+
+function __updateNodeLayoutZoomControls(element, lang) {
+    if (!element) return;
+    const zoomInLabel = getLayoutZoomLabel('in', lang);
+    const zoomOutLabel = getLayoutZoomLabel('out', lang);
+    const zoomValueLabel = getLayoutZoomLabel('value', lang);
+    const zoomInBtn = element.querySelector('.canvas-layout-zoom-btn[data-action="layout-zoom-in"]');
+    const zoomOutBtn = element.querySelector('.canvas-layout-zoom-btn[data-action="layout-zoom-out"]');
+    const zoomValue = element.querySelector('.canvas-layout-zoom-input, .canvas-layout-zoom-value');
+
+    if (zoomInBtn) {
+        zoomInBtn.setAttribute('title', zoomInLabel);
+        zoomInBtn.setAttribute('aria-label', zoomInLabel);
+        zoomInBtn.setAttribute('data-tooltip', zoomInLabel);
+    }
+    if (zoomOutBtn) {
+        zoomOutBtn.setAttribute('title', zoomOutLabel);
+        zoomOutBtn.setAttribute('aria-label', zoomOutLabel);
+        zoomOutBtn.setAttribute('data-tooltip', zoomOutLabel);
+    }
+    if (zoomValue) {
+        zoomValue.setAttribute('title', zoomValueLabel);
+        zoomValue.setAttribute('data-tooltip', zoomValueLabel);
+    }
+    __applyNodeLayoutZoom(element);
+    if (__isNodeMaximized(element)) {
+        __scheduleNodeLayoutZoomStabilize(element);
+    }
+    __bindNodeLayoutZoomInput(element);
+}
+
+function __adjustNodeLayoutZoom(element, delta) {
+    if (!element) return;
+    const current = __getNodeLayoutZoomPercent(element);
+    const next = __normalizeLayoutZoomPercent(current + delta, current);
+    if (next === current) return;
+    __setNodeLayoutZoomPercent(element, next);
+}
+
+function __handleLayoutZoomAction(element, action) {
+    if (!element || !action) return false;
+    if (action === 'layout-zoom-in') {
+        __adjustNodeLayoutZoom(element, NODE_LAYOUT_ZOOM_STEP);
+        return true;
+    }
+    if (action === 'layout-zoom-out') {
+        __adjustNodeLayoutZoom(element, -NODE_LAYOUT_ZOOM_STEP);
+        return true;
+    }
+    return false;
+}
+
+function __bindNodeLayoutZoomInput(element) {
+    if (!element) return;
+    const input = element.querySelector('.canvas-layout-zoom-input');
+    if (!input || input.dataset.layoutZoomBound === 'true') return;
+    input.dataset.layoutZoomBound = 'true';
+
+    input.addEventListener('focus', () => {
+        const current = __getNodeLayoutZoomPercent(element);
+        input.value = String(current);
+        try { input.select(); } catch (_) { }
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            if (e.isComposing) return;
+            e.preventDefault();
+            input.blur();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            input.value = `${__getNodeLayoutZoomPercent(element)}%`;
+            input.blur();
+        }
+    });
+
+    input.addEventListener('blur', () => {
+        const current = __getNodeLayoutZoomPercent(element);
+        const next = __parseLayoutZoomInput(input.value, current);
+        __setNodeLayoutZoomPercent(element, next);
+        input.value = `${next}%`;
+    });
+
+    ['mousedown', 'click'].forEach((evt) => {
+        input.addEventListener(evt, (e) => e.stopPropagation());
+    });
+}
+
+function __createLayoutZoomControls(buttonClass, lang, defaultPercent = null) {
+    const controls = document.createElement('div');
+    controls.className = 'canvas-layout-zoom-controls';
+    controls.setAttribute('data-layout-zoom-controls', 'true');
+    const sectionDefaultPercent = __getDefaultLayoutZoomPercentByElement(null);
+    const resolvedDefaultPercent = __normalizeLayoutZoomPercent(
+        Number.isFinite(defaultPercent) ? defaultPercent : sectionDefaultPercent,
+        sectionDefaultPercent
+    );
+
+    const zoomOutLabel = getLayoutZoomLabel('out', lang);
+    const zoomInLabel = getLayoutZoomLabel('in', lang);
+    const zoomValueLabel = getLayoutZoomLabel('value', lang);
+
+    const zoomOutBtn = document.createElement('button');
+    zoomOutBtn.type = 'button';
+    zoomOutBtn.className = `${buttonClass} canvas-layout-zoom-btn canvas-layout-zoom-out-btn`;
+    zoomOutBtn.setAttribute('data-action', 'layout-zoom-out');
+    zoomOutBtn.setAttribute('title', zoomOutLabel);
+    zoomOutBtn.setAttribute('aria-label', zoomOutLabel);
+    zoomOutBtn.setAttribute('data-tooltip', zoomOutLabel);
+    zoomOutBtn.innerHTML = '<i class="fas fa-minus"></i>';
+
+    const zoomValue = document.createElement('input');
+    zoomValue.type = 'text';
+    zoomValue.inputMode = 'numeric';
+    zoomValue.className = 'canvas-layout-zoom-value canvas-layout-zoom-input';
+    zoomValue.setAttribute('data-layout-zoom-value', 'true');
+    zoomValue.setAttribute('title', zoomValueLabel);
+    zoomValue.setAttribute('data-tooltip', zoomValueLabel);
+    zoomValue.setAttribute('aria-label', zoomValueLabel);
+    zoomValue.value = `${resolvedDefaultPercent}%`;
+
+    const zoomInBtn = document.createElement('button');
+    zoomInBtn.type = 'button';
+    zoomInBtn.className = `${buttonClass} canvas-layout-zoom-btn canvas-layout-zoom-in-btn`;
+    zoomInBtn.setAttribute('data-action', 'layout-zoom-in');
+    zoomInBtn.setAttribute('title', zoomInLabel);
+    zoomInBtn.setAttribute('aria-label', zoomInLabel);
+    zoomInBtn.setAttribute('data-tooltip', zoomInLabel);
+    zoomInBtn.innerHTML = '<i class="fas fa-plus"></i>';
+
+    controls.appendChild(zoomOutBtn);
+    controls.appendChild(zoomValue);
+    controls.appendChild(zoomInBtn);
+    return controls;
+}
+
+function getCurrentFullscreenElement() {
+    return document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement || null;
+}
+
+function __getCanvasViewportRect(options = {}) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return null;
+    const rect = workspace.getBoundingClientRect();
+    if ((options && options.viewportCoordinates === true) || __isCanvasNodeMaximizedActive()) {
+        return {
+            x: 0,
+            y: 0,
+            width: rect.width,
+            height: rect.height
+        };
+    }
+    const zoom = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.zoom === 'number' && CanvasState.zoom > 0)
+        ? CanvasState.zoom : 1;
+    const panX = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.panOffsetX === 'number')
+        ? CanvasState.panOffsetX : 0;
+    const panY = (typeof CanvasState !== 'undefined' && CanvasState && typeof CanvasState.panOffsetY === 'number')
+        ? CanvasState.panOffsetY : 0;
+    return {
+        x: (-panX) / zoom,
+        y: (-panY) / zoom,
+        width: rect.width / zoom,
+        height: rect.height / zoom
+    };
+}
+
+function __isNodeMaximized(element) {
+    return !!(element && element.classList && element.classList.contains('canvas-node-maximized'));
+}
+
+function __isCanvasNodeMaximizedActive() {
+    try {
+        if (CanvasState && CanvasState.nodeMaximizedActive) return true;
+    } catch (_) { }
+    try {
+        if (document && document.body && document.body.classList && document.body.classList.contains('canvas-node-maximized-active')) return true;
+    } catch (_) { }
+    try {
+        return !!document.querySelector('.canvas-node-maximized');
+    } catch (_) {
+        return false;
+    }
+}
+
+function __serializeMaximizedNode(element) {
+    if (!element || !element.classList) return null;
+    const isPermanent = element.classList.contains('permanent-bookmark-section');
+    const isTemp = element.classList.contains('temp-canvas-node');
+    const isMd = element.classList.contains('md-canvas-node');
+
+    if (isPermanent) {
+        const copyId = element.dataset ? element.dataset.permanentSectionCopyId : null;
+        if (copyId) {
+            return { type: 'permanent-copy', copyId: String(copyId) };
+        }
+        return { type: 'permanent', id: 'permanentSection' };
+    }
+
+    if (isTemp) {
+        const id = element.id || (element.dataset ? element.dataset.sectionId : null);
+        if (id) return { type: 'temp-node', id: String(id) };
+    }
+
+    if (isMd) {
+        const id = element.id;
+        if (id) return { type: 'md-node', id: String(id) };
+    }
+
+    if (element.id) {
+        return { type: 'node', id: String(element.id) };
+    }
+    return null;
+}
+
+function __getActiveMaximizedNodeDescriptor() {
+    const activeNode = document.querySelector('.canvas-node-maximized');
+    if (!activeNode) return null;
+    return __serializeMaximizedNode(activeNode);
+}
+
+function __getMaximizedNodeStorageKey(partitionKey = null) {
+    return __buildCanvasPartitionedViewStateKey(
+        NODE_MAXIMIZED_VIEW_STATE_KIND,
+        NODE_MAXIMIZED_STORAGE_KEY,
+        partitionKey || __getCanvasViewPartitionKey()
+    );
+}
+
+function __saveMaximizedNodeToStorage(element) {
+    const payload = __serializeMaximizedNode(element);
+    if (!payload) return;
+    try {
+        const partitionKey = __getCanvasViewPartitionKey();
+        saveViewState(NODE_MAXIMIZED_VIEW_STATE_KIND, NODE_MAXIMIZED_STORAGE_KEY, payload, { partitionKey });
+    } catch (_) { }
+}
+
+function __saveLastMaximizedNodeToStorage(element) {
+    const payload = __serializeMaximizedNode(element);
+    if (!payload) return;
+    try {
+        const saved = saveSharedState(NODE_LAST_MAXIMIZED_STORAGE_KEY, payload);
+        if (saved && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(new CustomEvent(LAST_MAXIMIZED_NODE_UPDATED_EVENT, {
+                detail: { descriptor: payload }
+            }));
+        }
+    } catch (_) { }
+}
+
+function __clearMaximizedNodeStorage() {
+    try {
+        localStorage.removeItem(__getMaximizedNodeStorageKey());
+    } catch (_) { }
+}
+
+function __loadMaximizedNodeFromStorage() {
+    try {
+        const key = __getMaximizedNodeStorageKey();
+        if (!key) return null;
+        const data = __readPartitionedViewJSON(key, null);
+        if (!data || typeof data !== 'object') return null;
+        return data;
+    } catch (_) {
+        return null;
+    }
+}
+
+function __loadLastMaximizedNodeFromStorage() {
+    try {
+        const raw = localStorage.getItem(NODE_LAST_MAXIMIZED_STORAGE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data || typeof data !== 'object') return null;
+        return data;
+    } catch (_) {
+        return null;
+    }
+}
+
+function __resolveMaximizedNode(descriptor) {
+    if (!descriptor || typeof descriptor !== 'object') return null;
+    if (descriptor.type === 'permanent') {
+        return document.getElementById('permanentSection');
+    }
+    if (descriptor.type === 'permanent-copy') {
+        const copyId = String(descriptor.copyId || '').trim();
+        if (!copyId) return null;
+        return document.querySelector(`.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`);
+    }
+    if (descriptor.id) {
+        return document.getElementById(String(descriptor.id));
+    }
+    return null;
+}
+
+function __isFullscreenPreloadRestoreActive() {
+    try {
+        const root = document.documentElement;
+        return !!(root && root.classList && root.classList.contains('layout-preload-node-maximized-active'));
+    } catch (_) {
+        return false;
+    }
+}
+
+function __setFullscreenPreloadReady(element, ready = true) {
+    if (!element || !element.dataset) return;
+    if (ready) {
+        element.dataset.fullscreenPreloadReady = 'true';
+    } else {
+        try { delete element.dataset.fullscreenPreloadReady; } catch (_) {
+            element.dataset.fullscreenPreloadReady = '';
+        }
+    }
+}
+
+function __setFullscreenBodyReady(element, ready = true) {
+    if (!element || !element.dataset) return;
+    if (ready) {
+        element.dataset.fullscreenBodyReady = 'true';
+    } else {
+        try { delete element.dataset.fullscreenBodyReady; } catch (_) {
+            element.dataset.fullscreenBodyReady = '';
+        }
+    }
+}
+
+function __resolveFullscreenPreloadTargetElement(target) {
+    if (!target || !target.closest) return target || null;
+    if (target.classList && (
+        target.classList.contains('permanent-bookmark-section')
+        || target.classList.contains('temp-canvas-node')
+        || target.classList.contains('md-canvas-node')
+    )) {
+        return target;
+    }
+    return target.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
+}
+
+function __beginCanvasFullscreenBodyRestoreLock(target) {
+    const element = __resolveFullscreenPreloadTargetElement(target);
+    if (!element || !element.classList || !element.classList.contains('canvas-node-maximized')) return null;
+    if (!element.dataset || element.dataset.fullscreenPreloadReady !== 'true') return null;
+    if (element.dataset.fullscreenBodyReady !== 'true') return null;
+    __setFullscreenBodyReady(element, false);
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        if (!element.isConnected) return;
+        __setFullscreenBodyReady(element, true);
+    };
+}
+window.__beginCanvasFullscreenBodyRestoreLock = __beginCanvasFullscreenBodyRestoreLock;
+
+function __shouldSuppressCanvasBootstrapRestore(target) {
+    const descriptor = CanvasState.pendingMaximizedDescriptor
+        || __getActiveMaximizedNodeDescriptor()
+        || __loadMaximizedNodeFromStorage();
+    if (!descriptor) return false;
+    const element = __resolveFullscreenPreloadTargetElement(target);
+    if (!element) return false;
+    const elementDescriptor = __serializeMaximizedNode(element);
+    if (!elementDescriptor) return false;
+    if (__getMaximizedDescriptorKey(descriptor) !== __getMaximizedDescriptorKey(elementDescriptor)) {
+        return false;
+    }
+    if (__isFullscreenPreloadRestoreActive()) return true;
+    try {
+        if (__isNodeMaximized(element)) return true;
+    } catch (_) { }
+    try {
+        if (element.dataset && element.dataset.fullscreenBodyReady !== 'true') return true;
+    } catch (_) { }
+    return false;
+}
+window.__shouldSuppressCanvasBootstrapRestore = __shouldSuppressCanvasBootstrapRestore;
+
+function __waitForNextAnimationFrame() {
+    return new Promise((resolve) => {
+        try {
+            requestAnimationFrame(() => resolve());
+        } catch (_) {
+            setTimeout(resolve, 16);
+        }
+    });
+}
+
+async function __waitForAnimationFrames(count = 1) {
+    const total = Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
+    for (let i = 0; i < total; i += 1) {
+        await __waitForNextAnimationFrame();
+    }
+}
+
+function __delayFullscreenRestore(ms) {
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+async function __waitForFullscreenPreloadRelease(maxMs = 900) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < maxMs) {
+        try {
+            const root = document.documentElement;
+            const preloadActive = !!(root && root.classList && (
+                root.classList.contains('layout-preload-active')
+                || root.classList.contains('layout-preload-node-maximized-active')
+            ));
+            if (!preloadActive) return;
+        } catch (_) {
+            return;
+        }
+        await __waitForAnimationFrames(1);
+        await __delayFullscreenRestore(16);
+    }
+}
+
+function __getFullscreenScrollableBody(target) {
+    if (!target || !target.querySelector) return null;
+    return target.querySelector('.permanent-section-body, .temp-node-body') || null;
+}
+
+function __shouldWaitForPermanentFullscreenQuiet() {
+    try {
+        if (typeof isRenderingTree !== 'undefined' && isRenderingTree) return true;
+    } catch (_) { }
+    try {
+        if (typeof pathBadgeRefreshInFlight !== 'undefined' && pathBadgeRefreshInFlight) return true;
+    } catch (_) { }
+    try {
+        if (typeof pendingPathBadgeRefreshTimer !== 'undefined' && pendingPathBadgeRefreshTimer) return true;
+    } catch (_) { }
+    return false;
+}
+
+async function __applyFullscreenScrollOnly(target, descriptor) {
+    if (!target || !descriptor) return;
+    const type = String(descriptor.type || '').toLowerCase();
+    const body = __getFullscreenScrollableBody(target);
+    if (!body) return;
+
+    if (type === 'permanent' || type === 'permanent-copy') {
+        try {
+            const key = __getPermanentSectionScrollKey(target);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 2200 });
+            }
+        } catch (_) { }
+        return;
+    }
+
+    if (type === 'temp-node') {
+        try {
+            const sectionId = String(descriptor.id || target.id || '').trim();
+            const key = __getTempSectionScrollKey(sectionId);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 1600 });
+            }
+        } catch (_) { }
+    }
+}
+
+async function __waitForFullscreenRevealStability(target, descriptor) {
+    if (!target || !descriptor) return;
+    const body = __getFullscreenScrollableBody(target);
+    const tree = target.querySelector ? target.querySelector('.bookmark-tree, .temp-bookmark-tree') : null;
+    const type = String(descriptor.type || '').toLowerCase();
+    const isPermanentTree = (type === 'permanent' || type === 'permanent-copy');
+    const idleMs = isPermanentTree ? 88 : 72;
+    const minDelayMs = isPermanentTree ? 108 : 84;
+    const maxMs = isPermanentTree ? 420 : 280;
+    const startedAt = Date.now();
+    let lastActivityAt = Date.now();
+    let observer = null;
+
+    const markActivity = () => {
+        lastActivityAt = Date.now();
+    };
+
+    try {
+        if (body && typeof body.addEventListener === 'function') {
+            body.addEventListener('scroll', markActivity, { passive: true });
+        }
+    } catch (_) { }
+
+    try {
+        if (tree && typeof MutationObserver !== 'undefined') {
+            observer = new MutationObserver(() => {
+                markActivity();
+            });
+            observer.observe(tree, {
+                subtree: true,
+                childList: true,
+                attributes: true,
+                attributeFilter: ['class', 'data-children-loaded', 'data-start-index']
+            });
+        }
+    } catch (_) { }
+
+    try {
+        await __delayFullscreenRestore(minDelayMs);
+        while (Date.now() - startedAt < maxMs) {
+            const quietEnough = (Date.now() - lastActivityAt) >= idleMs;
+            const permanentBusy = (type === 'permanent' || type === 'permanent-copy')
+                ? __shouldWaitForPermanentFullscreenQuiet()
+                : false;
+            if (quietEnough && !permanentBusy) {
+                break;
+            }
+            await __waitForAnimationFrames(1);
+            await __delayFullscreenRestore(16);
+        }
+    } finally {
+        try {
+            if (body && typeof body.removeEventListener === 'function') {
+                body.removeEventListener('scroll', markActivity);
+            }
+        } catch (_) { }
+        try {
+            if (observer) observer.disconnect();
+        } catch (_) { }
+    }
+}
+
+async function __waitForFullscreenBodyReveal(target, descriptor) {
+    if (!target || !descriptor) return;
+    const type = String(descriptor.type || '').toLowerCase();
+    const extraDelayMs = (type === 'permanent' || type === 'permanent-copy') ? 260 : 180;
+    const finalBufferMs = (type === 'permanent' || type === 'permanent-copy') ? 96 : 64;
+
+    await __delayFullscreenRestore(extraDelayMs);
+    await __waitForFullscreenPreloadRelease(1200);
+    await __waitForFullscreenRevealStability(target, descriptor);
+    await __applyFullscreenScrollOnly(target, descriptor);
+    await __delayFullscreenRestore(finalBufferMs);
+    await __waitForAnimationFrames(2);
+}
+
+function __applyPersistedScrollPayloadToBody(body, payload, options = {}) {
+    if (!body || !payload || typeof payload !== 'object') return false;
+    if (typeof payload.top === 'number') body.scrollTop = payload.top || 0;
+    if (typeof payload.left === 'number') body.scrollLeft = payload.left || 0;
+    if (options && options.guardMs && body.dataset) {
+        try {
+            body.dataset.scrollRestoreBlockUntil = String(Date.now() + Math.max(0, Number(options.guardMs) || 0));
+        } catch (_) { }
+    }
+    return true;
+}
+
+function __scheduleCanvasBodyScrollRestore(body, payload, options = {}) {
+    if (!body || !payload || typeof payload !== 'object') return false;
+
+    const target = options && options.target ? options.target : body;
+    const fallbackDelays = Array.isArray(options && options.fallbackDelays)
+        ? options.fallbackDelays
+            .map((delay) => Number(delay))
+            .filter((delay) => Number.isFinite(delay) && delay >= 0)
+        : [10, 50, 100];
+    const scheduleFollowUps = options && options.scheduleFollowUps === false ? false : true;
+    const isBlocked = (options && typeof options.isBlocked === 'function')
+        ? options.isBlocked
+        : () => {
+            try {
+                return !!(typeof window !== 'undefined'
+                    && typeof window.__isCanvasBodyScrollRestoreBlocked === 'function'
+                    && window.__isCanvasBodyScrollRestoreBlocked(body));
+            } catch (_) {
+                return false;
+            }
+        };
+    const apply = (force = false) => {
+        if (!force) {
+            try {
+                if (isBlocked()) return false;
+            } catch (_) { }
+        }
+        return __applyPersistedScrollPayloadToBody(body, payload, options);
+    };
+
+    let suppressBootstrapRestore = false;
+    if (options && Object.prototype.hasOwnProperty.call(options, 'suppressBootstrapRestore')) {
+        suppressBootstrapRestore = !!options.suppressBootstrapRestore;
+    } else {
+        try {
+            suppressBootstrapRestore = __shouldSuppressCanvasBootstrapRestore(target);
+        } catch (_) {
+            suppressBootstrapRestore = false;
+        }
+    }
+
+    let releaseBodyLock = null;
+    if (!(options && options.useFullscreenLock === false)) {
+        try {
+            releaseBodyLock = __beginCanvasFullscreenBodyRestoreLock(target);
+        } catch (_) {
+            releaseBodyLock = null;
+        }
+    }
+
+    if (releaseBodyLock) {
+        apply(true);
+        requestAnimationFrame(() => {
+            apply(true);
+            requestAnimationFrame(() => {
+                apply(true);
+                try { releaseBodyLock(); } catch (_) { }
+            });
+        });
+        return true;
+    }
+
+    apply();
+    if (!scheduleFollowUps || suppressBootstrapRestore) return true;
+
+    requestAnimationFrame(() => {
+        apply();
+        fallbackDelays.forEach((delay) => {
+            setTimeout(() => {
+                apply();
+            }, delay);
+        });
+    });
+
+    return true;
+}
+window.__scheduleCanvasBodyScrollRestore = __scheduleCanvasBodyScrollRestore;
+
+async function __settleFullscreenBodyScroll(body, payload, options = {}) {
+    if (!body || !payload || typeof payload !== 'object') return false;
+    const guardMs = Number.isFinite(options.guardMs) ? Math.max(0, Math.round(options.guardMs)) : 640;
+    __applyPersistedScrollPayloadToBody(body, payload, { guardMs });
+    await __waitForAnimationFrames(1);
+    __applyPersistedScrollPayloadToBody(body, payload, { guardMs });
+    return true;
+}
+
+async function __waitForPermanentTreeMaterialized(sectionEl) {
+    if (!sectionEl) return null;
+    const isCopy = __isPermanentSectionCopy(sectionEl);
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+        const tree = sectionEl.querySelector('.bookmark-tree');
+        if (tree && tree.querySelector('.tree-item[data-node-id]')) {
+            return tree;
+        }
+
+        try {
+            const renderSharedViews = window.__renderPermanentTreeSharedViews;
+            if (typeof renderSharedViews === 'function') {
+                renderSharedViews({
+                    includePrimary: !isCopy,
+                    includeCopies: isCopy,
+                    reason: 'fullscreen-preload-materialize'
+                });
+            }
+        } catch (_) { }
+
+        await __waitForAnimationFrames(1);
+        await __delayFullscreenRestore(16);
+    }
+
+    return sectionEl.querySelector('.bookmark-tree');
+}
+
+function __collectPermanentExpandedHydrationTargets(tree) {
+    if (!tree || typeof __shouldHydratePermanentFolderChildren !== 'function') return [];
+    const targets = [];
+    tree.querySelectorAll('.tree-item[data-node-id][data-node-type="folder"]').forEach((item) => {
+        try {
+            const node = item.closest('.tree-node');
+            const children = node ? node.querySelector(':scope > .tree-children') : null;
+            const toggle = item.querySelector(':scope > .tree-toggle');
+            if (!toggle || !toggle.classList.contains('expanded') || !children) return;
+            if (!__shouldHydratePermanentFolderChildren(item, children)) return;
+            targets.push({
+                nodeId: String(item.dataset.nodeId || ''),
+                children
+            });
+        } catch (_) { }
+    });
+    return targets.filter((entry) => !!entry.nodeId);
+}
+
+async function __hydratePermanentExpandedTreeForFullscreen(tree) {
+    if (!tree || typeof loadPermanentFolderChildrenLazy !== 'function') return;
+
+    for (let pass = 0; pass < 8; pass += 1) {
+        const targets = __collectPermanentExpandedHydrationTargets(tree);
+        if (!targets.length) break;
+
+        for (let i = 0; i < targets.length; i += 1) {
+            const entry = targets[i];
+            try {
+                await loadPermanentFolderChildrenLazy(entry.nodeId, entry.children, 0, null, false);
+            } catch (_) { }
+        }
+
+        await __waitForAnimationFrames(1);
+        await __delayFullscreenRestore(8);
+    }
+}
+
+async function __preparePermanentSectionForFullscreenRestore(sectionEl, options = {}) {
+    if (!sectionEl) return sectionEl;
+    const tree = await __waitForPermanentTreeMaterialized(sectionEl);
+    const includeScroll = options.includeScroll !== false;
+
+    if (tree && typeof restoreTreeExpandState === 'function') {
+        try { restoreTreeExpandState(tree); } catch (_) { }
+    }
+
+    await __hydratePermanentExpandedTreeForFullscreen(tree);
+    await __waitForAnimationFrames(1);
+
+    if (tree && typeof restoreTreeExpandState === 'function') {
+        try { restoreTreeExpandState(tree); } catch (_) { }
+    }
+
+    if (includeScroll) {
+        try {
+            const body = sectionEl.querySelector('.permanent-section-body');
+            const key = __getPermanentSectionScrollKey(sectionEl);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (body && persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 2200 });
+            }
+        } catch (_) { }
+    }
+
+    return sectionEl;
+}
+
+async function __prepareTempNodeForFullscreenRestore(nodeEl, descriptor, options = {}) {
+    if (!nodeEl || !descriptor) return nodeEl;
+    const sectionId = String(descriptor.id || nodeEl.id || '').trim();
+    if (!sectionId) return nodeEl;
+    const includeScroll = options.includeScroll !== false;
+
+    try {
+        const section = getTempSection(sectionId);
+        if (section) {
+            if (section.dormant && typeof wakeSection === 'function') {
+                try { wakeSection(section); } catch (_) { }
+            }
+            if (typeof __ensureTempSectionTreeLoadedInPlace === 'function') {
+                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
+            }
+            const refreshedNode = document.getElementById(sectionId) || nodeEl;
+            const refreshedTree = refreshedNode ? refreshedNode.querySelector('.temp-bookmark-tree') : null;
+            const treeLoaded = !!(refreshedTree && refreshedTree.querySelector('.tree-item[data-node-id], .tree-load-more'));
+            if (!treeLoaded && typeof renderTempNode === 'function') {
+                try { renderTempNode(section, { forceBuildTree: true }); } catch (_) { }
+            }
+        }
+    } catch (_) { }
+
+    const refreshedNode = document.getElementById(sectionId) || nodeEl;
+    if (includeScroll) {
+        try {
+            const body = refreshedNode ? refreshedNode.querySelector('.temp-node-body') : null;
+            const key = __getTempSectionScrollKey(sectionId);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (body && persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 1600 });
+            }
+        } catch (_) { }
+    }
+
+    return refreshedNode || nodeEl;
+}
+
+async function __prepareNodeForFullscreenRestore(target, descriptor, options = {}) {
+    if (!target || !descriptor) return target;
+    const type = String(descriptor.type || '').toLowerCase();
+
+    if (type === 'permanent' || type === 'permanent-copy') {
+        return __preparePermanentSectionForFullscreenRestore(target, options);
+    }
+
+    if (type === 'temp-node') {
+        return __prepareTempNodeForFullscreenRestore(target, descriptor, options);
+    }
+
+    return target;
+}
+
+function __runFullscreenPreloadRestore(target, descriptor) {
+    if (!target || !descriptor) return;
+    const taskKey = __getMaximizedDescriptorKey(descriptor) || '';
+    if (CanvasState.maximizedRestoreTaskKey && CanvasState.maximizedRestoreTaskKey === taskKey) {
+        return;
+    }
+    CanvasState.maximizedRestoreTaskKey = taskKey;
+
+    (async () => {
+        let resolvedTarget = target;
+        try {
+            __setFullscreenPreloadReady(resolvedTarget, false);
+            __setFullscreenBodyReady(resolvedTarget, false);
+            resolvedTarget = await __prepareNodeForFullscreenRestore(resolvedTarget, descriptor, { includeScroll: false });
+            resolvedTarget = __resolveMaximizedNode(descriptor) || resolvedTarget;
+            if (!resolvedTarget) return;
+            __setFullscreenPreloadReady(resolvedTarget, false);
+            __setFullscreenBodyReady(resolvedTarget, false);
+            maximizeCanvasNode(resolvedTarget, { suppressReadyNotify: true });
+            await __prepareNodeForFullscreenRestore(resolvedTarget, descriptor);
+            resolvedTarget = __resolveMaximizedNode(descriptor) || resolvedTarget;
+            if (!resolvedTarget) return;
+            await __waitForFullscreenRevealStability(resolvedTarget, descriptor);
+            await __applyFullscreenScrollOnly(resolvedTarget, descriptor);
+            await __waitForAnimationFrames(2);
+            resolvedTarget = __resolveMaximizedNode(descriptor) || resolvedTarget;
+            if (!resolvedTarget) return;
+            __setFullscreenBodyReady(resolvedTarget, true);
+            __notifyNodeFullscreenContextChange(resolvedTarget);
+            CanvasState.pendingMaximizedDescriptor = null;
+        } catch (_) {
+            try {
+                const fallbackTarget = __resolveMaximizedNode(descriptor) || resolvedTarget || target;
+                if (fallbackTarget) {
+                    maximizeCanvasNode(fallbackTarget);
+                    CanvasState.pendingMaximizedDescriptor = null;
+                }
+            } catch (_) { }
+        } finally {
+            if (CanvasState.maximizedRestoreTaskKey === taskKey) {
+                CanvasState.maximizedRestoreTaskKey = '';
+            }
+        }
+    })();
+}
+
+function __tryRestoreMaximizedNode({ clearIfMissing = false } = {}) {
+    if (!CanvasState.pendingMaximizedDescriptor) return;
+    const descriptor = CanvasState.pendingMaximizedDescriptor;
+    const target = __resolveMaximizedNode(descriptor);
+    if (target) {
+        if (__isFullscreenPreloadRestoreActive()) {
+            __runFullscreenPreloadRestore(target, descriptor);
+            return;
+        }
+        maximizeCanvasNode(target);
+        CanvasState.pendingMaximizedDescriptor = null;
+        CanvasState.maximizedRestoreTaskKey = '';
+        return;
+    }
+    if (clearIfMissing) {
+        CanvasState.pendingMaximizedDescriptor = null;
+        CanvasState.maximizedRestoreTaskKey = '';
+        __clearMaximizedNodeStorage();
+        __updateNodeMaximizedState();
+    }
+}
+
+function __tryRestorePendingMaximizedNodeForElement(element) {
+    if (!element || !CanvasState.pendingMaximizedDescriptor) return false;
+    const pendingKey = __getMaximizedDescriptorKey(CanvasState.pendingMaximizedDescriptor);
+    if (!pendingKey) return false;
+
+    const elementDescriptor = __serializeMaximizedNode(element);
+    if (!elementDescriptor) return false;
+    if (__getMaximizedDescriptorKey(elementDescriptor) !== pendingKey) return false;
+
+    try { __tryRestoreMaximizedNode({ clearIfMissing: false }); } catch (_) { }
+    return __isNodeMaximized(element);
+}
+
+function __primePendingCanvasFullscreenShell() {
+    let descriptor = CanvasState.pendingMaximizedDescriptor;
+    if (!descriptor) {
+        try {
+            descriptor = __loadMaximizedNodeFromStorage();
+        } catch (_) {
+            descriptor = null;
+        }
+        if (descriptor) {
+            CanvasState.pendingMaximizedDescriptor = descriptor;
+        }
+    }
+
+    if (!descriptor || typeof descriptor !== 'object') return false;
+
+    const type = String(descriptor.type || '').toLowerCase();
+    if (type === 'permanent' || type === 'permanent-copy') {
+        try {
+            const mainSection = document.getElementById('permanentSection');
+            if (mainSection) {
+                const copyId = type === 'permanent-copy'
+                    ? String(descriptor.copyId || '').trim()
+                    : '';
+                const shell = __buildPermanentViewShellProtocolFromStorage(copyId || null);
+                if (copyId) {
+                    let copySection = __resolvePermanentSectionElement(copyId);
+                    if (!copySection) {
+                        copySection = __createPermanentSectionCopyFromStorage({
+                            id: copyId,
+                            displayIndex: shell.displayIndex,
+                            ...(shell && shell.cardState && typeof shell.cardState === 'object' ? shell.cardState : {})
+                        });
+                    }
+                    if (copySection) {
+                        __applyPermanentViewShellToSectionElement(copySection, shell);
+                    }
+                } else {
+                    __applyPermanentViewShellToSectionElement(mainSection, shell);
+                }
+            }
+        } catch (_) { }
+    }
+
+    const target = __resolveMaximizedNode(descriptor);
+    if (!target) return false;
+
+    try { __tryRestoreMaximizedNode({ clearIfMissing: false }); } catch (_) { }
+    return __isNodeMaximized(target);
+}
+window.__primePendingCanvasFullscreenShell = __primePendingCanvasFullscreenShell;
+
+async function openLastMaximizedNode(options = {}) {
+    const parsedRetries = Number(options.retries);
+    const retries = Number.isFinite(parsedRetries) ? Math.max(0, Math.floor(parsedRetries)) : 18;
+    const parsedDelay = Number(options.retryDelayMs);
+    const retryDelayMs = Number.isFinite(parsedDelay) ? Math.max(16, Math.floor(parsedDelay)) : 100;
+    const descriptor = __loadLastMaximizedNodeFromStorage();
+
+    if (!descriptor) {
+        return { success: false, reason: 'empty' };
+    }
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        let target = __resolveMaximizedNode(descriptor);
+        if (!target) {
+            target = __materializeMaximizedNodeFromDescriptor(descriptor);
+        }
+        if (target) {
+            __wakeCanvasNodeFromLazyState(target);
+            if (__isNodeMaximized(target)) {
+                return { success: true, descriptor };
+            }
+            const rect = __getCanvasViewportRect();
+            if (rect && rect.width > 1 && rect.height > 1) {
+                maximizeCanvasNode(target);
+                if (__isNodeMaximized(target)) {
+                    return { success: true, descriptor };
+                }
+            }
+        }
+
+        if (attempt < retries) {
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        }
+    }
+
+    return { success: false, reason: 'not-found', descriptor };
+}
+
+function __updateNodeMaximizedState() {
+    try {
+        const wasActive = CanvasState.nodeMaximizedActive;
+        CanvasState.nodeMaximizedActive = !!document.querySelector('.canvas-node-maximized');
+        if (document && document.body) {
+            document.body.classList.toggle('canvas-node-maximized-active', CanvasState.nodeMaximizedActive);
+        }
+
+        // Dispatch custom event to notify external listeners of the fullscreen state change
+        window.dispatchEvent(new CustomEvent('canvas-maximized-state-change', {
+            detail: {
+                active: CanvasState.nodeMaximizedActive,
+                element: document.querySelector('.canvas-node-maximized')
+            }
+        }));
+    } catch (_) {
+        CanvasState.nodeMaximizedActive = false;
+    }
+}
+
+function __notifyNodeFullscreenContextChange(targetElement = null) {
+    try {
+        const applySearchMode = window.__canvasApplyFullscreenSearchDefault;
+        let suppressAutoMode = false;
+        try {
+            const pendingCount = Number(window.__canvasSearchSuppressFullscreenAutoModeCounter || 0);
+            if (Number.isFinite(pendingCount) && pendingCount > 0) {
+                suppressAutoMode = true;
+                const nextCount = pendingCount - 1;
+                if (nextCount > 0) {
+                    window.__canvasSearchSuppressFullscreenAutoModeCounter = nextCount;
+                } else {
+                    delete window.__canvasSearchSuppressFullscreenAutoModeCounter;
+                }
+            }
+        } catch (_) { }
+        if (!suppressAutoMode && typeof applySearchMode === 'function') {
+            applySearchMode(targetElement, { onlyWhenInputEmpty: true });
+        }
+    } catch (_) { }
+
+    try {
+        const refreshCurrentViewAddBtn = window.__canvasRefreshCurrentViewAddButton;
+        if (typeof refreshCurrentViewAddBtn === 'function') {
+            refreshCurrentViewAddBtn();
+        }
+    } catch (_) { }
+
+    try {
+        if (targetElement && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            __setFullscreenPreloadReady(targetElement, true);
+            window.dispatchEvent(new CustomEvent('canvas-maximized-node-ready', {
+                detail: {
+                    id: String(targetElement.id || ''),
+                    descriptor: __serializeMaximizedNode(targetElement)
+                }
+            }));
+        }
+    } catch (_) { }
+}
+
+function __mutationContainsRemovedMaximizedNode(mutationList) {
+    if (!Array.isArray(mutationList) || !mutationList.length) return false;
+
+    for (let i = 0; i < mutationList.length; i += 1) {
+        const mutation = mutationList[i];
+        if (!mutation || mutation.type !== 'childList' || !mutation.removedNodes || !mutation.removedNodes.length) {
+            continue;
+        }
+
+        for (let j = 0; j < mutation.removedNodes.length; j += 1) {
+            const removedNode = mutation.removedNodes[j];
+            if (!removedNode || removedNode.nodeType !== 1) continue;
+            if (removedNode.classList && removedNode.classList.contains('canvas-node-maximized')) return true;
+            if (removedNode.querySelector && removedNode.querySelector('.canvas-node-maximized')) return true;
+        }
+    }
+
+    return false;
+}
+
+function __syncNodeMaximizedStateAfterNodeRemoval() {
+    if (CanvasState.maximizedNodeRemovalObserverMuted) return;
+
+    const hadMaximizedContext = !!CanvasState.nodeMaximizedActive
+        || !!(document && document.body && document.body.classList && document.body.classList.contains('canvas-node-maximized-active'));
+
+    __updateNodeMaximizedState();
+
+    if (!CanvasState.nodeMaximizedActive) {
+        __clearMaximizedNodeStorage();
+        CanvasState.pendingMaximizedDescriptor = null;
+        CanvasState.maximizedRestoreTaskKey = '';
+    }
+
+    if (hadMaximizedContext && !CanvasState.nodeMaximizedActive) {
+        updateNodeFullscreenButtons();
+        __notifyNodeFullscreenContextChange(null);
+    }
+}
+
+function __scheduleNodeMaximizedStateSyncAfterRemoval() {
+    if (CanvasState.maximizedNodeRemovalSyncFrame) return;
+
+    const run = () => {
+        CanvasState.maximizedNodeRemovalSyncFrame = null;
+        if (CanvasState.maximizedNodeRemovalObserverMuted) return;
+        __syncNodeMaximizedStateAfterNodeRemoval();
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        CanvasState.maximizedNodeRemovalSyncFrame = window.requestAnimationFrame(run);
+    } else {
+        CanvasState.maximizedNodeRemovalSyncFrame = setTimeout(run, 16);
+    }
+}
+
+function __bindMaximizedNodeRemovalSync() {
+    if (CanvasState.maximizedNodeRemovalObserver) return;
+    if (typeof MutationObserver === 'undefined') return;
+
+    const observeTarget = document.getElementById('canvasContent') || document.body || document.documentElement;
+    if (!observeTarget) return;
+
+    try {
+        const observer = new MutationObserver((mutationList) => {
+            if (CanvasState.maximizedNodeRemovalObserverMuted) return;
+            if (!__mutationContainsRemovedMaximizedNode(mutationList)) return;
+            __scheduleNodeMaximizedStateSyncAfterRemoval();
+        });
+        observer.observe(observeTarget, { childList: true, subtree: true });
+        CanvasState.maximizedNodeRemovalObserver = observer;
+    } catch (_) { }
+}
+
+function __clearOtherMaximizedNodes(except) {
+    document.querySelectorAll('.canvas-node-maximized').forEach((el) => {
+        if (except && el === except) return;
+        restoreCanvasNodeLayout(el, { locate: false });
+    });
+}
+
+function __isMaximizedNodeRectCurrent(element, rect) {
+    if (!element || !rect) return false;
+    const tolerance = 0.5;
+    const nearlyEqual = (raw, expected) => {
+        const value = parseFloat(String(raw || ''));
+        return Number.isFinite(value) && Math.abs(value - expected) <= tolerance;
+    };
+    return nearlyEqual(element.style.left, rect.x)
+        && nearlyEqual(element.style.top, rect.y)
+        && nearlyEqual(element.style.width, rect.width)
+        && nearlyEqual(element.style.height, rect.height);
+}
+
+function __stabilizeMaximizedNodeLayouts() {
+    if (!CanvasState.nodeMaximizedActive) return;
+    document.querySelectorAll('.canvas-node-maximized').forEach((element) => {
+        __scheduleNodeLayoutZoomStabilize(element);
+    });
+}
+
+function scheduleMaximizedNodesRefresh(options = {}) {
+    if (!__isCanvasNodeMaximizedActive()) return false;
+
+    const parsedDelay = Number(options && options.delayMs);
+    const delayMs = Number.isFinite(parsedDelay)
+        ? Math.max(0, parsedDelay)
+        : MAXIMIZED_NODE_RESIZE_REFRESH_DEBOUNCE_MS;
+    const parsedStabilizeDelay = Number(options && options.stabilizeDelayMs);
+    const stabilizeDelayMs = Number.isFinite(parsedStabilizeDelay)
+        ? Math.max(delayMs, parsedStabilizeDelay)
+        : Math.max(delayMs, MAXIMIZED_NODE_RESIZE_STABILIZE_DELAY_MS);
+
+    if (maximizedNodeResizeRefreshTimer) {
+        clearTimeout(maximizedNodeResizeRefreshTimer);
+    }
+    maximizedNodeResizeRefreshTimer = setTimeout(() => {
+        maximizedNodeResizeRefreshTimer = null;
+        if (!__isCanvasNodeMaximizedActive()) return;
+        refreshMaximizedNodes({ stabilize: false });
+    }, delayMs);
+
+    if (maximizedNodeResizeStabilizeTimer) {
+        clearTimeout(maximizedNodeResizeStabilizeTimer);
+    }
+    maximizedNodeResizeStabilizeTimer = setTimeout(() => {
+        maximizedNodeResizeStabilizeTimer = null;
+        if (!__isCanvasNodeMaximizedActive()) return;
+        refreshMaximizedNodes({ stabilize: false });
+        __stabilizeMaximizedNodeLayouts();
+    }, stabilizeDelayMs);
+
+    return true;
+}
+
+function maximizeCanvasNode(element, options = {}) {
+    if (!element) return;
+    if (__isNodeMaximized(element)) {
+        __wakeCanvasNodeFromLazyState(element);
+        if (refreshMaximizedNodes({ stabilize: false })) {
+            __scheduleNodeLayoutZoomStabilize(element);
+            updateNodeFullscreenButtons();
+        }
+        return;
+    }
+    const suppressReadyNotify = !!(options && options.suppressReadyNotify);
+    __wakeCanvasNodeFromLazyState(element);
+    __restoreTemporaryRaisedCanvasNode();
+    const rect = __getCanvasViewportRect({ viewportCoordinates: true });
+    if (!rect) return;
+    __clearOtherMaximizedNodes(element);
+
+    if (!element.dataset) return;
+    const computedStyle = (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function')
+        ? window.getComputedStyle(element)
+        : null;
+    const resolveLength = (inlineValue, computedValue, fallbackNumber) => {
+        const inline = String(inlineValue || '').trim();
+        if (inline) return inline;
+        const computed = String(computedValue || '').trim();
+        if (computed && computed !== 'auto') return computed;
+        if (Number.isFinite(fallbackNumber)) return `${Math.round(fallbackNumber * 1000) / 1000}px`;
+        return '';
+    };
+    element.dataset.maxPrevLeft = resolveLength(element.style.left, computedStyle && computedStyle.left, element.offsetLeft);
+    element.dataset.maxPrevTop = resolveLength(element.style.top, computedStyle && computedStyle.top, element.offsetTop);
+    element.dataset.maxPrevWidth = resolveLength(element.style.width, computedStyle && computedStyle.width, element.offsetWidth || rect.width);
+    element.dataset.maxPrevHeight = resolveLength(element.style.height, computedStyle && computedStyle.height, element.offsetHeight || rect.height);
+    element.dataset.maxPrevTransform = element.style.transform || '';
+    element.dataset.maxPrevZ = element.style.zIndex || '';
+
+    const globalSearchState = (typeof window !== 'undefined' && window.searchUiState) ? window.searchUiState : null;
+
+    // Save current search state before entering fullscreen
+    try {
+        element._preFullscreenSearchState = {
+            activeMode: globalSearchState ? globalSearchState.activeMode : null,
+            areaSearchScope: (globalSearchState && globalSearchState.areaSearchScope)
+                ? JSON.parse(JSON.stringify(globalSearchState.areaSearchScope))
+                : null
+        };
+    } catch (_) { }
+
+    // Dynamically set search scope to the fullscreen card
+    try {
+        let searchMode = null;
+        let scopeData = null;
+        if (element.classList.contains('permanent-bookmark-section')) {
+            searchMode = 'bookmark';
+            const copyId = element.dataset.permanentSectionCopyId || element.getAttribute('data-permanent-section-copy-id');
+            const memberIds = ['permanentSection', 'permanent-section'];
+            if (copyId) {
+                memberIds.push(copyId, `permanent-section-copy-${copyId}`);
+            }
+            scopeData = {
+                kind: 'permanent',
+                id: copyId || 'permanentSection',
+                memberIds: memberIds
+            };
+        } else if (element.classList.contains('temp-canvas-node')) {
+            searchMode = 'bookmark';
+            const sectionId = element.dataset.sectionId;
+            if (sectionId) {
+                scopeData = {
+                    kind: 'temp',
+                    id: sectionId,
+                    memberIds: [sectionId]
+                };
+            }
+        } else if (element.classList.contains('md-canvas-node')) {
+            searchMode = 'description';
+            const nodeId = element.id;
+            if (nodeId) {
+                scopeData = {
+                    kind: 'blank',
+                    id: nodeId,
+                    memberIds: [nodeId]
+                };
+            }
+        }
+
+        if (searchMode && scopeData && typeof window.setSearchMode === 'function') {
+            try {
+                window.setSearchMode(searchMode, { source: 'auto' });
+            } catch (_) { }
+        }
+    } catch (_) { }
+
+    element.classList.add('canvas-node-maximized');
+    __setFullscreenPreloadReady(element, !suppressReadyNotify);
+    __setFullscreenBodyReady(element, !suppressReadyNotify);
+    element.style.transform = 'none';
+    element.style.left = `${rect.x}px`;
+    element.style.top = `${rect.y}px`;
+    element.style.width = `${rect.width}px`;
+    element.style.height = `${rect.height}px`;
+    element.style.zIndex = '10000';
+    __updateNodeMaximizedState();
+    __saveMaximizedNodeToStorage(element);
+    __saveLastMaximizedNodeToStorage(element);
+    __applyNodeLayoutZoom(element);
+    __scheduleNodeLayoutZoomStabilize(element);
+    updateNodeFullscreenButtons();
+    if (!suppressReadyNotify) {
+        __notifyNodeFullscreenContextChange(element);
+    }
+}
+
+function restoreCanvasNodeLayout(element, options = {}) {
+    if (!element || !element.dataset) return;
+    if (!__isNodeMaximized(element)) return;
+    __setFullscreenPreloadReady(element, false);
+    __setFullscreenBodyReady(element, false);
+    element.classList.remove('canvas-node-maximized');
+    element.style.left = element.dataset.maxPrevLeft || '';
+    element.style.top = element.dataset.maxPrevTop || '';
+    element.style.width = element.dataset.maxPrevWidth || '';
+    element.style.height = element.dataset.maxPrevHeight || '';
+    element.style.transform = element.dataset.maxPrevTransform || '';
+    element.style.zIndex = element.dataset.maxPrevZ || '';
+    delete element.dataset.maxPrevLeft;
+    delete element.dataset.maxPrevTop;
+    delete element.dataset.maxPrevWidth;
+    delete element.dataset.maxPrevHeight;
+    delete element.dataset.maxPrevTransform;
+    delete element.dataset.maxPrevZ;
+    __updateNodeMaximizedState();
+    if (!CanvasState.nodeMaximizedActive) {
+        try {
+            const globalState = (typeof window !== 'undefined' && window.searchUiState) ? window.searchUiState : null;
+            if (globalState) {
+                globalState.fullscreenAreaSearchDismissed = false;
+            }
+        } catch (_) { }
+        __clearMaximizedNodeStorage();
+        requestAnimationFrame(() => {
+            if (__isCanvasNodeMaximizedActive()) return;
+            try { updateCanvasScrollBounds({ recomputeBounds: true, initial: false }); } catch (_) { }
+            try { scheduleScrollbarUpdate(); } catch (_) { }
+            try { scheduleEdgesRender(0); } catch (_) { }
+        });
+    }
+    updateNodeFullscreenButtons();
+    __notifyNodeFullscreenContextChange(document.querySelector('.canvas-node-maximized'));
+
+    if (options.locate !== false) {
+        try {
+            locateToElement(element, CanvasState.zoom);
+        } catch (_) { }
+    }
+
+    // Restore pre-fullscreen search state if available
+    try {
+        if (element._preFullscreenSearchState) {
+            const preState = element._preFullscreenSearchState;
+            delete element._preFullscreenSearchState;
+
+            if (preState.activeMode && typeof window.setSearchMode === 'function') {
+                window.setSearchMode(preState.activeMode, { source: 'auto' });
+            }
+            if (preState.areaSearchScope) {
+                if (typeof window.triggerAreaSearch === 'function') {
+                    window.triggerAreaSearch(preState.areaSearchScope, { silent: true });
+                }
+            } else {
+                if (typeof window.exitAreaSearch === 'function') {
+                    window.exitAreaSearch();
+                }
+            }
+        }
+    } catch (_) { }
+}
+
+function toggleElementFullscreen(element) {
+    if (!element) return;
+    if (__isNodeMaximized(element)) {
+        restoreCanvasNodeLayout(element);
+    } else {
+        maximizeCanvasNode(element);
+    }
+    updateNodeFullscreenButtons();
+}
+
+function refreshMaximizedNodes(options = {}) {
+    if (!CanvasState.nodeMaximizedActive) return false;
+    const rect = __getCanvasViewportRect();
+    if (!rect) return false;
+    const shouldStabilize = !(options && options.stabilize === false);
+    let changed = false;
+    document.querySelectorAll('.canvas-node-maximized').forEach((element) => {
+        if (!element) return;
+        if (__isMaximizedNodeRectCurrent(element, rect)) return;
+        element.style.left = `${rect.x}px`;
+        element.style.top = `${rect.y}px`;
+        element.style.width = `${rect.width}px`;
+        element.style.height = `${rect.height}px`;
+        if (shouldStabilize) {
+            __scheduleNodeLayoutZoomStabilize(element);
+        }
+        changed = true;
+    });
+    return changed;
+}
+
+function updateNodeFullscreenButtons() {
+    __updateViewSyncExpandScrollButtonText();
+
+    const buttons = document.querySelectorAll('.canvas-node-fullscreen-btn');
+    if (!buttons.length) return;
+    const lang = getCanvasLanguage();
+
+    buttons.forEach((btn) => {
+        if (!btn) return;
+        const target = btn.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
+        if (!target) return;
+        const isFullscreen = __isNodeMaximized(target);
+        const labelKey = isFullscreen ? 'canvasFullscreenExit' : 'canvasFullscreenEnter';
+        const label = getFullscreenLabel(labelKey, lang);
+        __updateNodeLayoutZoomControls(target, lang);
+        btn.setAttribute('title', label);
+        btn.setAttribute('aria-label', label);
+        btn.setAttribute('data-tooltip', label);
+        btn.classList.toggle('fullscreen-active', isFullscreen);
+        const icon = btn.querySelector('i');
+        if (icon) {
+            icon.classList.toggle('fa-expand', !isFullscreen);
+            icon.classList.toggle('fa-compress', isFullscreen);
+        }
+    });
+}
+
+function shouldHandleCustomScroll(event) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace || !workspace.contains(event.target)) {
+        return false;
+    }
+
+    // 说明/管理弹窗内滚动：不拦截，让弹窗自身滚动
+    if (event.target.closest('.canvas-help-modal') ||
+        event.target.closest('.canvas-manage-modal')) {
+        return false;
+    }
+
+    // 在 Markdown 空白栏目内（查看/编辑区）时，不拦截滚轮，让其自身垂直滚动
+    // - .md-canvas-text: 查看态的滚动容器
+    // - .md-canvas-editor: 编辑态的文本域
+    if (event.target.closest('.md-canvas-text') || event.target.closest('.md-canvas-editor')) {
+        return false;
+    }
+
+    // 在临时/永久栏目说明区域内：默认让说明自身滚动
+    // 但如果触控板正在进行画布级滚动（快速滚动），则交给画布处理，避免被打断
+    const descTarget = event.target.closest('.temp-node-description');
+    const tipTarget = event.target.closest('.permanent-section-tip');
+    if (descTarget || tipTarget) {
+        const now = Date.now();
+        const recentCanvasScroll = CanvasState.lastCanvasScrollTime && (now - CanvasState.lastCanvasScrollTime < 180);
+        const isTouchpad = __isCanvasTouchpadLikeScrollInput(event);
+        if ((isTouchpad && CanvasState.touchpadState.isScrolling) || CanvasState.inertiaState.isActive || recentCanvasScroll) {
+            return true;
+        }
+        return false;
+    }
+
+    const scrollbarElement = event.target.closest('.canvas-scrollbar');
+    if (scrollbarElement) {
+        const axisKey = scrollbarElement.classList.contains('horizontal') ? 'horizontal' : 'vertical';
+        const axisState = CanvasState.scrollState[axisKey];
+        const controlsArea = event.target.closest('.scrollbar-controls');
+        if (!axisState) {
+            return false;
+        }
+        if (controlsArea) {
+            return false;
+        }
+        if (!axisState.hidden) {
+            return false;
+        }
+    }
+
+    // 在栏目内部：如果正在画布级滚动，或者按下了 Shift 键进行横向滚动，则拦截处理并交给画布
+    const sectionBody = event.target.closest('.permanent-section-body') || event.target.closest('.temp-node-body');
+    if (sectionBody) {
+        // Shift + 滚轮进行横向滚动的时候，无视栏目内部的滚动，拦截并交给画布处理
+        if (event.shiftKey) {
+            return true;
+        }
+
+        // 检测是否为触控板双指滑动
+        const isTouchpad = __isCanvasTouchpadLikeScrollInput(event);
+
+        // 触摸板横向滚动防误触：如果已锁定为横向滚动模式，直接拦截给画布
+        if (isTouchpad && CanvasState.touchpadState.horizontalScrollLocked) {
+            return true;
+        }
+
+        // 触摸板横向滑动意图检测：累积短窗口内的 deltaX/deltaY 来判断方向
+        if (isTouchpad) {
+            const absX = Math.abs(event.deltaX || 0);
+            const absY = Math.abs(event.deltaY || 0);
+
+            // 有明显水平分量时，累积判断
+            if (absX > 0.5) {
+                CanvasState.touchpadState.horizontalAccumDeltaX += absX;
+                CanvasState.touchpadState.horizontalAccumDeltaY += absY;
+
+                // 重置累积窗口定时器（80ms 窗口）
+                if (CanvasState.touchpadState.horizontalAccumTimer) {
+                    clearTimeout(CanvasState.touchpadState.horizontalAccumTimer);
+                }
+                CanvasState.touchpadState.horizontalAccumTimer = setTimeout(() => {
+                    // 窗口过期，重置累积
+                    CanvasState.touchpadState.horizontalAccumDeltaX = 0;
+                    CanvasState.touchpadState.horizontalAccumDeltaY = 0;
+                    CanvasState.touchpadState.horizontalAccumTimer = null;
+                }, 80);
+
+                const accumX = CanvasState.touchpadState.horizontalAccumDeltaX;
+                const accumY = CanvasState.touchpadState.horizontalAccumDeltaY;
+
+                // 判定：累积水平 > 阈值 且 水平明显大于垂直（ratio > 1.5）
+                if (accumX > 6 && (accumY < 0.5 || accumX / accumY > 1.5)) {
+                    // 锁定横向滚动模式
+                    CanvasState.touchpadState.horizontalScrollLocked = true;
+                    // 重置累积
+                    CanvasState.touchpadState.horizontalAccumDeltaX = 0;
+                    CanvasState.touchpadState.horizontalAccumDeltaY = 0;
+                    if (CanvasState.touchpadState.horizontalAccumTimer) {
+                        clearTimeout(CanvasState.touchpadState.horizontalAccumTimer);
+                        CanvasState.touchpadState.horizontalAccumTimer = null;
+                    }
+                    return true;
+                }
+            }
+        }
+
+        // 如果正在画布级滚动（双指滑动），拦截并让画布处理
+        const now = Date.now();
+        const recentCanvasScroll = CanvasState.lastCanvasScrollTime && (now - CanvasState.lastCanvasScrollTime < 180);
+        if ((isTouchpad && CanvasState.touchpadState.isScrolling) || CanvasState.inertiaState.isActive || recentCanvasScroll) {
+            return true; // 让画布处理滚动
+        }
+
+        // 否则让栏目自己处理滚动
+        return false;
+    }
+
+    if (CanvasState.scrollState.vertical.disabled && CanvasState.scrollState.horizontal.disabled) {
+        return false;
+    }
+
+    return true;
+}
+
+function handleCanvasCustomScroll(event) {
+    const horizontalEnabled = !CanvasState.scrollState.horizontal.disabled;
+    const verticalEnabled = !CanvasState.scrollState.vertical.disabled;
+
+    if (!horizontalEnabled && !verticalEnabled) {
+        return;
+    }
+
+    CanvasState.lastCanvasScrollTime = Date.now();
+
+    // 标记正在滚动
+    markScrolling();
+
+    // 取消之前的惯性滚动
+    cancelInertiaScroll();
+
+    const normalizedWheel = __normalizeCanvasWheelEventDeltas(event);
+    let horizontalDelta = normalizedWheel.deltaX;
+    let verticalDelta = normalizedWheel.deltaY;
+
+    if (event.shiftKey && horizontalEnabled) {
+        horizontalDelta = horizontalDelta !== 0 ? horizontalDelta : verticalDelta;
+        verticalDelta = 0;
+    }
+
+    // 检测是否为触控板（触控板的 delta 值较小且连续，deltaMode 通常为 0）
+    let isTouchpad = __isCanvasTouchpadLikeScrollInput(event, normalizedWheel);
+    if (isTouchpad && !__shouldTreatMacWheelAsTouchpad(event, normalizedWheel)) {
+        isTouchpad = false;
+    }
+    const isDiscretePanWheel = __isCanvasDiscretePanWheelEvent(event);
+    const panInertiaInputType = __resolveCanvasPanInertiaInputType(isTouchpad, isDiscretePanWheel);
+    __logCanvasWinInput('wheel-pan-input', {
+        event: __snapshotCanvasWheelEvent(event),
+        normalizedDeltaX: __roundCanvasDebugNumber(normalizedWheel.deltaX, 3),
+        normalizedDeltaY: __roundCanvasDebugNumber(normalizedWheel.deltaY, 3),
+        horizontalDelta: __roundCanvasDebugNumber(horizontalDelta, 3),
+        verticalDelta: __roundCanvasDebugNumber(verticalDelta, 3),
+        horizontalEnabled,
+        verticalEnabled,
+        isTouchpad,
+        isDiscretePanWheel,
+        panInertiaInputType
+    }, { throttleKey: 'wheel-pan-input', throttleMs: 80 });
+
+    // 双指滑动状态追踪：当检测到画布级别的滚动时，标记状态并设置超时清除
+    if (isTouchpad && (Math.abs(horizontalDelta) > 0.5 || Math.abs(verticalDelta) > 0.5)) {
+        CanvasState.touchpadState.isScrolling = true;
+        CanvasState.touchpadState.lastScrollTime = Date.now();
+
+        // 清除之前的超时
+        if (CanvasState.touchpadState.scrollTimeout) {
+            clearTimeout(CanvasState.touchpadState.scrollTimeout);
+        }
+
+        // 设置新的超时：滚动停止300ms后恢复栏目内滚动 & 解锁横向滚动
+        CanvasState.touchpadState.scrollTimeout = setTimeout(() => {
+            CanvasState.touchpadState.isScrolling = false;
+            // 解锁触摸板横向滚动模式
+            CanvasState.touchpadState.horizontalScrollLocked = false;
+        }, 300);
+    }
+
+    // 触控板连续输入保留原有缩放补偿；鼠标滚轮平移使用屏幕像素步长，避免低缩放跳太远、高缩放太慢。
+    const zoomForScroll = getCanvasZoomForScrollFactor();
+    let scrollFactor = 1.0;
+
+    const trackpadPanRate = getCanvasTrackpadPanRate();
+    const wheelVerticalPanRate = getCanvasWheelVerticalPanRate();
+    const wheelHorizontalPanRate = getCanvasWheelHorizontalPanRate();
+
+    const preferSnappyPan = __shouldPreferSnappyCanvasPan(
+        isTouchpad,
+        wheelVerticalPanRate,
+        wheelHorizontalPanRate,
+        trackpadPanRate
+    );
+
+    if (isTouchpad) {
+        if (preferSnappyPan) {
+            scrollFactor = 0.8 * trackpadPanRate;
+        } else {
+            scrollFactor = 1.0 / zoomForScroll;
+            scrollFactor *= Math.pow(zoomForScroll, 0.3);
+            scrollFactor *= 0.7 * trackpadPanRate;
+
+            const scrollSpeed = Math.sqrt(horizontalDelta * horizontalDelta + verticalDelta * verticalDelta);
+            if (scrollSpeed > 8) {
+                const speedBoost = Math.min(1.15, 1 + (scrollSpeed - 8) / 200);
+                scrollFactor *= speedBoost;
+            }
+        }
+    } else {
+        scrollFactor *= 0.8;
+        if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel) {
+            scrollFactor *= WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR;
+        }
+    }
+
+    // 累积滚动增量
+    let hasUpdate = false;
+    let panDeltaX = 0;
+    let panDeltaY = 0;
+
+    if (horizontalEnabled && horizontalDelta !== 0) {
+        const horizontalRate = isTouchpad ? 1 : wheelHorizontalPanRate;
+        panDeltaX -= horizontalDelta * scrollFactor * horizontalRate;
+        hasUpdate = true;
+    }
+
+    if (verticalEnabled && verticalDelta !== 0) {
+        const verticalRate = isTouchpad ? 1 : wheelVerticalPanRate;
+        panDeltaY -= verticalDelta * scrollFactor * verticalRate;
+        hasUpdate = true;
+    }
+
+    if (hasUpdate) {
+        if (panInertiaInputType !== PAN_INERTIA_INPUT_NONE) {
+            __updateCanvasPanInertiaSample(panInertiaInputType, panDeltaX, panDeltaY);
+        } else {
+            __resetCanvasPanInertiaSample();
+        }
+
+        const useSmoothPan = __shouldSmoothCanvasWheelPan(event, isTouchpad);
+        if (useSmoothPan) {
+            const baseTargetX = (CanvasState.scrollAnimation.frameId && Number.isFinite(CanvasState.scrollAnimation.targetX))
+                ? CanvasState.scrollAnimation.targetX
+                : CanvasState.panOffsetX;
+            const baseTargetY = (CanvasState.scrollAnimation.frameId && Number.isFinite(CanvasState.scrollAnimation.targetY))
+                ? CanvasState.scrollAnimation.targetY
+                : CanvasState.panOffsetY;
+
+            CanvasState.scrollAnimation.targetX = baseTargetX + panDeltaX;
+            CanvasState.scrollAnimation.targetY = baseTargetY + panDeltaY;
+            CanvasState.scrollAnimation.source = 'wheel';
+            if (!CanvasState.scrollAnimation.frameId) {
+                CanvasState.scrollAnimation.frameId = requestAnimationFrame(runScrollAnimation);
+            }
+        } else {
+            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel && CanvasState.scrollAnimation.frameId) {
+                cancelAnimationFrame(CanvasState.scrollAnimation.frameId);
+                CanvasState.scrollAnimation.frameId = null;
+                CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+                CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+                CanvasState.scrollAnimation.source = null;
+            }
+            if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel) {
+                winWheelPanAccumX += panDeltaX;
+                winWheelPanAccumY += panDeltaY;
+                __startWinWheelPanPump();
+            } else {
+                CanvasState.panOffsetX += panDeltaX;
+                CanvasState.panOffsetY += panDeltaY;
+                if (preferSnappyPan) {
+                    __syncCanvasPanVisualImmediate();
+                } else {
+                    CanvasState.scrollAnimation.source = 'direct';
+                    scheduleScrollUpdate();
+                }
+            }
+        }
+        __logCanvasWinInput('wheel-pan-apply', {
+            event: __snapshotCanvasWheelEvent(event),
+            route: useSmoothPan ? 'smooth-pan-animation' : 'direct-pan',
+            scrollFactor: __roundCanvasDebugNumber(scrollFactor, 5),
+            panDeltaX: __roundCanvasDebugNumber(panDeltaX, 4),
+            panDeltaY: __roundCanvasDebugNumber(panDeltaY, 4),
+            panOffsetX: __roundCanvasDebugNumber(CanvasState.panOffsetX, 3),
+            panOffsetY: __roundCanvasDebugNumber(CanvasState.panOffsetY, 3),
+            targetX: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetX, 3),
+            targetY: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetY, 3),
+            horizontalDelta: __roundCanvasDebugNumber(horizontalDelta, 3),
+            verticalDelta: __roundCanvasDebugNumber(verticalDelta, 3)
+        }, { throttleKey: 'wheel-pan-apply', throttleMs: 80 });
+        event.preventDefault();
+    } else {
+        __logCanvasWinInput('wheel-pan-no-update', {
+            event: __snapshotCanvasWheelEvent(event),
+            horizontalEnabled,
+            verticalEnabled,
+            horizontalDelta: __roundCanvasDebugNumber(horizontalDelta, 3),
+            verticalDelta: __roundCanvasDebugNumber(verticalDelta, 3)
+        }, { throttleKey: 'wheel-pan-no-update', throttleMs: 120 });
+        __resetCanvasPanInertiaSample();
+    }
+}
+
+// 性能优化：使用 RAF 去抖滚动更新（参考 scheduleZoomUpdate）
+function scheduleScrollUpdate() {
+    // 保存当前的滚动位置
+    pendingScrollRequest = {
+        panOffsetX: CanvasState.panOffsetX,
+        panOffsetY: CanvasState.panOffsetY
+    };
+
+    // 如果没有正在进行的渲染帧，调度一次
+    if (!scrollUpdateFrame) {
+        scrollUpdateFrame = requestAnimationFrame(() => {
+            scrollUpdateFrame = null;
+            if (!pendingScrollRequest) return;
+
+            // 应用累积的滚动位置（使用极速平移）
+            applyPanOffsetFast();
+
+            // 实时更新滚动条位置（轻量操作，只更新 transform）
+            updateScrollbarThumbsLightweight();
+
+            pendingScrollRequest = null;
+        });
+    }
+}
+
+// 轻量级滚动条更新：只更新 thumb 的 transform，不触发边界重计算
+function updateScrollbarThumbsLightweight() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    const verticalBar = document.getElementById('canvasVerticalScrollbar');
+    const horizontalBar = document.getElementById('canvasHorizontalScrollbar');
+
+    // 更新垂直滚动条
+    if (verticalBar) {
+        const metrics = getCachedCanvasScrollbarMetrics('vertical');
+        if (metrics && metrics.thumb) {
+            const trackSize = metrics.trackSize;
+            const bounds = CanvasState.scrollBounds.vertical;
+            if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
+                const range = bounds.max - bounds.min;
+                const thumbSize = metrics.thumbSize || 20;
+                const maxTravel = Math.max(0, trackSize - thumbSize);
+                const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetY) / range;
+                const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
+
+                // 只更新 transform，极轻量
+                metrics.thumb.style.transform = `translateY(${position}px)`;
+            }
+        }
+    }
+
+    // 更新水平滚动条
+    if (horizontalBar) {
+        const metrics = getCachedCanvasScrollbarMetrics('horizontal');
+        if (metrics && metrics.thumb) {
+            const trackSize = metrics.trackSize;
+            const bounds = CanvasState.scrollBounds.horizontal;
+            if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
+                const range = bounds.max - bounds.min;
+                const thumbSize = metrics.thumbSize || 20;
+                const maxTravel = Math.max(0, trackSize - thumbSize);
+                const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetX) / range;
+                const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
+
+                // 只更新 transform，极轻量
+                metrics.thumb.style.transform = `translateX(${position}px)`;
+            }
+        }
+    }
+
+    persistCanvasScrollbarPreloadStateThrottled();
+}
+
+function adjustDragReferenceForPan(panDeltaX, panDeltaY, clientX, clientY) {
+    if (!CanvasState.dragState.isDragging) return;
+    const source = CanvasState.dragState.dragSource;
+    if (source !== 'temp-node' && source !== 'permanent-section') return;
+    if (!panDeltaX && !panDeltaY) return;
+
+    CanvasState.dragState.dragStartX += panDeltaX;
+    CanvasState.dragState.dragStartY += panDeltaY;
+    CanvasState.dragState.hasMoved = true;
+
+    updateActiveDragPosition(clientX, clientY);
+}
+
+function updateActiveDragPosition(clientX, clientY) {
+    if (!CanvasState.dragState.isDragging || !CanvasState.dragState.draggedElement) {
+        return false;
+    }
+
+    CanvasState.dragState.lastClientX = clientX;
+    CanvasState.dragState.lastClientY = clientY;
+
+    if (CanvasState.dragState.dragSource === 'temp-node') {
+        return applyTempNodeDragPosition(clientX, clientY);
+    }
+
+    if (CanvasState.dragState.dragSource === 'permanent-section') {
+        return applyPermanentSectionDragPosition(clientX, clientY);
+    }
+
+    return false;
+}
+
+function getActiveDraggedCanvasNodeData(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return null;
+    const cached = CanvasState.dragState && CanvasState.dragState.draggedNodeData;
+    if (cached && cached.id === id) return cached;
+    return CanvasState.tempSections.find(n => n && n.id === id) ||
+        (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.find(n => n && n.id === id) : null);
+}
+
+// Import/export transfer logic moved to transfer_AI_sync/import-export-transfer-ui-support.js
+
+function applyTempNodeDragPosition(clientX, clientY) {
+    const element = CanvasState.dragState.draggedElement;
+    if (!element) return false;
+
+    const deltaX = clientX - CanvasState.dragState.dragStartX;
+    const deltaY = clientY - CanvasState.dragState.dragStartY;
+    const zoom = (CanvasState.zoom || 1);
+    const scaledDeltaX = deltaX / zoom;
+    const scaledDeltaY = deltaY / zoom;
+
+    if (!CanvasState.dragState.hasMoved) {
+        if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
+            CanvasState.dragState.hasMoved = true;
+        }
+    }
+
+    const newX = CanvasState.dragState.nodeStartX + scaledDeltaX;
+    const newY = CanvasState.dragState.nodeStartY + scaledDeltaY;
+
+    const nodeId = element.id;
+    const section = getActiveDraggedCanvasNodeData(nodeId);
+
+    const isCardGroupSection = !!(section && section.subtype === 'card-group');
+    if (isCardGroupSection && Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
+        const meta = (CanvasState.dragState.meta && typeof CanvasState.dragState.meta === 'object')
+            ? CanvasState.dragState.meta
+            : (CanvasState.dragState.meta = {});
+
+        if (!meta.cardGroupDrag) {
+            meta.cardGroupDrag = true;
+            meta.cardGroupDx = 0;
+            meta.cardGroupDy = 0;
+            meta.cardGroupEdgeRaf = 0;
+            try { __initCardGroupDragEdgeFollow(meta, section); } catch (_) { }
+            const content = getCachedContent();
+            if (content) {
+                content.classList.add('card-group-drag-active');
+            }
+            try { element.classList.add('card-group-dragging'); } catch (_) { }
+            CanvasState.dragState.childElements.forEach((child) => {
+                if (child && child.element) {
+                    try { child.element.classList.add('card-group-dragging'); } catch (_) { }
+                }
+            });
+        }
+
+        meta.cardGroupDx = scaledDeltaX;
+        meta.cardGroupDy = scaledDeltaY;
+
+        const content = getCachedContent();
+        if (content) {
+            try { content.style.setProperty('--card-group-dx', `${scaledDeltaX}px`); } catch (_) { }
+            try { content.style.setProperty('--card-group-dy', `${scaledDeltaY}px`); } catch (_) { }
+        }
+        try { __scheduleCardGroupMembershipRefreshForNodeIds(section.id, { renderFrames: false, renderEdges: false }); } catch (_) { }
+        try { __scheduleCardGroupDragEdgeUpdate(meta); } catch (_) { }
+        return true;
+    }
+
+    element.style.transform = `translate(${scaledDeltaX}px, ${scaledDeltaY}px)`;
+
+    if (section) {
+        section.x = newX;
+        section.y = newY;
+        try { __scheduleCardGroupMembershipRefreshForNodeIds(section.id, { renderFrames: false, renderEdges: false }); } catch (_) { }
+    }
+
+    try { __scheduleCanvasDragEdgeFollowForNodeIds(nodeId); } catch (_) { }
+
+    return true;
+}
+
+function applyPermanentSectionDragPosition(clientX, clientY) {
+    const element = CanvasState.dragState.draggedElement;
+    if (!element) return false;
+
+    const deltaX = clientX - CanvasState.dragState.dragStartX;
+    const deltaY = clientY - CanvasState.dragState.dragStartY;
+    const scaledDeltaX = deltaX / (CanvasState.zoom || 1);
+    const scaledDeltaY = deltaY / (CanvasState.zoom || 1);
+
+    if (!CanvasState.dragState.hasMoved) {
+        if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
+            CanvasState.dragState.hasMoved = true;
+        }
+    }
+
+    element.style.transform = `translate(${scaledDeltaX}px, ${scaledDeltaY}px)`;
+
+    try { __scheduleCanvasDragEdgeFollowForNodeIds(__getPermanentSectionCanvasNodeId(element)); } catch (_) { }
+
+    return true;
+}
+
+function finalizeTempNodeDrag() {
+    const element = CanvasState.dragState.draggedElement;
+    if (!element) return;
+
+    element.classList.remove('dragging');
+
+    const nodeId = element.id;
+    const section = getActiveDraggedCanvasNodeData(nodeId);
+
+    const meta = (CanvasState.dragState.meta && typeof CanvasState.dragState.meta === 'object') ? CanvasState.dragState.meta : null;
+    const isGroupLikeSection = !!(section && section.subtype === 'card-group');
+    const isCardGroupDrag = !!(meta && meta.cardGroupDrag && isGroupLikeSection);
+
+    if (isCardGroupDrag) {
+        const deltaX = (CanvasState.dragState.lastClientX || 0) - (CanvasState.dragState.dragStartX || 0);
+        const deltaY = (CanvasState.dragState.lastClientY || 0) - (CanvasState.dragState.dragStartY || 0);
+        const zoom = (CanvasState.zoom || 1);
+        const scaledDeltaX = deltaX / zoom;
+        const scaledDeltaY = deltaY / zoom;
+
+        if (meta && meta.cardGroupEdgeRaf) {
+            try { cancelAnimationFrame(meta.cardGroupEdgeRaf); } catch (_) { }
+            meta.cardGroupEdgeRaf = 0;
+        }
+
+        const content = getCachedContent();
+        if (content) {
+            try { content.style.setProperty('--card-group-dx', '0px'); } catch (_) { }
+            try { content.style.setProperty('--card-group-dy', '0px'); } catch (_) { }
+        }
+
+        const restoreTransitionEls = [];
+
+        section.x = (CanvasState.dragState.nodeStartX || 0) + scaledDeltaX;
+        section.y = (CanvasState.dragState.nodeStartY || 0) + scaledDeltaY;
+        restoreTransitionEls.push(element);
+        element.style.transition = 'none';
+        element.style.transform = 'none';
+        element.style.left = section.x + 'px';
+        element.style.top = section.y + 'px';
+
+        // Commit：组内成员（只移动成员，不更新成员关系）
+        if (Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
+            CanvasState.dragState.childElements.forEach((child) => {
+                if (!child || !child.data) return;
+                const cx = (child.startX || 0) + scaledDeltaX;
+                const cy = (child.startY || 0) + scaledDeltaY;
+                child.data.x = cx;
+                child.data.y = cy;
+
+                if (child.element) {
+                    restoreTransitionEls.push(child.element);
+                    child.element.style.transition = 'none';
+                    child.element.style.transform = 'none';
+                    child.element.style.left = cx + 'px';
+                    child.element.style.top = cy + 'px';
+                }
+            });
+        }
+
+        if (content) {
+            try { content.classList.remove('card-group-drag-active'); } catch (_) { }
+            try { content.style.removeProperty('--card-group-dx'); } catch (_) { }
+            try { content.style.removeProperty('--card-group-dy'); } catch (_) { }
+        }
+        try { element.classList.remove('card-group-dragging'); } catch (_) { }
+        if (Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
+            CanvasState.dragState.childElements.forEach((child) => {
+                if (child && child.element) {
+                    try { child.element.classList.remove('card-group-dragging'); } catch (_) { }
+                }
+            });
+        }
+
+        if (meta) {
+            meta.cardGroupDx = 0;
+            meta.cardGroupDy = 0;
+            meta.cardGroupDrag = false;
+        }
+
+        requestAnimationFrame(() => {
+            restoreTransitionEls.forEach((el) => {
+                try { el.style.transition = ''; } catch (_) { }
+            });
+        });
+    }
+
+    if (section) {
+        if (!isCardGroupDrag) {
+            element.style.transition = 'none';
+        }
+        element.style.transform = 'none';
+        element.style.left = section.x + 'px';
+        element.style.top = section.y + 'px';
+        if (!isCardGroupDrag) {
+            element.offsetHeight;
+            requestAnimationFrame(() => { element.style.transition = ''; });
+        }
+    }
+
+    try { scheduleEdgesRender(0); } catch (_) { }
+
+    saveCanvasManifestOnly();
+    scheduleBoundsUpdate();
+    scheduleScrollbarUpdate();
+    try {
+        const changedIds = [nodeId];
+        if (Array.isArray(CanvasState.dragState.childElements)) {
+            CanvasState.dragState.childElements.forEach((child) => {
+                if (child && child.data && child.data.id) changedIds.push(child.data.id);
+            });
+        }
+        __scheduleCardGroupMembershipRefreshForNodeIds(changedIds);
+    } catch (_) { }
+    try { __cancelCanvasDragEdgeFollow(meta); } catch (_) { }
+    CanvasState.dragState.meta = null;
+    CanvasState.dragState.draggedNodeData = null;
+    CanvasState.dragState.cardGroupOwnerIdsBeforeDrag = null;
+    CanvasState.dragState.hasMoved = false;
+
+}
+
+function finalizePermanentSectionDrag() {
+    const element = CanvasState.dragState.draggedElement;
+    if (!element) return;
+
+    element.classList.remove('dragging');
+    const meta = (CanvasState.dragState.meta && typeof CanvasState.dragState.meta === 'object') ? CanvasState.dragState.meta : null;
+
+    if (CanvasState.dragState.hasMoved) {
+        const deltaX = CanvasState.dragState.lastClientX - CanvasState.dragState.dragStartX;
+        const deltaY = CanvasState.dragState.lastClientY - CanvasState.dragState.dragStartY;
+        const scaledDeltaX = deltaX / (CanvasState.zoom || 1);
+        const scaledDeltaY = deltaY / (CanvasState.zoom || 1);
+        const finalX = CanvasState.dragState.nodeStartX + scaledDeltaX;
+        const finalY = CanvasState.dragState.nodeStartY + scaledDeltaY;
+        // 关闭过渡，避免落下时“果冻”弹动
+        element.style.transition = 'none';
+        element.style.transform = 'none';
+        element.style.left = finalX + 'px';
+        element.style.top = finalY + 'px';
+        // 强制重排，然后恢复 transition（下一帧再允许动画）
+        element.offsetHeight; // reflow
+        requestAnimationFrame(() => { element.style.transition = ''; });
+
+        try { scheduleEdgesRender(0); } catch (_) { }
+
+        savePermanentSectionPosition(element);
+        scheduleBoundsUpdate();
+        scheduleScrollbarUpdate();
+        try { __scheduleCardGroupMembershipRefreshForNodeIds(__getPermanentSectionCanvasNodeId(element)); } catch (_) { }
+    } else {
+        element.style.transform = 'none';
+    }
+
+    CanvasState.dragState.hasMoved = false;
+    try { __cancelCanvasDragEdgeFollow(meta); } catch (_) { }
+    CanvasState.dragState.meta = null;
+    CanvasState.dragState.draggedNodeData = null;
+    CanvasState.dragState.cardGroupOwnerIdsBeforeDrag = null;
+    element.style.transition = '';
+}
+
+function getScrollFactor(axis) {
+    // 极简计算，提升性能
+    const zoom = CanvasState.zoom || 1;
+    // 直接线性缩放，避免 Math.pow 计算
+    const base = axis === 'vertical' ? 1.0 : 1.0;
+    return base / zoom;
+}
+
+function getScrollEaseFactor(axis) {
+    const zoom = clampCanvasZoom(CanvasState.zoom || 1);
+    const windowsLike = CANVAS_RUNTIME_WINDOWS_LIKE;
+    const animationSource = CanvasState.scrollAnimation && CanvasState.scrollAnimation.source;
+    const isWindowsWheelMicroSmooth = windowsLike && animationSource === 'wheel';
+    const base = axis === 'horizontal'
+        ? (windowsLike ? 0.31 : 0.35)
+        : (windowsLike ? 0.30 : 0.33);
+    const zoomBoost = zoom > 1
+        ? Math.min(windowsLike ? 0.16 : 0.18, (zoom - 1) * (windowsLike ? 0.11 : 0.12))
+        : (1 - zoom) * (windowsLike ? 0.07 : 0.08);
+    let ease = Math.min(windowsLike ? 0.50 : 0.52, base + zoomBoost);
+    if (isWindowsWheelMicroSmooth) {
+        ease = Math.min(0.82, ease * WINDOWS_LINUX_WHEEL_PAN_EASE_MULTIPLIER);
+    }
+    if (animationSource === 'wheel') {
+        ease = Math.min(0.95, ease * __getCanvasWheelPanTailCompensation(axis));
+    }
+    return ease;
+}
+
+function schedulePanTo(targetX, targetY) {
+    if (typeof targetX === 'number') {
+        // 只在动画滚动到特定位置时才限制（比如双击居中），允许一定的边界
+        CanvasState.scrollAnimation.targetX = clampPan('horizontal', targetX);
+    }
+    if (typeof targetY === 'number') {
+        CanvasState.scrollAnimation.targetY = clampPan('vertical', targetY);
+    }
+    CanvasState.scrollAnimation.source = 'programmatic';
+
+    if (!CanvasState.scrollAnimation.frameId) {
+        CanvasState.scrollAnimation.frameId = requestAnimationFrame(runScrollAnimation);
+    }
+}
+
+function runScrollAnimation() {
+    let continueAnimation = false;
+    const source = (CanvasState.scrollAnimation && CanvasState.scrollAnimation.source) || 'unknown';
+    const isWindowsWheelMicroSmooth = CANVAS_RUNTIME_WINDOWS_LIKE && source === 'wheel';
+    const stopThreshold = isWindowsWheelMicroSmooth ? 1.0 : 0.5;
+
+    if (typeof CanvasState.scrollAnimation.targetX === 'number') {
+        const diffX = CanvasState.scrollAnimation.targetX - CanvasState.panOffsetX;
+        if (Math.abs(diffX) > stopThreshold) {
+            CanvasState.panOffsetX += diffX * getScrollEaseFactor('horizontal');
+            continueAnimation = true;
+        } else {
+            CanvasState.panOffsetX = CanvasState.scrollAnimation.targetX;
+        }
+    }
+
+    if (typeof CanvasState.scrollAnimation.targetY === 'number') {
+        const diffY = CanvasState.scrollAnimation.targetY - CanvasState.panOffsetY;
+        if (Math.abs(diffY) > stopThreshold) {
+            CanvasState.panOffsetY += diffY * getScrollEaseFactor('vertical');
+            continueAnimation = true;
+        } else {
+            CanvasState.panOffsetY = CanvasState.scrollAnimation.targetY;
+        }
+    }
+
+    // 优化：使用快速平移（不更新滚动条）
+    applyPanOffsetFast();
+    __logCanvasWinInput('wheel-pan-smooth-frame', {
+        continueAnimation,
+        source,
+        stopThreshold,
+        panOffsetX: __roundCanvasDebugNumber(CanvasState.panOffsetX, 3),
+        panOffsetY: __roundCanvasDebugNumber(CanvasState.panOffsetY, 3),
+        targetX: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetX, 3),
+        targetY: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetY, 3)
+    }, { throttleKey: 'wheel-pan-smooth-frame', throttleMs: 90 });
+
+    if (continueAnimation) {
+        CanvasState.scrollAnimation.frameId = requestAnimationFrame(runScrollAnimation);
+    } else {
+        __logCanvasWinInput('wheel-pan-smooth-finish', {
+            source,
+            stopThreshold,
+            panOffsetX: __roundCanvasDebugNumber(CanvasState.panOffsetX, 3),
+            panOffsetY: __roundCanvasDebugNumber(CanvasState.panOffsetY, 3),
+            targetX: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetX, 3),
+            targetY: __roundCanvasDebugNumber(CanvasState.scrollAnimation.targetY, 3)
+        }, { force: true, throttleMs: 0 });
+        CanvasState.scrollAnimation.frameId = null;
+        CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
+        CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
+        CanvasState.scrollAnimation.source = null;
+
+        // 动画结束后更新滚动条
+        scheduleScrollbarUpdate();
+        savePanOffsetThrottled();
+    }
+}
+
+function updateCanvasScrollBounds(options = {}) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    let initial = false;
+    let recomputeBounds = true;
+
+    if (typeof options === 'boolean') {
+        initial = options;
+    } else if (options && typeof options === 'object') {
+        initial = Boolean(options.initial);
+        if (Object.prototype.hasOwnProperty.call(options, 'recomputeBounds')) {
+            recomputeBounds = options.recomputeBounds;
+        }
+    }
+
+    let bounds = CanvasState.contentBounds;
+    if (recomputeBounds || !bounds) {
+        bounds = computeCanvasContentBounds();
+        CanvasState.contentBounds = bounds;
+    } else if (!bounds) {
+        bounds = computeCanvasContentBounds();
+        CanvasState.contentBounds = bounds;
+    }
+
+    const zoom = clampCanvasZoom(CanvasState.zoom || 1);
+    const workspaceWidth = workspace.clientWidth || 1;
+    const workspaceHeight = workspace.clientHeight || 1;
+
+    // 允许滚动到内容区域外的空白区域
+    const minPanX = workspaceWidth - CANVAS_SCROLL_MARGIN - bounds.maxX * zoom - CANVAS_SCROLL_EXTRA_SPACE;
+    const maxPanX = CANVAS_SCROLL_MARGIN - bounds.minX * zoom + CANVAS_SCROLL_EXTRA_SPACE;
+    const minPanY = workspaceHeight - CANVAS_SCROLL_MARGIN - bounds.maxY * zoom - CANVAS_SCROLL_EXTRA_SPACE;
+    const maxPanY = CANVAS_SCROLL_MARGIN - bounds.minY * zoom + CANVAS_SCROLL_EXTRA_SPACE;
+
+    CanvasState.scrollBounds.horizontal = normalizeScrollBounds(minPanX, maxPanX, workspaceWidth);
+    CanvasState.scrollBounds.vertical = normalizeScrollBounds(minPanY, maxPanY, workspaceHeight);
+
+    // 不要自动限制滚动位置，允许用户滚动到空白区域
+    // CanvasState.panOffsetX = clampPan('horizontal', CanvasState.panOffsetX);
+    // CanvasState.panOffsetY = clampPan('vertical', CanvasState.panOffsetY);
+
+    if (!initial) {
+        applyPanOffset();
+    }
+}
+
+function normalizeScrollBounds(min, max, fallbackSize) {
+    if (!isFinite(min) || !isFinite(max)) {
+        const half = fallbackSize * 0.5;
+        return { min: -half, max: half };
+    }
+
+    if (min === max) {
+        const half = Math.max(fallbackSize * 0.5, 200);
+        return { min: min - half, max: max + half };
+    }
+
+    if (min > max) {
+        const center = (min + max) / 2;
+        const half = Math.max(fallbackSize * 0.5, 200);
+        return { min: center - half, max: center + half };
+    }
+
+    const span = max - min;
+    if (span < fallbackSize * 0.3) {
+        const center = (min + max) / 2;
+        const half = Math.max(span / 2, fallbackSize * 0.3);
+        return { min: center - half, max: center + half };
+    }
+
+    return { min, max };
+}
+
+function computeCanvasContentBounds() {
+    let minX = 0;
+    let maxX = 0;
+    let minY = 0;
+    let maxY = 0;
+    let hasContent = false;
+
+    // 永久栏目（包含副本）也参与边界计算，直接读取内存/存储，避免虚拟化 DOM 被删除后滚动边界变小
+    const mainEl = document.getElementById('permanentSection');
+    if (mainEl) {
+        const left = parseFloat(mainEl.style.left) || 0;
+        const top = parseFloat(mainEl.style.top) || 0;
+        const size = getPermanentSectionBaseSize();
+        const width = mainEl.offsetWidth || size.width || 600;
+        const height = mainEl.offsetHeight || size.height || 600;
+        minX = Math.min(minX, left);
+        maxX = Math.max(maxX, left + width);
+        minY = Math.min(minY, top);
+        maxY = Math.max(maxY, top + height);
+        hasContent = true;
+    }
+
+    try {
+        const existingMeta = (__readPermanentSectionCopies() || []).filter((item) => item && item.id);
+        const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+            ? CanvasState.permanentLayout.copiesById
+            : {};
+        existingMeta.forEach(meta => {
+            const copyId = meta.id;
+            const cardState = copyStateById[copyId];
+            if (!cardState) return;
+            const left = Number(cardState.left) || 0;
+            const top = Number(cardState.top) || 0;
+            const size = getPermanentSectionBaseSize();
+            const width = Number(cardState.width) || size.width || 600;
+            const height = Number(cardState.height) || size.height || 600;
+            minX = Math.min(minX, left);
+            maxX = Math.max(maxX, left + width);
+            minY = Math.min(minY, top);
+            maxY = Math.max(maxY, top + height);
+            hasContent = true;
+        });
+    } catch (_) { }
+
+    CanvasState.tempSections.forEach(section => {
+        const tempBaseSize = getTempSectionBaseSize(section);
+        const width = section.width || tempBaseSize.width;
+        const height = section.height || tempBaseSize.height;
+        minX = Math.min(minX, section.x);
+        maxX = Math.max(maxX, section.x + width);
+        minY = Math.min(minY, section.y);
+        maxY = Math.max(maxY, section.y + height);
+        hasContent = true;
+    });
+    // 计算 Markdown 文本节点范围
+    if (Array.isArray(CanvasState.mdNodes)) {
+        const mdBaseSize = getBlankNodeDefaultSize();
+        CanvasState.mdNodes.forEach(node => {
+            const width = node.width || mdBaseSize.width;
+            const height = node.height || mdBaseSize.height;
+            minX = Math.min(minX, node.x);
+            maxX = Math.max(maxX, node.x + width);
+            minY = Math.min(minY, node.y);
+            maxY = Math.max(maxY, node.y + height);
+            hasContent = true;
+        });
+    }
+
+    if (!hasContent) {
+        minX = -400;
+        maxX = 400;
+        minY = -300;
+        maxY = 300;
+    }
+
+    return {
+        minX: minX - 80,
+        maxX: maxX + 80,
+        minY: minY - 80,
+        maxY: maxY + 80
+    };
+}
+
+function clampPan(axis, value) {
+    const bounds = axis === 'horizontal'
+        ? CanvasState.scrollBounds.horizontal
+        : CanvasState.scrollBounds.vertical;
+
+    if (!bounds) return value;
+    if (value < bounds.min) return bounds.min;
+    if (value > bounds.max) return bounds.max;
+    return value;
+}
+
+function updateScrollbarThumbs() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    const verticalBar = document.getElementById('canvasVerticalScrollbar');
+    const horizontalBar = document.getElementById('canvasHorizontalScrollbar');
+
+    if (verticalBar) {
+        const track = verticalBar.querySelector('.scrollbar-track');
+        const thumb = verticalBar.querySelector('.scrollbar-thumb');
+        if (track && thumb) {
+            const trackSize = track.clientHeight;
+            const bounds = CanvasState.scrollBounds.vertical;
+            if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
+                const range = bounds.max - bounds.min;
+                // 使用scrollBounds中的范围来计算可见比例，而不是contentBounds
+                const totalScrollableHeight = Math.abs(range);
+                // 内容总高度 = 滚动范围 + 可见窗口
+                const totalHeight = Math.max(1, totalScrollableHeight + workspace.clientHeight);
+                const visibleRatio = Math.max(0.05, Math.min(1, workspace.clientHeight / totalHeight));
+                const thumbSize = Math.max(20, trackSize * visibleRatio);
+                const maxTravel = Math.max(0, trackSize - thumbSize);
+                const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetY) / range;
+                const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
+
+                thumb.style.height = `${thumbSize}px`;
+                thumb.style.transform = `translateY(${position}px)`;
+                __setCanvasScrollbarMetricCache('vertical', track, thumb, trackSize, thumbSize);
+            }
+        }
+    }
+
+    if (horizontalBar) {
+        const track = horizontalBar.querySelector('.scrollbar-track');
+        const thumb = horizontalBar.querySelector('.scrollbar-thumb');
+        if (track && thumb) {
+            const trackSize = track.clientWidth;
+            const bounds = CanvasState.scrollBounds.horizontal;
+            if (trackSize > 0 && bounds && isFinite(bounds.min) && isFinite(bounds.max)) {
+                const range = bounds.max - bounds.min;
+                // 使用scrollBounds中的范围来计算可见比例，而不是contentBounds
+                const totalScrollableWidth = Math.abs(range);
+                // 内容总宽度 = 滚动范围 + 可见窗口
+                const totalWidth = Math.max(1, totalScrollableWidth + workspace.clientWidth);
+                const visibleRatio = Math.max(0.05, Math.min(1, workspace.clientWidth / totalWidth));
+                const thumbSize = Math.max(20, trackSize * visibleRatio);
+                const maxTravel = Math.max(0, trackSize - thumbSize);
+                const normalized = range === 0 ? 0 : (bounds.max - CanvasState.panOffsetX) / range;
+                const position = Math.min(maxTravel, Math.max(0, normalized * maxTravel));
+
+                thumb.style.width = `${thumbSize}px`;
+                thumb.style.transform = `translateX(${position}px)`;
+                __setCanvasScrollbarMetricCache('horizontal', track, thumb, trackSize, thumbSize);
+            }
+        }
+    }
+
+    persistCanvasScrollbarPreloadStateThrottled();
+}
+
 function resetCanvasCtrlState() {
     CanvasState.isCtrlPressed = false;
     CanvasState.isSpacePressed = false;
@@ -42104,9 +41828,7 @@ function resetCanvasCtrlState() {
     ;
 }
 
-// =============================================================================
 // 导出模块
-// =============================================================================
 
 window.getTempItemNote = getTempItemNote;
 window.getTempItemNoteMeta = getTempItemNoteMeta;
@@ -42199,9 +41921,9 @@ window.CanvasModule = {
     }
 };
 
-// =============================================================================
-// 外观管理面板 (Appearance Settings)
-// =============================================================================
+// =================================================================================
+// XVII. APPEARANCE SETTINGS PANEL (外观管理面板)
+// =================================================================================
 
 function setupCanvasAppearanceSettingsBtn() {
     const btn = document.getElementById('canvasAppearanceSettingsBtn');
@@ -43097,9 +42819,324 @@ function createCanvasAppearanceSettingsModal() {
     });
 }
 
+// =================================================================================
+// XVIII. SIDE PANEL & OTHER SETTINGS PANEL (侧边栏与其他管理面板)
+// =================================================================================
+
 // =============================================================================
-// 其他管理面板 (Other Settings)
+// 侧边栏管理面板 (Side Panel Settings)
 // =============================================================================
+
+function openCanvasSidePanelSettingsModal() {
+    let modal = document.getElementById('canvasSidePanelSettingsModal');
+    if (modal) {
+        if (typeof modal.__cleanup === 'function') modal.__cleanup();
+        modal.remove();
+    }
+    createCanvasSidePanelSettingsModal();
+    modal = document.getElementById('canvasSidePanelSettingsModal');
+    if (!modal) return;
+
+    modal.style.display = 'flex';
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    const unknownText = isEn ? 'Unknown (open settings)' : '未知（打开设置查看）';
+    const leftText = isEn ? 'Left' : '左侧';
+    const rightText = isEn ? 'Right' : '右侧';
+
+    const positionEl = modal.querySelector('#canvasSidePanelPositionValue');
+    if (positionEl) positionEl.textContent = isEn ? 'Detecting...' : '检测中...';
+    const updateLayout = () => {
+        __getSidePanelLayout().then((layout) => {
+            const side = layout && layout.side ? String(layout.side) : '';
+            if (!positionEl) return;
+            if (side === 'left') positionEl.textContent = leftText;
+            else if (side === 'right') positionEl.textContent = rightText;
+            else positionEl.textContent = unknownText;
+        });
+    };
+    updateLayout();
+
+    const onFocus = () => updateLayout();
+    const onVisibility = () => {
+        if (document.visibilityState === 'visible') updateLayout();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    const previousCleanup = typeof modal.__cleanup === 'function' ? modal.__cleanup : null;
+    modal.__cleanup = () => {
+        if (previousCleanup) {
+            try { previousCleanup(); } catch (_) { }
+        }
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVisibility);
+    };
+}
+
+function closeCanvasSidePanelSettingsModal() {
+    const modal = document.getElementById('canvasSidePanelSettingsModal');
+    if (modal) {
+        if (typeof modal.__cleanup === 'function') modal.__cleanup();
+        modal.style.display = 'none';
+    }
+}
+
+function createCanvasSidePanelSettingsModal() {
+    const modal = document.createElement('div');
+    modal.id = 'canvasSidePanelSettingsModal';
+    modal.className = 'modal';
+    modal.style.display = 'none';
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
+    const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+    const title = isEn ? 'Side Panel' : '侧边栏管理';
+    const positionLabel = isEn ? 'Side panel position' : '侧边栏位置';
+    const shortcutLabel = isEn ? 'Side panel shortcut' : '侧边栏快捷键';
+    const directoryCollapseLabel = isEn ? 'Directory collapse mode' : '目录栏折叠方式';
+    const manualText = isEn ? 'Manual' : '手动';
+    const autoText = isEn ? 'Auto' : '自动';
+    const autoWidthLabel = isEn ? 'Auto collapse width (px)' : '自动折叠阈值（px）';
+    const detectingText = isEn ? 'Detecting...' : '检测中...';
+    const openSettingsText = isEn ? 'Browser settings' : '浏览器设置';
+    const openShortcutSettingsText = isEn ? 'Shortcut settings' : '快捷键设置';
+    modal.innerHTML = `
+        <div class="modal-content sidepanel-settings-modal">
+            <div class="modal-header">
+                <h3>${title}</h3>
+                <button class="perf-modal-close" id="sidePanelModalCloseBtn"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="detail-section">
+                    <div class="detail-section-title">${isEn ? 'System' : '系统设置'}</div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${positionLabel}</span>
+                            <button class="perf-help-btn" id="sidePanelHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content sidepanel-row-content">
+                            <div class="sidepanel-position-value" id="canvasSidePanelPositionValue">${detectingText}</div>
+                            <button class="sidepanel-settings-btn" id="canvasSidePanelOpenSettingsBtn" type="button">${openSettingsText}</button>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${shortcutLabel}</span>
+                        </div>
+                        <div class="appearance-row-content sidepanel-row-content">
+                            <button class="sidepanel-settings-btn" id="canvasSidePanelShortcutOpenSettingsBtnMain" type="button">${openShortcutSettingsText}</button>
+                        </div>
+                    </div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${directoryCollapseLabel}</span>
+                            <button class="perf-help-btn" id="sidePanelSidebarCollapseHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <div class="appearance-mode-toggle" id="sidePanelSidebarCollapseModeGroup">
+                                <label class="appearance-radio">
+                                    <input type="radio" name="sidepanel-sidebar-collapse-mode" value="manual">
+                                    <span>${manualText}</span>
+                                </label>
+                                <label class="appearance-radio">
+                                    <input type="radio" name="sidepanel-sidebar-collapse-mode" value="auto">
+                                    <span>${autoText}</span>
+                                </label>
+                            </div>
+                            <div class="appearance-size-inputs" id="sidePanelSidebarAutoCollapseInputs">
+                                <label class="appearance-inline-input" for="sidePanelSidebarAutoCollapseWidth">
+                                    <span>${autoWidthLabel}</span>
+                                    <input type="number" id="sidePanelSidebarAutoCollapseWidth" min="320" max="2000" step="10">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="perf-help-popover" id="sidePanelHelpPopover">
+                <div class="perf-help-popover-content">
+                    ${isEn
+            ? '<b>Edge</b>: The sidebar is fixed on the right by default and cannot be moved to the left.'
+            : '<b>Edge</b>：侧边栏默认固定在右侧，无法移动到左侧。'}
+                </div>
+            </div>
+            <div class="perf-help-popover" id="sidePanelSidebarCollapseHelpPopover">
+                <div class="perf-help-popover-content">
+                    ${isEn
+            ? '<b>Auto</b>: directory panel expands/collapses by the auto width threshold.<br><b>Manual takeover</b>: once you click the directory toggle (expand/collapse) in HTML page or side panel, it switches to Manual immediately.<br><b>Reset</b>: click <b>Auto</b> here to return to automatic mode.<br><b>Sync</b>: this setting is synchronized in both places.'
+            : '<b>自动</b>：目录栏会按“自动折叠阈值”自动展开/收起。<br><b>手动接管</b>：只要你在 HTML 页面或侧边栏手动点击目录栏开关（展开/收起），就会立即切到手动。<br><b>回正</b>：在这里点击<b>自动</b>按钮即可恢复自动模式。<br><b>同步</b>：侧边栏与html页面的这个开关是同步的。'}
+                </div>
+            </div>
+        </div>
+    `;
+
+    getOverlayContainer().appendChild(modal);
+
+    const closeBtn = modal.querySelector('#sidePanelModalCloseBtn');
+    if (closeBtn) closeBtn.addEventListener('click', closeCanvasSidePanelSettingsModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeCanvasSidePanelSettingsModal();
+    });
+
+    const openBtn = modal.querySelector('#canvasSidePanelOpenSettingsBtn');
+    if (openBtn) {
+        openBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                if (chrome && chrome.tabs && typeof chrome.tabs.create === 'function') {
+                    const meta = __getSidePanelSettingsSearchMeta();
+                    chrome.tabs.create({ url: meta.url });
+                }
+            } catch (_) { }
+        });
+    }
+
+    const openShortcutBtn = modal.querySelector('#canvasSidePanelShortcutOpenSettingsBtnMain');
+    if (openShortcutBtn) {
+        openShortcutBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                if (chrome && chrome.tabs && typeof chrome.tabs.create === 'function') {
+                    const ua = navigator.userAgent || '';
+                    const url = ua.includes('Edg/') ? 'edge://extensions/shortcuts' : 'chrome://extensions/shortcuts';
+                    chrome.tabs.create({ url });
+                }
+            } catch (_) { }
+        });
+    }
+
+    const sidePanelCollapseModeRadios = modal.querySelectorAll('input[name="sidepanel-sidebar-collapse-mode"]');
+    const sidePanelAutoWidthInput = modal.querySelector('#sidePanelSidebarAutoCollapseWidth');
+    const sidePanelAutoInputs = modal.querySelector('#sidePanelSidebarAutoCollapseInputs');
+
+    const getSidePanelCollapseModeFromUI = () => {
+        let mode = 'auto';
+        sidePanelCollapseModeRadios.forEach((radio) => {
+            if (radio.checked) {
+                mode = radio.value === 'manual' ? 'manual' : 'auto';
+            }
+        });
+        return mode;
+    };
+
+    const updateSidePanelAutoInputs = () => {
+        if (!sidePanelAutoInputs) return;
+        const useAuto = getSidePanelCollapseModeFromUI() === 'auto';
+        sidePanelAutoInputs.classList.toggle('is-disabled', !useAuto);
+        sidePanelAutoInputs.classList.toggle('is-hidden', !useAuto);
+    };
+
+    const syncSidePanelCollapsePrefsToUI = (settingsOverride = null) => {
+        const prefs = getCanvasDirectoryCollapsePrefs(settingsOverride, {
+            forSidePanel: __isCanvasInSidePanelMode()
+        });
+        __setAppearanceRadioGroup(modal, 'sidepanel-sidebar-collapse-mode', prefs.mode || 'auto');
+        if (sidePanelAutoWidthInput) {
+            sidePanelAutoWidthInput.value = String(__clampNumber(prefs.width, 320, 2000, 600));
+        }
+        updateSidePanelAutoInputs();
+    };
+
+    let sidePanelCollapseSaveTimer = null;
+    const scheduleSidePanelCollapseSave = () => {
+        if (sidePanelCollapseSaveTimer) {
+            clearTimeout(sidePanelCollapseSaveTimer);
+        }
+        sidePanelCollapseSaveTimer = setTimeout(() => {
+            sidePanelCollapseSaveTimer = null;
+            const mode = getSidePanelCollapseModeFromUI();
+            const widthRaw = sidePanelAutoWidthInput ? parseInt(sidePanelAutoWidthInput.value, 10) : 600;
+            const width = __clampNumber(widthRaw, 320, 2000, 600);
+            if (sidePanelAutoWidthInput) {
+                sidePanelAutoWidthInput.value = String(width);
+            }
+            setCanvasDirectoryCollapsePrefs(
+                { mode, width },
+                {
+                    forSidePanel: __isCanvasInSidePanelMode(),
+                    dispatch: true
+                }
+            );
+        }, 120);
+    };
+
+    sidePanelCollapseModeRadios.forEach((radio) => {
+        radio.addEventListener('change', () => {
+            updateSidePanelAutoInputs();
+            scheduleSidePanelCollapseSave();
+        });
+    });
+
+    if (sidePanelAutoWidthInput) {
+        const onWidthChange = () => {
+            const width = __clampNumber(parseInt(sidePanelAutoWidthInput.value, 10), 320, 2000, 600);
+            sidePanelAutoWidthInput.value = String(width);
+            scheduleSidePanelCollapseSave();
+        };
+        sidePanelAutoWidthInput.addEventListener('input', onWidthChange);
+        sidePanelAutoWidthInput.addEventListener('change', onWidthChange);
+    }
+
+    const onCanvasOtherSettingsUpdated = (event) => {
+        const detail = event && event.detail;
+        if (!detail || typeof detail !== 'object') return;
+        syncSidePanelCollapsePrefsToUI(detail);
+    };
+    window.addEventListener('canvas-other-settings-updated', onCanvasOtherSettingsUpdated);
+    syncSidePanelCollapsePrefsToUI();
+
+    const previousCleanup = typeof modal.__cleanup === 'function' ? modal.__cleanup : null;
+    modal.__cleanup = () => {
+        if (previousCleanup) {
+            try { previousCleanup(); } catch (_) { }
+        }
+        if (sidePanelCollapseSaveTimer) {
+            clearTimeout(sidePanelCollapseSaveTimer);
+            sidePanelCollapseSaveTimer = null;
+        }
+        window.removeEventListener('canvas-other-settings-updated', onCanvasOtherSettingsUpdated);
+    };
+
+    const helpBtn = modal.querySelector('#sidePanelHelpBtn');
+    const helpPopover = modal.querySelector('#sidePanelHelpPopover');
+    const sidePanelSidebarCollapseHelpBtn = modal.querySelector('#sidePanelSidebarCollapseHelpBtn');
+    const sidePanelSidebarCollapseHelpPopover = modal.querySelector('#sidePanelSidebarCollapseHelpPopover');
+    const showPopover = (btn, popover) => {
+        if (!btn || !popover) return;
+        modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
+        const rect = btn.getBoundingClientRect();
+        const modalRect = modal.querySelector('.modal-content').getBoundingClientRect();
+        popover.style.top = (rect.bottom - modalRect.top + 8) + 'px';
+        popover.style.left = (rect.left - modalRect.left) + 'px';
+        popover.classList.add('show');
+    };
+    const hidePopovers = () => {
+        modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
+    };
+    const bindSidePanelHelpPopover = (btn, popover) => {
+        if (!btn || !popover) return;
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (popover.classList.contains('show')) hidePopovers();
+            else showPopover(btn, popover);
+        });
+    };
+    bindSidePanelHelpPopover(helpBtn, helpPopover);
+    bindSidePanelHelpPopover(sidePanelSidebarCollapseHelpBtn, sidePanelSidebarCollapseHelpPopover);
+    modal.addEventListener('click', (e) => {
+        if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
+            hidePopovers();
+        }
+    });
+}
+
 
 function setupCanvasOtherSettingsBtn() {
     const btn = document.getElementById('canvasOtherSettingsBtn');
@@ -43415,11 +43452,11 @@ function saveCanvasOtherSettings(options = {}) {
         const settingsInput = {
             ...currentAppearance,
             fullScreenZoom: {
-                section: fsSectionInput 
-                    ? parseInt(fsSectionInput.value, 10) 
+                section: fsSectionInput
+                    ? parseInt(fsSectionInput.value, 10)
                     : (currentAppearance.fullScreenZoom?.section ?? __getDefaultAppearanceFullscreenZoomSettings().section),
-                mdNode: fsMdInput 
-                    ? parseInt(fsMdInput.value, 10) 
+                mdNode: fsMdInput
+                    ? parseInt(fsMdInput.value, 10)
                     : (currentAppearance.fullScreenZoom?.mdNode ?? __getDefaultAppearanceFullscreenZoomSettings().mdNode)
             }
         };
@@ -44679,9 +44716,9 @@ function createCanvasOtherSettingsModal() {
     }
 }
 
-// =============================================================================
-// 性能管理面板 (Performance Settings)
-// =============================================================================
+// =================================================================================
+// XIX. PERFORMANCE SETTINGS PANEL (性能管理面板)
+// =================================================================================
 
 function loadCanvasDataIntensiveSettings() {
     try {
@@ -45090,10 +45127,10 @@ function saveCanvasPerfSettings(options = {}) {
         }
         otherParsed.magnetPoints.m1.x = __normXFromPercent(axis, enterLowDetailThreshold * 100);
         otherParsed.magnetPoints = __normalizeMagnetPoints(otherParsed.magnetPoints);
-        
+
         saveSharedState(CANVAS_OTHER_SETTINGS_KEY, otherParsed);
         CanvasState.otherSettings = otherParsed;
-        
+
         const otherModal = document.getElementById('canvasOtherSettingsModal');
         if (otherModal) {
             otherModal._magnetPoints = otherParsed.magnetPoints;
@@ -45318,7 +45355,7 @@ function createCanvasPerfSettingsModal() {
                 <button class="perf-modal-close" id="perfModalCloseBtn"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body" style="padding: 20px; padding-bottom: 20px; overflow-y: auto; flex: 1;">
-                
+
                 <!-- [Redesigned Viewport Stats] -->
                 <div class="perf-stats-hero" style="display: flex; justify-content: space-around; gap: 10px; margin-bottom: 20px; padding: 0 4px;">
                     <div class="perf-stats-card" style="flex: 1; display: flex; flex-direction: column; align-items: center; padding: 12px; background: var(--bg-tertiary); border-radius: 10px; border: 1px solid var(--border-color);">
@@ -45334,7 +45371,7 @@ function createCanvasPerfSettingsModal() {
                         <div class="perf-stat-label" style="font-size: 12px; color: var(--text-secondary);">${isEn ? 'Folders (V/L)' : '可视/已加载文件夹'}</div>
                     </div>
                 </div>
-                
+
 
 
                 <!-- Group 1: 低细节色块视觉模式 -->
@@ -45346,7 +45383,7 @@ function createCanvasPerfSettingsModal() {
                 <!-- 低细节显示控制 -->
                 <div class="perf-settings-section">
                     <input type="checkbox" id="perfToggleLowDetail" checked style="display: none;">
-                    
+
                     <!-- 触发的缩放比例 (包裹在子容器中) -->
                     <div id="perfLowDetailSubContainer">
                         <!-- 缩放降级阈值 -->
@@ -45436,11 +45473,11 @@ function createCanvasPerfSettingsModal() {
                         </div>
                     </div>
                 </div>
-                 
+
             </div>
         </div>
         </div>
-        
+
         <!-- 自动触发的缩放比例帮助弹层 -->
         <div class="perf-help-popover" id="perfZoomHelpPopover">
             <div class="perf-help-popover-content">
