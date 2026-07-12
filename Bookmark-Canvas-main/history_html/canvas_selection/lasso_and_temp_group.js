@@ -169,7 +169,7 @@ function __isLassoBlankTarget(e) {
         '.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node, ' +
         '.card-group-header-pill, .card-group-drag-mask, .card-group-toolbar, .card-group-toolbar-btn, .card-group-color-popover, ' +
         '.canvas-node-anchor, .canvas-anchor-zone, .resize-handle, ' +
-        '.canvas-edge, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, .edge-label-fo, ' +
+        '.canvas-edge, .canvas-edge-glow, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, .edge-label-fo, ' +
         '.md-node-toolbar, .temp-node-actions, .canvas-layout-zoom-controls, ' +
         '.temp-group-mask, .temp-group-toolbar, .temp-group-toolbar-btn, ' +
         'button, input, textarea, select, a'
@@ -380,17 +380,19 @@ function __tempGroupBuildDragEdgeMeta(snapshot) {
     const edgeDomMap = new Map();
     const svg = document.querySelector('.canvas-edges');
     if (svg) {
-        const els = svg.querySelectorAll('.canvas-edge, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, foreignObject.edge-label-fo');
+        const els = svg.querySelectorAll('.canvas-edge, .canvas-edge-glow, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, foreignObject.edge-label-fo');
         els.forEach((el) => {
             const edgeId = (el && el.dataset && el.dataset.edgeId) ? el.dataset.edgeId : (el ? el.getAttribute('data-edge-id') : null);
             if (!edgeId) return;
             let entry = edgeDomMap.get(edgeId);
             if (!entry) {
-                entry = { path: null, hitArea: null, label: null, labelBg: null, labelFo: null };
+                entry = { path: null, glow: null, hitArea: null, label: null, labelBg: null, labelFo: null };
                 edgeDomMap.set(edgeId, entry);
             }
             if (el.classList && el.classList.contains('canvas-edge-hit-area')) {
                 entry.hitArea = el;
+            } else if (el.classList && el.classList.contains('canvas-edge-glow')) {
+                entry.glow = el;
             } else if (el.classList && el.classList.contains('canvas-edge')) {
                 entry.path = el;
             } else if (el.classList && el.classList.contains('canvas-edge-label-bg')) {
@@ -458,6 +460,9 @@ function __tempGroupUpdateDraggedEdges(meta) {
             if (dom.path) {
                 try { dom.path.setAttribute('d', d); } catch (_) { }
             }
+            if (dom.glow) {
+                try { dom.glow.setAttribute('d', d); } catch (_) { }
+            }
         } else {
             const safeId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(edge.id) : String(edge.id).replace(/"/g, '\\"');
             const els = document.querySelectorAll(`[data-edge-id="${safeId}"]`);
@@ -466,7 +471,7 @@ function __tempGroupUpdateDraggedEdges(meta) {
                 return;
             }
             els.forEach((el) => {
-                if (el.classList && (el.classList.contains('canvas-edge') || el.classList.contains('canvas-edge-hit-area'))) {
+                if (el.classList && (el.classList.contains('canvas-edge') || el.classList.contains('canvas-edge-glow') || el.classList.contains('canvas-edge-hit-area'))) {
                     try { el.setAttribute('d', d); } catch (_) { }
                 }
             });

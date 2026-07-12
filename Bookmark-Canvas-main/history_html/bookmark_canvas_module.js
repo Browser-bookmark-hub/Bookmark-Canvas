@@ -10251,6 +10251,9 @@ function __applyPermanentLayoutFromCanvasNodes(nodesInput, options = {}) {
             reason: 'apply-layout'
         });
     } catch (_) { }
+    if (mainState || copyIds.length) {
+        try { scheduleEdgesRender(0); } catch (_) { }
+    }
     return !!(mainState || copyIds.length);
 }
 
@@ -10266,17 +10269,66 @@ function __applyPermanentLayoutFromBcsStorageSnapshot(storageMap, options = {}) 
 try { window.__applyPermanentLayoutFromBcsStorageSnapshot = __applyPermanentLayoutFromBcsStorageSnapshot; } catch (_) { }
 
 let __permanentLayoutFromBcsSyncToken = 0;
+let __permanentLayoutStartupRevealTimer = null;
+
+function __setPermanentLayoutStartupPending(active, options = {}) {
+    const pending = !!active;
+    if (__permanentLayoutStartupRevealTimer) {
+        clearTimeout(__permanentLayoutStartupRevealTimer);
+        __permanentLayoutStartupRevealTimer = null;
+    }
+
+    const canvasContent = document.getElementById('canvasContent') || document;
+    try {
+        canvasContent.querySelectorAll('.permanent-bookmark-section').forEach((sectionEl) => {
+            if (!sectionEl || !sectionEl.dataset) return;
+            if (pending) {
+                if (sectionEl.classList && sectionEl.classList.contains('canvas-node-maximized')) return;
+                sectionEl.dataset.permanentLayoutPending = 'true';
+                sectionEl.style.visibility = 'hidden';
+            } else if (sectionEl.dataset.permanentLayoutPending === 'true') {
+                delete sectionEl.dataset.permanentLayoutPending;
+                if (sectionEl.style.visibility === 'hidden') {
+                    sectionEl.style.visibility = '';
+                }
+            }
+        });
+    } catch (_) { }
+
+    if (pending) {
+        const timeoutMs = Math.max(0, Number(options.timeoutMs) || 3200);
+        __permanentLayoutStartupRevealTimer = setTimeout(() => {
+            __permanentLayoutStartupRevealTimer = null;
+            try { __setPermanentLayoutStartupPending(false); } catch (_) { }
+            try { scheduleEdgesRender(0); } catch (_) { }
+        }, timeoutMs);
+    }
+}
+
+function __isPermanentLayoutStartupPending() {
+    try {
+        return !!document.querySelector('.permanent-bookmark-section[data-permanent-layout-pending="true"]');
+    } catch (_) {
+        return false;
+    }
+}
+
 function __syncPermanentLayoutFromBcsCanvasAsync(options = {}) {
     const token = ++__permanentLayoutFromBcsSyncToken;
-    Promise.resolve()
+    return Promise.resolve()
         .then(async () => {
             const storage = (options && options.bcsStorage && typeof options.bcsStorage === 'object')
                 ? options.bcsStorage
                 : await __bcsStorageGet([BCS_CANVAS_KEY]);
-            if (token !== __permanentLayoutFromBcsSyncToken) return;
-            __applyPermanentLayoutFromBcsStorageSnapshot(storage, options);
+            if (token !== __permanentLayoutFromBcsSyncToken) return false;
+            return __applyPermanentLayoutFromBcsStorageSnapshot(storage, options);
         })
-        .catch(() => { });
+        .catch(() => false)
+        .finally(() => {
+            if (token !== __permanentLayoutFromBcsSyncToken) return;
+            try { __setPermanentLayoutStartupPending(false); } catch (_) { }
+            try { scheduleEdgesRender(0); } catch (_) { }
+        });
 }
 
 function __buildPermanentViewShellViewId(copyId = null) {
@@ -11976,6 +12028,7 @@ function loadPermanentSectionPosition() {
     try {
         const permanentSection = document.getElementById('permanentSection');
         if (!permanentSection) return;
+        __setPermanentLayoutStartupPending(true, { timeoutMs: 3200 });
 
         // 副本 UI 状态（展开/滚动）必须独立持久化：首次进入时仅补一次共享树同步。
         // 这里不要再优先排旧的 copy-sync 定时器，否则首屏完成后很容易再出现一轮可见补刷。
@@ -25703,7 +25756,7 @@ function _doClearCanvas(includeCopies) {
     // 5. 清空 SVG
     const svg = document.querySelector('.canvas-edges');
     if (svg) {
-        Array.from(svg.querySelectorAll('.canvas-edge, .canvas-edge-label, .canvas-edge-label-bg, .canvas-edge-hit-area, foreignObject.edge-label-fo')).forEach(el => {
+        Array.from(svg.querySelectorAll('.canvas-edge, .canvas-edge-glow, .canvas-edge-label, .canvas-edge-label-bg, .canvas-edge-hit-area, foreignObject.edge-label-fo')).forEach(el => {
             el.remove();
         });
     }
@@ -30040,6 +30093,7 @@ function __initCanvasDragEdgeFollow(meta, nodeIds) {
     meta.canvasDragEdgeMovedIds = movedIds;
     meta.canvasDragAffectedEdges = affectedEdges;
     meta.canvasDragEdgeRaf = 0;
+    meta.canvasDragNodeBounds = __captureCanvasDragFollowNodeBounds(affectedEdges);
 
     const svg = document.querySelector('.canvas-edges');
     meta.canvasDragEdgeDomMap = svg ? __collectEdgeDomRecords(svg) : null;
@@ -30089,6 +30143,8 @@ function __updateCanvasDragFollowEdges(meta) {
     const domMap = meta.canvasDragEdgeDomMap;
     if (!domMap || !domMap.get) return;
 
+    const anchorResolver = (nodeId, side) => __getCanvasDragFollowAnchorPosition(nodeId, side, meta);
+
     meta.canvasDragAffectedEdges.forEach(edge => {
         if (!edge || !edge.id) return;
         const record = domMap.get(normalizeEdgeId(edge.id));
@@ -30096,8 +30152,8 @@ function __updateCanvasDragFollowEdges(meta) {
 
         const fromId = edge.fromNode || edge.from;
         const toId = edge.toNode || edge.to;
-        const start = getAnchorPosition(fromId, edge.fromSide);
-        const end = getAnchorPosition(toId, edge.toSide);
+        const start = anchorResolver(fromId, edge.fromSide);
+        const end = anchorResolver(toId, edge.toSide);
         const d = (start && end) ? getEdgePathD(start.x, start.y, end.x, end.y, edge.fromSide, edge.toSide) : '';
 
         if (record.hitArea) {
@@ -30112,7 +30168,7 @@ function __updateCanvasDragFollowEdges(meta) {
         __moveCanvasEdgeLabelDom(record, mid);
     });
 
-    try { updateEdgeToolbarPosition(); } catch (_) { }
+    try { updateEdgeToolbarPosition({ anchorResolver }); } catch (_) { }
 }
 
 function __scheduleCanvasDragEdgeFollowForNodeIds(nodeIds) {
@@ -30233,7 +30289,6 @@ function __isCardGroupLowDetailEdgeContextEndpoint(nodeId) {
     if (!el || !el.classList) return false;
     if (el.classList.contains('card-group-low-detail-child-hidden')) return true;
     if (el.classList.contains('card-group-low-detail-nested-visible')) return true;
-    if (el.classList.contains('card-group-canvas-node') && el.classList.contains('low-detail-active')) return true;
     return !!(el.dataset && el.dataset.lowDetailHostGroupId);
 }
 
@@ -30273,6 +30328,7 @@ function __collectEdgeDomRecords(svg) {
 
     register('path.canvas-edge-hit-area', 'hitArea');
     register('path.canvas-edge', 'path');
+    register('path.canvas-edge-glow', 'glow');
     register('text.canvas-edge-label', 'label');
     register('rect.canvas-edge-label-bg', 'labelBg');
     register('foreignObject.edge-label-fo', 'editorFo');
@@ -30282,7 +30338,7 @@ function __collectEdgeDomRecords(svg) {
 
 function __removeEdgeDomRecord(record) {
     if (!record) return;
-    ['hitArea', 'path', 'labelBg', 'label', 'editorFo'].forEach((key) => {
+    ['hitArea', 'glow', 'path', 'labelBg', 'label', 'editorFo'].forEach((key) => {
         const el = record[key];
         if (el) {
             try { el.remove(); } catch (_) { }
@@ -30364,6 +30420,20 @@ function __createEdgePath() {
     return path;
 }
 
+function __createEdgeGlowPath() {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.style.pointerEvents = 'none';
+    return path;
+}
+
+function __syncEdgeGlowDom(glow, edge, geometry) {
+    glow.setAttribute('class', 'canvas-edge-glow');
+    glow.dataset.edgeId = edge.id;
+    const edgeColor = clickToClearModeActive ? null : (edge.colorHex || presetToHex(edge.color) || null);
+    glow.style.stroke = edgeColor || '';
+    updateEdgePath(edge, glow, geometry);
+}
+
 function __syncEdgePathDom(path, edge, geometry) {
     path.setAttribute('class', 'canvas-edge');
     path.dataset.edgeId = edge.id;
@@ -30390,12 +30460,7 @@ function __syncEdgePathDom(path, edge, geometry) {
         path.removeAttribute('marker-start');
     }
 
-    if (isSameEdgeId(edge.id, CanvasState.selectedEdgeId)) {
-        const glow = edgeColor || '#66bbff';
-        path.style.filter = `drop-shadow(0 0 2px ${glow}66) drop-shadow(0 0 6px ${glow}99)`;
-    } else {
-        path.style.filter = '';
-    }
+    path.style.filter = '';
 
     updateEdgePath(edge, path, geometry);
 }
@@ -30547,11 +30612,13 @@ function __syncEdgeLabelDom(svg, edge, geometry, record, bgColor) {
 function __appendEdgeDomInRenderOrder(svg, record, forceAppend = false) {
     const isHitAppended = record.hitArea && record.hitArea.parentNode === svg;
     const isPathAppended = record.path && record.path.parentNode === svg;
+    const isGlowAppended = !record.glow || record.glow.parentNode === svg;
     const isBgAppended = !record.labelBg || record.labelBg.parentNode === svg;
     const isLabelAppended = !record.label || record.label.parentNode === svg;
 
-    if (!isHitAppended || !isPathAppended || !isBgAppended || !isLabelAppended || forceAppend) {
+    if (!isHitAppended || !isPathAppended || !isGlowAppended || !isBgAppended || !isLabelAppended || forceAppend) {
         if (record.hitArea) svg.appendChild(record.hitArea);
+        if (record.glow) svg.appendChild(record.glow);
         if (record.path) svg.appendChild(record.path);
         if (record.labelBg) svg.appendChild(record.labelBg);
         if (record.label) svg.appendChild(record.label);
@@ -30561,6 +30628,12 @@ function __appendEdgeDomInRenderOrder(svg, record, forceAppend = false) {
 function renderEdges() {
     const svg = document.querySelector('.canvas-edges');
     if (!svg) return;
+
+    if (__isPermanentLayoutStartupPending()) {
+        svg.style.display = 'none';
+        scheduleEdgesRenderRetry(80);
+        return;
+    }
 
     if (__isCanvasNodeMaximizedActive()) {
         try { hideEdgeToolbar(); } catch (_) { }
@@ -30640,8 +30713,15 @@ function renderEdges() {
         record.hitArea.__canvasEdgePath = record.path;
         __syncEdgeHitAreaDom(record.hitArea, edge, geometry);
         __syncEdgePathDom(record.path, edge, geometry);
-        __syncEdgeLabelDom(svg, edge, geometry, record, labelBgColor);
         const isSelected = selectedId && isSameEdgeId(edge.id, selectedId);
+        if (isSelected && !clickToClearModeActive) {
+            if (!record.glow) record.glow = __createEdgeGlowPath();
+            __syncEdgeGlowDom(record.glow, edge, geometry);
+        } else if (record.glow) {
+            try { record.glow.remove(); } catch (_) { }
+            record.glow = null;
+        }
+        __syncEdgeLabelDom(svg, edge, geometry, record, labelBgColor);
         __appendEdgeDomInRenderOrder(svg, record, isSelected);
     });
 
@@ -30676,12 +30756,11 @@ function applyEdgeColorToDom(edge) {
     document.querySelectorAll('.canvas-edge').forEach(path => {
         if (!isSameEdgeId(path.dataset && path.dataset.edgeId, edge.id)) return;
         path.style.stroke = edgeColor || '';
-        if (isSameEdgeId(edge.id, CanvasState.selectedEdgeId)) {
-            const glow = edgeColor || '#66bbff';
-            path.style.filter = `drop-shadow(0 0 2px ${glow}66) drop-shadow(0 0 6px ${glow}99)`;
-        } else {
-            path.style.filter = '';
-        }
+        path.style.filter = '';
+    });
+    document.querySelectorAll('.canvas-edge-glow').forEach(glow => {
+        if (!isSameEdgeId(glow.dataset && glow.dataset.edgeId, edge.id)) return;
+        glow.style.stroke = edgeColor || '';
     });
     document.querySelectorAll('.canvas-edge-label').forEach(label => {
         if (!isSameEdgeId(label.dataset && label.dataset.edgeId, edge.id)) return;
@@ -30694,9 +30773,12 @@ function applyEdgeColorToDom(edge) {
     });
 }
 
-function getEdgeRenderGeometry(edge) {
-    const start = getAnchorPosition(edge.fromNode, edge.fromSide);
-    const end = getAnchorPosition(edge.toNode, edge.toSide);
+function getEdgeRenderGeometry(edge, options = null) {
+    const anchorResolver = options && typeof options.anchorResolver === 'function'
+        ? options.anchorResolver
+        : getAnchorPosition;
+    const start = anchorResolver(edge.fromNode, edge.fromSide);
+    const end = anchorResolver(edge.toNode, edge.toSide);
     if (!start || !end) return null;
 
     const x1 = start.x, y1 = start.y;
@@ -30727,6 +30809,20 @@ function updateEdgePath(edge, pathElement, geometry = null) {
     }
 }
 
+function __hasPermanentLayoutStateForNode(nodeId) {
+    const id = String(nodeId || '').trim();
+    const layout = CanvasState.permanentLayout;
+    if (!layout || typeof layout !== 'object') return false;
+    if (id === 'permanent-section' || id === 'permanentSection') {
+        return !!(layout.main && typeof layout.main === 'object');
+    }
+    if (id.startsWith('permanent-section-copy-')) {
+        const copyId = id.slice('permanent-section-copy-'.length).trim();
+        return !!(copyId && layout.copiesById && typeof layout.copiesById === 'object' && layout.copiesById[copyId]);
+    }
+    return false;
+}
+
 function __getNodeBoundsFromState(nodeId) {
     const id = String(nodeId || '').trim();
     if (!id) return null;
@@ -30737,9 +30833,19 @@ function __getNodeBoundsFromState(nodeId) {
     let height = 200;
 
     if (id === 'permanent-section' || id === 'permanentSection') {
+        const mainState = CanvasState.permanentLayout && CanvasState.permanentLayout.main
+            ? CanvasState.permanentLayout.main
+            : null;
         const size = getPermanentSectionBaseSize();
-        width = size.width || 600;
-        height = size.height || 600;
+        if (mainState) {
+            left = Number(mainState.left) || 0;
+            top = Number(mainState.top) || 0;
+            width = Number(mainState.width) || size.width || 600;
+            height = Number(mainState.height) || size.height || 600;
+        } else {
+            width = size.width || 600;
+            height = size.height || 600;
+        }
         if (CanvasState.dragState && CanvasState.dragState.isDragging && CanvasState.dragState.dragSource === 'permanent-section') {
             const deltaX = (CanvasState.dragState.lastClientX - CanvasState.dragState.dragStartX) / (CanvasState.zoom || 1);
             const deltaY = (CanvasState.dragState.lastClientY - CanvasState.dragState.dragStartY) / (CanvasState.zoom || 1);
@@ -30810,7 +30916,109 @@ function __getNodeBoundsFromState(nodeId) {
     return null;
 }
 
+function __measureCanvasNodeBoundsForDragFollow(nodeId) {
+    const id = String(nodeId || '').trim();
+    if (!id) return null;
+
+    const stateBounds = __getNodeBoundsFromState(id);
+    const el = __resolveCanvasNodeElementById(id);
+    if (!el) return stateBounds;
+
+    let left = parseFloat(el.style.left);
+    let top = parseFloat(el.style.top);
+    if (!Number.isFinite(left)) left = stateBounds ? Number(stateBounds.x) || 0 : 0;
+    if (!Number.isFinite(top)) top = stateBounds ? Number(stateBounds.y) || 0 : 0;
+
+    const transform = el.style.transform;
+    if (transform && transform.includes('translate')) {
+        const match = transform.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
+        if (match) {
+            left += parseFloat(match[1]) || 0;
+            top += parseFloat(match[2]) || 0;
+        }
+    }
+
+    return {
+        x: left,
+        y: top,
+        width: el.offsetWidth || (stateBounds ? Number(stateBounds.width) || 0 : 0),
+        height: el.offsetHeight || (stateBounds ? Number(stateBounds.height) || 0 : 0)
+    };
+}
+
+function __captureCanvasDragFollowNodeBounds(affectedEdges) {
+    const boundsById = new Map();
+    const ids = new Set();
+    (Array.isArray(affectedEdges) ? affectedEdges : []).forEach(edge => {
+        if (!edge) return;
+        const fromId = String(edge.fromNode || edge.from || '').trim();
+        const toId = String(edge.toNode || edge.to || '').trim();
+        if (fromId) ids.add(fromId);
+        if (toId) ids.add(toId);
+    });
+
+    ids.forEach(id => {
+        const bounds = __measureCanvasNodeBoundsForDragFollow(id);
+        if (bounds) boundsById.set(id, bounds);
+    });
+
+    return boundsById;
+}
+
+function __getCanvasDragFollowNodeBounds(nodeId, meta) {
+    const id = String(nodeId || '').trim();
+    if (!id) return null;
+
+    const boundsById = meta && meta.canvasDragNodeBounds && typeof meta.canvasDragNodeBounds.get === 'function'
+        ? meta.canvasDragNodeBounds
+        : null;
+    const cached = boundsById ? boundsById.get(id) : null;
+    const movedIds = meta && meta.canvasDragEdgeMovedIds && typeof meta.canvasDragEdgeMovedIds.has === 'function'
+        ? meta.canvasDragEdgeMovedIds
+        : null;
+
+    if (movedIds && movedIds.has(id)) {
+        const live = __getNodeBoundsFromState(id);
+        if (live) {
+            return {
+                x: live.x,
+                y: live.y,
+                width: cached ? (Number(cached.width) || Number(live.width) || 0) : live.width,
+                height: cached ? (Number(cached.height) || Number(live.height) || 0) : live.height
+            };
+        }
+    }
+
+    return cached || __getNodeBoundsFromState(id);
+}
+
+function __getAnchorPositionFromBounds(bounds, side) {
+    if (!bounds) return null;
+    const left = Number(bounds.x) || 0;
+    const top = Number(bounds.y) || 0;
+    const width = Number(bounds.width) || 0;
+    const height = Number(bounds.height) || 0;
+
+    switch (side) {
+        case 'top': return { x: left + width / 2, y: top };
+        case 'bottom': return { x: left + width / 2, y: top + height };
+        case 'left': return { x: left, y: top + height / 2 };
+        case 'right': return { x: left + width, y: top + height / 2 };
+        default: return { x: left + width / 2, y: top + height / 2 };
+    }
+}
+
+function __getCanvasDragFollowAnchorPosition(nodeId, side, meta = null) {
+    return __getAnchorPositionFromBounds(__getCanvasDragFollowNodeBounds(nodeId, meta), side) || getAnchorPosition(nodeId, side);
+}
+
 function getAnchorPosition(nodeId, side) {
+    if (__hasPermanentLayoutStateForNode(nodeId)) {
+        const stateBounds = __getNodeBoundsFromState(nodeId);
+        const stateAnchor = __getAnchorPositionFromBounds(stateBounds, side);
+        if (stateAnchor) return stateAnchor;
+    }
+
     let el = __resolveCanvasNodeElementById(nodeId);
 
     let left = 0;
@@ -31203,7 +31411,7 @@ function __handleEdgeToolbarAction(toolbar, btn) {
 }
 
 // 更新连接线工具栏位置（使用 canvas-content 坐标系）
-function updateEdgeToolbarPosition() {
+function updateEdgeToolbarPosition(options = null) {
     const toolbar = document.getElementById('edge-toolbar');
     if (!toolbar || !toolbar.parentElement) {
         // 即使工具栏不存在，也尝试更新编辑器位置（在缩放/移动时）
@@ -31211,7 +31419,7 @@ function updateEdgeToolbarPosition() {
         if (editorOnly && editorOnly.dataset.edgeId) {
             const edge = getEdgeById(editorOnly.dataset.edgeId);
             if (!edge) return;
-            const geometry = getEdgeRenderGeometry(edge);
+            const geometry = getEdgeRenderGeometry(edge, options);
             if (!geometry) return;
             const midX = geometry.labelX;
             const midY = geometry.labelY;
@@ -31234,7 +31442,7 @@ function updateEdgeToolbarPosition() {
     const edge = getEdgeById(edgeId);
     if (!edge) return;
 
-    const geometry = getEdgeRenderGeometry(edge);
+    const geometry = getEdgeRenderGeometry(edge, options);
     if (!geometry) return;
     const midX = geometry.labelX;
     const midY = geometry.labelY;
@@ -36084,12 +36292,72 @@ function __getCanvasViewportBounds(workspace, marginPx = 250) {
     };
 }
 
+function __parseCanvasViewportNumericValue(value) {
+    const num = (typeof value === 'number') ? value : parseFloat(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function __resolveCanvasViewportCardStateBounds(el) {
+    if (!el) return null;
+
+    const rawId = String(el.id || '').trim();
+    if (rawId === 'permanentSection' || rawId === 'permanent-section') {
+        const mainState = CanvasState.permanentLayout && CanvasState.permanentLayout.main
+            ? CanvasState.permanentLayout.main
+            : null;
+        if (mainState) {
+            const x = __parseCanvasViewportNumericValue(mainState.left);
+            const y = __parseCanvasViewportNumericValue(mainState.top);
+            const width = __parseCanvasViewportNumericValue(mainState.width);
+            const height = __parseCanvasViewportNumericValue(mainState.height);
+            if (width > 0 && height > 0) {
+                return {
+                    x: x !== null ? x : 0,
+                    y: y !== null ? y : 0,
+                    width,
+                    height
+                };
+            }
+        }
+        return null;
+    }
+
+    const candidates = [];
+    if (rawId) candidates.push(rawId);
+
+    const copyId = el.dataset ? String(el.dataset.permanentSectionCopyId || '').trim() : '';
+    if (copyId) candidates.push(`permanent-section-copy-${copyId}`);
+
+    const seen = new Set();
+    for (const id of candidates) {
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const bounds = __getNodeBoundsFromState(id);
+        if (bounds && Number(bounds.width) > 0 && Number(bounds.height) > 0) {
+            return bounds;
+        }
+    }
+
+    return null;
+}
+
 function __isCardOutsideViewportBounds(el, bounds) {
     if (!el || !bounds) return false;
-    const x = parseFloat(el.style.left) || 0;
-    const y = parseFloat(el.style.top) || 0;
-    const w = parseFloat(el.style.width) || el.offsetWidth || 0;
-    const h = parseFloat(el.style.height) || el.offsetHeight || 0;
+    const stateBounds = __resolveCanvasViewportCardStateBounds(el);
+    const stateX = stateBounds ? __parseCanvasViewportNumericValue(stateBounds.x) : null;
+    const stateY = stateBounds ? __parseCanvasViewportNumericValue(stateBounds.y) : null;
+    const stateW = stateBounds ? __parseCanvasViewportNumericValue(stateBounds.width) : null;
+    const stateH = stateBounds ? __parseCanvasViewportNumericValue(stateBounds.height) : null;
+
+    const styleX = __parseCanvasViewportNumericValue(el.style.left);
+    const styleY = __parseCanvasViewportNumericValue(el.style.top);
+    const styleW = __parseCanvasViewportNumericValue(el.style.width);
+    const styleH = __parseCanvasViewportNumericValue(el.style.height);
+
+    const x = styleX !== null ? styleX : (stateX !== null ? stateX : 0);
+    const y = styleY !== null ? styleY : (stateY !== null ? stateY : 0);
+    const w = (styleW && styleW > 0) ? styleW : ((stateW && stateW > 0) ? stateW : (el.offsetWidth || 0));
+    const h = (styleH && styleH > 0) ? styleH : ((stateH && stateH > 0) ? stateH : (el.offsetHeight || 0));
 
     return (
         x + w < bounds.left ||
@@ -36356,18 +36624,6 @@ function __applyCardGroupLowDetailMembershipState(options = {}) {
         if (desiredHosted.has(entry.element)) return;
         desiredGroupNodes.set(entry.element, entry.node);
         if (!desiredGroupDepths.has(entry.element)) setGroupLowDetailDepth(entry.element, 0);
-        const entryDepth = desiredGroupDepths.get(entry.element) || 0;
-
-        if (typeof groupApi.getDirectGeometricMembers === 'function') {
-            try {
-                const directMembers = groupApi.getDirectGeometricMembers(entry.node) || [];
-                directMembers.forEach((member) => {
-                    if (!member || member.type !== 'md-node' || !member.data || member.data.subtype !== 'card-group') return;
-                    const memberEl = __resolveCardGroupLowDetailMemberElement(member);
-                    if (memberEl) setGroupLowDetailDepth(memberEl, entryDepth + 1);
-                });
-            } catch (_) { }
-        }
 
         let members = [];
         try { members = groupApi.getRecursiveGeometricMembers(entry.node) || []; } catch (_) { members = []; }
@@ -36377,15 +36633,6 @@ function __applyCardGroupLowDetailMembershipState(options = {}) {
             if (!memberId || memberId === entry.node.id) return;
             const memberEl = __resolveCardGroupLowDetailMemberElement(member);
             if (!memberEl) return;
-
-            if (member.type === 'md-node' && member.data && member.data.subtype === 'card-group') {
-                try {
-                    setGroupLowDetailDepth(memberEl, entryDepth + 1);
-                    desiredGroupNodes.set(memberEl, member.data);
-                    desiredNestedGroups.add(memberEl);
-                } catch (_) { }
-                return;
-            }
 
             markHosted(memberEl, entry.node.id);
 

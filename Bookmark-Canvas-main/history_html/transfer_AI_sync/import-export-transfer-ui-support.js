@@ -1857,19 +1857,21 @@ function __initCardGroupDragEdgeFollow(meta, containerSection) {
     }
 
     const domMap = new Map();
-    const els = svg.querySelectorAll('.canvas-edge, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, foreignObject.edge-label-fo');
+    const els = svg.querySelectorAll('.canvas-edge, .canvas-edge-glow, .canvas-edge-hit-area, .canvas-edge-label, .canvas-edge-label-bg, foreignObject.edge-label-fo');
     els.forEach((el) => {
         const edgeId = (el && el.dataset && el.dataset.edgeId) ? el.dataset.edgeId : (el ? el.getAttribute('data-edge-id') : null);
         if (!edgeId) return;
 
         let entry = domMap.get(edgeId);
         if (!entry) {
-            entry = { path: null, hitArea: null, label: null, labelBg: null, labelFo: null };
+            entry = { path: null, glow: null, hitArea: null, label: null, labelBg: null, labelFo: null };
             domMap.set(edgeId, entry);
         }
 
         if (el.classList && el.classList.contains('canvas-edge-hit-area')) {
             entry.hitArea = el;
+        } else if (el.classList && el.classList.contains('canvas-edge-glow')) {
+            entry.glow = el;
         } else if (el.classList && el.classList.contains('canvas-edge')) {
             entry.path = el;
         } else if (el.classList && el.classList.contains('canvas-edge-label-bg')) {
@@ -1945,6 +1947,9 @@ function __updateCardGroupDragEdges(meta) {
         }
         if (dom.path) {
             try { dom.path.setAttribute('d', d); } catch (_) { }
+        }
+        if (dom.glow) {
+            try { dom.glow.setAttribute('d', d); } catch (_) { }
         }
 
         // 标签/编辑器跟随（不重建，只更新坐标）

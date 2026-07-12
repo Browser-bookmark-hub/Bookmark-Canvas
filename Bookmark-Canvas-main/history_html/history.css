@@ -4060,7 +4060,6 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-edge-highlight {
-    stroke: var(--accent-primary, #1877f2) !important;
     stroke-width: 5px !important;
 }
 

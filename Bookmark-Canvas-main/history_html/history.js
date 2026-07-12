@@ -12059,6 +12059,18 @@ function renderCurrentView() {
                         if (permanentSectionEl) {
                             permanentSectionEl.style.width = '600px';
                             permanentSectionEl.style.height = '600px';
+                            permanentSectionEl.dataset.permanentLayoutPending = 'true';
+                            permanentSectionEl.style.visibility = 'hidden';
+                            setTimeout(() => {
+                                try {
+                                    if (permanentSectionEl.dataset.permanentLayoutPending === 'true') {
+                                        delete permanentSectionEl.dataset.permanentLayoutPending;
+                                        if (permanentSectionEl.style.visibility === 'hidden') {
+                                            permanentSectionEl.style.visibility = '';
+                                        }
+                                    }
+                                } catch (_) { }
+                            }, 3200);
                         }
                         canvasContent.appendChild(permanentSection);
                         ;

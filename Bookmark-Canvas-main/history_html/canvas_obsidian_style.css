@@ -643,6 +643,16 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     transition: stroke 0.2s, stroke-width 0.2s;
 }
 
+.canvas-edge-glow {
+    fill: none;
+    stroke: #999;
+    stroke-width: 8px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-opacity: 0.3;
+    pointer-events: none;
+}
+
 .canvas-edge:hover,
 .canvas-edge.hover {
     stroke: #666;
@@ -650,11 +660,14 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 .canvas-edge.selected {
-    stroke: var(--accent-primary, #1877f2);
     stroke-width: 3px;
 }
 
 [data-theme="dark"] .canvas-edge {
+    stroke: #555;
+}
+
+[data-theme="dark"] .canvas-edge-glow {
     stroke: #555;
 }
 
@@ -1451,20 +1464,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     display: none !important;
 }
 
-.temp-canvas-node.low-detail-active .canvas-node-anchor,
-.temp-canvas-node.low-detail-active .canvas-anchor-zone,
-.temp-canvas-node.dormant-content .canvas-node-anchor,
-.temp-canvas-node.dormant-content .canvas-anchor-zone,
-.temp-canvas-node.temp-tree-unloaded .canvas-node-anchor,
-.temp-canvas-node.temp-tree-unloaded .canvas-anchor-zone,
-.md-canvas-node.low-detail-active .canvas-node-anchor,
-.md-canvas-node.low-detail-active .canvas-anchor-zone,
-.permanent-bookmark-section.low-detail-active .canvas-node-anchor,
-.permanent-bookmark-section.low-detail-active .canvas-anchor-zone,
-.permanent-bookmark-section.permanent-tree-unloaded .canvas-node-anchor,
-.permanent-bookmark-section.permanent-tree-unloaded .canvas-anchor-zone,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .canvas-node-anchor,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .canvas-anchor-zone {
+.card-group-low-detail-child-hidden .canvas-node-anchor,
+.card-group-low-detail-child-hidden .canvas-anchor-zone {
     display: none !important;
 }
 

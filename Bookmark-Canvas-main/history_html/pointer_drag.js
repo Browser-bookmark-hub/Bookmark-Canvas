@@ -284,7 +284,8 @@ function handlePointerMove(e) {
         pointerDragState.dragOverlay.style.top = e.clientY + 10 + 'px';
     }
 
-    // 查找当前鼠标下的目标节点（暂时隐藏覆盖层和放置指示器以避免干扰）
+    // 查找当前鼠标下的目标节点。拖拽覆盖层自身已禁用 pointer-events，
+    // elementFromPoint 会自然穿透它，避免每帧切换 display 触发布局抖动。
     let target = null;
     const dropIndicator = document.querySelector('.drop-indicator');
     let originalPointerEvents = '';
@@ -293,13 +294,7 @@ function handlePointerMove(e) {
         dropIndicator.style.pointerEvents = 'none';
     }
 
-    if (pointerDragState.dragOverlay) {
-        pointerDragState.dragOverlay.style.display = 'none';
-        target = document.elementFromPoint(e.clientX, e.clientY);
-        pointerDragState.dragOverlay.style.display = 'block';
-    } else {
-        target = document.elementFromPoint(e.clientX, e.clientY);
-    }
+    target = document.elementFromPoint(e.clientX, e.clientY);
 
     if (dropIndicator) {
         dropIndicator.style.pointerEvents = originalPointerEvents;
@@ -373,11 +368,6 @@ async function handlePointerUp(e) {
     }
 
     try {
-        // 隐藏覆盖层以准确检测落点
-        if (pointerDragState.dragOverlay) {
-            pointerDragState.dragOverlay.style.display = 'none';
-        }
-
         // 临时禁用放置指示器的 pointer-events，防止其遮挡真正的落点元素
         const dropIndicator = document.querySelector('.drop-indicator');
         let originalPointerEvents = '';
@@ -394,11 +384,6 @@ async function handlePointerUp(e) {
 
         if (dropIndicator) {
             dropIndicator.style.pointerEvents = originalPointerEvents;
-        }
-
-        // 恢复覆盖层显示（准备清理）
-        if (pointerDragState.dragOverlay) {
-            pointerDragState.dragOverlay.style.display = 'block';
         }
 
         // 检查是否在树容器内
@@ -593,7 +578,7 @@ function startPointerDrag(e) {
     overlay.style.padding = '4px 8px';
     overlay.style.color = 'white';
     overlay.style.borderRadius = '4px';
-    overlay.style.pointerEvents = 'none';
+    overlay.style.setProperty('pointer-events', 'none', 'important');
     overlay.style.zIndex = '10000';
     overlay.style.fontSize = '12px';
     overlay.style.maxWidth = '260px'; // Slightly wider to hold details

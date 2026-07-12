@@ -1151,7 +1151,7 @@ async function __applyOverwriteImportedCanvasState(parsedTempState, bridge, pars
         });
         const svg = document.querySelector('.canvas-edges');
         if (svg) {
-            Array.from(svg.querySelectorAll('.canvas-edge, .canvas-edge-label, .canvas-edge-label-bg, .canvas-edge-hit-area, foreignObject.edge-label-fo')).forEach((el) => {
+            Array.from(svg.querySelectorAll('.canvas-edge, .canvas-edge-glow, .canvas-edge-label, .canvas-edge-label-bg, .canvas-edge-hit-area, foreignObject.edge-label-fo')).forEach((el) => {
                 try { el.remove(); } catch (_) {}
             });
         }
