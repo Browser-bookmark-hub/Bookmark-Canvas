@@ -30,6 +30,148 @@ function initSidePanel() {
   } catch (_) {}
 }
 
+const CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY = 'canvasPermanentBookmarksDirty';
+const CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY = 'canvasPermanentBookmarksDirtyAt';
+const CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY = 'canvasPermanentBookmarksDirtyReason';
+const CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY = 'canvasPermanentBookmarksDirtyVersion';
+const CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY = 'canvasPermanentBookmarksCleanAt';
+let canvasPermanentBookmarksDirtyMemory = null;
+
+function storageLocalGet(keys) {
+  return new Promise((resolve) => {
+    try {
+      const result = browserAPI.storage.local.get(keys, (items) => {
+        try {
+          const err = browserAPI?.runtime?.lastError;
+          if (err) {
+            resolve({});
+            return;
+          }
+        } catch (_) { }
+        resolve(items || {});
+      });
+      if (result && typeof result.then === 'function') {
+        result.then((items) => resolve(items || {})).catch(() => resolve({}));
+      }
+    } catch (_) {
+      resolve({});
+    }
+  });
+}
+
+function storageLocalSet(values) {
+  return new Promise((resolve) => {
+    try {
+      const result = browserAPI.storage.local.set(values, () => {
+        try {
+          const err = browserAPI?.runtime?.lastError;
+          resolve(!err);
+        } catch (_) {
+          resolve(true);
+        }
+      });
+      if (result && typeof result.then === 'function') {
+        result.then(() => resolve(true)).catch(() => resolve(false));
+      }
+    } catch (_) {
+      resolve(false);
+    }
+  });
+}
+
+async function getCanvasPermanentBookmarkDirtyState() {
+  const data = await storageLocalGet([
+    CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY,
+    CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY,
+    CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY,
+    CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY,
+    CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY
+  ]);
+  const dirty = data[CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY] === true;
+  canvasPermanentBookmarksDirtyMemory = dirty;
+  return {
+    success: true,
+    dirty,
+    dirtyAt: Number(data[CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY]) || 0,
+    reason: String(data[CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY] || ''),
+    version: Number(data[CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY]) || 0,
+    cleanAt: Number(data[CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY]) || 0
+  };
+}
+
+async function markCanvasPermanentBookmarksDirty(reason = 'bookmark-event') {
+  if (canvasPermanentBookmarksDirtyMemory === true) return { success: true, skipped: true };
+
+  const state = await getCanvasPermanentBookmarkDirtyState();
+  if (state.dirty) {
+    canvasPermanentBookmarksDirtyMemory = true;
+    return { success: true, skipped: true, dirty: true, version: state.version };
+  }
+
+  const nextVersion = Math.max(0, Number(state.version) || 0) + 1;
+  const now = Date.now();
+  const ok = await storageLocalSet({
+    [CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY]: true,
+    [CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY]: now,
+    [CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY]: String(reason || 'bookmark-event'),
+    [CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY]: nextVersion
+  });
+  if (ok) canvasPermanentBookmarksDirtyMemory = true;
+  return { success: ok, dirty: ok, version: nextVersion, dirtyAt: now };
+}
+
+async function clearCanvasPermanentBookmarkDirtyState(expectedVersion = null) {
+  const state = await getCanvasPermanentBookmarkDirtyState();
+  const expected = Number(expectedVersion);
+  if (Number.isFinite(expected) && expected > 0 && state.version !== expected) {
+    return { success: true, skipped: true, reason: 'version_changed', state };
+  }
+  const ok = await storageLocalSet({
+    [CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY]: false,
+    [CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY]: Date.now()
+  });
+  if (ok) canvasPermanentBookmarksDirtyMemory = false;
+  return { success: ok, dirty: false, version: state.version };
+}
+
+function registerCanvasPermanentBookmarkDirtyListener() {
+  try {
+    if (browserAPI?.storage?.onChanged?.addListener) {
+      browserAPI.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== 'local') return;
+        if (changes && Object.prototype.hasOwnProperty.call(changes, CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY)) {
+          canvasPermanentBookmarksDirtyMemory = changes[CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY].newValue === true;
+        }
+      });
+    }
+  } catch (_) { }
+
+  try {
+    if (!browserAPI?.bookmarks) return;
+    const mark = (reason) => {
+      markCanvasPermanentBookmarksDirty(reason).catch(() => { });
+    };
+    if (browserAPI.bookmarks.onCreated?.addListener) {
+      browserAPI.bookmarks.onCreated.addListener(() => mark('created'));
+    }
+    if (browserAPI.bookmarks.onRemoved?.addListener) {
+      browserAPI.bookmarks.onRemoved.addListener(() => mark('removed'));
+    }
+    if (browserAPI.bookmarks.onMoved?.addListener) {
+      browserAPI.bookmarks.onMoved.addListener(() => mark('moved'));
+    }
+    if (browserAPI.bookmarks.onChanged?.addListener) {
+      browserAPI.bookmarks.onChanged.addListener(() => mark('changed'));
+    }
+    if (browserAPI.bookmarks.onChildrenReordered?.addListener) {
+      browserAPI.bookmarks.onChildrenReordered.addListener(() => mark('children-reordered'));
+    }
+    if (browserAPI.bookmarks.onImportEnded?.addListener) {
+      browserAPI.bookmarks.onImportEnded.addListener(() => mark('import-ended'));
+    }
+  } catch (_) { }
+}
+
 const SIDE_PANEL_CONTEXT = browserAPI?.runtime?.ContextType?.SIDE_PANEL || 'SIDE_PANEL';
 const SIDE_PANEL_TOGGLE_PORT = 'bookmark-canvas-sidepanel-toggle-v1';
 const sidePanelOpenWindows = new Set();
@@ -311,6 +453,7 @@ try {
 
 initSidePanel();
 registerSidePanelTogglePortListener();
+registerCanvasPermanentBookmarkDirtyListener();
 refreshSidePanelOpenWindows().catch(() => {});
 clearExtensionBadge();
 
@@ -709,6 +852,20 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     browserAPI.bookmarks.getTree((tree) => {
       sendResponse({ success: true, tree });
     });
+    return true;
+  }
+
+  if (message.action === 'getCanvasPermanentBookmarkDirtyState') {
+    getCanvasPermanentBookmarkDirtyState()
+      .then((state) => sendResponse(state))
+      .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message.action === 'clearCanvasPermanentBookmarkDirtyState') {
+    clearCanvasPermanentBookmarkDirtyState(message.expectedVersion)
+      .then((state) => sendResponse(state))
+      .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
     return true;
   }
 

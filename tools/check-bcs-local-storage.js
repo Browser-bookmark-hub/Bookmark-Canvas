@@ -7,6 +7,7 @@
         CANVAS: 'bcs:canvas',
         SECTION_PREFIX: 'bcs:section:',
         PERM_MAIN: 'bcs:perm:main',
+        PERM_MAIN_IDENTITY_MAP: 'bcs:perm:main-identity-map',
         PERM_COPY_PREFIX: 'bcs:perm:copy-',
         SIGNAL: 'bcs:signal'
     });
@@ -244,6 +245,7 @@
     function isPermanentStorageKey(key) {
         const text = String(key || '');
         return text === STORAGE_KEYS.PERM_MAIN
+            || text === STORAGE_KEYS.PERM_MAIN_IDENTITY_MAP
             || text.startsWith(STORAGE_KEYS.PERM_COPY_PREFIX);
     }
 
@@ -378,37 +380,87 @@
         children.forEach((child) => collectPermanentTreeNodeIds(child, outSet));
     }
 
-    function checkPermanentIdentityMap(report, main) {
+    function readIdentityMapPayload(rawValue) {
+        if (Array.isArray(rawValue)) {
+            return {
+                format: 'legacy-array',
+                identityMap: rawValue
+            };
+        }
+        if (!isRecord(rawValue)) return null;
+        if (!Array.isArray(rawValue.identityMap)) return null;
+        return rawValue;
+    }
+
+    function checkPermanentIdentityMap(report, main, rawSplitIdentityMap) {
         const keys = Object.keys(main || {});
         const idxDescription = keys.indexOf('descriptionMd');
         const idxIdentityMap = keys.indexOf('identityMap');
         const idxTree = keys.indexOf('tree');
+        const splitPayload = readIdentityMapPayload(rawSplitIdentityMap);
+        const hasSplitPayload = !!splitPayload;
+        const hasInlineIdentityMap = Array.isArray(main && main.identityMap);
+        const identityMap = hasSplitPayload
+            ? splitPayload.identityMap
+            : (hasInlineIdentityMap ? main.identityMap : null);
+        const identityMapStorageMode = hasSplitPayload ? 'split' : (hasInlineIdentityMap ? 'inline-legacy' : 'missing');
 
-        if (idxIdentityMap < 0) {
-            fail(report, 'permanent', '`bcs:perm:main.identityMap` is missing.');
+        report.permanentIdentityMap = {
+            contentKey: hasSplitPayload ? STORAGE_KEYS.PERM_MAIN_IDENTITY_MAP : STORAGE_KEYS.PERM_MAIN,
+            storageMode: identityMapStorageMode,
+            rawContent: cloneJsonValue(hasSplitPayload ? rawSplitIdentityMap : (main && main.identityMap)),
+            content: cloneJsonValue(splitPayload || (hasInlineIdentityMap ? { identityMap: main.identityMap } : null))
+        };
+
+        if (rawSplitIdentityMap !== undefined && !hasSplitPayload) {
+            fail(report, 'permanent', '`bcs:perm:main-identity-map` exists but is invalid.');
             return;
         }
-        if (idxDescription >= 0 && idxIdentityMap < idxDescription) {
-            fail(report, 'permanent', '`identityMap` must appear after `descriptionMd` in `bcs:perm:main`.', {
-                keyOrder: keys
-            });
-        }
-        if (idxTree >= 0 && idxIdentityMap > idxTree) {
-            fail(report, 'permanent', '`identityMap` must appear before `tree` in `bcs:perm:main`.', {
-                keyOrder: keys
-            });
-        }
 
-        if (!Array.isArray(main.identityMap)) {
-            fail(report, 'permanent', '`bcs:perm:main.identityMap` must be an array.');
+        if (!identityMap) {
+            fail(report, 'permanent', '`bcs:perm:main-identity-map.identityMap` is missing. Legacy fallback `bcs:perm:main.identityMap` is also missing.');
             return;
         }
 
-        report.summary.permanentIdentityMapEntries = main.identityMap.length;
+        if (hasSplitPayload) {
+            passInfo(report, 'permanent', 'Permanent identityMap is stored in split local storage.', {
+                key: STORAGE_KEYS.PERM_MAIN_IDENTITY_MAP,
+                entries: identityMap.length,
+                format: splitPayload.format || null,
+                schemaVersion: splitPayload.schemaVersion ?? null,
+                version: splitPayload.version ?? null
+            });
+            if (idxIdentityMap >= 0) {
+                warn(report, 'permanent', 'Legacy inline `bcs:perm:main.identityMap` is still present while split identityMap is available.', {
+                    keyOrder: keys
+                });
+            }
+        } else {
+            if (idxIdentityMap < 0) {
+                fail(report, 'permanent', '`bcs:perm:main.identityMap` is missing.');
+                return;
+            }
+            if (idxDescription >= 0 && idxIdentityMap < idxDescription) {
+                fail(report, 'permanent', '`identityMap` must appear after `descriptionMd` in `bcs:perm:main`.', {
+                    keyOrder: keys
+                });
+            }
+            if (idxTree >= 0 && idxIdentityMap > idxTree) {
+                fail(report, 'permanent', '`identityMap` must appear before `tree` in `bcs:perm:main`.', {
+                    keyOrder: keys
+                });
+            }
+            warn(report, 'permanent', 'Permanent identityMap is using legacy inline storage.', {
+                key: STORAGE_KEYS.PERM_MAIN,
+                entries: identityMap.length
+            });
+        }
+
+        report.summary.permanentIdentityMapEntries = identityMap.length;
         const mapByChromeId = new Map();
         const mapBySyncId = new Map();
 
-        main.identityMap.forEach((entry, index) => {
+        identityMap.forEach((entry, index) => {
             if (!isRecord(entry)) {
                 fail(report, 'permanent', 'identityMap entry must be an object.', { index });
                 return;
@@ -470,7 +522,8 @@
         }
 
         passInfo(report, 'permanent', 'Permanent identityMap contract scan completed.', {
-            entries: main.identityMap.length,
+            storageMode: identityMapStorageMode,
+            entries: identityMap.length,
             treeNodeIds: treeNodeIds.size,
             missingInMap: missingInMap.length,
             staleInMap: staleInMap.length
@@ -516,11 +569,14 @@
 
     function checkPermanentMain(report, storage) {
         const rawMain = storage[STORAGE_KEYS.PERM_MAIN];
+        const rawIdentityMap = storage[STORAGE_KEYS.PERM_MAIN_IDENTITY_MAP];
         const main = readContentPayload(rawMain);
         report.permanentMain = {
             contentKey: STORAGE_KEYS.PERM_MAIN,
             rawContent: cloneJsonValue(rawMain),
-            content: cloneJsonValue(main)
+            content: cloneJsonValue(main),
+            splitIdentityMapKey: STORAGE_KEYS.PERM_MAIN_IDENTITY_MAP,
+            splitIdentityMapRawContent: cloneJsonValue(rawIdentityMap)
         };
         if (!main) {
             fail(report, 'permanent', '`bcs:perm:main` is missing or invalid.');
@@ -550,7 +606,7 @@
             });
         }
 
-        checkPermanentIdentityMap(report, main);
+        checkPermanentIdentityMap(report, main, rawIdentityMap);
 
         return main;
     }
@@ -857,6 +913,15 @@
             count += 1;
         }
 
+        const permanentIdentityMap = readIdentityMapPayload(permanentStorage[STORAGE_KEYS.PERM_MAIN_IDENTITY_MAP])
+            || (report.permanentIdentityMap && report.permanentIdentityMap.content
+                ? report.permanentIdentityMap.content
+                : readIdentityMapPayload(storage[STORAGE_KEYS.PERM_MAIN_IDENTITY_MAP]));
+        if (permanentIdentityMap) {
+            downloadJsonPayload('A书签树 identityMap（本地存储）.json', permanentIdentityMap);
+            count += 1;
+        }
+
         Object.keys(permanentStorage)
             .filter((key) => key.startsWith(STORAGE_KEYS.PERM_COPY_PREFIX))
             .sort()
@@ -914,22 +979,23 @@
         report.bcsLocalStorageExport = buildStorageSnapshot(loaded.source, storage, {});
         report.permanentStorageExportRaw = buildPermanentStorageSnapshot(loaded.source, storage);
         report.permanentStorageExport = report.permanentStorageExportRaw;
+        report.permanentProtocolExport = null;
         try {
             const exportStyle = await buildPermanentExportStyleSnapshot();
             if (exportStyle) {
-                report.permanentStorageExport = exportStyle;
-                passInfo(report, 'export', 'Permanent storage export uses export sandbox pipeline.', {
+                report.permanentProtocolExport = exportStyle;
+                passInfo(report, 'export', 'Permanent protocol export uses export sandbox pipeline.', {
                     mode: exportStyle.mode,
                     source: exportStyle.source,
                     keys: exportStyle.keys
                 });
             } else {
-                warn(report, 'export', 'Permanent storage export falls back to raw local storage snapshot (export bridge unavailable).', {
+                warn(report, 'export', 'Permanent protocol export is unavailable; raw permanent local storage export is still available.', {
                     mode: report.permanentStorageExportRaw.mode
                 });
             }
         } catch (error) {
-            warn(report, 'export', 'Permanent storage export sandbox processing failed; fallback to raw snapshot.', {
+            warn(report, 'export', 'Permanent protocol export sandbox processing failed; raw permanent local storage export is still available.', {
                 message: error && error.message ? error.message : String(error),
                 mode: report.permanentStorageExportRaw.mode
             });
@@ -948,6 +1014,7 @@
         global.__bcsLocalStorageExport = report.bcsLocalStorageExport;
         global.__bcsPermanentStorageExport = report.permanentStorageExport;
         global.__bcsPermanentStorageExportRaw = report.permanentStorageExportRaw;
+        global.__bcsPermanentProtocolExport = report.permanentProtocolExport;
         printReport(report);
         autoDownloadReportSnapshot(report);
         return report;

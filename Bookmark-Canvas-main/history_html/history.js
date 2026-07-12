@@ -209,7 +209,6 @@ async function applyPermanentBookmarkEventsToDomIncremental(events, options = {}
         if (event.type === 'created') {
             const id = event.id;
             const bookmark = event.bookmark;
-            addBookmarkToCache(bookmark);
             const appliedToCachedTree = applyIncrementalCreateToCachedCurrentTree(id, bookmark);
             if (appliedToCachedTree) {
                 refreshPermanentSharedSourceAfterDomPatch('create');
@@ -221,7 +220,6 @@ async function applyPermanentBookmarkEventsToDomIncremental(events, options = {}
         } else if (event.type === 'removed') {
             const id = event.id;
             const removeInfo = event.removeInfo || { parentId: event.parentId, index: event.index };
-            removeBookmarkFromCache(id, removeInfo);
             const appliedToCachedTree = applyIncrementalRemoveFromCachedCurrentTree(id, removeInfo);
             if (appliedToCachedTree) {
                 refreshPermanentSharedSourceAfterDomPatch('remove');
@@ -233,7 +231,6 @@ async function applyPermanentBookmarkEventsToDomIncremental(events, options = {}
         } else if (event.type === 'moved') {
             const id = event.id;
             const moveInfo = event.moveInfo || { parentId: event.parentId, index: event.index, oldParentId: event.oldParentId, oldIndex: event.oldIndex };
-            moveBookmarkInCache(id, moveInfo);
             const appliedToCachedTree = applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
             if (appliedToCachedTree) {
                 refreshPermanentSharedSourceAfterDomPatch('move');
@@ -245,7 +242,6 @@ async function applyPermanentBookmarkEventsToDomIncremental(events, options = {}
         } else if (event.type === 'changed') {
             const id = event.id;
             const changeInfo = event.changeInfo;
-            updateBookmarkInCache(id, changeInfo);
             const appliedToCachedTree = applyIncrementalChangeToCachedCurrentTree(id, changeInfo);
             if (appliedToCachedTree) {
                 refreshPermanentSharedSourceAfterDomPatch('change');
@@ -316,21 +312,7 @@ function extractLastBookmarkTree(storageData) {
     return null;
 }
 ;
-let allBookmarks = [];
 let currentBookmarkData = null;
-
-const bookmarkUrlSet = new Set();
-const bookmarkTitleSet = new Set(); // 书签标题集合（用于标题匹配的实时刷新）
-
-const DATA_CACHE_KEYS = {
-    bookmarks: 'bb_cache_bookmarks_v1'
-};
-
-let bookmarkCacheRestored = false;
-let saveBookmarkCacheTimer = null;
-
-// 预加载缓存
-let cachedBookmarkTree = null;
 
 // 图标预加载缓存
 const preloadedIcons = new Map();
@@ -1789,250 +1771,6 @@ const FaviconCache = {
     }
 };
 
-// =============================================================================
-// 书签缓存读写与 URL 索引
-// =============================================================================
-
-function readCachedValue(key) {
-    return new Promise((resolve) => {
-        const storageArea = getCacheStorageArea();
-        if (storageArea) {
-            storageArea.get([key], (result) => {
-                if (browserAPI.runtime && browserAPI.runtime.lastError) {
-                    console.warn('[Cache] 读取失败:', browserAPI.runtime.lastError.message);
-                    resolve(null);
-                    return;
-                }
-                resolve(result ? result[key] : null);
-            });
-            return;
-        }
-
-        try {
-            const raw = localStorage.getItem(key);
-            resolve(raw ? JSON.parse(raw) : null);
-        } catch (error) {
-            console.warn('[Cache] 读取 localStorage 失败:', error);
-            resolve(null);
-        }
-    });
-}
-
-function writeCachedValue(key, value) {
-    return new Promise((resolve) => {
-        const storageArea = getCacheStorageArea();
-        if (storageArea) {
-            storageArea.set({ [key]: value }, () => {
-                if (browserAPI.runtime && browserAPI.runtime.lastError) {
-                    console.warn('[Cache] 写入失败:', browserAPI.runtime.lastError.message);
-                }
-                resolve();
-            });
-            return;
-        }
-
-        try {
-            __saveLocalStorageJSON(key, value);
-        } catch (error) {
-            console.warn('[Cache] 写入 localStorage 失败:', error);
-        }
-        resolve();
-    });
-}
-
-function normalizeBookmarkCacheEntry(entry) {
-    if (!entry || !entry.url) return null;
-    const timestamp = typeof entry.dateAdded === 'number'
-        ? entry.dateAdded
-        : (entry.dateAdded instanceof Date ? entry.dateAdded.getTime() : Date.now());
-    return {
-        id: entry.id,
-        title: entry.title || entry.url || '',
-        url: entry.url || '',
-        dateAdded: timestamp,
-        parentId: entry.parentId || '',
-        path: entry.path || ''
-    };
-}
-
-async function ensureBookmarkCacheLoaded(skipRender) {
-    if (bookmarkCacheRestored || allBookmarks.length > 0) {
-        return;
-    }
-    try {
-        const cached = await readCachedValue(DATA_CACHE_KEYS.bookmarks);
-        if (cached && Array.isArray(cached.bookmarks)) {
-            allBookmarks = cached.bookmarks
-                .map(normalizeBookmarkCacheEntry)
-                .filter(Boolean);
-            bookmarkCacheRestored = true;
-            rebuildBookmarkUrlSet();
-            ;
-            if (!skipRender) {
-            }
-        }
-    } catch (error) {
-        console.warn('[BookmarkCache] 恢复失败:', error);
-    }
-}
-
-async function persistBookmarkCache() {
-    try {
-        const payload = {
-            timestamp: Date.now(),
-            bookmarks: allBookmarks.map(normalizeBookmarkCacheEntry).filter(Boolean)
-        };
-        await writeCachedValue(DATA_CACHE_KEYS.bookmarks, payload);
-        ;
-    } catch (error) {
-        console.warn('[BookmarkCache] 保存失败:', error);
-    }
-}
-
-function scheduleBookmarkCacheSave() {
-    if (saveBookmarkCacheTimer) {
-        clearTimeout(saveBookmarkCacheTimer);
-    }
-    saveBookmarkCacheTimer = setTimeout(() => {
-        saveBookmarkCacheTimer = null;
-        persistBookmarkCache();
-    }, 600);
-}
-
-function handleBookmarkCacheMutation(forceRender = true) {
-    bookmarkCacheRestored = true;
-    scheduleBookmarkCacheSave();
-}
-
-function addBookmarkToCache(bookmark) {
-    const normalized = normalizeBookmarkCacheEntry(bookmark);
-    if (!normalized) return;
-    allBookmarks.push(normalized);
-    addUrlToBookmarkSet(normalized.url);
-    const normalizedTitle = normalizeBookmarkTitle(normalized.title);
-    if (normalizedTitle) {
-        bookmarkTitleSet.add(normalizedTitle);
-    }
-    handleBookmarkCacheMutation(true);
-}
-
-function removeBookmarkFromCache(bookmarkId, removeInfo = null) {
-    if (!bookmarkId) return;
-    const descendants = new Set([String(bookmarkId)]);
-    const removedNode = removeInfo && (removeInfo.node || removeInfo.bookmark);
-    if (removedNode && Array.isArray(removedNode.children)) {
-        const stack = [...removedNode.children];
-        while (stack.length) {
-            const child = stack.pop();
-            if (child) {
-                if (child.id) descendants.add(String(child.id));
-                if (Array.isArray(child.children)) stack.push(...child.children);
-            }
-        }
-    }
-
-    // Pre-collect all URLs of bookmarks that are NOT being deleted to make check O(1)
-    const remainingUrls = new Set();
-    for (const item of allBookmarks) {
-        if (!descendants.has(String(item.id))) {
-            remainingUrls.add(item.url);
-        }
-    }
-
-    let changed = false;
-    allBookmarks = allBookmarks.filter(item => {
-        if (descendants.has(String(item.id))) {
-            if (!remainingUrls.has(item.url)) {
-                removeUrlFromBookmarkSet(item.url);
-            }
-            changed = true;
-            return false;
-        }
-        return true;
-    });
-
-    if (changed) {
-        handleBookmarkCacheMutation(true);
-    }
-}
-
-function updateBookmarkInCache(bookmarkId, changeInfo = {}) {
-    if (!bookmarkId) return;
-    const target = allBookmarks.find(item => item.id === bookmarkId);
-    if (!target) return;
-    const prevUrl = target.url;
-    if (typeof changeInfo.title !== 'undefined') {
-        target.title = changeInfo.title;
-        const normalizedTitle = normalizeBookmarkTitle(changeInfo.title);
-        if (normalizedTitle) {
-            bookmarkTitleSet.add(normalizedTitle);
-        }
-    }
-    if (typeof changeInfo.url !== 'undefined') {
-        target.url = changeInfo.url;
-        const isUrlShared = allBookmarks.some(item => item.id !== bookmarkId && item.url === prevUrl);
-        if (!isUrlShared) {
-            removeUrlFromBookmarkSet(prevUrl);
-        }
-        addUrlToBookmarkSet(changeInfo.url);
-    }
-    handleBookmarkCacheMutation(true);
-}
-
-function moveBookmarkInCache(bookmarkId, moveInfo = {}) {
-    if (!bookmarkId) return;
-    const target = allBookmarks.find(item => item.id === bookmarkId);
-    if (!target) return;
-    if (typeof moveInfo.parentId !== 'undefined') {
-        target.parentId = moveInfo.parentId;
-    }
-    handleBookmarkCacheMutation(false);
-}
-
-function normalizeBookmarkTitle(title) {
-    if (!title || typeof title !== 'string') return null;
-    const trimmed = title.trim();
-    return trimmed || null;
-}
-
-function normalizeBookmarkUrl(url) {
-    if (!url || typeof url !== 'string') return null;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        return null;
-    }
-    return url.trim();
-}
-
-function rebuildBookmarkUrlSet() {
-    bookmarkUrlSet.clear();
-    bookmarkTitleSet.clear();
-    allBookmarks.forEach(item => {
-        const normalized = normalizeBookmarkUrl(item.url);
-        if (normalized) {
-            bookmarkUrlSet.add(normalized);
-        }
-        const normalizedTitle = normalizeBookmarkTitle(item.title);
-        if (normalizedTitle) {
-            bookmarkTitleSet.add(normalizedTitle);
-        }
-    });
-}
-
-function addUrlToBookmarkSet(url) {
-    const normalized = normalizeBookmarkUrl(url);
-    if (normalized) {
-        bookmarkUrlSet.add(normalized);
-    }
-}
-
-function removeUrlFromBookmarkSet(url) {
-    const normalized = normalizeBookmarkUrl(url);
-    if (normalized) {
-        bookmarkUrlSet.delete(normalized);
-    }
-}
-
-
 // =================================================================================
 // III. CANVAS VIEW SURFACE, PERMANENT COPIES & VIEW-STATE STORAGE (Canvas 视图分区、永久栏目副本与视图状态存储)
 // =================================================================================
@@ -2140,18 +1878,6 @@ async function __initCanvasViewSurfaceKey() {
 }
 
 __setCanvasViewSurfaceGlobals({ mode: isSidePanelMode ? 'sidepanel' : 'page' });
-
-function getCacheStorageArea() {
-    try {
-        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
-            return browserAPI.storage.local;
-        }
-    } catch (_) {
-        // ignore
-    }
-    return null;
-}
-
 
 // =============================================================================
 // Canvas 永久栏目副本：渲染同步（主永久栏目 -> 所有副本）
@@ -8815,20 +8541,17 @@ function initializeUI() {
 // =============================================================================
 
 async function loadAllData(options = {}) {
-    const { skipRender = false } = options;
-    ;
+    void options;
 
     try {
-        await ensureBookmarkCacheLoaded(skipRender);
+        setTimeout(async () => {
+            try {
+                await preloadCommonIcons();
+            } catch (err) {
+                console.error('[loadAllData] Background favicon preload failed:', err);
+            }
+        }, 150);
 
-        const bookmarkTree = await loadBookmarkTree();
-        allBookmarks = flattenBookmarkTree(bookmarkTree);
-        rebuildBookmarkUrlSet();
-        bookmarkCacheRestored = true;
-        await persistBookmarkCache();
-        cachedBookmarkTree = bookmarkTree;
-
-        ;
     } catch (error) {
         console.error('[loadAllData] 加载数据失败:', error);
         showError('加载数据失败');
@@ -8840,10 +8563,19 @@ async function preloadCommonIcons() {
     ;
 
     try {
-        // 获取当前所有书签的 URL，过滤掉无效的
-        const urls = allBookmarks
-            .map(b => b.url)
-            .filter(url => url && url.trim() && (url.startsWith('http://') || url.startsWith('https://')));
+        if (!cachedCurrentTree || !cachedCurrentTree[0]) return;
+        const urls = [];
+        const traverse = (node) => {
+            if (!node) return;
+            const url = typeof node.url === 'string' ? node.url.trim() : '';
+            if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+                urls.push(url);
+            }
+            if (Array.isArray(node.children)) {
+                node.children.forEach(traverse);
+            }
+        };
+        traverse(cachedCurrentTree[0]);
 
         if (urls.length === 0) {
             ;
@@ -8941,38 +8673,6 @@ async function warmupFaviconCache(bookmarkUrls) {
     } catch (error) {
         console.warn('[Favicon预热] 失败:', error);
     }
-}
-
-function loadBookmarkTree() {
-    return new Promise((resolve) => {
-        browserAPI.bookmarks.getTree((tree) => {
-            resolve(tree[0]);
-        });
-    });
-}
-
-function flattenBookmarkTree(node, parentPath = '') {
-    const bookmarks = [];
-    const currentPath = parentPath ? `${parentPath}/${node.title}` : node.title;
-
-    if (node.url) {
-        bookmarks.push({
-            id: node.id,
-            title: node.title,
-            url: node.url,
-            dateAdded: node.dateAdded,
-            path: currentPath,
-            parentId: node.parentId
-        });
-    }
-
-    if (node.children) {
-        node.children.forEach(child => {
-            bookmarks.push(...flattenBookmarkTree(child, currentPath));
-        });
-    }
-
-    return bookmarks;
 }
 
 // =============================================================================
@@ -12749,16 +12449,80 @@ function shouldSkipForceTreeRefreshForNoNetChange() {
     return !!(lastTreeFingerprint && cachedTreeData);
 }
 
+async function getCanvasPermanentBookmarkDirtyState() {
+    try {
+        if (!(browserAPI && browserAPI.runtime && typeof browserAPI.runtime.sendMessage === 'function')) {
+            return { success: false, dirty: false, version: 0 };
+        }
+        const response = await browserAPI.runtime.sendMessage({
+            action: 'getCanvasPermanentBookmarkDirtyState'
+        });
+        if (response && response.success) {
+            return {
+                ...response,
+                dirty: response.dirty === true,
+                version: Number(response.version) || 0
+            };
+        }
+    } catch (_) { }
+    return { success: false, dirty: false, version: 0 };
+}
+
+async function clearCanvasPermanentBookmarkDirtyState(expectedVersion = null) {
+    try {
+        if (!(browserAPI && browserAPI.runtime && typeof browserAPI.runtime.sendMessage === 'function')) {
+            return { success: false };
+        }
+        return await browserAPI.runtime.sendMessage({
+            action: 'clearCanvasPermanentBookmarkDirtyState',
+            expectedVersion
+        });
+    } catch (_) {
+        return { success: false };
+    }
+}
+
 // 从 background.js 获取书签树快照（优先走缓存，失败再直连 getTree）
 async function getBookmarkTreeSnapshot() {
     try {
         const bridge = window.CanvasProtocolBridge;
         if (bridge && typeof bridge.readPermanentTreeSnapshotFromBcs === 'function') {
-            const tree = await bridge.readPermanentTreeSnapshotFromBcs({
-                assumeCleanWhenMissingState: true
-            });
+            const dirtyState = await getCanvasPermanentBookmarkDirtyState();
+            if (dirtyState && dirtyState.dirty && typeof bridge.syncPermanentMainTreeFromChromeBookmarks === 'function') {
+                try {
+                    const syncResult = await bridge.syncPermanentMainTreeFromChromeBookmarks({
+                        reason: 'background-bookmark-dirty-open',
+                        assumeClean: false
+                    });
+                    if (syncResult) {
+                        try {
+                            if (typeof bridge.clearPermanentTreeRenderCaches === 'function') {
+                                bridge.clearPermanentTreeRenderCaches();
+                            }
+                        } catch (_) { }
+                        await clearCanvasPermanentBookmarkDirtyState(dirtyState.version);
+                    }
+                } catch (syncError) {
+                    console.warn('[TreeSnapshot] 后台书签 dirty 同步失败，继续读取现有永久 JSON:', syncError);
+                }
+            }
+            const readOptions = {
+                assumeCleanWhenMissingState: true,
+                treeOnly: true,
+                skipIdentityMapHeal: true
+            };
+            if (typeof bridge.readPermanentTreeSnapshotRecordFromBcs === 'function') {
+                const record = await bridge.readPermanentTreeSnapshotRecordFromBcs(readOptions);
+                if (record && Array.isArray(record.tree) && record.tree.length) {
+                    return {
+                        tree: record.tree,
+                        version: record.version ?? null
+                    };
+                }
+            }
+            const tree = await bridge.readPermanentTreeSnapshotFromBcs(readOptions);
             if (Array.isArray(tree) && tree.length) {
-                return { tree, version: null };
+                return { tree, version: tree.__bcsSnapshotVersion ?? null };
             }
         }
     } catch (e) {
@@ -12786,6 +12550,7 @@ function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) 
             permanentMainStorageSyncTimer = null;
             const bridge = window.CanvasProtocolBridge;
             if (!bridge || typeof bridge.syncPermanentMainTreeFromChromeBookmarks !== 'function') return;
+            const dirtyState = await getCanvasPermanentBookmarkDirtyState();
             bridge.syncPermanentMainTreeFromChromeBookmarks({
                 reason,
                 assumeClean: false
@@ -12799,6 +12564,9 @@ function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) 
                     if (typeof bridge.clearPermanentTreeRenderCaches === 'function') {
                         bridge.clearPermanentTreeRenderCaches();
                     }
+                } catch (_) { }
+                try {
+                    clearCanvasPermanentBookmarkDirtyState(dirtyState && dirtyState.version).catch(() => { });
                 } catch (_) { }
                 if (currentView === 'canvas') {
                     try { scheduleBulkBookmarkMutationTreeRefresh('post-main-storage-sync', 120); } catch (_) { }
@@ -16177,7 +15945,6 @@ async function handleBookmarkCreateRealtime(id, bookmark, options = {}) {
             bookmark
         }, 'onCreated');
     }
-    addBookmarkToCache(bookmark);
 
     if (currentView === 'canvas') {
         const appliedToCachedTree = applyIncrementalCreateToCachedCurrentTree(id, bookmark);
@@ -16202,7 +15969,6 @@ async function handleBookmarkRemoveRealtime(id, removeInfo, options = {}) {
             removeInfo: enrichedRemoveInfo || removeInfo
         }, 'onRemoved');
     }
-    removeBookmarkFromCache(id, enrichedRemoveInfo || removeInfo);
 
     clearIncrementalDeletedSnapshots('onRemoved');
 
@@ -16228,7 +15994,6 @@ async function handleBookmarkMoveRealtime(id, moveInfo, options = {}) {
             moveInfo
         }, 'onMoved');
     }
-    moveBookmarkInCache(id, moveInfo);
 
     if (currentView === 'canvas') {
         const appliedToCachedTree = applyIncrementalMoveToCachedCurrentTree(id, moveInfo);
@@ -16304,19 +16069,6 @@ async function flushPendingBookmarkMutationEvents(reason = '') {
                 if (isBulk) {
                     ;
 
-                    batch.forEach((event) => {
-                        if (event.type === 'created') {
-                            addBookmarkToCache(event.bookmark);
-                            return;
-                        }
-                        if (event.type === 'removed') {
-                            removeBookmarkFromCache(event.id, event.removeInfo);
-                            return;
-                        }
-                        if (event.type === 'moved') {
-                            moveBookmarkInCache(event.id, event.moveInfo);
-                        }
-                    });
                     schedulePermanentMainStorageSyncFromChrome('bulk-bookmark-mutation', 0);
 
                     if (currentView === 'canvas') {
@@ -16416,7 +16168,6 @@ function setupBookmarkListener() {
                 id: String(id),
                 changeInfo
             }, 'onChanged');
-            updateBookmarkInCache(id, changeInfo);
 
             // 支持 canvas 视图（包含永久栏目的书签树）
             if (currentView === 'canvas') {
@@ -16502,7 +16253,6 @@ async function refreshTreeViewIfVisible() {
         ;
 
         // 清除缓存，强制刷新
-        cachedBookmarkTree = null;
         cachedTreeData = null;
         lastTreeFingerprint = null;
         lastTreeSnapshotVersion = null;

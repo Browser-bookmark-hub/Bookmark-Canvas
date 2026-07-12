@@ -336,7 +336,7 @@ window.SearchContextManager = {
             try {
                 if (typeof window.currentView === 'string' && window.currentView === 'canvas') {
                     if (typeof setSearchMode === 'function' && typeof searchUiState === 'object' && searchUiState) {
-                        setSearchMode(searchUiState.activeMode || 'bookmark');
+                        setSearchMode(searchUiState.activeMode || 'bookmark', { skipIndexLoad: true });
                         return;
                     }
                 }
@@ -2172,9 +2172,11 @@ function initSearchClearButton() {
 function initSearchEvents() {
     initSearchClearButton();
     if (typeof SearchIndexManager !== 'undefined' && typeof SearchIndexManager.init === 'function') {
-        SearchIndexManager.init().catch(err => {
-            console.error('[Search] Failed to initialize SearchIndexManager in initSearchEvents:', err);
-        });
+        setTimeout(() => {
+            SearchIndexManager.init().catch(err => {
+                console.error('[Search] Failed to initialize SearchIndexManager in initSearchEvents:', err);
+            });
+        }, 800);
     }
 
     const searchAreaExitBtn = document.getElementById('searchAreaExitBtn');
@@ -2958,7 +2960,7 @@ async function setSearchMode(modeKey, options = {}) {
     renderSearchModeUI();
 
     // 确保异步加载目标模式的分片索引，加载完成后再触发搜索渲染，避免回退到同步内存构建
-    if (typeof ensureIndexForModeLoaded === 'function') {
+    if (typeof ensureIndexForModeLoaded === 'function' && !(options && options.skipIndexLoad === true)) {
         try {
             await ensureIndexForModeLoaded(modeKey);
         } catch (_) {}
@@ -3473,7 +3475,7 @@ function initSearchModeUI() {
     } catch (_) { }
 
     // [Fix] Ensure placeholder and UI are synced on init
-    setSearchMode(searchUiState.activeMode);
+    setSearchMode(searchUiState.activeMode, { skipIndexLoad: true });
     applyFullscreenDefaultSearchMode({ onlyWhenInputEmpty: true });
 
     const trigger = document.getElementById('searchModeTrigger');
@@ -13461,7 +13463,7 @@ document.addEventListener('DOMContentLoaded', () => {
 document.addEventListener('DOMContentLoaded', () => {
     // Force refresh mode UI to update placeholder
     if (typeof window.setSearchMode === 'function' && window.searchUiState && window.searchUiState.activeMode) {
-        window.setSearchMode(window.searchUiState.activeMode);
+        window.setSearchMode(window.searchUiState.activeMode, { skipIndexLoad: true });
     }
 });
 
@@ -13475,7 +13477,7 @@ document.addEventListener('DOMContentLoaded', () => {
 document.addEventListener('DOMContentLoaded', () => {
     // 1. Force placeholder update
     if (window.setSearchMode && window.searchUiState && window.searchUiState.activeMode) {
-        window.setSearchMode(window.searchUiState.activeMode);
+        window.setSearchMode(window.searchUiState.activeMode, { skipIndexLoad: true });
     }
 
     // 2. Add extra safeguard for button focus cycling IF it wasn't added by previous steps correctly
@@ -13499,7 +13501,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function updateSearchUILanguage() {
     // Sync Placeholder
     if (typeof setSearchMode === 'function' && typeof searchUiState !== 'undefined') {
-        setSearchMode(searchUiState.activeMode);
+        setSearchMode(searchUiState.activeMode, { skipIndexLoad: true });
     }
 
     // Sync Menu if open

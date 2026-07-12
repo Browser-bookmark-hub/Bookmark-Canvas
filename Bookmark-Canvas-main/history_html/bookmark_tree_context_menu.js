@@ -3192,8 +3192,10 @@ async function openFolderWithManualSelection(urls, title, context = null) {
     }
 }
 
-// 初始化时加载手动选择
-loadManualSelection();
+// 初始化时延迟加载手动选择（避开首屏加载）
+setTimeout(() => {
+    try { loadManualSelection(); } catch (_) {}
+}, 600);
 
 // 导出到全局供其他模块调用
 try {

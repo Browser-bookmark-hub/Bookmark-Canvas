@@ -47,6 +47,9 @@ const BCS_META_KEY = 'bcs:meta';
 const BCS_CANVAS_KEY = 'bcs:canvas';
 const BCS_SECTION_PREFIX = 'bcs:section:';
 const BCS_PERM_MAIN_KEY = 'bcs:perm:main';
+const BCS_PERM_MAIN_IDENTITY_MAP_KEY = 'bcs:perm:main-identity-map';
+const BCS_PERM_MAIN_TREE_LEGACY_KEY = 'bcs:perm:main-tree';
+const BCS_PERM_MAIN_TREE_MIGRATION_LEGACY_KEY = 'bcs:perm:main-tree-migration-v1';
 const BCS_PERM_COPY_PREFIX = 'bcs:perm:copy-';
 const BCS_SIGNAL_KEY = 'bcs:signal';
 const BCS_META_SCHEMA_VERSION = 5;
@@ -73,6 +76,7 @@ const __BCS_ID_TOKEN_LENGTH = 7;
 const __bcsIssuedSyncIds = new Set();
 const __bcsIssuedTempIds = new Set();
 const __bcsIssuedTempSectionIds = new Set();
+let __legacyPermanentTreeCacheCleanupPromise = null;
 
 function __formatTodayYYYYMMDD() {
     const d = new Date();
@@ -1070,6 +1074,57 @@ function __getCanvasBookmarksApiForPermanentStorage() {
     return null;
 }
 
+function __getCanvasRuntimeApiForPermanentStorage() {
+    try {
+        if (typeof browserAPI !== 'undefined' && browserAPI && browserAPI.runtime) return browserAPI.runtime;
+    } catch (_) { }
+    try {
+        if (typeof chrome !== 'undefined' && chrome && chrome.runtime) return chrome.runtime;
+    } catch (_) { }
+    try {
+        if (typeof browser !== 'undefined' && browser && browser.runtime) return browser.runtime;
+    } catch (_) { }
+    return null;
+}
+
+function __sendCanvasPermanentStorageRuntimeMessage(message) {
+    const runtime = __getCanvasRuntimeApiForPermanentStorage();
+    if (!runtime || typeof runtime.sendMessage !== 'function') {
+        return Promise.resolve({ success: false });
+    }
+    return new Promise((resolve) => {
+        try {
+            const maybePromise = runtime.sendMessage(message, (response) => {
+                try {
+                    if (runtime.lastError) {
+                        resolve({ success: false, error: runtime.lastError.message || String(runtime.lastError) });
+                        return;
+                    }
+                } catch (_) { }
+                resolve(response || { success: false });
+            });
+            if (maybePromise && typeof maybePromise.then === 'function') {
+                maybePromise.then((response) => resolve(response || { success: false })).catch(() => resolve({ success: false }));
+            }
+        } catch (_) {
+            resolve({ success: false });
+        }
+    });
+}
+
+async function __getCanvasPermanentBookmarkDirtyStateFromBackground() {
+    return await __sendCanvasPermanentStorageRuntimeMessage({
+        action: 'getCanvasPermanentBookmarkDirtyState'
+    });
+}
+
+async function __clearCanvasPermanentBookmarkDirtyStateInBackground(expectedVersion = null) {
+    return await __sendCanvasPermanentStorageRuntimeMessage({
+        action: 'clearCanvasPermanentBookmarkDirtyState',
+        expectedVersion
+    });
+}
+
 function __getPermanentChromeTreeForStorage() {
     const api = __getCanvasBookmarksApiForPermanentStorage();
     if (!api || typeof api.getTree !== 'function') {
@@ -1089,10 +1144,118 @@ function __getPermanentChromeTreeForStorage() {
     });
 }
 
-function __readPermanentContentPayload(rawInput) {
+function __readPermanentContentPayload(rawInput, options = {}) {
     if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) return null;
     if (rawInput.sectionType && String(rawInput.sectionType) !== 'permanent') return null;
+    if (options && options.treeOnly === true) {
+        const tree = __cloneCanvasProtocolJson(rawInput.tree);
+        if (!tree || typeof tree !== 'object') return null;
+        return {
+            format: rawInput.format,
+            schemaVersion: rawInput.schemaVersion,
+            sectionType: rawInput.sectionType || 'permanent',
+            slot: rawInput.slot,
+            title: rawInput.title,
+            version: rawInput.version,
+            fileRole: rawInput.fileRole,
+            fileNote: rawInput.fileNote,
+            descriptionMd: rawInput.descriptionMd,
+            tree
+        };
+    }
     return __cloneCanvasProtocolJson(rawInput) || null;
+}
+
+function __normalizePermanentStorageVersion(value) {
+    const text = String(value || '').trim();
+    return text || null;
+}
+
+function __makePermanentStorageVersion() {
+    return `${Date.now().toString(36)}-${__makeBcsIdToken(6)}`;
+}
+
+function __readPermanentIdentityMapPayload(rawInput) {
+    if (Array.isArray(rawInput)) return __normalizeIdentityMapArray(rawInput);
+    if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) return null;
+    const list = Array.isArray(rawInput.identityMap) ? rawInput.identityMap : null;
+    return list ? __normalizeIdentityMapArray(list) : null;
+}
+
+function __buildPermanentIdentityMapPayload(identityMapInput, options = {}) {
+    const identityMap = __normalizeIdentityMapArray(Array.isArray(identityMapInput) ? identityMapInput : []);
+    return {
+        format: 'bookmark-canvas-permanent-identity-map',
+        schemaVersion: 1,
+        sectionType: 'permanent',
+        slot: String(options && options.slot || 'A'),
+        version: __normalizePermanentStorageVersion(options && options.version) || __makePermanentStorageVersion(),
+        updatedAt: Date.now(),
+        identityMap
+    };
+}
+
+async function __writePermanentIdentityMapToBcs(identityMapInput, options = {}) {
+    const payload = __buildPermanentIdentityMapPayload(identityMapInput, options);
+    await __bcsStorageSet({
+        [BCS_PERM_MAIN_IDENTITY_MAP_KEY]: payload
+    }, { immediate: options && options.immediate !== false });
+    return payload;
+}
+
+function __cleanupLegacyPermanentTreeCacheKeys() {
+    if (__legacyPermanentTreeCacheCleanupPromise) return __legacyPermanentTreeCacheCleanupPromise;
+    __legacyPermanentTreeCacheCleanupPromise = __bcsStorageRemove([
+        BCS_PERM_MAIN_TREE_LEGACY_KEY,
+        BCS_PERM_MAIN_TREE_MIGRATION_LEGACY_KEY
+    ]).catch(() => false).finally(() => {
+        __legacyPermanentTreeCacheCleanupPromise = null;
+    });
+    return __legacyPermanentTreeCacheCleanupPromise;
+}
+
+function __buildPermanentMainStorageContentPayload(content, treeRoot, options = {}) {
+    const slot = String(content && content.slot || 'A');
+    return {
+        format: content && content.format || __CANVAS_SECTION_JSON_FORMAT,
+        schemaVersion: 3,
+        sectionType: 'permanent',
+        slot,
+        title: String(content && content.title || __getPermanentSectionDisplayTitle(__getLang().isEn)),
+        descriptionMd: String((content && content.descriptionMd != null) ? content.descriptionMd : ''),
+        version: __normalizePermanentStorageVersion(options && options.version)
+            || __normalizePermanentStorageVersion(content && content.version)
+            || __makePermanentStorageVersion(),
+        fileRole: 'primary',
+        fileNote: String(content && content.fileNote ? content.fileNote : (__getLang().isEn
+            ? 'Primary permanent file: canonical bookmark tree source.'
+            : '永久栏目主文件：书签树的规范真相源。')),
+        tree: treeRoot
+    };
+}
+
+async function __migrateInlinePermanentIdentityMapToSplitStorage(rawMain, content, options = {}) {
+    if (!rawMain || typeof rawMain !== 'object' || !Array.isArray(rawMain.identityMap)) return false;
+    if (!content || !content.tree || typeof content.tree !== 'object') return false;
+    const identityMap = __readPermanentIdentityMapPayload(rawMain.identityMap) || [];
+    const storageContent = __buildPermanentMainStorageContentPayload(content, content.tree, {
+        version: rawMain.version || content.version
+    });
+    const identityMapPayload = __buildPermanentIdentityMapPayload(identityMap, {
+        slot: storageContent.slot,
+        version: rawMain.identityMapVersion || rawMain.version
+    });
+    try {
+        await __bcsStorageSet({
+            [BCS_PERM_MAIN_KEY]: storageContent,
+            [BCS_PERM_MAIN_IDENTITY_MAP_KEY]: identityMapPayload
+        }, { immediate: options && options.immediate !== false });
+        try { __cleanupLegacyPermanentTreeCacheKeys(); } catch (_) { }
+        content.version = storageContent.version;
+        return true;
+    } catch (_) {
+        return false;
+    }
 }
 
 function __coercePermanentTreeRootInput(treeInput) {
@@ -1415,9 +1578,11 @@ function __buildPermanentMainSyncPayload(contentInput, options = {}) {
 // Entry shape: { id: <chromeBookmarkId>, syncId: <stable-cross-device-id>, ...extras }
 // `id` and `syncId` form the "minimum cell" — both must be present, and deleting one
 // implicitly deletes the cell. Extras (`tags`, etc.) are introduced by section 3 of the
-// design. The identityMap field lives in `bcs:perm:main` between `descriptionMd` and
-// `tree` (the doc requires that exact ordering). Internally we expose a non-enumerable
-// lookup index `content.__identityMapIndex__` for O(1) chromeId/syncId lookups.
+// design. The logical protocol still exposes identityMap between `descriptionMd` and
+// `tree`. For local runtime storage, identityMap is physically split into
+// `bcs:perm:main-identity-map` so tree-only reads do not deserialize the mapping table.
+// Internally we expose a non-enumerable lookup index `content.__identityMapIndex__`
+// for O(1) chromeId/syncId lookups.
 
 function __normalizeNoteInput(raw) {
     if (raw === undefined || raw === null) return '';
@@ -2082,9 +2247,14 @@ function __applyIdentityMapDeltaFromBookmarkEvents(content, events) {
 
 
 async function __readPermanentMainContentFromBcs(options = {}) {
-    const storage = await __bcsStorageGet([BCS_PERM_MAIN_KEY]);
+    const treeOnly = !!(options && options.treeOnly === true);
+    const storage = await __bcsStorageGet(treeOnly
+        ? [BCS_PERM_MAIN_KEY]
+        : [BCS_PERM_MAIN_KEY, BCS_PERM_MAIN_IDENTITY_MAP_KEY]);
     const raw = storage ? storage[BCS_PERM_MAIN_KEY] : null;
-    const content = __readPermanentContentPayload(raw);
+    const content = __readPermanentContentPayload(raw, {
+        treeOnly
+    });
     if (!content || !content.tree || typeof content.tree !== 'object') {
         return null;
     }
@@ -2109,13 +2279,32 @@ async function __readPermanentMainContentFromBcs(options = {}) {
             preserveRawSource: true
         });
     }
-    if (!Array.isArray(content.identityMap)) {
-        content.identityMap = __bootstrapIdentityMapFromTree(content.tree);
-    } else {
-        content.identityMap = __normalizeIdentityMapArray(content.identityMap);
+    if (treeOnly) {
+        try {
+            await __migrateInlinePermanentIdentityMapToSplitStorage(raw, content, {
+                immediate: true
+            });
+        } catch (_) { }
     }
-    if (!(options && options.skipIdentityMapHeal === true)) {
-        __verifyAndHealIdentityMap(content);
+    if (!treeOnly) {
+        const splitIdentityMap = __readPermanentIdentityMapPayload(storage ? storage[BCS_PERM_MAIN_IDENTITY_MAP_KEY] : null);
+        const inlineIdentityMap = __readPermanentIdentityMapPayload(raw && raw.identityMap);
+        if (splitIdentityMap && splitIdentityMap.length) {
+            content.identityMap = splitIdentityMap;
+        } else if (inlineIdentityMap && inlineIdentityMap.length) {
+            content.identityMap = inlineIdentityMap;
+            try {
+                await __migrateInlinePermanentIdentityMapToSplitStorage(raw, content, {
+                    immediate: true
+                });
+            } catch (_) { }
+        }
+        if (!Array.isArray(content.identityMap)) {
+            content.identityMap = __bootstrapIdentityMapFromTree(content.tree);
+        }
+        if (!(options && options.skipIdentityMapHeal === true)) {
+            __verifyAndHealIdentityMap(content);
+        }
     }
 
     return content;
@@ -2133,34 +2322,36 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
     if (!identityMap || !identityMap.length) {
         identityMap = __bootstrapIdentityMapFromTree(treeRoot);
     }
-    // Field order is contractual per the spec: descriptionMd → identityMap → fileRole/Note → tree.
+    const storageContent = __buildPermanentMainStorageContentPayload(content, treeRoot, {
+        version: options && options.version
+    });
     const nextContent = {
-        format: content.format || __CANVAS_SECTION_JSON_FORMAT,
-        schemaVersion: 3,
-        sectionType: 'permanent',
-        slot: String(content.slot || 'A'),
-        title: String(content.title || __getPermanentSectionDisplayTitle(__getLang().isEn)),
-        descriptionMd: String(content.descriptionMd == null ? '' : content.descriptionMd),
-        identityMap,
-        fileRole: 'primary',
-        fileNote: String(content.fileNote || (__getLang().isEn
-            ? 'Primary permanent file: canonical bookmark tree source.'
-            : '永久栏目主文件：书签树的规范真相源。')),
-        tree: treeRoot
+        ...storageContent,
+        identityMap
     };
     // The import flow already finalized the identityMap with syncIds sourced exclusively
     // from the import package; we MUST NOT let __verifyAndHealIdentityMap mint fresh syncIds
     // for unmatched chromeIds in that case (doc commit2298735 fix plan §2.3 step 4).
     if (!(options && options.skipIdentityMapHeal === true)) {
         __verifyAndHealIdentityMap(nextContent);
+        identityMap = Array.isArray(nextContent.identityMap) ? __normalizeIdentityMapArray(nextContent.identityMap) : identityMap;
+        nextContent.identityMap = identityMap;
     }
+    const identityMapPayload = __buildPermanentIdentityMapPayload(identityMap, {
+        slot: storageContent.slot,
+        version: __normalizePermanentStorageVersion(options && options.identityMapVersion)
+    });
     // Keep write paths deterministic for callers that immediately read-and-render
     // (e.g. overwrite import). Fire-and-forget can race the next render with stale BCS.
     await __bcsStorageSet({
-        [BCS_PERM_MAIN_KEY]: nextContent
+        [BCS_PERM_MAIN_KEY]: storageContent,
+        [BCS_PERM_MAIN_IDENTITY_MAP_KEY]: identityMapPayload
     }, { immediate: options && options.immediate !== false });
+    try { __cleanupLegacyPermanentTreeCacheKeys(); } catch (_) { }
     return {
-        content: nextContent
+        content: nextContent,
+        version: storageContent.version,
+        identityMapVersion: identityMapPayload.version
     };
 }
 
@@ -2178,7 +2369,7 @@ async function __migratePermanentMainContentFromChromeTree(options = {}) {
 }
 
 async function __ensurePermanentMainContentInBcs(options = {}) {
-    const existing = await __readPermanentMainContentFromBcs();
+    const existing = await __readPermanentMainContentFromBcs(options);
     if (existing && !(options && options.forceMigrateFromChrome === true)) return existing;
 
     const migrated = await __migratePermanentMainContentFromChromeTree();
@@ -2186,11 +2377,24 @@ async function __ensurePermanentMainContentInBcs(options = {}) {
 }
 
 
-async function __readPermanentTreeSnapshotFromBcs() {
-    const content = await __ensurePermanentMainContentInBcs();
+async function __readPermanentTreeSnapshotFromBcs(options = {}) {
+    const record = await __readPermanentTreeSnapshotRecordFromBcs(options);
+    return record && Array.isArray(record.tree) ? record.tree : null;
+}
+
+async function __readPermanentTreeSnapshotRecordFromBcs(options = {}) {
+    const content = await __ensurePermanentMainContentInBcs({
+        ...(options && typeof options === 'object' ? options : {}),
+        treeOnly: true,
+        skipIdentityMapHeal: true
+    });
     if (!content || !content.tree) return null;
     const tree = __cloneCanvasProtocolJson([content.tree]);
-    return Array.isArray(tree) ? tree : null;
+    if (!Array.isArray(tree)) return null;
+    return {
+        tree,
+        version: content.version ?? null
+    };
 }
 
 
@@ -7286,9 +7490,17 @@ function __buildCanvasTempStateProtocolView(stateInput, options = {}) {
 // codebase, so we do exactly that, then mark the migration as done.
 
 async function __migrateLegacyTempSectionKeysOnce() {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('bcs_legacy_temp_migration_done') === 'true') {
+        return { skipped: true };
+    }
     try {
         const flag = await __bcsStorageGet([BCS_LEGACY_TEMP_MIGRATION_DONE_KEY]);
-        if (flag && flag[BCS_LEGACY_TEMP_MIGRATION_DONE_KEY]) return { skipped: true };
+        if (flag && flag[BCS_LEGACY_TEMP_MIGRATION_DONE_KEY]) {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('bcs_legacy_temp_migration_done', 'true');
+            }
+            return { skipped: true };
+        }
     } catch (_) { return { skipped: true }; }
 
     const all = await __bcsStorageGetAll();
@@ -7310,7 +7522,12 @@ async function __migrateLegacyTempSectionKeysOnce() {
         try { ; } catch (_) {}
     }
 
-    try { await __bcsStorageSet({ [BCS_LEGACY_TEMP_MIGRATION_DONE_KEY]: { migratedAt: Date.now(), removed: toRemove.length } }, { immediate: true }); } catch (_) {}
+    try {
+        await __bcsStorageSet({ [BCS_LEGACY_TEMP_MIGRATION_DONE_KEY]: { migratedAt: Date.now(), removed: toRemove.length } }, { immediate: true });
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('bcs_legacy_temp_migration_done', 'true');
+        }
+    } catch (_) {}
     return { removed: toRemove.length };
 }
 
@@ -7338,8 +7555,25 @@ async function __buildExportSandbox(options = {}) {
     if (!(options && options.skipRuntimeFlush === true)) {
         await __flushRuntimeCanvasStateToBcs(options);
     }
+    if (!(options && options.skipBackgroundDirtySync === true)) {
+        try {
+            const dirtyState = await __getCanvasPermanentBookmarkDirtyStateFromBackground();
+            if (dirtyState && dirtyState.dirty) {
+                const syncResult = await __syncPermanentMainTreeFromChromeBookmarks({
+                    reason: String(options && options.reason || 'export'),
+                    assumeClean: false
+                });
+                if (syncResult) {
+                    try { __clearPermanentTreeRenderCachesAfterStorageUpdate(); } catch (_) { }
+                    await __clearCanvasPermanentBookmarkDirtyStateInBackground(dirtyState.version);
+                }
+            }
+        } catch (e) {
+            console.warn('[Export Sandbox] background dirty sync failed; continuing with current BCS state:', e);
+        }
+    }
     const all = await __bcsStorageGetAll();
-    const permMainRaw = all && all[BCS_PERM_MAIN_KEY] ? all[BCS_PERM_MAIN_KEY] : null;
+    const permMainRaw = await __readPermanentMainContentFromBcs({ skipIdentityMapHeal: true });
     const metaRaw = all && all[BCS_META_KEY] ? all[BCS_META_KEY] : null;
     const tempStateRaw = __buildCanvasTempStateFromBcsStorage(all, metaRaw, { skipValidation: true });
     const copyKeys = Object.keys(all || {}).filter((key) => typeof key === 'string' && key.startsWith(BCS_PERM_COPY_PREFIX));
@@ -7660,6 +7894,9 @@ if (typeof window !== 'undefined') {
         },
         async readPermanentTreeSnapshotFromBcs(options = {}) {
             return await __readPermanentTreeSnapshotFromBcs(options);
+        },
+        async readPermanentTreeSnapshotRecordFromBcs(options = {}) {
+            return await __readPermanentTreeSnapshotRecordFromBcs(options);
         },
         async writePermanentTreeSnapshotAfterChromeApply(localTreeInput, options = {}) {
             return await __writePermanentTreeSnapshotAfterChromeApply(localTreeInput, options);
@@ -8191,7 +8428,16 @@ async function __buildBcsDocumentsFromState(stateInput, options = {}) {
         }
         : null;
     if (permContent) {
-        updates[BCS_PERM_MAIN_KEY] = permContent;
+        const permTree = __normalizePermanentTreeSnapshotForLocalStorage(permContent.tree);
+        if (permTree) {
+            const permMainStorage = __buildPermanentMainStorageContentPayload(permContent, permTree[0], {
+                version: permContent.version
+            });
+            updates[BCS_PERM_MAIN_KEY] = permMainStorage;
+            updates[BCS_PERM_MAIN_IDENTITY_MAP_KEY] = __buildPermanentIdentityMapPayload(permContent.identityMap, {
+                slot: permMainStorage.slot
+            });
+        }
     }
 
     const copyIds = Object.keys((fileRefs && fileRefs.copyPathById) ? fileRefs.copyPathById : {});
@@ -8642,9 +8888,38 @@ async function __loadCanvasManifestFromBcs(options = {}) {
 }
 
 async function __loadCanvasTempStateBundleFromBcs(options = {}) {
-    const storage = await __bcsStorageGetAll();
-    const meta = storage ? storage[BCS_META_KEY] : null;
+    // 1) First load meta, canvas layout and permanent main key in a single batch
+    const initialStorage = await __bcsStorageGet([BCS_META_KEY, BCS_CANVAS_KEY, BCS_PERM_MAIN_KEY]);
+    if (!initialStorage) return null;
+    const meta = initialStorage[BCS_META_KEY];
     if (!__isBcsMetaPayload(meta)) return null;
+
+    const canvasRaw = initialStorage[BCS_CANVAS_KEY];
+    const canvas = __readBcsCanvasPayload(canvasRaw) || {};
+    const nodes = Array.isArray(canvas.nodes) ? canvas.nodes : [];
+
+    // 2) Collect all section keys from canvas nodes
+    const sectionKeys = [];
+    nodes.forEach(node => {
+        if (node && node.id) {
+            sectionKeys.push(BCS_SECTION_PREFIX + node.id);
+        }
+    });
+
+    // 3) Load all section payloads in a second batch
+    let sectionStorage = {};
+    if (sectionKeys.length > 0) {
+        try {
+            sectionStorage = await __bcsStorageGet(sectionKeys) || {};
+        } catch (_) {}
+    }
+
+    // 4) Merge into a single storage map
+    const storage = {
+        ...initialStorage,
+        ...sectionStorage
+    };
+
     try {
         __canonicalizeBcsCanvasStorageIfNeeded(storage, {
             immediate: true
