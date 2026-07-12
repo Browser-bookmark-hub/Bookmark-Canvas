@@ -34585,7 +34585,7 @@ function scheduleCanvasVirtualizationUpdate(delayMs = null) {
         canvasVirtualizationPending = false;
         // 低细节：先切视觉，重 DOM 延迟卸载，避免边界附近来回缩放反复构建/销毁。
         if (CanvasState.lowDetailActive) {
-            try { __updateNonTempNodesViewportVisibility(); } catch (_) { }
+            try { __syncCanvasLowDetailVisibleShells({ doUnload: true }); } catch (_) { }
             try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
             return;
         }
@@ -34734,6 +34734,83 @@ function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoom
     __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
 }
 
+function __syncCanvasLowDetailVisibleShells(options = {}) {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace || !CanvasState.lowDetailActive) return;
+
+    const opts = (options && typeof options === 'object') ? options : {};
+    const doUnload = opts.doUnload !== false;
+    const visualBounds = __getCanvasViewportBounds(workspace, 0);
+    if (!visualBounds) return;
+
+    try {
+        for (const section of (CanvasState.tempSections || [])) {
+            if (!section || !section.id) continue;
+            const baseSize = getTempSectionBaseSize(section);
+            const x = Number(section.x);
+            const y = Number(section.y);
+            const w = Number(section.width || baseSize.width);
+            const h = Number(section.height || baseSize.height);
+            if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
+
+            const inViewport = !__isCanvasRectOutsideBounds(x, y, w, h, visualBounds);
+            __updateNodeOffScreenState(section.id, !inViewport);
+
+            let element = document.getElementById(section.id);
+            const shouldKeepLoaded = element && __shouldKeepLazyCardDomLoaded(element);
+
+            if (!inViewport && !shouldKeepLoaded) {
+                const canUnload = __shouldNodeBeUnloaded(section.id);
+                if (doUnload && element && canUnload) {
+                    try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+                    try { element.remove(); } catch (_) { }
+                }
+                continue;
+            }
+
+            if (!element) {
+                try { renderTempNode(section, { skipTree: true }); } catch (_) { }
+                element = document.getElementById(section.id);
+            }
+            if (!element) continue;
+
+            __setCanvasViewportLazyShellClass(element, false);
+            if (element.classList && element.classList.contains('canvas-node-maximized')) {
+                try { element.classList.remove('low-detail-active'); } catch (_) { }
+                continue;
+            }
+
+            try {
+                if (__isNodeGeometricallyInsideAnyCardGroup(section, 'temp-section')) {
+                    element.classList.remove('low-detail-active');
+                    element.classList.add('card-group-low-detail-child-hidden');
+                    const hostGroup = __findHostCardGroup(section, 'temp-section');
+                    if (hostGroup && element.dataset) {
+                        element.dataset.lowDetailHostGroupId = hostGroup.id;
+                    }
+                } else {
+                    element.classList.remove('card-group-low-detail-child-hidden');
+                    if (element.dataset) delete element.dataset.lowDetailHostGroupId;
+                    element.classList.add('low-detail-active');
+                    __ensureTempSectionLowDetailOverlay(section, element);
+                }
+            } catch (_) { }
+
+            if (doUnload && !shouldKeepLoaded) {
+                try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+            }
+        }
+    } catch (_) { }
+
+    try {
+        __updateNonTempNodesViewportVisibility({
+            force: !!opts.force,
+            doLoad: false,
+            doUnload
+        });
+    } catch (_) { }
+}
+
 
 function runCanvasVirtualizationUpdate(options = {}) {
     const enabled = isCanvasVirtualizationEnabled();
@@ -34769,7 +34846,7 @@ function runCanvasVirtualizationUpdate(options = {}) {
     if (CanvasState.lowDetailActive) {
         doLoad = false;
         if (!allowLowDetailPrune) {
-            try { __updateNonTempNodesViewportVisibility({ doLoad: false, doUnload: doUnload }); } catch (_) { }
+            try { __syncCanvasLowDetailVisibleShells({ force, doUnload }); } catch (_) { }
             if (doUnload) {
                 try { __scheduleCanvasLowDetailDomPrune(); } catch (_) { }
             }
@@ -37116,6 +37193,7 @@ function __startCanvasLowDetailVisualRipple(shouldActive, workspace = null) {
     CanvasState.lowDetailRippleGeneration = generation;
 
     if (shouldActive) {
+        try { __syncCanvasLowDetailVisibleShells({ force: true, doUnload: false }); } catch (_) { }
         __ensureCanvasLowDetailOverlaysReady(ws);
         ws.classList.add(CANVAS_LOW_DETAIL_RIPPLE_CLASS);
         ws.classList.add('canvas-low-detail');
@@ -37204,6 +37282,7 @@ function __enterCanvasLowDetailVisualState(workspace = null) {
     const ws = workspace || document.getElementById('canvasWorkspace');
     if (!ws) return;
 
+    try { __syncCanvasLowDetailVisibleShells({ force: true, doUnload: false }); } catch (_) { }
     __ensureCanvasLowDetailOverlaysReady(ws);
     try { __markCardGroupLowDetailMembershipDirty(); } catch (_) { }
     try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
