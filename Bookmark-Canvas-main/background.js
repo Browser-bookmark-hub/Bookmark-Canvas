@@ -35,7 +35,10 @@ const CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY = 'canvasPermanentBookmarksDirtyAt'
 const CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY = 'canvasPermanentBookmarksDirtyReason';
 const CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY = 'canvasPermanentBookmarksDirtyVersion';
 const CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY = 'canvasPermanentBookmarksCleanAt';
+const CANVAS_FOREGROUND_ACTIVE_PORT = 'bookmark-canvas-foreground-active';
 let canvasPermanentBookmarksDirtyMemory = null;
+const activeForegroundPorts = new Set();
+let foregroundActivePortListenerRegistered = false;
 
 function storageLocalGet(keys) {
   return new Promise((resolve) => {
@@ -134,6 +137,37 @@ async function clearCanvasPermanentBookmarkDirtyState(expectedVersion = null) {
   return { success: ok, dirty: false, version: state.version };
 }
 
+function registerCanvasForegroundActivePortListener() {
+  if (foregroundActivePortListenerRegistered) return;
+  if (!browserAPI?.runtime?.onConnect?.addListener) return;
+  foregroundActivePortListenerRegistered = true;
+
+  browserAPI.runtime.onConnect.addListener((port) => {
+    if (!port || port.name !== CANVAS_FOREGROUND_ACTIVE_PORT) return;
+
+    activeForegroundPorts.add(port);
+
+    const onDisconnect = () => {
+      try {
+        const err = browserAPI?.runtime?.lastError;
+        if (err && err.message) {
+          // touch lastError to avoid unchecked runtime.lastError noise.
+        }
+      } catch (_) { }
+      activeForegroundPorts.delete(port);
+      try {
+        port.onDisconnect.removeListener(onDisconnect);
+      } catch (_) { }
+    };
+
+    try {
+      port.onDisconnect.addListener(onDisconnect);
+    } catch (_) {
+      activeForegroundPorts.delete(port);
+    }
+  });
+}
+
 function registerCanvasPermanentBookmarkDirtyListener() {
   try {
     if (browserAPI?.storage?.onChanged?.addListener) {
@@ -149,6 +183,7 @@ function registerCanvasPermanentBookmarkDirtyListener() {
   try {
     if (!browserAPI?.bookmarks) return;
     const mark = (reason) => {
+      if (activeForegroundPorts.size > 0) return;
       markCanvasPermanentBookmarksDirty(reason).catch(() => { });
     };
     if (browserAPI.bookmarks.onCreated?.addListener) {
@@ -452,6 +487,7 @@ try {
 } catch (_) { }
 
 initSidePanel();
+registerCanvasForegroundActivePortListener();
 registerSidePanelTogglePortListener();
 registerCanvasPermanentBookmarkDirtyListener();
 refreshSidePanelOpenWindows().catch(() => {});

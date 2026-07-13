@@ -1781,8 +1781,76 @@ const FaviconCache = {
 
 // 浏览器 API 兼容性
 const browserAPI = (typeof chrome !== 'undefined') ? chrome : browser;
+const FOREGROUND_ACTIVE_PORT_NAME = 'bookmark-canvas-foreground-active';
+const FOREGROUND_ACTIVE_PORT_RECONNECT_INITIAL_DELAY_MS = 100;
+const FOREGROUND_ACTIVE_PORT_RECONNECT_MAX_DELAY_MS = 2000;
+let foregroundActivePort = null;
+let foregroundActivePortReconnectTimer = null;
+let foregroundActivePortReconnectDelay = FOREGROUND_ACTIVE_PORT_RECONNECT_INITIAL_DELAY_MS;
+let foregroundActivePortStopped = false;
 
 let __canvasViewSurfaceKeyInitPromise = null;
+
+function getForegroundActivePortLastError() {
+    try {
+        return browserAPI && browserAPI.runtime ? browserAPI.runtime.lastError : null;
+    } catch (e) {
+        return e;
+    }
+}
+
+function isForegroundActivePortContextInvalidated(errorLike) {
+    const message = String((errorLike && errorLike.message) || errorLike || '').toLowerCase();
+    return message.includes('context invalidated');
+}
+
+function scheduleForegroundActivePortReconnect(delayMs = foregroundActivePortReconnectDelay) {
+    if (foregroundActivePortStopped || foregroundActivePortReconnectTimer) return;
+    const delay = Math.max(0, Number(delayMs) || 0);
+    foregroundActivePortReconnectTimer = setTimeout(() => {
+        foregroundActivePortReconnectTimer = null;
+        setupForegroundActivePort();
+    }, delay);
+    const nextDelay = delay > 0 ? delay * 2 : FOREGROUND_ACTIVE_PORT_RECONNECT_INITIAL_DELAY_MS;
+    foregroundActivePortReconnectDelay = Math.min(
+        FOREGROUND_ACTIVE_PORT_RECONNECT_MAX_DELAY_MS,
+        Math.max(FOREGROUND_ACTIVE_PORT_RECONNECT_INITIAL_DELAY_MS, nextDelay)
+    );
+}
+
+function setupForegroundActivePort() {
+    try {
+        if (foregroundActivePortStopped) return;
+        if (!(browserAPI && browserAPI.runtime && typeof browserAPI.runtime.connect === 'function')) {
+            return;
+        }
+        if (foregroundActivePort) return;
+        if (foregroundActivePortReconnectTimer) {
+            clearTimeout(foregroundActivePortReconnectTimer);
+            foregroundActivePortReconnectTimer = null;
+        }
+
+        foregroundActivePort = browserAPI.runtime.connect({ name: FOREGROUND_ACTIVE_PORT_NAME });
+        foregroundActivePortReconnectDelay = FOREGROUND_ACTIVE_PORT_RECONNECT_INITIAL_DELAY_MS;
+        foregroundActivePort.onDisconnect.addListener(() => {
+            const err = getForegroundActivePortLastError();
+            foregroundActivePort = null;
+            if (isForegroundActivePortContextInvalidated(err)) {
+                foregroundActivePortStopped = true;
+                return;
+            }
+            scheduleForegroundActivePortReconnect();
+        });
+    } catch (e) {
+        foregroundActivePort = null;
+        if (isForegroundActivePortContextInvalidated(e)) {
+            foregroundActivePortStopped = true;
+            return;
+        }
+        scheduleForegroundActivePortReconnect();
+        console.warn('[ForegroundPort] Connection failed:', e);
+    }
+}
 
 function __buildCanvasViewSurfaceKey({ isSidePanel, tabId, windowId }) {
     if (isSidePanel) {
@@ -4164,6 +4232,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 监听书签API变化（实时更新书签树视图）
     setupBookmarkListener();
+
+    setupForegroundActivePort();
 
     ;
 });
