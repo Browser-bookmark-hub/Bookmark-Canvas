@@ -89,6 +89,156 @@ try {
     }
 } catch (_) { }
 
+const CANVAS_LIFECYCLE_RELOAD_MARKER_KEY = 'bookmark_canvas_lifecycle_reload_v1';
+const CANVAS_LIFECYCLE_FREEZE_MARKER_KEY = 'bookmark_canvas_lifecycle_freeze_v1';
+let canvasLifecycleBcsWriteSuspended = false;
+let canvasLifecycleReloadPending = false;
+let canvasLifecycleSuspendReason = '';
+
+function isCanvasLifecycleBcsWriteSuspended() {
+    // Reload pending only deduplicates navigation. BCS writes are suspended
+    // exclusively while a restored old lifecycle context is being replaced.
+    return canvasLifecycleBcsWriteSuspended;
+}
+
+function suspendCanvasLifecycleBcsWrites(reason) {
+    // This is a one-way gate for restored old contexts; the new page load clears it.
+    canvasLifecycleBcsWriteSuspended = true;
+    canvasLifecycleSuspendReason = String(reason || 'page_lifecycle_restore');
+    try {
+        window.__canvasLifecycleBcsWriteSuspended = true;
+        window.__canvasLifecycleBcsWriteSuspendedReason = canvasLifecycleSuspendReason;
+    } catch (_) { }
+}
+
+function cancelCanvasLifecyclePendingBcsWrites() {
+    try {
+        if (typeof __cancelPendingBcsStorageWrite === 'function') {
+            __cancelPendingBcsStorageWrite();
+        }
+    } catch (_) { }
+}
+
+function writeCanvasLifecycleSessionMarker(key, payload) {
+    try {
+        sessionStorage.setItem(key, JSON.stringify({
+            ...(payload && typeof payload === 'object' ? payload : {}),
+            timestamp: Date.now()
+        }));
+    } catch (_) { }
+}
+
+function clearCanvasLifecycleReloadMarker() {
+    try { sessionStorage.removeItem(CANVAS_LIFECYCLE_RELOAD_MARKER_KEY); } catch (_) { }
+}
+
+function consumeCanvasLifecycleReloadMarker() {
+    let marker = null;
+    try {
+        const raw = sessionStorage.getItem(CANVAS_LIFECYCLE_RELOAD_MARKER_KEY);
+        marker = raw ? JSON.parse(raw) : null;
+    } catch (_) {
+        marker = null;
+    }
+    clearCanvasLifecycleReloadMarker();
+    return marker && typeof marker === 'object' ? marker : null;
+}
+
+function reloadCurrentCanvasLifecycleDocument() {
+    try {
+        window.location.reload();
+        return;
+    } catch (_) { }
+    try {
+        window.location.href = window.location.href;
+    } catch (_) { }
+}
+
+function requestCanvasDocumentReloadOnce(reason, options = {}) {
+    const suspendBcsWrites = !!(options && options.suspendBcsWrites);
+    const delayMs = Math.max(0, Number(options && options.delayMs) || 0);
+    if (suspendBcsWrites) {
+        suspendCanvasLifecycleBcsWrites(reason);
+        cancelCanvasLifecyclePendingBcsWrites();
+    }
+    if (canvasLifecycleReloadPending) return false;
+    canvasLifecycleReloadPending = true;
+    if (!canvasLifecycleSuspendReason) {
+        canvasLifecycleSuspendReason = String(reason || 'canvas_document_reload');
+    }
+    try {
+        window.__canvasLifecycleReloadPending = true;
+        window.__canvasLifecycleReloadReason = canvasLifecycleSuspendReason;
+    } catch (_) { }
+    writeCanvasLifecycleSessionMarker(CANVAS_LIFECYCLE_RELOAD_MARKER_KEY, {
+        reason: canvasLifecycleSuspendReason,
+        sidePanel: isSidePanelMode === true,
+        suspendBcsWrites,
+        bcsWriteSuspended: isCanvasLifecycleBcsWriteSuspended()
+    });
+    if (delayMs > 0) {
+        try {
+            setTimeout(() => {
+                reloadCurrentCanvasLifecycleDocument();
+            }, delayMs);
+        } catch (_) {
+            reloadCurrentCanvasLifecycleDocument();
+        }
+    } else {
+        reloadCurrentCanvasLifecycleDocument();
+    }
+    return true;
+}
+
+function handleCanvasLifecycleOldContextRestore(reason) {
+    suspendCanvasLifecycleBcsWrites(reason);
+    cancelCanvasLifecyclePendingBcsWrites();
+    requestCanvasDocumentReloadOnce(reason, { suspendBcsWrites: true });
+}
+
+function installCanvasPageLifecycleGuards() {
+    try {
+        window.__isCanvasLifecycleBcsWriteSuspended = isCanvasLifecycleBcsWriteSuspended;
+        window.__reloadCanvasDocumentOnce = requestCanvasDocumentReloadOnce;
+    } catch (_) { }
+
+    try {
+        window.__canvasLifecyclePreviousReloadMarker = consumeCanvasLifecycleReloadMarker();
+    } catch (_) { }
+
+    try {
+        window.__canvasLifecycleWasDiscarded = document.wasDiscarded === true;
+        if (document.wasDiscarded === true) {
+            clearCanvasLifecycleReloadMarker();
+        }
+    } catch (_) { }
+
+    try {
+        document.addEventListener('freeze', () => {
+            writeCanvasLifecycleSessionMarker(CANVAS_LIFECYCLE_FREEZE_MARKER_KEY, {
+                reason: 'freeze',
+                sidePanel: isSidePanelMode === true
+            });
+        }, { capture: true });
+    } catch (_) { }
+
+    try {
+        document.addEventListener('resume', () => {
+            handleCanvasLifecycleOldContextRestore('resume');
+        }, { capture: true });
+    } catch (_) { }
+
+    try {
+        window.addEventListener('pageshow', (event) => {
+            if (event && event.persisted === true) {
+                handleCanvasLifecycleOldContextRestore('pageshow.persisted');
+            }
+        }, { capture: true });
+    } catch (_) { }
+}
+
+installCanvasPageLifecycleGuards();
+
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_ACTION = 'triggerCanvasPageFullscreenByTabId';
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_STORAGE_KEY = 'canvas_page_fullscreen_bridge_request_v1';
 const CANVAS_PAGE_FULLSCREEN_BRIDGE_MAX_AGE_MS = 30000;

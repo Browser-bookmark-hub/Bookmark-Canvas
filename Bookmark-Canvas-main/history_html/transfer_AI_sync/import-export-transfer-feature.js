@@ -48,14 +48,18 @@ function __requestPostReloadLocatePermanentMain(reason = '') {
 function __saveTransferImportSectionsDelta(sectionInputs, options = {}) {
     const sections = (Array.isArray(sectionInputs) ? sectionInputs : [sectionInputs])
         .filter((section) => section && typeof section === 'object' && section.id);
-    if (!sections.length) return;
+    if (!sections.length) return null;
     try {
         if (typeof saveCanvasSectionDelta === 'function') {
-            saveCanvasSectionDelta({ upsertSections: sections }, options);
-            return;
+            return saveCanvasSectionDelta({ upsertSections: sections }, options);
         }
     } catch (_) { }
-    try { if (typeof saveTempNodes === 'function') saveTempNodes(options); } catch (_) { }
+    try {
+        if (typeof saveTempNodes === 'function') {
+            return saveTempNodes(options);
+        }
+    } catch (_) { }
+    return null;
 }
 
 function __trimImportPreviewText(value, max = 52) {
@@ -1857,6 +1861,27 @@ function __showImportReloadProgress(importMode = 'snapshot', phase = 'reload') {
     } catch (_) { }
 }
 
+function __reloadCanvasDocumentAfterImport(reason = 'import', delayMs = 1500) {
+    const delay = Math.max(0, Number(delayMs) || 0);
+    try {
+        if (typeof window !== 'undefined' && typeof window.__reloadCanvasDocumentOnce === 'function') {
+            window.__reloadCanvasDocumentOnce(reason, {
+                suspendBcsWrites: false,
+                delayMs: delay
+            });
+            return;
+        }
+    } catch (_) { }
+    const reload = () => {
+        try { window.location.reload(); } catch (_) { }
+    };
+    if (delay > 0) {
+        try { setTimeout(reload, delay); } catch (_) { reload(); }
+    } else {
+        reload();
+    }
+}
+
 function __hideImportReloadProgress() {
     try {
         if (typeof window !== 'undefined' && typeof window.__hideCanvasReloadProgressPanel === 'function') {
@@ -1951,9 +1976,13 @@ async function __importBookmarkFilesBatch(type, filesInput, options = {}) {
 
     if (importedFiles > 0) {
         if (importedSections.length) {
-            __saveTransferImportSectionsDelta(importedSections);
+            await Promise.resolve(__saveTransferImportSectionsDelta(importedSections, { immediate: true }));
         } else {
-            try { if (typeof saveTempNodes === 'function') saveTempNodes(); } catch (_) { }
+            try {
+                if (typeof saveTempNodes === 'function') {
+                    await Promise.resolve(saveTempNodes({ immediate: true }));
+                }
+            } catch (_) { }
         }
         showCanvasToast(
             isEn
@@ -2209,9 +2238,7 @@ async function handleFileImport(e) {
                 e.target.value = '';
                 e.target.__canvasImportOptions = null;
                 __showImportReloadProgress('snapshot');
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1500);
+                __reloadCanvasDocumentAfterImport('import-snapshot');
                 return;
             }
 
@@ -2249,9 +2276,7 @@ async function handleFileImport(e) {
                     const activeDialog = document.getElementById('canvasImportDialog');
                     if (activeDialog) activeDialog.remove();
                     __showImportReloadProgress('overwrite');
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1500);
+                    __reloadCanvasDocumentAfterImport('import-overwrite');
                 } catch (err) {
                     __hideImportReloadProgress();
                     console.error('[Overwrite Import] failed:', err);
@@ -2271,9 +2296,7 @@ async function handleFileImport(e) {
                 willReloadAfterImport: true
             });
             __showImportReloadProgress('snapshot');
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
+            __reloadCanvasDocumentAfterImport('import-snapshot');
         } else if (type === 'html' || type === 'json') {
             if (files.length > 1) {
                 __showImportReloadProgress('bookmarks', 'processing');
@@ -2281,9 +2304,7 @@ async function handleFileImport(e) {
                     canvasPosition
                 });
                 __showImportReloadProgress('bookmarks');
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1500);
+                __reloadCanvasDocumentAfterImport('import-bookmarks');
             } else {
                 const text = await file.text();
                 if (type === 'html') {
@@ -2357,9 +2378,7 @@ async function handleFolderImport(e) {
             e.target.value = '';
             e.target.__canvasImportOptions = null;
             __showImportReloadProgress('snapshot');
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
+            __reloadCanvasDocumentAfterImport('import-snapshot');
             return;
         }
 
@@ -2396,9 +2415,7 @@ async function handleFolderImport(e) {
                 const activeDialog = document.getElementById('canvasImportDialog');
                 if (activeDialog) activeDialog.remove();
                 __showImportReloadProgress('overwrite');
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1500);
+                __reloadCanvasDocumentAfterImport('import-overwrite');
             } catch (err) {
                 __hideImportReloadProgress();
                 console.error('[Overwrite Import] failed:', err);
@@ -2421,9 +2438,7 @@ async function handleFolderImport(e) {
         const activeDialog = document.getElementById('canvasImportDialog');
         if (activeDialog) activeDialog.remove();
         __showImportReloadProgress('snapshot');
-        setTimeout(() => {
-            window.location.reload();
-        }, 1500);
+        __reloadCanvasDocumentAfterImport('import-snapshot');
     } catch (error) {
         __hideImportReloadProgress();
         console.error('[Canvas] 文件夹导入失败:', error);

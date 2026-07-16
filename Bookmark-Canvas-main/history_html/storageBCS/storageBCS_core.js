@@ -2343,10 +2343,11 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
     });
     // Keep write paths deterministic for callers that immediately read-and-render
     // (e.g. overwrite import). Fire-and-forget can race the next render with stale BCS.
-    await __bcsStorageSet({
+    const saved = await __bcsStorageSet({
         [BCS_PERM_MAIN_KEY]: storageContent,
         [BCS_PERM_MAIN_IDENTITY_MAP_KEY]: identityMapPayload
     }, { immediate: options && options.immediate !== false });
+    if (!saved) return null;
     try { __cleanupLegacyPermanentTreeCacheKeys(); } catch (_) { }
     return {
         content: nextContent,
@@ -6362,6 +6363,18 @@ let __canvasTempStateLastAppliedTimestamp = 0;
 let __canvasTempStateLastPersistedSignature = '';
 let __canvasImportRuntimeMode = 'permanent';
 
+function __isBcsWriteSuspendedByCanvasLifecycle() {
+    try {
+        if (typeof window !== 'undefined') {
+            if (typeof window.__isCanvasLifecycleBcsWriteSuspended === 'function') {
+                return window.__isCanvasLifecycleBcsWriteSuspended() === true;
+            }
+            return window.__canvasLifecycleBcsWriteSuspended === true;
+        }
+    } catch (_) { }
+    return false;
+}
+
 function __cancelPendingBcsStorageWrite() {
     if (!__canvasTempStateBcsWriteTimer && !__canvasTempStateBcsWritePending && !__canvasTempStateBcsWriteWaiters.length) return;
     if (__canvasTempStateBcsWriteTimer) {
@@ -8035,6 +8048,7 @@ function __bcsStorageRemove(keys) {
     const list = Array.isArray(keys) ? keys : [keys];
     const storage = __getCanvasStorageLocalArea();
     if (!list.length) return Promise.resolve(false);
+    if (__isBcsWriteSuspendedByCanvasLifecycle()) return Promise.resolve(false);
     __dropPendingBcsStorageKeys(list);
     if (!storage || typeof storage.remove !== 'function') {
         list.forEach((key) => {
@@ -8065,6 +8079,7 @@ function __bcsStorageRemove(keys) {
 
 function __bcsStorageSet(payload, { immediate = false } = {}) {
     if (!payload || typeof payload !== 'object') return Promise.resolve(false);
+    if (__isBcsWriteSuspendedByCanvasLifecycle()) return Promise.resolve(false);
     let effectivePayload = payload;
     let consumedWaiters = [];
     if (immediate && (__canvasTempStateBcsWriteTimer || __canvasTempStateBcsWritePending || __canvasTempStateBcsWriteWaiters.length)) {
@@ -8474,6 +8489,7 @@ async function __buildBcsDocumentsFromState(stateInput, options = {}) {
 
 async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
     try {
+        if (__isBcsWriteSuspendedByCanvasLifecycle()) return false;
         const state = options && options.alreadyPersisted === true
             ? stateInput
             : __buildPersistedCanvasState(stateInput, options);
@@ -8505,17 +8521,21 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
         }
 
         if (removals.length) {
-            await __bcsStorageRemove(removals);
+            const removed = await __bcsStorageRemove(removals);
+            if (!removed || __isBcsWriteSuspendedByCanvasLifecycle()) return false;
         }
-        await __bcsStorageSet(updates, { immediate });
+        const saved = await __bcsStorageSet(updates, { immediate });
+        if (!saved || __isBcsWriteSuspendedByCanvasLifecycle()) return false;
+        let signalSaved = false;
         try {
-            await __bcsStorageSet({
+            signalSaved = await __bcsStorageSet({
                 [BCS_SIGNAL_KEY]: {
                     __storage: 'bcs',
                     timestamp: Number(state.timestamp) || Date.now()
                 }
             }, { immediate });
         } catch (_) { }
+        if (!signalSaved || __isBcsWriteSuspendedByCanvasLifecycle()) return false;
         try {
             saveSharedState(BCS_SIGNAL_KEY, {
                 __storage: 'bcs',
@@ -8529,6 +8549,7 @@ async function __saveCanvasTempStateToBcsStorage(stateInput, options = {}) {
 
 async function __saveCanvasManifestToBcsStorage(stateInput, options = {}) {
     try {
+        if (__isBcsWriteSuspendedByCanvasLifecycle()) return null;
         const state = options && options.alreadyPersisted === true
             ? stateInput
             : __buildPersistedCanvasState(stateInput, options);
@@ -8558,7 +8579,8 @@ async function __saveCanvasManifestToBcsStorage(stateInput, options = {}) {
             [BCS_SIGNAL_KEY]: signal
         };
 
-        await __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
+        const saved = await __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
+        if (!saved || __isBcsWriteSuspendedByCanvasLifecycle()) return null;
         try {
             saveSharedState(BCS_SIGNAL_KEY, signal);
         } catch (_) { }
@@ -8669,6 +8691,7 @@ function __buildBcsCanvasManifestPatchSignal(timestamp, meta) {
 
 async function __saveCanvasSectionDeltaToBcsStorage(deltaInput, options = {}) {
     try {
+        if (__isBcsWriteSuspendedByCanvasLifecycle()) return null;
         const delta = __normalizeBcsSectionDeltaInput(deltaInput);
         if (!delta.upsertSections.length && !delta.deleteSectionIds.length) return null;
 
@@ -8713,14 +8736,16 @@ async function __saveCanvasSectionDeltaToBcsStorage(deltaInput, options = {}) {
             .map((id) => __buildBcsSectionKey(id))
             .filter(Boolean);
         if (removalKeys.length) {
-            await __bcsStorageRemove(removalKeys);
+            const removed = await __bcsStorageRemove(removalKeys);
+            if (!removed || __isBcsWriteSuspendedByCanvasLifecycle()) return null;
         }
 
         const signal = __buildBcsCanvasSectionDeltaSignal(upsertSectionIds, delta.deleteSectionIds, timestamp);
         signal.meta = meta;
         updates[BCS_SIGNAL_KEY] = signal;
 
-        await __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
+        const saved = await __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
+        if (!saved || __isBcsWriteSuspendedByCanvasLifecycle()) return null;
         try {
             saveSharedState(BCS_SIGNAL_KEY, signal);
         } catch (_) { }
@@ -8785,6 +8810,7 @@ function __buildBcsSectionPatchSignal(sectionIds, timestamp) {
 
 async function __saveTempSectionsToBcsStorage(sectionInputs, options = {}) {
     try {
+        if (__isBcsWriteSuspendedByCanvasLifecycle()) return null;
         const sections = __normalizeBcsSectionPatchInputs(sectionInputs);
         if (!sections.length) return null;
 
@@ -8816,7 +8842,8 @@ async function __saveTempSectionsToBcsStorage(sectionInputs, options = {}) {
         }
         updates[BCS_SIGNAL_KEY] = signal;
 
-        await __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
+        const saved = await __bcsStorageSet(updates, { immediate: !!(options && options.immediate) });
+        if (!saved || __isBcsWriteSuspendedByCanvasLifecycle()) return null;
         try {
             saveSharedState(BCS_SIGNAL_KEY, signal);
         } catch (_) { }

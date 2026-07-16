@@ -29203,6 +29203,13 @@ function saveTempNodes(options = {}) {
     // 4) 若功能是“仅当前会话临时态”（如 sandbox 导入），不要调用本函数
     if (__canvasTempStateRealtimeSyncApplying) return;
     try {
+        if (typeof window !== 'undefined'
+            && typeof window.__isCanvasLifecycleBcsWriteSuspended === 'function'
+            && window.__isCanvasLifecycleBcsWriteSuspended() === true) {
+            return false;
+        }
+    } catch (_) { }
+    try {
         __updateAllMdNodeLowDetailOverlays();
     } catch (_) {}
     const immediate = !!(options && options.immediate);

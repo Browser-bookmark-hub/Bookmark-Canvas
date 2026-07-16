@@ -170,6 +170,27 @@ function __showCanvasReloadProgressBeforeNavigation(options = {}) {
     });
 }
 
+function __reloadCanvasDocumentAfterRestore(reason = 'backup-restore', delayMs = 1500) {
+    const delay = Math.max(0, Number(delayMs) || 0);
+    try {
+        if (typeof window !== 'undefined' && typeof window.__reloadCanvasDocumentOnce === 'function') {
+            window.__reloadCanvasDocumentOnce(reason, {
+                suspendBcsWrites: false,
+                delayMs: delay
+            });
+            return;
+        }
+    } catch (_) { }
+    const reload = () => {
+        try { window.location.reload(); } catch (_) { }
+    };
+    if (delay > 0) {
+        try { setTimeout(reload, delay); } catch (_) { reload(); }
+    } else {
+        reload();
+    }
+}
+
 function __hideCanvasReloadProgressPanel(options = {}) {
     if (options.clearState !== false) {
         __clearGithubReloadProgressState();
@@ -1667,9 +1688,7 @@ async function showBackupDialog() {
                     title: isEn ? 'Refreshing canvas...' : '正在刷新画布...',
                     text: isEn ? 'Backup restore is saved. Refreshing and preparing to locate...' : '备份恢复已写入，正在刷新并准备定位...'
                 });
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1500);
+                __reloadCanvasDocumentAfterRestore('backup-restore');
             } catch (e) {
                 __hideCanvasReloadProgressPanel();
                 console.error('[Backup] restore failed:', e);

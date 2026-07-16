@@ -1563,6 +1563,27 @@ ${isEn()
         });
     }
 
+    function reloadCanvasDocumentAfterPull(reason = 'github-pull', delayMs = 1500) {
+        const delay = Math.max(0, Number(delayMs) || 0);
+        try {
+            if (typeof window !== 'undefined' && typeof window.__reloadCanvasDocumentOnce === 'function') {
+                window.__reloadCanvasDocumentOnce(reason, {
+                    suspendBcsWrites: false,
+                    delayMs: delay
+                });
+                return;
+            }
+        } catch (_) { }
+        const reload = () => {
+            try { window.location.reload(); } catch (_) { }
+        };
+        if (delay > 0) {
+            try { setTimeout(reload, delay); } catch (_) { reload(); }
+        } else {
+            reload();
+        }
+    }
+
     function closeProgressDialog(delay = 0, isSuccess = true) {
         if (progressStuckTimer) {
             clearTimeout(progressStuckTimer);
@@ -3253,9 +3274,7 @@ ${isEn()
             });
             showReloadProgressBeforeNavigation('pull');
             showToast(note, 'success', 5000);
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
+            reloadCanvasDocumentAfterPull('github-pull');
         } catch (error) {
             await closeProgressDialog(0, false);
             const msg = (error && error.message) || String(error);
