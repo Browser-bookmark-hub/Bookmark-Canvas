@@ -49,6 +49,7 @@
     let activeProgressDialog = null;
     let originalProgressTitle = '';
     let progressStuckTimer = null;
+    let progressStuckTitleTimer = null;
     let operationRunning = false;
     let activeAbortController = null;
 
@@ -1439,12 +1440,20 @@ ${isEn()
         });
     }
 
-    function showProgressDialog(title) {
-        originalProgressTitle = title;
+    function clearProgressStuckTimers() {
         if (progressStuckTimer) {
             clearTimeout(progressStuckTimer);
             progressStuckTimer = null;
         }
+        if (progressStuckTitleTimer) {
+            clearInterval(progressStuckTitleTimer);
+            progressStuckTitleTimer = null;
+        }
+    }
+
+    function showProgressDialog(title) {
+        originalProgressTitle = title;
+        clearProgressStuckTimers();
 
         if (activeProgressDialog) {
             try { activeProgressDialog.remove(); } catch (_) { }
@@ -1497,22 +1506,35 @@ ${isEn()
             if (textEl) textEl.textContent = text;
         }
 
+        const isZipballRequest = percent === 15 && text === t('正在获取远端 ZIP 压缩包...', 'Requesting remote ZIP archive...');
         if (percent === 15 || percent === 85) {
             if (!progressStuckTimer) {
                 progressStuckTimer = setTimeout(() => {
                     if (activeProgressDialog) {
                         const titleEl = activeProgressDialog.querySelector('.github-progress-title');
                         if (titleEl) {
-                            titleEl.textContent = t('时间稍长, 请核查数据大小或者网络问题', 'Taking a while, please check data size or network issues');
+                            const titles = isZipballRequest
+                                ? [
+                                    t('时间稍长, 请核查数据大小或者网络问题', 'Taking a while, please check data size or network issues'),
+                                    t('尝试在配置中勾选「定点拉取法」', 'Try selecting "Targeted Pull" in Settings')
+                                ]
+                                : [t('时间稍长, 请核查数据大小或者网络问题', 'Taking a while, please check data size or network issues')];
+                            let titleIndex = 0;
+                            const showStuckTitle = () => {
+                                if (!activeProgressDialog || !titleEl.isConnected) return;
+                                titleEl.textContent = titles[titleIndex];
+                                titleIndex = (titleIndex + 1) % titles.length;
+                            };
+                            showStuckTitle();
+                            if (titles.length > 1) {
+                                progressStuckTitleTimer = setInterval(showStuckTitle, 3000);
+                            }
                         }
                     }
                 }, 10000);
             }
         } else {
-            if (progressStuckTimer) {
-                clearTimeout(progressStuckTimer);
-                progressStuckTimer = null;
-            }
+            clearProgressStuckTimers();
             const titleEl = activeProgressDialog.querySelector('.github-progress-title');
             if (titleEl && originalProgressTitle) {
                 titleEl.textContent = originalProgressTitle;
@@ -1586,10 +1608,7 @@ ${isEn()
     }
 
     function closeProgressDialog(delay = 0, isSuccess = true) {
-        if (progressStuckTimer) {
-            clearTimeout(progressStuckTimer);
-            progressStuckTimer = null;
-        }
+        clearProgressStuckTimers();
 
         if (!activeProgressDialog) return Promise.resolve();
         const dialog = activeProgressDialog;
@@ -2968,7 +2987,24 @@ ${isEn()
                     <div class="github-confirm-message github-pull-mode-message">
                         ${pullMessageHtml}
                     </div>
-                    <div class="github-pull-mode-actions">
+                    <div class="github-pull-method-choice" style="margin: 12px 0 0; padding: 10px; border-radius: 6px; background: var(--bg-secondary, rgba(0, 0, 0, 0.03)); border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12)); text-align: left;">
+                        <span style="font-size: 12px; font-weight: 700; color: var(--accent-primary, #7c3aed); display: inline-flex; align-items: center; gap: 4px; user-select: none;">
+                            ${escapeHtml(t('拉取数据包方式:', 'Pull Package Method:'))}
+                            <button id="githubPullModeMethodHelp" type="button" class="github-config-info-trigger" aria-label="${escapeHtml(t('拉取数据包方式说明', 'Pull package method explanation'))}" style="cursor: pointer; border: 0; background: transparent; padding: 0; color: inherit; font: inherit;">?</button>
+                        </span>
+                        <div style="display: flex; align-items: center; gap: 16px; margin-top: 7px; flex-wrap: wrap;">
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); margin: 0;">
+                                <input type="radio" name="githubPullModeMethod" value="zipball" id="githubPullModeMethodZipball" ${config.pullMethod === 'targeted' ? '' : 'checked'} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                <span style="font-weight: 600;">${escapeHtml(t('整仓压缩包法', 'Full Repo ZIPball'))}</span>
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); margin: 0;">
+                                <input type="radio" name="githubPullModeMethod" value="targeted" id="githubPullModeMethodTargeted" ${config.pullMethod === 'targeted' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                <span style="font-weight: 600;">${escapeHtml(t('定点拉取法', 'Targeted Pull'))}</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; font-weight: 700; color: var(--accent-primary, #7c3aed); margin-top: 14px;">${escapeHtml(t('导入方式:', 'Import Method:'))}</div>
+                    <div class="github-pull-mode-actions" style="margin-top: 6px;">
                         <button id="githubPullSnapshot" type="button" class="import-mode-option github-pull-mode-option${defaultMode === 'snapshot' ? ' is-selected' : ''}">
                             <span class="import-mode-radio" aria-hidden="true"></span>
                             <span class="import-mode-option-main">
@@ -3015,6 +3051,10 @@ ${isEn()
             const cancelBtn = dialog.querySelector('#githubPullCancel');
             const confirmBtn = dialog.querySelector('#githubPullConfirm');
             const backupJumpLink = dialog.querySelector('#githubPullBackupJump');
+            const pullMethodHelpBtn = dialog.querySelector('#githubPullModeMethodHelp');
+            const zipballMethodRadio = dialog.querySelector('#githubPullModeMethodZipball');
+            const targetedMethodRadio = dialog.querySelector('#githubPullModeMethodTargeted');
+            let pullMethodSavePromise = Promise.resolve();
             const setSelectedMode = (mode) => {
                 selectedMode = mode === 'overwrite' || mode === 'selective' ? mode : 'snapshot';
                 if (snapshotBtn) snapshotBtn.classList.toggle('is-selected', selectedMode === 'snapshot');
@@ -3026,6 +3066,25 @@ ${isEn()
             if (snapshotBtn) snapshotBtn.addEventListener('click', () => setSelectedMode('snapshot'));
             if (overwriteBtn) overwriteBtn.addEventListener('click', () => setSelectedMode('overwrite'));
             if (selectiveBtn) selectiveBtn.addEventListener('click', () => setSelectedMode('selective'));
+            if (pullMethodHelpBtn) {
+                pullMethodHelpBtn.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    await showPullMethodHelpDialog();
+                });
+            }
+            const saveSelectedPullMethod = (method) => {
+                const pullMethod = method === 'targeted' ? 'targeted' : 'zipball';
+                config.pullMethod = pullMethod;
+                pullMethodSavePromise = pullMethodSavePromise
+                    .catch(() => {})
+                    .then(() => saveConfig(Object.assign({}, config, { pullMethod })))
+                    .catch((error) => {
+                        console.warn('[Pull] Failed to save pull package method:', error);
+                    });
+            };
+            if (zipballMethodRadio) zipballMethodRadio.addEventListener('change', () => saveSelectedPullMethod('zipball'));
+            if (targetedMethodRadio) targetedMethodRadio.addEventListener('change', () => saveSelectedPullMethod('targeted'));
             if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
             if (confirmBtn) confirmBtn.addEventListener('click', () => cleanup(selectedMode));
             if (backupJumpLink) {
