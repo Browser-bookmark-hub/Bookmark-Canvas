@@ -3229,8 +3229,8 @@ const i18n = {
         'en': 'Shortcuts'
     },
     settingsOpenSourceText: {
-        'zh_CN': '开源信息',
-        'en': 'Open Source'
+        'zh_CN': '开源信息与问题反馈',
+        'en': 'Open Source & Issues Feedback'
     },
     settingsFloatText: {
         'zh_CN': '悬浮工具窗状态',
@@ -3608,6 +3608,10 @@ const i18n = {
         'zh_CN': '开源信息',
         'en': 'Open Source'
     },
+    canvasOpenSourceModalTitle: {
+        'zh_CN': '开源信息与问题反馈',
+        'en': 'Open Source & Issues Feedback'
+    },
     canvasHelpPanelShortcuts: {
         'zh_CN': `<h2>快捷键说明</h2>
 <h3>Ctrl 键操作</h3>
@@ -3733,8 +3737,7 @@ const i18n = {
 </ul>`
     },
     canvasHelpPanelOpenSource: {
-        'zh_CN': `<h2>开源信息</h2>
-<h3>主项目</h3>
+        'zh_CN': `<h3 style="margin-top: 0;">主项目</h3>
 <ul>
 <li><strong>Bookmark Canvas</strong> (书签画布):<br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
@@ -3752,9 +3755,8 @@ const i18n = {
 </ul>
 <hr>
 <h3>数据兼容说明</h3>
-<p>这两个生态项目（Bookmark Backup & Bookmark Record and Recommend）导出的 JSON/HTML 备份文件，均支持直接拖入书签画布或通过导入功能，在画布中快速形成临时的栏目卡片。</p>`,
-        'en': `<h2>Open Source</h2>
-<h3>Main Project</h3>
+<p style="text-indent: 18px;">这两个生态项目（Bookmark Backup & Bookmark Record and Recommend）导出的 JSON/HTML 备份文件，均支持直接拖入书签画布或通过导入功能，在画布中快速形成临时的栏目卡片。</p>`,
+        'en': `<h3 style="margin-top: 0;">Main Project</h3>
 <ul>
 <li><strong>Bookmark Canvas</strong>:<br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
@@ -3772,7 +3774,7 @@ const i18n = {
 </ul>
 <hr>
 <h3>Compatibility Note</h3>
-<p>The JSON/HTML files exported by Bookmark Backup and Bookmark Record and Recommend can be directly dragged or imported onto the canvas to form temporary section cards.</p>`
+<p style="text-indent: 18px;">The JSON/HTML files exported by Bookmark Backup and Bookmark Record and Recommend can be directly dragged or imported onto the canvas to form temporary section cards.</p>`
     },
     canvasHelpPanelFeatures: {
         'zh_CN': `<h2>特色功能</h2>
@@ -4683,7 +4685,7 @@ function applyLanguage() {
     const canvasHelpPanelOpenSource = document.getElementById('canvasHelpPanelOpenSource');
     if (canvasHelpPanelOpenSource) canvasHelpPanelOpenSource.innerHTML = i18n.canvasHelpPanelOpenSource[currentLang];
     const canvasOpenSourceModalTitle = document.getElementById('canvasOpenSourceModalTitle');
-    if (canvasOpenSourceModalTitle) canvasOpenSourceModalTitle.textContent = i18n.canvasHelpTabOpenSource[currentLang];
+    if (canvasOpenSourceModalTitle) canvasOpenSourceModalTitle.textContent = i18n.canvasOpenSourceModalTitle[currentLang];
     const canvasOpenSourceContent = document.getElementById('canvasOpenSourceContent');
     if (canvasOpenSourceContent) canvasOpenSourceContent.innerHTML = i18n.canvasHelpPanelOpenSource[currentLang];
     const canvasShortcutsModalTitle = document.getElementById('canvasShortcutsModalTitle');

@@ -575,6 +575,10 @@ html[lang="en"] #canvasManageModal.canvas-manage-modal {
     width: min(480px, calc(100vw - 16px));
 }
 
+#canvasOpenSourceModal .canvas-manage-modal-header h4 {
+    margin-left: -2px;
+}
+
 html[lang="en"] #canvasShortcutsModal.canvas-manage-modal,
 html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     min-width: 480px;
