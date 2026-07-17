@@ -1396,6 +1396,7 @@ ${isEn()
         const messageHtml = String(options.messageHtml || '');
         const confirmText = String(options.confirmText || t('继续', 'Continue'));
         const cancelText = String(options.cancelText || t('取消', 'Cancel'));
+        const showCancel = options.showCancel !== false;
         const danger = options.danger === true;
         dialog.innerHTML = `
             <div class="import-dialog-content github-confirm-content">
@@ -1406,7 +1407,7 @@ ${isEn()
                 <div class="import-dialog-body github-confirm-body">
                     <div class="github-confirm-message">${messageHtml}</div>
                     <div class="github-confirm-actions">
-                        <button id="githubConfirmCancel" type="button" class="import-mode-btn import-mode-btn-cancel">${escapeHtml(cancelText)}</button>
+                        ${showCancel ? `<button id="githubConfirmCancel" type="button" class="import-mode-btn import-mode-btn-cancel">${escapeHtml(cancelText)}</button>` : ''}
                         <button id="githubConfirmOk" type="button" class="import-mode-btn${danger ? ' github-danger-btn' : ''}">${escapeHtml(confirmText)}</button>
                     </div>
                 </div>
@@ -2137,16 +2138,39 @@ ${isEn()
                 return;
             }
 
-            // Detect files larger than 5MB
-            const LARGE_FILE_LIMIT = 5 * 1024 * 1024; // 5MB
+            // GitHub blocks individual files above 100 MiB; warn starting at 50 MiB.
+            const GITHUB_FILE_HARD_LIMIT = 100 * 1024 * 1024; // 100 MiB
+            const LARGE_FILE_LIMIT = 50 * 1024 * 1024; // 50 MiB
+            const hardLimitFiles = [];
             const largeFiles = [];
             changes.forEach((entry) => {
                 if (entry.delete) return;
                 const size = entry.content ? textToUtf8Bytes(entry.content).length : 0;
+                if (size > GITHUB_FILE_HARD_LIMIT) {
+                    hardLimitFiles.push({ path: entry.path, size });
+                }
                 if (size > LARGE_FILE_LIMIT) {
                     largeFiles.push({ path: entry.path, size });
                 }
             });
+
+            if (hardLimitFiles.length > 0) {
+                const listHtml = hardLimitFiles.map((f) => {
+                    const sizeMB = (f.size / (1024 * 1024)).toFixed(2);
+                    return `<li style="word-break: break-all; margin-bottom: 4px;"><code>${escapeHtml(f.path)}</code> (${sizeMB} MB)</li>`;
+                }).join('');
+                await showConfirmDialog({
+                    title: t('文件超过 GitHub 上限', 'File Exceeds GitHub Limit'),
+                    messageHtml: t(
+                        `以下待推送文件超过 GitHub 单文件 100MB 上限，无法推送。请缩小文件或改用 Git LFS 后再试。<br><ul style="text-align: left; margin-top: 8px; max-height: 120px; overflow-y: auto; padding-left: 20px;">${listHtml}</ul>`,
+                        `The following files exceed GitHub's 100MB per-file limit and cannot be pushed. Reduce their size or use Git LFS, then try again.<br><ul style="text-align: left; margin-top: 8px; max-height: 120px; overflow-y: auto; padding-left: 20px;">${listHtml}</ul>`
+                    ),
+                    confirmText: t('知道了', 'Got it'),
+                    showCancel: false,
+                    danger: true
+                });
+                return;
+            }
 
             if (largeFiles.length > 0) {
                 const listHtml = largeFiles.map((f) => {
@@ -2155,8 +2179,8 @@ ${isEn()
                 }).join('');
 
                 const warningMsg = t(
-                    `检测到以下待推送文件超过了建议的 5MB 大小限制，可能会导致网络请求失败或耗时极长。是否继续推送？<br><ul style="text-align: left; margin-top: 8px; max-height: 120px; overflow-y: auto; padding-left: 20px;">${listHtml}</ul>`,
-                    `The following files exceed the recommended 5MB limit and might cause network failure or take too long. Do you want to continue?<br><ul style="text-align: left; margin-top: 8px; max-height: 120px; overflow-y: auto; padding-left: 20px;">${listHtml}</ul>`
+                    `检测到以下待推送文件超过 GitHub 的 50MB 警告阈值，可能会导致网络请求失败或耗时极长。单个文件超过 GitHub 约 100MB 的上限将无法推送。是否继续推送？<br><ul style="text-align: left; margin-top: 8px; max-height: 120px; overflow-y: auto; padding-left: 20px;">${listHtml}</ul>`,
+                    `The following files exceed GitHub's 50MB warning threshold and might cause network failure or take too long. Individual files over GitHub's approximately 100MB limit cannot be pushed. Do you want to continue?<br><ul style="text-align: left; margin-top: 8px; max-height: 120px; overflow-y: auto; padding-left: 20px;">${listHtml}</ul>`
                 );
 
                 const continuePush = await showConfirmDialog({
