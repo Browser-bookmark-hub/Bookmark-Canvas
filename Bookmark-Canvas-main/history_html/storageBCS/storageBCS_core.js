@@ -48,8 +48,6 @@ const BCS_CANVAS_KEY = 'bcs:canvas';
 const BCS_SECTION_PREFIX = 'bcs:section:';
 const BCS_PERM_MAIN_KEY = 'bcs:perm:main';
 const BCS_PERM_MAIN_IDENTITY_MAP_KEY = 'bcs:perm:main-identity-map';
-const BCS_PERM_MAIN_TREE_LEGACY_KEY = 'bcs:perm:main-tree';
-const BCS_PERM_MAIN_TREE_MIGRATION_LEGACY_KEY = 'bcs:perm:main-tree-migration-v1';
 const BCS_PERM_COPY_PREFIX = 'bcs:perm:copy-';
 const BCS_SIGNAL_KEY = 'bcs:signal';
 const BCS_META_SCHEMA_VERSION = 5;
@@ -76,7 +74,6 @@ const __BCS_ID_TOKEN_LENGTH = 7;
 const __bcsIssuedSyncIds = new Set();
 const __bcsIssuedTempIds = new Set();
 const __bcsIssuedTempSectionIds = new Set();
-let __legacyPermanentTreeCacheCleanupPromise = null;
 
 function __formatTodayYYYYMMDD() {
     const d = new Date();
@@ -1199,7 +1196,6 @@ function __makePermanentStorageVersion() {
 }
 
 function __readPermanentIdentityMapPayload(rawInput) {
-    if (Array.isArray(rawInput)) return __normalizeIdentityMapArray(rawInput);
     if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) return null;
     const list = Array.isArray(rawInput.identityMap) ? rawInput.identityMap : null;
     return list ? __normalizeIdentityMapArray(list) : null;
@@ -1216,25 +1212,6 @@ function __buildPermanentIdentityMapPayload(identityMapInput, options = {}) {
         updatedAt: Date.now(),
         identityMap
     };
-}
-
-async function __writePermanentIdentityMapToBcs(identityMapInput, options = {}) {
-    const payload = __buildPermanentIdentityMapPayload(identityMapInput, options);
-    await __bcsStorageSet({
-        [BCS_PERM_MAIN_IDENTITY_MAP_KEY]: payload
-    }, { immediate: options && options.immediate !== false });
-    return payload;
-}
-
-function __cleanupLegacyPermanentTreeCacheKeys() {
-    if (__legacyPermanentTreeCacheCleanupPromise) return __legacyPermanentTreeCacheCleanupPromise;
-    __legacyPermanentTreeCacheCleanupPromise = __bcsStorageRemove([
-        BCS_PERM_MAIN_TREE_LEGACY_KEY,
-        BCS_PERM_MAIN_TREE_MIGRATION_LEGACY_KEY
-    ]).catch(() => false).finally(() => {
-        __legacyPermanentTreeCacheCleanupPromise = null;
-    });
-    return __legacyPermanentTreeCacheCleanupPromise;
 }
 
 function __buildPermanentMainStorageContentPayload(content, treeRoot, options = {}) {
@@ -1255,30 +1232,6 @@ function __buildPermanentMainStorageContentPayload(content, treeRoot, options = 
             : '永久栏目主文件：书签树的规范真相源。')),
         tree: treeRoot
     };
-}
-
-async function __migrateInlinePermanentIdentityMapToSplitStorage(rawMain, content, options = {}) {
-    if (!rawMain || typeof rawMain !== 'object' || !Array.isArray(rawMain.identityMap)) return false;
-    if (!content || !content.tree || typeof content.tree !== 'object') return false;
-    const identityMap = __readPermanentIdentityMapPayload(rawMain.identityMap) || [];
-    const storageContent = __buildPermanentMainStorageContentPayload(content, content.tree, {
-        version: rawMain.version || content.version
-    });
-    const identityMapPayload = __buildPermanentIdentityMapPayload(identityMap, {
-        slot: storageContent.slot,
-        version: rawMain.identityMapVersion || rawMain.version
-    });
-    try {
-        await __bcsStorageSet({
-            [BCS_PERM_MAIN_KEY]: storageContent,
-            [BCS_PERM_MAIN_IDENTITY_MAP_KEY]: identityMapPayload
-        }, { immediate: options && options.immediate !== false });
-        try { __cleanupLegacyPermanentTreeCacheKeys(); } catch (_) { }
-        content.version = storageContent.version;
-        return true;
-    } catch (_) {
-        return false;
-    }
 }
 
 function __coercePermanentTreeRootInput(treeInput) {
@@ -2302,29 +2255,11 @@ async function __readPermanentMainContentFromBcs(options = {}) {
             preserveRawSource: true
         });
     }
-    if (treeOnly) {
-        try {
-            await __migrateInlinePermanentIdentityMapToSplitStorage(raw, content, {
-                immediate: true
-            });
-        } catch (_) { }
-    }
     if (!treeOnly) {
         const splitIdentityMap = __readPermanentIdentityMapPayload(storage ? storage[BCS_PERM_MAIN_IDENTITY_MAP_KEY] : null);
-        const inlineIdentityMap = __readPermanentIdentityMapPayload(raw && raw.identityMap);
-        if (splitIdentityMap && splitIdentityMap.length) {
-            content.identityMap = splitIdentityMap;
-        } else if (inlineIdentityMap && inlineIdentityMap.length) {
-            content.identityMap = inlineIdentityMap;
-            try {
-                await __migrateInlinePermanentIdentityMapToSplitStorage(raw, content, {
-                    immediate: true
-                });
-            } catch (_) { }
-        }
-        if (!Array.isArray(content.identityMap)) {
-            content.identityMap = __bootstrapIdentityMapFromTree(content.tree);
-        }
+        content.identityMap = Array.isArray(splitIdentityMap)
+            ? splitIdentityMap
+            : __bootstrapIdentityMapFromTree(content.tree);
         if (!(options && options.skipIdentityMapHeal === true)) {
             __verifyAndHealIdentityMap(content);
         }
@@ -2371,7 +2306,6 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
         [BCS_PERM_MAIN_IDENTITY_MAP_KEY]: identityMapPayload
     }, { immediate: options && options.immediate !== false });
     if (!saved) return null;
-    try { __cleanupLegacyPermanentTreeCacheKeys(); } catch (_) { }
     return {
         content: nextContent,
         version: storageContent.version,
