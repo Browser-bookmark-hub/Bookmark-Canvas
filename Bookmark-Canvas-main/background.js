@@ -35,10 +35,46 @@ const CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY = 'canvasPermanentBookmarksDirtyAt'
 const CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY = 'canvasPermanentBookmarksDirtyReason';
 const CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY = 'canvasPermanentBookmarksDirtyVersion';
 const CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY = 'canvasPermanentBookmarksCleanAt';
+const CANVAS_PERMANENT_BOOKMARK_DIRTY_SYNC_LEASE_KEY = 'canvasPermanentBookmarksDirtySyncLease';
+const CANVAS_PERMANENT_BOOKMARK_DIRTY_SYNC_LEASE_MAX_AGE_MS = 5 * 60 * 1000;
 const CANVAS_FOREGROUND_ACTIVE_PORT = 'bookmark-canvas-foreground-active';
+const CANVAS_FOREGROUND_PORT_STATE_MESSAGE = 'canvas-foreground-port-state';
+const CANVAS_FOREGROUND_PORT_STATE_RUNNABLE = 'runnable';
+const CANVAS_FOREGROUND_PORT_STATE_FROZEN = 'frozen';
 let canvasPermanentBookmarksDirtyMemory = null;
-const activeForegroundPorts = new Set();
+let canvasPermanentBookmarkDirtyOperation = Promise.resolve();
+const activeForegroundPorts = new Map();
 let foregroundActivePortListenerRegistered = false;
+
+function hasRunnableCanvasForegroundPort() {
+  for (const state of activeForegroundPorts.values()) {
+    if (state === CANVAS_FOREGROUND_PORT_STATE_RUNNABLE) return true;
+  }
+  return false;
+}
+
+function runCanvasPermanentBookmarkDirtyOperation(task) {
+  const run = canvasPermanentBookmarkDirtyOperation.then(task, task);
+  canvasPermanentBookmarkDirtyOperation = run.catch(() => { });
+  return run;
+}
+
+function normalizeCanvasPermanentBookmarkDirtySyncLease(value) {
+  if (!value || typeof value !== 'object') return null;
+  const id = String(value.id || '').trim();
+  const startedAt = Number(value.startedAt) || 0;
+  if (!id || !startedAt) return null;
+  return {
+    id,
+    startedAt,
+    reason: String(value.reason || ''),
+    invalidated: value.invalidated === true
+  };
+}
+
+function isCanvasPermanentBookmarkDirtySyncLeaseExpired(lease, now = Date.now()) {
+  return !lease || (now - lease.startedAt) > CANVAS_PERMANENT_BOOKMARK_DIRTY_SYNC_LEASE_MAX_AGE_MS;
+}
 
 function storageLocalGet(keys) {
   return new Promise((resolve) => {
@@ -88,7 +124,8 @@ async function getCanvasPermanentBookmarkDirtyState() {
     CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY,
     CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY,
     CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY,
-    CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY
+    CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY,
+    CANVAS_PERMANENT_BOOKMARK_DIRTY_SYNC_LEASE_KEY
   ]);
   const dirty = data[CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY] === true;
   canvasPermanentBookmarksDirtyMemory = dirty;
@@ -98,43 +135,136 @@ async function getCanvasPermanentBookmarkDirtyState() {
     dirtyAt: Number(data[CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY]) || 0,
     reason: String(data[CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY] || ''),
     version: Number(data[CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY]) || 0,
-    cleanAt: Number(data[CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY]) || 0
+    cleanAt: Number(data[CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY]) || 0,
+    syncLease: normalizeCanvasPermanentBookmarkDirtySyncLease(data[CANVAS_PERMANENT_BOOKMARK_DIRTY_SYNC_LEASE_KEY])
   };
 }
 
-async function markCanvasPermanentBookmarksDirty(reason = 'bookmark-event') {
-  if (canvasPermanentBookmarksDirtyMemory === true) return { success: true, skipped: true };
+async function markCanvasPermanentBookmarksDirty(reason = 'bookmark-event', options = {}) {
+  return runCanvasPermanentBookmarkDirtyOperation(async () => {
+    const state = await getCanvasPermanentBookmarkDirtyState();
+    const now = Date.now();
+    const lease = state.syncLease;
 
-  const state = await getCanvasPermanentBookmarkDirtyState();
-  if (state.dirty) {
-    canvasPermanentBookmarksDirtyMemory = true;
-    return { success: true, skipped: true, dirty: true, version: state.version };
-  }
+    // A full-tree BCS sync owns a point-in-time snapshot. One mutation during
+    // that window invalidates the snapshot; coalesce all later mutations so a
+    // bulk import still performs at most one additional storage write.
+    if (lease && !lease.invalidated) {
+      const nextVersion = state.dirty
+        ? state.version
+        : Math.max(0, Number(state.version) || 0) + 1;
+      const ok = await storageLocalSet({
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY]: true,
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY]: state.dirtyAt || now,
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY]: String(reason || 'bookmark-event'),
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY]: nextVersion,
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_SYNC_LEASE_KEY]: {
+          ...lease,
+          invalidated: true
+        }
+      });
+      if (ok) canvasPermanentBookmarksDirtyMemory = true;
+      return { success: ok, dirty: true, version: nextVersion, invalidatedLease: true };
+    }
 
-  const nextVersion = Math.max(0, Number(state.version) || 0) + 1;
-  const now = Date.now();
-  const ok = await storageLocalSet({
-    [CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY]: true,
-    [CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY]: now,
-    [CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY]: String(reason || 'bookmark-event'),
-    [CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY]: nextVersion
+    if (state.dirty || options.markWhenNoForeground !== true) {
+      if (state.dirty) canvasPermanentBookmarksDirtyMemory = true;
+      return { success: true, skipped: true, dirty: state.dirty, version: state.version };
+    }
+
+    const nextVersion = Math.max(0, Number(state.version) || 0) + 1;
+    const ok = await storageLocalSet({
+      [CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY]: true,
+      [CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY]: now,
+      [CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY]: String(reason || 'bookmark-event'),
+      [CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY]: nextVersion
+    });
+    if (ok) canvasPermanentBookmarksDirtyMemory = true;
+    return { success: ok, dirty: ok, version: nextVersion, dirtyAt: now };
   });
-  if (ok) canvasPermanentBookmarksDirtyMemory = true;
-  return { success: ok, dirty: ok, version: nextVersion, dirtyAt: now };
+}
+
+async function beginCanvasPermanentBookmarkDirtySync(reason = 'full-sync') {
+  return runCanvasPermanentBookmarkDirtyOperation(async () => {
+    const state = await getCanvasPermanentBookmarkDirtyState();
+    const now = Date.now();
+    const existingLease = state.syncLease;
+    if (existingLease && !isCanvasPermanentBookmarkDirtySyncLeaseExpired(existingLease, now)) {
+      return { success: true, acquired: false, reason: 'sync_in_progress', lease: existingLease, state };
+    }
+
+    const lease = {
+      id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+      startedAt: now,
+      reason: String(reason || 'full-sync'),
+      invalidated: false
+    };
+    const ok = await storageLocalSet({
+      [CANVAS_PERMANENT_BOOKMARK_DIRTY_SYNC_LEASE_KEY]: lease
+    });
+    return {
+      success: ok,
+      acquired: ok,
+      lease: ok ? lease : null,
+      state
+    };
+  });
+}
+
+async function finishCanvasPermanentBookmarkDirtySync(leaseId, completed = true, reason = 'full-sync') {
+  return runCanvasPermanentBookmarkDirtyOperation(async () => {
+    const state = await getCanvasPermanentBookmarkDirtyState();
+    const lease = state.syncLease;
+    const expectedLeaseId = String(leaseId || '').trim();
+    if (!lease || !expectedLeaseId || lease.id !== expectedLeaseId) {
+      return { success: true, skipped: true, reason: 'lease_mismatch', state };
+    }
+
+    const now = Date.now();
+    if (completed !== true || lease.invalidated) {
+      const nextVersion = state.dirty
+        ? state.version
+        : Math.max(0, Number(state.version) || 0) + 1;
+      const ok = await storageLocalSet({
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY]: true,
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_AT_KEY]: state.dirtyAt || now,
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_REASON_KEY]: completed === true
+          ? 'sync-invalidated'
+          : String(reason || 'sync-failed'),
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_VERSION_KEY]: nextVersion,
+        [CANVAS_PERMANENT_BOOKMARK_DIRTY_SYNC_LEASE_KEY]: null
+      });
+      if (ok) canvasPermanentBookmarksDirtyMemory = true;
+      return { success: ok, dirty: true, invalidated: lease.invalidated === true, version: nextVersion };
+    }
+
+    const ok = await storageLocalSet({
+      [CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY]: false,
+      [CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY]: now,
+      [CANVAS_PERMANENT_BOOKMARK_DIRTY_SYNC_LEASE_KEY]: null
+    });
+    if (ok) canvasPermanentBookmarksDirtyMemory = false;
+    return { success: ok, dirty: false, version: state.version };
+  });
 }
 
 async function clearCanvasPermanentBookmarkDirtyState(expectedVersion = null) {
-  const state = await getCanvasPermanentBookmarkDirtyState();
-  const expected = Number(expectedVersion);
-  if (Number.isFinite(expected) && expected > 0 && state.version !== expected) {
-    return { success: true, skipped: true, reason: 'version_changed', state };
-  }
-  const ok = await storageLocalSet({
-    [CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY]: false,
-    [CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY]: Date.now()
+  return runCanvasPermanentBookmarkDirtyOperation(async () => {
+    const state = await getCanvasPermanentBookmarkDirtyState();
+    const expected = Number(expectedVersion);
+    if (state.syncLease) {
+      return { success: true, skipped: true, reason: 'sync_lease_active', state };
+    }
+    if (Number.isFinite(expected) && expected > 0 && state.version !== expected) {
+      return { success: true, skipped: true, reason: 'version_changed', state };
+    }
+    const ok = await storageLocalSet({
+      [CANVAS_PERMANENT_BOOKMARK_DIRTY_KEY]: false,
+      [CANVAS_PERMANENT_BOOKMARK_CLEAN_AT_KEY]: Date.now()
+    });
+    if (ok) canvasPermanentBookmarksDirtyMemory = false;
+    return { success: ok, dirty: false, version: state.version };
   });
-  if (ok) canvasPermanentBookmarksDirtyMemory = false;
-  return { success: ok, dirty: false, version: state.version };
 }
 
 function registerCanvasForegroundActivePortListener() {
@@ -145,7 +275,18 @@ function registerCanvasForegroundActivePortListener() {
   browserAPI.runtime.onConnect.addListener((port) => {
     if (!port || port.name !== CANVAS_FOREGROUND_ACTIVE_PORT) return;
 
-    activeForegroundPorts.add(port);
+    // A connecting page is not considered runnable until it explicitly reports
+    // its lifecycle state. This avoids treating a reconnected frozen document
+    // as the owner of permanent-bookmark BCS updates.
+    activeForegroundPorts.set(port, null);
+
+    const onMessage = (message) => {
+      if (!message || message.type !== CANVAS_FOREGROUND_PORT_STATE_MESSAGE) return;
+      const state = message.state === CANVAS_FOREGROUND_PORT_STATE_FROZEN
+        ? CANVAS_FOREGROUND_PORT_STATE_FROZEN
+        : CANVAS_FOREGROUND_PORT_STATE_RUNNABLE;
+      activeForegroundPorts.set(port, state);
+    };
 
     const onDisconnect = () => {
       try {
@@ -156,11 +297,13 @@ function registerCanvasForegroundActivePortListener() {
       } catch (_) { }
       activeForegroundPorts.delete(port);
       try {
+        port.onMessage.removeListener(onMessage);
         port.onDisconnect.removeListener(onDisconnect);
       } catch (_) { }
     };
 
     try {
+      port.onMessage.addListener(onMessage);
       port.onDisconnect.addListener(onDisconnect);
     } catch (_) {
       activeForegroundPorts.delete(port);
@@ -183,8 +326,9 @@ function registerCanvasPermanentBookmarkDirtyListener() {
   try {
     if (!browserAPI?.bookmarks) return;
     const mark = (reason) => {
-      if (activeForegroundPorts.size > 0) return;
-      markCanvasPermanentBookmarksDirty(reason).catch(() => { });
+      markCanvasPermanentBookmarksDirty(reason, {
+        markWhenNoForeground: !hasRunnableCanvasForegroundPort()
+      }).catch(() => { });
     };
     if (browserAPI.bookmarks.onCreated?.addListener) {
       browserAPI.bookmarks.onCreated.addListener(() => mark('created'));
@@ -893,6 +1037,27 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === 'getCanvasPermanentBookmarkDirtyState') {
     getCanvasPermanentBookmarkDirtyState()
+      .then((state) => sendResponse(state))
+      .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message.action === 'beginCanvasPermanentBookmarkDirtySync') {
+    beginCanvasPermanentBookmarkDirtySync(message.reason)
+      .then((state) => sendResponse(state))
+      .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message.action === 'finishCanvasPermanentBookmarkDirtySync') {
+    finishCanvasPermanentBookmarkDirtySync(message.leaseId, message.completed === true, message.reason)
+      .then((state) => sendResponse(state))
+      .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message.action === 'markCanvasPermanentBookmarksDirty') {
+    markCanvasPermanentBookmarksDirty(message.reason, { markWhenNoForeground: true })
       .then((state) => sendResponse(state))
       .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
     return true;

@@ -6,7 +6,7 @@
 
 ## 一句话结论
 
-后台 dirty 已经被收窄为“没有任何可连接的画布前台 Port 时”的后台兜底信号。它只判断永久书签树是否可能在纯后台期间领先 BCS，不负责修复前台页面休眠、冻结、过期内存、自动保存覆盖等问题。这一部分在规划基线提交 `6828baf3beb25db9ca42718a47e053b206054be5` 之后已经做了主干实现和 Port 断线打磨。
+后台 dirty 已经被收窄为“没有任何可运行的画布前台 Port 时”的后台兜底信号。它判断永久书签树是否可能在纯后台或全部 frozen 期间领先 BCS；后台只记录 dirty，不直接写永久栏目 BCS。
 
 下一阶段真正要补的是 `history.html` 的页面生命周期恢复边界：普通 tab 和侧边栏 iframe 如果从 `frozen` / sleeping 状态恢复，浏览器不会自动刷新，旧 JS 内存会继续运行。`resume`、`pageshow.persisted` 这类事件不能直接等同于“数据一定过期”，但它们足以说明页面是旧 JS 上下文恢复。首版处理要和现有全量覆盖/恢复导入保持同一安全策略：先同步阻断旧页面写回 BCS、取消 pending 写入，再刷新当前 `history.html`。普通 tab 刷新当前 tab；侧边栏里只刷新 iframe。
 
@@ -16,27 +16,27 @@
 
 ## 当前已完成的代码事实
 
-### 后台 dirty 已限制在“无活跃前台 Port”
+### 后台 dirty 已限制在“无可运行前台 Port”
 
 [background.js](/Users/kk/Downloads/kk/canvas/Bookmark-Canvas/Bookmark-Canvas-main/background.js:33) 当前维护：
 
 - `CANVAS_FOREGROUND_ACTIVE_PORT = 'bookmark-canvas-foreground-active'`。
-- `activeForegroundPorts = new Set()`。
-- `registerCanvasForegroundActivePortListener()` 监听 `runtime.onConnect`。
-- 只有端口名匹配 `bookmark-canvas-foreground-active` 的连接才加入 `activeForegroundPorts`。
+- `activeForegroundPorts = new Map()`，记录每个连接画布 Port 的生命周期状态。
+- `registerCanvasForegroundActivePortListener()` 同时监听 `runtime.onConnect` 与 Port 消息。
+- 新 `history.html` 通过 `canvas-foreground-port-state` 上报 `runnable`；`freeze` 与 `pagehide.persisted` 上报 `frozen`。
 - `port.onDisconnect` 会移除端口，并读取一次 `runtime.lastError`，避免 Chrome 控制台出现 unchecked lastError 噪声。
 
 [registerCanvasPermanentBookmarkDirtyListener()](/Users/kk/Downloads/kk/canvas/Bookmark-Canvas/Bookmark-Canvas-main/background.js:171) 中，所有 Chrome 书签事件进入同一个 `mark(reason)`。当前关键边界是：
 
 ```javascript
-if (activeForegroundPorts.size > 0) return;
+if (hasRunnableCanvasForegroundPort()) return;
 markCanvasPermanentBookmarksDirty(reason).catch(() => { });
 ```
 
 这意味着：
 
-- 任意画布前台 Port 存活时，后台不再写 `canvasPermanentBookmarksDirty`。
-- 没有画布前台 Port 时，后台把 `bookmarks.onCreated`、`onRemoved`、`onMoved`、`onChanged`、`onChildrenReordered`、`onImportEnded` 记录为永久书签 dirty。
+- 任意 `runnable` 画布前台 Port 存在时，后台不再写 `canvasPermanentBookmarksDirty`。
+- 没有 `runnable` 画布前台 Port 时（包括全部端口均 `frozen`），后台把 `bookmarks.onCreated`、`onRemoved`、`onMoved`、`onChanged`、`onChildrenReordered`、`onImportEnded` 记录为永久书签 dirty。
 - dirty 仍然只是“Chrome 书签树可能领先 BCS 永久树”的兜底标记，不参与临时栏目、Markdown、连接线、布局等画布状态。
 
 ### 前台画布页面已建立 Port，并做了断线打磨
@@ -167,30 +167,32 @@ Page Lifecycle API 也把 `frozen` 和 `discarded` 区分开：`freeze` / `resum
 
 ## 当前后台 dirty 边界
 
-### 有活跃前台 Port
+### 有可运行前台 Port
 
 - 后台忽略 Chrome 书签事件，不写 dirty。
 - 永久书签变化继续交给前台 `history.js` 现有监听处理。
 - 前台已有逻辑可做小批量增量 patch、大批量或异常回退全量同步。
 
-### 没有活跃前台 Port
+### 没有可运行前台 Port
 
-- 后台监听 Chrome 书签事件并写 dirty。
+- 后台监听 Chrome 书签事件并写 dirty；这包括所有 Port 已断开的关闭/discard 场景，以及所有现存画布 Port 都上报为 `frozen` 的弱休眠场景。
 - 下次任意 `history.html` 冷启动时，前台读取 dirty。
 - 如果 dirty 存在，前台优先通过 `CanvasProtocolBridge.syncPermanentMainTreeFromChromeBookmarks` 从 Chrome 书签树同步永久栏目到 BCS；同步成功后按 version 清 dirty，失败路径不应假装 dirty 已解决。
 
 ### Port 不是生命周期安全证明
 
-Port 只能证明“当前 service worker 内存里存在一个连接中的画布前台上下文”。它不能证明：
+Port 连接只能证明“当前 service worker 内存里存在一个画布前台上下文”。只有前台通过 Page Lifecycle API 上报为 `runnable` 后，后台才把它视为可以承担永久书签 BCS 同步的前台。`freeze` 与 `pagehide.persisted` 会上报 `frozen`；新 `history.html` 文档连接后上报 `runnable`。
+
+Port 本身不能证明：
 
 - 页面没有 frozen。
 - 页面内存中的画布状态是最新的。
 - 页面已经处理完恢复检查。
 - 页面没有错过 `storage.onChanged`、BroadcastChannel 或 BCS 信号。
 
-因此，当前 Port 机制只解决后台 dirty 的误写边界，不解决 frozen 页面复苏后的旧内存写回风险。
+因此，后台以“是否存在 runnable Port”判断 dirty 责任；旧 frozen 上下文恢复后的旧内存写回，仍由 `resume` / `pageshow.persisted` 的禁写与 reload 处理。
 
-还有一个交叉边界要明确：如果某个 `history.html` 的 Port 在 service worker 当前生命周期内仍被认为连接中，但页面随后进入 frozen，后台会按规则不写 dirty，而被冻结的前台也可能暂时处理不了 Chrome 书签事件。弱休眠恢复因此不能只看 dirty 标记；恢复后的冷启动路径需要重新读取 BCS，并在 dirty、启动同步策略或后续版本检查要求时校准永久书签树。
+多页面、多侧边栏下，只要有任一 `runnable` 画布前台，前台监听负责维护 BCS；当全部前台都 frozen 或断开时，后台对后续外部 Chrome 书签变化写 dirty。任一页面恢复 reload 或重新创建后，沿现有 dirty 闭环决定是否 Chrome → BCS 同步。
 
 ## 当前已打磨的 Port 边界
 
@@ -336,7 +338,7 @@ window.location.reload();
 
 ## 不做的事
 
-- 不让后台 dirty 接管前台 frozen 恢复。
+- 不让后台 dirty 直接写永久栏目 BCS，或在每次 frozen 恢复时无条件全量同步。
 - 不把 `panel-shell.html`、`sidebar.html`、配置页、帮助页算作画布前台。
 - 不用 Port 判断页面数据是否最新。
 - 不为 frozen 页面补事件队列。

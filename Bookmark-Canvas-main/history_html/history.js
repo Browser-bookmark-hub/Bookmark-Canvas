@@ -215,10 +215,19 @@ function installCanvasPageLifecycleGuards() {
 
     try {
         document.addEventListener('freeze', () => {
+            setForegroundActivePortLifecycleState('frozen');
             writeCanvasLifecycleSessionMarker(CANVAS_LIFECYCLE_FREEZE_MARKER_KEY, {
                 reason: 'freeze',
                 sidePanel: isSidePanelMode === true
             });
+        }, { capture: true });
+    } catch (_) { }
+
+    try {
+        window.addEventListener('pagehide', (event) => {
+            if (event && event.persisted === true) {
+                setForegroundActivePortLifecycleState('frozen');
+            }
         }, { capture: true });
     } catch (_) { }
 
@@ -1938,6 +1947,7 @@ let foregroundActivePort = null;
 let foregroundActivePortReconnectTimer = null;
 let foregroundActivePortReconnectDelay = FOREGROUND_ACTIVE_PORT_RECONNECT_INITIAL_DELAY_MS;
 let foregroundActivePortStopped = false;
+let foregroundActivePortLifecycleState = 'runnable';
 
 let __canvasViewSurfaceKeyInitPromise = null;
 
@@ -1952,6 +1962,25 @@ function getForegroundActivePortLastError() {
 function isForegroundActivePortContextInvalidated(errorLike) {
     const message = String((errorLike && errorLike.message) || errorLike || '').toLowerCase();
     return message.includes('context invalidated');
+}
+
+function postForegroundActivePortLifecycleState() {
+    if (!foregroundActivePort) return false;
+    try {
+        foregroundActivePort.postMessage({
+            type: 'canvas-foreground-port-state',
+            state: foregroundActivePortLifecycleState
+        });
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function setForegroundActivePortLifecycleState(stateInput) {
+    foregroundActivePortLifecycleState = stateInput === 'frozen' ? 'frozen' : 'runnable';
+    postForegroundActivePortLifecycleState();
+    return foregroundActivePortLifecycleState;
 }
 
 function scheduleForegroundActivePortReconnect(delayMs = foregroundActivePortReconnectDelay) {
@@ -1982,6 +2011,7 @@ function setupForegroundActivePort() {
 
         foregroundActivePort = browserAPI.runtime.connect({ name: FOREGROUND_ACTIVE_PORT_NAME });
         foregroundActivePortReconnectDelay = FOREGROUND_ACTIVE_PORT_RECONNECT_INITIAL_DELAY_MS;
+        postForegroundActivePortLifecycleState();
         foregroundActivePort.onDisconnect.addListener(() => {
             const err = getForegroundActivePortLastError();
             foregroundActivePort = null;
@@ -12716,13 +12746,18 @@ async function getBookmarkTreeSnapshot() {
                         reason: 'background-bookmark-dirty-open',
                         assumeClean: false
                     });
-                    if (syncResult) {
+                    if (syncResult && syncResult.skipped && syncResult.reason === 'sync_in_progress') {
+                        schedulePermanentMainStorageSyncFromChrome('background-bookmark-dirty-open-retry', 800);
+                    }
+                    if (syncResult && !syncResult.skipped) {
                         try {
                             if (typeof bridge.clearPermanentTreeRenderCaches === 'function') {
                                 bridge.clearPermanentTreeRenderCaches();
                             }
                         } catch (_) { }
-                        await clearCanvasPermanentBookmarkDirtyState(dirtyState.version);
+                        if (syncResult.dirtySync && syncResult.dirtySync.invalidated === true) {
+                            schedulePermanentMainStorageSyncFromChrome('background-bookmark-dirty-open-invalidated', 0);
+                        }
                     }
                 } catch (syncError) {
                     console.warn('[TreeSnapshot] 后台书签 dirty 同步失败，继续读取现有永久 JSON:', syncError);
@@ -12772,12 +12807,14 @@ function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) 
             permanentMainStorageSyncTimer = null;
             const bridge = window.CanvasProtocolBridge;
             if (!bridge || typeof bridge.syncPermanentMainTreeFromChromeBookmarks !== 'function') return;
-            const dirtyState = await getCanvasPermanentBookmarkDirtyState();
             bridge.syncPermanentMainTreeFromChromeBookmarks({
                 reason,
                 assumeClean: false
             }).then((syncResult) => {
                 if (syncResult && syncResult.skipped) {
+                    if (syncResult.reason === 'sync_in_progress') {
+                        schedulePermanentMainStorageSyncFromChrome(`${reason}-lease-retry`, 800);
+                    }
                     ;
                     return;
                 }
@@ -12787,9 +12824,9 @@ function schedulePermanentMainStorageSyncFromChrome(reason = '', delayMs = 180) 
                         bridge.clearPermanentTreeRenderCaches();
                     }
                 } catch (_) { }
-                try {
-                    clearCanvasPermanentBookmarkDirtyState(dirtyState && dirtyState.version).catch(() => { });
-                } catch (_) { }
+                if (syncResult.dirtySync && syncResult.dirtySync.invalidated === true) {
+                    schedulePermanentMainStorageSyncFromChrome(`${reason}-invalidated`, 0);
+                }
                 if (currentView === 'canvas') {
                     try { scheduleBulkBookmarkMutationTreeRefresh('post-main-storage-sync', 120); } catch (_) { }
                 }

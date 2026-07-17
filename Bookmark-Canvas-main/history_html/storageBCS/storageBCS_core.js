@@ -1125,6 +1125,29 @@ async function __clearCanvasPermanentBookmarkDirtyStateInBackground(expectedVers
     });
 }
 
+async function __beginCanvasPermanentBookmarkDirtySyncInBackground(reason = '') {
+    return await __sendCanvasPermanentStorageRuntimeMessage({
+        action: 'beginCanvasPermanentBookmarkDirtySync',
+        reason: String(reason || 'full-sync')
+    });
+}
+
+async function __finishCanvasPermanentBookmarkDirtySyncInBackground(leaseId, completed, reason = '') {
+    return await __sendCanvasPermanentStorageRuntimeMessage({
+        action: 'finishCanvasPermanentBookmarkDirtySync',
+        leaseId: String(leaseId || ''),
+        completed: completed === true,
+        reason: String(reason || 'full-sync')
+    });
+}
+
+async function __markCanvasPermanentBookmarksDirtyInBackground(reason = '') {
+    return await __sendCanvasPermanentStorageRuntimeMessage({
+        action: 'markCanvasPermanentBookmarksDirty',
+        reason: String(reason || 'bcs-write-failed')
+    });
+}
+
 function __getPermanentChromeTreeForStorage() {
     const api = __getCanvasBookmarksApiForPermanentStorage();
     if (!api || typeof api.getTree !== 'function') {
@@ -2478,9 +2501,12 @@ async function __mutatePermanentMainContentInBcs(mutator, options = {}) {
     const writeResult = await __writePermanentMainContentToBcs(nextContent, {
         immediate: true
     });
+    if (!writeResult || !writeResult.content) {
+        throw new Error('[Permanent JSON] failed to persist main content.');
+    }
     return {
         ...(mutation && typeof mutation === 'object' ? mutation : {}),
-        content: writeResult && writeResult.content ? writeResult.content : nextContent,
+        content: writeResult.content,
         previousContent,
         changed: true
     };
@@ -2869,20 +2895,55 @@ async function __applyPermanentBookmarkEventsToBcs(eventsInput, options = {}) {
 }
 
 async function __syncPermanentMainTreeFromChromeBookmarks(options = {}) {
-    const chromeTree = await __getPermanentChromeTreeForStorage();
-    if (!chromeTree) return null;
-    const previous = await __ensurePermanentMainContentInBcs();
-    const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(chromeTree);
-    if (!normalizedTree) return null;
-    const rebuiltIdentityMap = __rebuildIdentityMapPreservingExisting(previous, normalizedTree[0]);
-    const content = {
-        ...(previous && typeof previous === 'object' ? previous : __buildPermanentPrimaryContentPayloadFromTree(normalizedTree)),
-        tree: normalizedTree[0],
-        identityMap: rebuiltIdentityMap
+    const reason = String(options && options.reason || 'full-sync');
+    const leaseResult = await __beginCanvasPermanentBookmarkDirtySyncInBackground(reason);
+    if (!leaseResult || leaseResult.success !== true) {
+        throw new Error('[Permanent JSON] failed to begin background dirty sync lease.');
+    }
+    if (leaseResult.acquired !== true || !leaseResult.lease || !leaseResult.lease.id) {
+        return {
+            skipped: true,
+            reason: String(leaseResult.reason || 'sync_in_progress')
+        };
+    }
+
+    const leaseId = leaseResult.lease.id;
+    let writeResult = null;
+    try {
+        const chromeTree = await __getPermanentChromeTreeForStorage();
+        if (!chromeTree) throw new Error('[Permanent JSON] failed to read Chrome bookmark tree.');
+        const previous = await __ensurePermanentMainContentInBcs();
+        const normalizedTree = __normalizePermanentTreeSnapshotForLocalStorage(chromeTree);
+        if (!normalizedTree) throw new Error('[Permanent JSON] failed to normalize Chrome bookmark tree.');
+        const rebuiltIdentityMap = __rebuildIdentityMapPreservingExisting(previous, normalizedTree[0]);
+        const content = {
+            ...(previous && typeof previous === 'object' ? previous : __buildPermanentPrimaryContentPayloadFromTree(normalizedTree)),
+            tree: normalizedTree[0],
+            identityMap: rebuiltIdentityMap
+        };
+        writeResult = await __writePermanentMainContentToBcs(content, {
+            immediate: true
+        });
+        if (!writeResult || !writeResult.content) {
+            throw new Error('[Permanent JSON] failed to persist Chrome bookmark tree.');
+        }
+    } catch (error) {
+        const finishResult = await __finishCanvasPermanentBookmarkDirtySyncInBackground(leaseId, false, reason);
+        if (!finishResult || finishResult.success !== true) {
+            await __markCanvasPermanentBookmarksDirtyInBackground(`${reason}-finish-failed`);
+        }
+        throw error;
+    }
+
+    const finishResult = await __finishCanvasPermanentBookmarkDirtySyncInBackground(leaseId, true, reason);
+    if (!finishResult || finishResult.success !== true) {
+        await __markCanvasPermanentBookmarksDirtyInBackground(`${reason}-finish-failed`);
+        throw new Error('[Permanent JSON] failed to finish background dirty sync lease.');
+    }
+    return {
+        ...writeResult,
+        dirtySync: finishResult
     };
-    return __writePermanentMainContentToBcs(content, {
-        immediate: true
-    });
 }
 
 function __clearPermanentTreeRenderCachesAfterStorageUpdate() {
@@ -7576,9 +7637,8 @@ async function __buildExportSandbox(options = {}) {
                     reason: String(options && options.reason || 'export'),
                     assumeClean: false
                 });
-                if (syncResult) {
+                if (syncResult && !syncResult.skipped) {
                     try { __clearPermanentTreeRenderCachesAfterStorageUpdate(); } catch (_) { }
-                    await __clearCanvasPermanentBookmarkDirtyStateInBackground(dirtyState.version);
                 }
             }
         } catch (e) {
@@ -8066,7 +8126,12 @@ function __bcsStorageRemove(keys) {
         };
         try {
             const maybePromise = storage.remove(list, () => {
-                done(true);
+                try {
+                    const runtime = __getCanvasRuntimeApiForPermanentStorage();
+                    done(!(runtime && runtime.lastError));
+                } catch (_) {
+                    done(true);
+                }
             });
             if (maybePromise && typeof maybePromise.then === 'function') {
                 maybePromise.then(() => done(true)).catch(() => done(false));
@@ -8153,7 +8218,12 @@ function __bcsStorageSet(payload, { immediate = false } = {}) {
         };
         try {
             const maybePromise = storage.set(effectivePayload, () => {
-                done(true);
+                try {
+                    const runtime = __getCanvasRuntimeApiForPermanentStorage();
+                    done(!(runtime && runtime.lastError));
+                } catch (_) {
+                    done(true);
+                }
             });
             if (maybePromise && typeof maybePromise.then === 'function') {
                 maybePromise.then(() => done(true)).catch(() => done(false));

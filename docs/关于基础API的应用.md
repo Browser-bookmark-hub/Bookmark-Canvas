@@ -33,16 +33,16 @@
 
 ### 2.2 后台写脏（Dirty）与前台清脏的闭环
 
-为了避免在前后台同时活跃时产生重复同步的开销，系统建立了基于 **Port 计数器** 的拦截机制：
+为了避免在前后台同时活跃时产生重复同步的开销，系统建立了基于 **可运行前台 Port** 的拦截机制：
 
 1. **前台活跃时**：
    * 前台页面（标签页或侧边栏 Iframe）加载时会通过 `chrome.runtime.connect` 与后台建立长连接通道。
-   * 后台 Service Worker 内存中的 `activeForegroundPorts` 计数器 $> 0$。
+   * 后台 Service Worker 内存中至少存在一个状态为 `runnable` 的画布 Port。
    * 此时，后台的书签事件监听器在触发时检测到有活跃前台，直接**提前退出（Return）**，不写 dirty 状态。所有的书签树维护完全由活跃的前台自己通过原生 API 实时更新并同步到 BCS。
-2. **前台关闭（纯后台）时**：
-   * 所有前台 Port 均已断开，后台 `activeForegroundPorts` 计数器 $= 0$。
+2. **没有可运行前台时（纯后台或全部 frozen）**：
+   * 所有前台 Port 都已断开，或现存 Port 都通过 Page Lifecycle API 上报为 `frozen`。
    * 当用户使用原生书签管理器、其它同步插件或同步工具修改了书签时，后台 Service Worker 监听到变更。
-   * 由于计数器为 0，后台会向 `chrome.storage.local` 写入脏标记 `canvasPermanentBookmarksDirty = true`，记录此次修改的版本号和时间戳。
+   * 由于没有 `runnable` 前台，后台会向 `chrome.storage.local` 写入脏标记 `canvasPermanentBookmarksDirty = true`，记录此次修改的版本号和时间戳。
 3. **前台重新打开时（清脏）**：
    * 任意前台（标签页或侧边栏）冷启动打开。
    * 在初始化时主动读取 `canvasPermanentBookmarksDirty` 标记。
