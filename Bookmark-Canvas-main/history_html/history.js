@@ -15072,20 +15072,18 @@ function saveTreeExpandState(treeContainer) {
             }
         } catch (_) { }
 
-        // Canvas 永久栏目副本：立即写入（避免同步/刷新时 debounce 丢失，确保“副本独立记忆”可靠）
+        // Canvas 永久栏目（主体和副本）：真实的展开/收起操作后立即写入。
+        // 不能把主体留给 pagehide/visibilitychange 再从 DOM 重算：懒加载或
+        // 重渲染中的 DOM 可能不完整，会把已经持久化的 folder ID 覆盖丢失。
         try {
-            if (currentView === 'canvas') {
-                const key = __getTreeExpandStateStorageKey(treeContainer);
-                const copyExpandPrefix = `${__CANVAS_VIEW_STATE_STORAGE_NS}:expand:${__getCanvasViewStatePartitionKey()}:${__PERMANENT_SECTION_EXPANDED_KEY}:`;
-                if (key && key.startsWith(copyExpandPrefix)) {
-                    const prevTimer = _saveTreeExpandStateTimers.get(treeContainer);
-                    if (prevTimer) {
-                        clearTimeout(prevTimer);
-                        try { _saveTreeExpandStateTimers.delete(treeContainer); } catch (_) { }
-                    }
-                    __saveTreeExpandStateToStorage(treeContainer);
-                    return;
+            if (__isCanvasPermanentTreeContainer(treeContainer)) {
+                const prevTimer = _saveTreeExpandStateTimers.get(treeContainer);
+                if (prevTimer) {
+                    clearTimeout(prevTimer);
+                    try { _saveTreeExpandStateTimers.delete(treeContainer); } catch (_) { }
                 }
+                __saveTreeExpandStateToStorage(treeContainer);
+                return;
             }
         } catch (_) { }
         const prevTimer = _saveTreeExpandStateTimers.get(treeContainer);
@@ -15212,7 +15210,8 @@ function restoreTreeExpandState(treeContainer) {
     }
 }
 
-// Canvas 永久栏目：在刷新/关闭前强制 flush 展开状态，避免 debounce 丢失（副本尤其明显）
+// Canvas 永久栏目：展开状态在真实操作时已经立即写入。关闭/隐藏时不得
+// 扫描 DOM 重建快照，否则懒加载或重渲染中的不完整树会覆盖正确的 ID 状态。
 function __flushCanvasPermanentSectionExpandState() {
     try {
         if (currentView !== 'canvas') return;
@@ -15226,7 +15225,6 @@ function __flushCanvasPermanentSectionExpandState() {
                     _saveTreeExpandStateTimers.delete(tree);
                 }
             } catch (_) { }
-            try { __saveTreeExpandStateToStorage(tree); } catch (_) { }
         });
     } catch (_) { }
 }

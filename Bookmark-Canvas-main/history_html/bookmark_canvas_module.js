@@ -9135,17 +9135,6 @@ function __syncExpandAndScrollForFullscreenCard(descriptor, sourcePartition) {
             scrollBaseKey = __getPermanentSectionScrollBaseKey(target);
 
             try {
-                const tree = target.querySelector('.bookmark-tree');
-                if (tree) {
-                    if (typeof __saveTreeExpandStateToStorage === 'function') {
-                        __saveTreeExpandStateToStorage(tree);
-                    } else if (typeof saveTreeExpandState === 'function') {
-                        saveTreeExpandState(tree);
-                    }
-                }
-            } catch (_) { }
-
-            try {
                 const body = target.querySelector('.permanent-section-body');
                 if (body && scrollBaseKey) {
                     saveViewState('scroll', scrollBaseKey, {
@@ -9239,23 +9228,6 @@ function __flushCurrentPartitionExpandAndScrollState(partitionKey) {
         };
         saveViewState('expand', TEMP_EXPAND_STATE_KEY, tempExpandState, { partitionKey: 'page' });
         saveViewState('expand', TEMP_EXPAND_STATE_KEY, tempExpandState, { partitionKey: 'sidepanel' });
-    } catch (_) { }
-
-    try {
-        const canvasContent = document.getElementById('canvasContent');
-        const scope = canvasContent || document;
-        const trees = scope.querySelectorAll('.permanent-bookmark-section .bookmark-tree');
-        trees.forEach((tree) => {
-            try {
-                if (typeof __saveTreeExpandStateToStorage === 'function') {
-                    __saveTreeExpandStateToStorage(tree);
-                    return;
-                }
-                if (typeof saveTreeExpandState === 'function') {
-                    saveTreeExpandState(tree);
-                }
-            } catch (_) { }
-        });
     } catch (_) { }
 
     try {
@@ -11213,17 +11185,6 @@ function __getPermanentSectionScrollKey(sectionEl) {
 
 function __flushPermanentSectionViewState(sectionEl) {
     if (!sectionEl) return;
-    try {
-        const tree = sectionEl.querySelector('.bookmark-tree');
-        if (tree) {
-            if (typeof __saveTreeExpandStateToStorage === 'function') {
-                __saveTreeExpandStateToStorage(tree);
-            } else if (typeof saveTreeExpandState === 'function') {
-                saveTreeExpandState(tree);
-            }
-        }
-    } catch (_) { }
-
     try {
         const body = sectionEl.querySelector('.permanent-section-body');
         const baseKey = __getPermanentSectionScrollBaseKey(sectionEl);
