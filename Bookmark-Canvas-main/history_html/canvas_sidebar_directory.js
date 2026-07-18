@@ -3254,6 +3254,21 @@
     return locateDirectoryTargetFromRect(module, target, zoom);
   }
 
+  function locateCardGroup(nodeId, zoom = 'fit') {
+    const id = normalizeText(nodeId);
+    if (!id) return false;
+
+    const state = getCanvasState();
+    const mdNodes = Array.isArray(state && state.mdNodes) ? state.mdNodes : [];
+    const node = mdNodes.find((item) => item
+      && normalizeText(item.id) === id
+      && normalizeText(item.subtype) === 'card-group');
+    if (!node) return false;
+
+    const target = makeCardGroupTarget(node, node.label || node.title || '');
+    return !!target && locateMdNodeTarget(getCanvasModule(), target, zoom);
+  }
+
   function highlightEdge(edgeId) {
     const id = normalizeText(edgeId);
     if (!id) return;
@@ -5229,6 +5244,7 @@
   global.CanvasSidebarDirectory = {
     init,
     refresh,
+    locateCardGroup,
     renderPreviewDirectory,
     getMdNodeTitle,
     getTempSectionDisplayText,

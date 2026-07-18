@@ -2382,9 +2382,8 @@ const SEARCH_MODES = [
         labelEn: 'Card (Group)',
         icon: 'fa-layer-group',
         color: 'mode-color-orange',
-        // Include date-range example for card mode (e.g. 0107-0120)
-        desc: '序号 (#A / A-1), 群组 (A-), 卡片组名字, 时间 (今天 / 2024 / 0107-0120)',
-        descEn: 'Index (#A / A-1), Group (A-), Card group name, Time (Today / 2024 / 0107-0120)'
+        desc: '序号 (#A / A-1), 卡片(组)名字',
+        descEn: 'Index (#A / A-1), Card (Group) name'
     },
     {
         key: 'description',
@@ -4010,7 +4009,6 @@ function collectSectionSearchContentSignature(activeCanvasState) {
             label,
             sequenceNumber: normalizeCanvasSearchString(section.sequenceNumber || null),
             description: normalizeCanvasSearchString((section.description || '').replace(/<[^>]+>/g, ' ').trim()),
-            time: normalizeCanvasSearchString(inferTempSectionTime(section, title) || ''),
             originDisplayIndex: normalizeCanvasSearchString(getTempSectionOriginDisplayIndex(section, label) || ''),
             color: normalizeCanvasSearchString(getTempSectionSearchColor(section)),
             items: collectTempSectionSearchItemSnapshots(section)
@@ -4401,13 +4399,11 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
 
     const title = section.title || section.name || '';
     const description = (section.description || '').replace(/<[^>]+>/g, ' ').trim();
-    const time = inferTempSectionTime(section, title);
     const label = getTempSectionSearchLabel(section);
     const sequenceNumber = section.sequenceNumber || null;
     const originDisplayIndex = getTempSectionOriginDisplayIndex(section, label);
     const color = getTempSectionSearchColor(section);
     const metrics = getCanvasSearchBoxMetrics(section, color);
-    const dateFields = buildCanvasSearchDateFields(time);
 
     const item = {
         id: section.id,
@@ -4416,7 +4412,6 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
         label: label,
         sequenceNumber: sequenceNumber,
         description: description,
-        time: time,
         originDisplayIndex: originDisplayIndex,
         x: metrics.x,
         y: metrics.y,
@@ -4426,8 +4421,6 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
         __title: title.toLowerCase(),
         __label: label.toLowerCase(),
         __description: description.toLowerCase(),
-        __timeSearchable: time ? buildTimeSearchableString(time) : '',
-        ...dateFields,
         isMultiColumnMode: isMultiColumnMode
     };
 
@@ -4439,7 +4432,6 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
         const descItem = Object.assign({}, item);
         descItem.__title = '';
         descItem.__label = '';
-        descItem.__timeSearchable = '';
         db.descriptionIndex.push(descItem);
     }
 
@@ -5879,14 +5871,12 @@ function detectDirtyKeysFromLiveState() {
         const liveTitle = sec.title || sec.name || '';
         const liveDesc = (sec.description || '').replace(/<[^>]+>/g, ' ').trim();
         const liveLabel = getTempSectionSearchLabel(sec);
-        const liveTime = inferTempSectionTime(sec, liveTitle);
         const liveOriginDisplayIndex = getTempSectionOriginDisplayIndex(sec, liveLabel);
         const liveColor = getTempSectionSearchColor(sec);
         if (cached.title !== liveTitle ||
             cached.description !== liveDesc ||
             normalizeCanvasSearchString(cached.label) !== normalizeCanvasSearchString(liveLabel) ||
             normalizeCanvasSearchString(cached.sequenceNumber) !== normalizeCanvasSearchString(sec.sequenceNumber || null) ||
-            normalizeCanvasSearchNumber(cached.time, 0) !== normalizeCanvasSearchNumber(liveTime, 0) ||
             normalizeCanvasSearchNumber(cached.originDisplayIndex, 0) !== normalizeCanvasSearchNumber(liveOriginDisplayIndex, 0) ||
             normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(liveColor)) {
             detected.add(`bcs:section:${sec.id}`);
@@ -6339,8 +6329,6 @@ function createCanvasSearchQueryContext(query, mode = '') {
     const isBookmarkMode = mode === 'bookmark' || mode === 'tag';
     const permanentQuery = !isBookmarkMode ? parsePermanentSectionQuery(rawQuery) : null;
     const isGroupSearch = !isBookmarkMode && isGroupSearchQuery(rawQuery);
-    const dateMeta = !isBookmarkMode ? parseDateQuery(lowerQuery) : null;
-    const timeKeyword = !isBookmarkMode ? parseTimeKeyword(lowerQuery) : null;
 
     return {
         rawQuery,
@@ -6351,9 +6339,7 @@ function createCanvasSearchQueryContext(query, mode = '') {
         permanentQuery,
         isPermanentQuery: permanentQuery !== null,
         isGroupSearch,
-        groupPrefix: isGroupSearch ? lowerQuery.replace(/-$/, '') : '',
-        dateMeta,
-        timeKeyword
+        groupPrefix: isGroupSearch ? lowerQuery.replace(/-$/, '') : ''
     };
 }
 
@@ -6362,73 +6348,6 @@ function getCanvasSearchQueryContext(query, options = {}) {
     const mode = options && options.mode ? String(options.mode) :
         ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || '');
     return createCanvasSearchQueryContext(query, mode);
-}
-
-function matchCanvasSearchDateMetaForItem(item, dateMeta) {
-    if (!item || !dateMeta || item.type !== 'temp-section' || !item.time) return false;
-
-    const dateFields = Number.isFinite(Number(item.__dateYear))
-        ? item
-        : buildCanvasSearchDateFields(item.time);
-    const year = Number(dateFields.__dateYear);
-    const month = Number(dateFields.__dateMonth);
-    const day = Number(dateFields.__dateDay);
-    const dateKey = dateFields.__dateKey || '';
-    const mmdd = dateFields.__dateMmdd || '';
-
-    if (dateMeta.type === 'day') {
-        const vm = parseInt(dateMeta.m, 10);
-        const vd = parseInt(dateMeta.d, 10);
-        if (!Number.isFinite(vm) || !Number.isFinite(vd)) return false;
-        if (dateMeta.ignoreYear) return month === vm && day === vd;
-        const vy = parseInt(dateMeta.y, 10);
-        return year === vy && month === vm && day === vd;
-    }
-
-    if (dateMeta.type === 'month') {
-        const vm = parseInt(dateMeta.m, 10);
-        if (!Number.isFinite(vm)) return false;
-        if (dateMeta.ignoreYear) return month === vm;
-        const vy = parseInt(dateMeta.y, 10);
-        return year === vy && month === vm;
-    }
-
-    if (dateMeta.type === 'year') {
-        return year === parseInt(dateMeta.y, 10);
-    }
-
-    if (dateMeta.type === 'range') {
-        if (dateMeta.ignoreYear) {
-            return !!mmdd && mmdd >= dateMeta.startM + '-' + dateMeta.startD && mmdd <= dateMeta.endM + '-' + dateMeta.endD;
-        }
-        return !!dateKey && dateKey >= dateMeta.startKey && dateKey <= dateMeta.endKey;
-    }
-
-    return false;
-}
-
-function getCanvasSearchDateMetaScore(dateMeta) {
-    if (!dateMeta) return 0;
-    if (dateMeta.type === 'day') return 200;
-    if (dateMeta.type === 'month') return 180;
-    if (dateMeta.type === 'year') return 160;
-    if (dateMeta.type === 'range') return 170;
-    return 0;
-}
-
-function matchCanvasSearchTimeKeywordForItem(item, timeKeyword) {
-    if (!item || !timeKeyword || !item.time) return false;
-    const dateFields = Number.isFinite(Number(item.__dateYear))
-        ? item
-        : buildCanvasSearchDateFields(item.time);
-    if (timeKeyword.type === 'range') {
-        return item.time >= timeKeyword.start && item.time <= timeKeyword.end;
-    }
-    if (timeKeyword.type === 'month') return Number(dateFields.__dateMonth) === Number(timeKeyword.month);
-    if (timeKeyword.type === 'weekday') return Number(dateFields.__dateWeekday) === Number(timeKeyword.weekday);
-    if (timeKeyword.type === 'day') return Number(dateFields.__dateDay) === Number(timeKeyword.day);
-    if (timeKeyword.type === 'year') return Number(dateFields.__dateYear) === Number(timeKeyword.year);
-    return matchTimeRange(item.time, timeKeyword);
 }
 
 function shouldSkipCanvasSearchCandidateForQuery(item, mode, queryContext) {
@@ -6482,23 +6401,7 @@ function scoreCanvasSearchItem(item, query, options = {}) {
         return -Infinity;
     }
 
-    // 3. 时间搜索（临时栏目 - Unified Date）
-    const dateMeta = queryContext.dateMeta;
-    if (dateMeta && matchCanvasSearchDateMetaForItem(item, dateMeta)) {
-        return getCanvasSearchDateMetaScore(dateMeta);
-    }
-
-    // 3b. 相对时间范围搜索 (本周/上周等 - Legacy Support)
-    //parseDateQuery currently focuses on specific points (day/month/year). 
-    //Time ranges are still handled by parseTimeKeyword for now.
-    const timeKeyword = queryContext.timeKeyword;
-    if (timeKeyword && timeKeyword.type === 'range' && item.type === 'temp-section' && item.time) {
-        if (matchCanvasSearchTimeKeywordForItem(item, timeKeyword)) {
-            return 150;
-        }
-    }
-
-    // 4. 普通文本匹配
+    // 3. 普通文本匹配
     // [Optim] Single letter query: strict prefix matching only to avoid noise (e.g. searching 'A' finding 'B-1' via 'a' in date/text)
     const isSingleChar = queryContext.isSingleChar;
 
@@ -6566,9 +6469,6 @@ function scoreCanvasSearchItem(item, query, options = {}) {
             }
             // 说明匹配
             if (item.__description && !isSingleChar && item.__description.includes(q)) score = Math.max(score, 80);
-            // 时间字符串匹配
-            // Ensure time string doesn't trigger on single char 'a' etc
-            if (item.__timeSearchable && !isSingleChar && item.__timeSearchable.includes(q)) score = Math.max(score, 60);
             break;
 
         case 'md-node':
@@ -8087,10 +7987,9 @@ function searchCanvasAndRender(query, options = {}) {
         : queryContext;
 
     // 检测特殊语法
-    // Bookmark 模式下应当被视为“纯文本搜索”，不触发 # / A- / 时间等特殊语法。
+    // Bookmark 模式下应当被视为“纯文本搜索”，不触发 # / A- 等特殊语法。
     const isGroupSearch = queryContext.isGroupSearch;
     const isPermanentQuery = queryContext.isPermanentQuery;
-    const timeKeyword = queryContext.timeKeyword;
 
     // 清除之前的高亮状态 (用户输入改变时，如果不再匹配之前的群组，需要清除高亮)
     clearCanvasSearchHighlight();
@@ -8123,7 +8022,7 @@ function searchCanvasAndRender(query, options = {}) {
     // Aggregation buckets
     const groupAggregation = {
         ids: [],
-        type: null, // 'permanent-group' | 'temp-group' | 'time-range'
+        type: null, // 'permanent-group' | 'temp-group'
         label: '',
         count: 0
     };
@@ -8145,14 +8044,6 @@ function searchCanvasAndRender(query, options = {}) {
         // Check if multiple items actually start with this prefix plus dash
         // Logic will be done during iteration
     }
-    // 1c. Time Range Intent
-    else if (timeKeyword && timeKeyword.type !== 'invalid') {
-        // e.g. "2024", "1月"
-        isAggregationIntent = true;
-        groupAggregation.type = 'time-range';
-        groupAggregation.label = (typeof currentLang !== 'undefined' && currentLang === 'en') ? `Time Range: ${trimmedQuery}` : `时间范围: ${trimmedQuery}`;
-    }
-
     for (const item of sourceIndex) {
         if (searchUiState.areaSearchScope) {
             if (!isItemInAreaSearchScope(item, searchUiState.areaSearchScope)) {
@@ -8279,15 +8170,6 @@ function searchCanvasAndRender(query, options = {}) {
             // Collect for Aggregation
             if (groupAggregation.type === 'permanent-group') {
                 if (item.type === 'permanent-section') {
-                    groupAggregation.ids.push(item.id);
-                    groupAggregation.count++;
-                }
-            } else if (groupAggregation.type === 'time-range') {
-                // Item matches time search?
-                // scoreCanvasSearchItem returns > -Infinity if match, so we can trust `rawScore`
-                // But we want to ensure it's a time match, not just text match.
-                // Ideally check `scoreCanvasSearchItem` logic, but here assume if it scored high enough and is temp section
-                if (item.type === 'temp-section' && rawScore >= 100) { // arbitrary threshold for time match logic
                     groupAggregation.ids.push(item.id);
                     groupAggregation.count++;
                 }
@@ -11909,20 +11791,47 @@ async function exitCanvasNodeFullscreenForSearchLocate() {
 
 async function locateCanvasGroupSearchResult(item) {
     if (!item || !item.id) return false;
+
+    // Reuse the directory's card-group locator: it fits the group's stored
+    // rect, drives the shared viewport navigation, then wakes and highlights
+    // virtualized groups after they enter the viewport.
     try {
-        if (typeof selectMdNode === 'function') {
-            selectMdNode(item.id);
+        const directory = window.CanvasSidebarDirectory;
+        if (directory && typeof directory.locateCardGroup === 'function') {
+            const located = directory.locateCardGroup(item.id, 'fit');
+            if (located) {
+                return true;
+            }
         }
     } catch (_) { }
-    try {
-        if (typeof locateAndZoomToMdNode === 'function') {
+
+    // Compatibility fallback for an unavailable directory module.
+    let groupElement = document.getElementById(item.id);
+    if (!groupElement) {
+        try {
+            const module = window.CanvasModule;
+            if (module && typeof module.materializeMaximizedNodeFromDescriptor === 'function') {
+                groupElement = module.materializeMaximizedNodeFromDescriptor({
+                    type: 'md-node',
+                    id: item.id
+                }) || document.getElementById(item.id);
+            }
+        } catch (_) { }
+    }
+
+    if (groupElement && typeof locateAndZoomToMdNode === 'function') {
+        try {
             locateAndZoomToMdNode(item.id, 'fit');
             return true;
-        }
-    } catch (_) { }
-    return locateCanvasElement(item.id, 'group', {
+        } catch (_) { }
+    }
+
+    // If the virtualized node cannot be materialized, still navigate to its
+    // persisted rect so the search result remains usable.
+    const located = await locateCanvasElement(item.id, 'group', {
         color: item.color || '#7c3aed'
     });
+    return located;
 }
 
 function getCanvasSearchFullscreenTargetElement(item) {
