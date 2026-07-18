@@ -582,12 +582,18 @@
 
         const files = [];
         const prefix = normalizedRootPath ? `${normalizedRootPath}/` : '';
+        const rootParentPath = normalizedRootPath.split('/').slice(0, -1).join('/');
+        const siblingFolders = new Set();
         let rootExists = !normalizedRootPath;
         (Array.isArray(json && json.tree) ? json.tree : []).forEach((entry) => {
             if (!entry || typeof entry !== 'object') return;
             const pathText = normalizeRepoPath(entry.path);
             if (!pathText) return;
             const type = String(entry.type || '').trim();
+            if (normalizedRootPath && type === 'tree' && pathText !== normalizedRootPath) {
+                const parentPath = pathText.split('/').slice(0, -1).join('/');
+                if (parentPath === rootParentPath) siblingFolders.add(pathText);
+            }
             if (normalizedRootPath) {
                 if (pathText === normalizedRootPath && type === 'tree') {
                     rootExists = true;
@@ -609,7 +615,10 @@
             rootPath: normalizedRootPath,
             rootExists,
             files,
-            truncated: json && json.truncated === true
+            truncated: json && json.truncated === true,
+            autoPullMethod: json && json.truncated === true
+                ? 'targeted'
+                : (siblingFolders.size > 0 ? 'targeted' : 'zipball')
         };
     }
 
@@ -691,7 +700,7 @@
             if (!treeResult.truncated || !normalizedRootPath) return treeResult;
 
             if (normalizedRootPath) {
-                return await listRepoFilesRecursivelyByContents({
+                const contentsResult = await listRepoFilesRecursivelyByContents({
                     authHeader,
                     owner: trimmedOwner,
                     repo: trimmedRepo,
@@ -699,6 +708,7 @@
                     rootPath: normalizedRootPath,
                     signal
                 });
+                return Object.assign(contentsResult, { autoPullMethod: 'targeted' });
             }
             return treeResult;
         } catch (error) {

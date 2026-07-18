@@ -204,6 +204,18 @@
         return 'snapshot';
     }
 
+    function normalizePullMethod(value) {
+        if (value === 'zipball') return 'zipball';
+        if (value === 'targeted') return 'targeted';
+        return 'auto';
+    }
+
+    function resolvePullMethod(method, autoPullMethod) {
+        const normalized = normalizePullMethod(method);
+        if (normalized !== 'auto') return normalized;
+        return autoPullMethod === 'zipball' ? 'zipball' : 'targeted';
+    }
+
     function normalizeThreshold(value) {
         const n = Math.round(Number(value));
         if (!Number.isFinite(n)) return DEFAULT_OVERWRITE_THRESHOLD;
@@ -327,7 +339,7 @@
             confirmCommitDetails: raw.githubConfirmCommitDetails !== false,
             commitMsgTemplate: String(raw.githubCommitMsgTemplate !== undefined ? raw.githubCommitMsgTemplate : DEFAULT_COMMIT_MSG_TEMPLATE).trim(),
             commitDescTemplate: String(raw.githubCommitDescTemplate !== undefined ? raw.githubCommitDescTemplate : DEFAULT_COMMIT_DESC_TEMPLATE).trim(),
-            pullMethod: raw.githubPullMethod === 'targeted' ? 'targeted' : 'zipball'
+            pullMethod: normalizePullMethod(raw.githubPullMethod)
         };
     }
 
@@ -346,7 +358,7 @@
             githubConfirmCommitDetails: config && config.confirmCommitDetails !== false,
             githubCommitMsgTemplate: String(config && (config.commitMsgTemplate !== undefined ? config.commitMsgTemplate : DEFAULT_COMMIT_MSG_TEMPLATE)).trim(),
             githubCommitDescTemplate: String(config && (config.commitDescTemplate !== undefined ? config.commitDescTemplate : DEFAULT_COMMIT_DESC_TEMPLATE)).trim(),
-            githubPullMethod: config && config.pullMethod === 'targeted' ? 'targeted' : 'zipball'
+            githubPullMethod: normalizePullMethod(config && config.pullMethod)
         };
         await storageSet(safe);
         return await loadConfig();
@@ -593,7 +605,7 @@
             confirmCommitDetails: getRadioValue('githubPushMode') === 'prompt',
             commitMsgTemplate: get('githubConfigCommitMsgTemplate'),
             commitDescTemplate: get('githubConfigCommitDescTemplate'),
-            pullMethod: getRadioValue('githubPullMethod', 'zipball')
+            pullMethod: normalizePullMethod(getRadioValue('githubPullMethod', 'auto'))
         };
     }
 
@@ -762,6 +774,11 @@
                             </thead>
                             <tbody>
                                 <tr style="border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.08));">
+                                    <td style="padding: 8px; font-weight: bold; color: var(--accent-primary, #0969da);">${escapeHtml(t('自动', 'Auto'))}</td>
+                                    <td style="padding: 8px; color: var(--text-primary); font-weight: 600;">${t('自动<span style="color: #2da44e;">判断</span>', 'Automatically <span style="color: #2da44e;">chooses</span>')}</td>
+                                    <td style="padding: 8px; color: var(--text-secondary);">${t('仓库里有非本项目的<span style="color: #bc4c00;">其他文件夹</span>时用定点拉取；否则用整仓压缩包。Tree 清单截断时保守使用定点拉取。', 'Uses Targeted Pull when the repo contains <span style="color: #bc4c00;">other folders</span> outside this project; otherwise uses Full Repo ZIPball. Uses Targeted Pull conservatively when the Tree listing is truncated.')}</td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.08));">
                                     <td style="padding: 8px; font-weight: bold; color: var(--accent-primary, #0969da);">${escapeHtml(t('整仓压缩包法', 'Full Repo ZIP'))}</td>
                                     <td style="padding: 8px; color: var(--text-primary); font-weight: 600;">${t('速度<span style="color: #2da44e;">快</span>，但需<span style="color: #bc4c00;">过滤</span>', 'Speed is <span style="color: #2da44e;">fast</span>, but needs <span style="color: #bc4c00;">filtering</span>')}</td>
                                     <td style="padding: 8px; color: var(--text-secondary);">${t('永久/临时栏目卡片<span style="color: #0969da; font-weight: bold;">多</span>，仓库其他文件<span style="color: #2da44e; font-weight: bold;">少</span>', 'Canvas cards count is <span style="color: #0969da; font-weight: bold;">high</span>, other files in repo are <span style="color: #2da44e; font-weight: bold;">few</span>')}</td>
@@ -787,7 +804,7 @@
                         <div>
                             <strong style="font-size: 13px; display: block; margin-bottom: 4px;">${escapeHtml(t('建议：', 'Recommendation:'))}</strong>
                             <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; padding: 8px 10px; border-radius: 6px; background: rgba(9, 105, 218, 0.06); border: 1px solid rgba(9, 105, 218, 0.15);">
-                                <span>${t('默认选「整仓压缩包法」，强烈建议用一个<span style="color: #2da44e; font-weight: bold;">干净的仓库</span>存放。', 'Defaults to "Full Repo ZIPball", highly recommended to store in a <span style="color: #2da44e; font-weight: bold;">clean repository</span>.')}</span>
+                                <span>${t('默认选「自动」，仍建议用一个<span style="color: #2da44e; font-weight: bold;">干净的仓库</span>存放。', 'Defaults to "Auto". A <span style="color: #2da44e; font-weight: bold;">clean repository</span> is still recommended.')}</span>
                             </div>
                         </div>
 
@@ -1041,7 +1058,11 @@ ${isEn()
                                     ${escapeHtml(t('2.2.1、拉取数据包方式', '2.2.1 Pull Package Method'))}
                                     <span class="github-config-info-trigger" id="githubPullMethodHelpBtn" style="cursor: pointer;">?</span>
                                 </span>
-                                <div style="display: flex; align-items: center; gap: 16px; margin-top: 2px;">
+                                <div style="display: flex; align-items: center; gap: 16px; margin-top: 2px; flex-wrap: wrap;">
+                                    <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); margin: 0;">
+                                        <input type="radio" name="githubPullMethod" value="auto" id="githubPullMethodAuto" ${config.pullMethod === 'auto' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                        <span style="font-weight: 600;">${escapeHtml(t('自动', 'Auto'))}</span>
+                                    </label>
                                     <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); margin: 0;">
                                         <input type="radio" name="githubPullMethod" value="zipball" id="githubPullMethodZipball" ${config.pullMethod === 'zipball' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
                                         <span style="font-weight: 600;">${escapeHtml(t('整仓压缩包法', 'Full Repo ZIPball'))}</span>
@@ -2923,8 +2944,11 @@ ${isEn()
         return folderFiles;
     }
 
-    async function choosePullMode(config, rootPath, fileCount, commitInfo = null) {
+    async function choosePullMode(config, rootPath, fileCount, commitInfo = null, autoPullMethod = 'targeted') {
         const defaultMode = normalizePullMode(config.defaultPullMode);
+        const autoMethodLabel = resolvePullMethod('auto', autoPullMethod) === 'zipball'
+            ? t('自动（整仓压缩包法）', 'Auto (Full Repo ZIPball)')
+            : t('自动（定点拉取法）', 'Auto (Targeted Pull)');
 
         const formatCommitDate = (isoString) => {
             if (!isoString) return '';
@@ -2990,11 +3014,15 @@ ${isEn()
                     <div class="github-pull-method-choice" style="margin: 12px 0 0; padding: 10px; border-radius: 6px; background: var(--bg-secondary, rgba(0, 0, 0, 0.03)); border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12)); text-align: left;">
                         <span style="font-size: 12px; font-weight: 700; color: var(--accent-primary, #7c3aed); display: inline-flex; align-items: center; gap: 4px; user-select: none;">
                             ${escapeHtml(t('拉取数据包方式:', 'Pull Package Method:'))}
-                            <button id="githubPullModeMethodHelp" type="button" class="github-config-info-trigger" aria-label="${escapeHtml(t('拉取数据包方式说明', 'Pull package method explanation'))}" style="cursor: pointer; border: 0; background: transparent; padding: 0; color: inherit; font: inherit;">?</button>
+                            <span class="github-config-info-trigger" id="githubPullModeMethodHelp" style="cursor: pointer;">?</span>
                         </span>
                         <div style="display: flex; align-items: center; gap: 16px; margin-top: 7px; flex-wrap: wrap;">
                             <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); margin: 0;">
-                                <input type="radio" name="githubPullModeMethod" value="zipball" id="githubPullModeMethodZipball" ${config.pullMethod === 'targeted' ? '' : 'checked'} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                <input type="radio" name="githubPullModeMethod" value="auto" id="githubPullModeMethodAuto" ${config.pullMethod === 'auto' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
+                                <span style="font-weight: 600;">${escapeHtml(autoMethodLabel)}</span>
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); margin: 0;">
+                                <input type="radio" name="githubPullModeMethod" value="zipball" id="githubPullModeMethodZipball" ${config.pullMethod === 'zipball' ? 'checked' : ''} style="margin: 0; cursor: pointer; accent-color: var(--accent-primary);">
                                 <span style="font-weight: 600;">${escapeHtml(t('整仓压缩包法', 'Full Repo ZIPball'))}</span>
                             </label>
                             <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; font-size: 12px; color: var(--text-primary); margin: 0;">
@@ -3052,6 +3080,7 @@ ${isEn()
             const confirmBtn = dialog.querySelector('#githubPullConfirm');
             const backupJumpLink = dialog.querySelector('#githubPullBackupJump');
             const pullMethodHelpBtn = dialog.querySelector('#githubPullModeMethodHelp');
+            const autoMethodRadio = dialog.querySelector('#githubPullModeMethodAuto');
             const zipballMethodRadio = dialog.querySelector('#githubPullModeMethodZipball');
             const targetedMethodRadio = dialog.querySelector('#githubPullModeMethodTargeted');
             let pullMethodSavePromise = Promise.resolve();
@@ -3074,7 +3103,7 @@ ${isEn()
                 });
             }
             const saveSelectedPullMethod = (method) => {
-                const pullMethod = method === 'targeted' ? 'targeted' : 'zipball';
+                const pullMethod = normalizePullMethod(method);
                 config.pullMethod = pullMethod;
                 pullMethodSavePromise = pullMethodSavePromise
                     .catch(() => {})
@@ -3083,6 +3112,7 @@ ${isEn()
                         console.warn('[Pull] Failed to save pull package method:', error);
                     });
             };
+            if (autoMethodRadio) autoMethodRadio.addEventListener('change', () => saveSelectedPullMethod('auto'));
             if (zipballMethodRadio) zipballMethodRadio.addEventListener('change', () => saveSelectedPullMethod('zipball'));
             if (targetedMethodRadio) targetedMethodRadio.addEventListener('change', () => saveSelectedPullMethod('targeted'));
             if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
@@ -3210,7 +3240,7 @@ ${isEn()
                 }
             }
 
-            const mode = await choosePullMode(config, rootPath, classification.files.length, commitInfo);
+            const mode = await choosePullMode(config, rootPath, classification.files.length, commitInfo, listResult.autoPullMethod);
             if (!mode) {
                 return;
             }
@@ -3257,8 +3287,9 @@ ${isEn()
                 updateProgress(10, t('正在下载远端文件...', 'Downloading remote files...'));
             }
 
-            // Attempt to pull via ZIPball first to optimize network requests (unless targeted pull is explicitly configured)
-            if (mode !== 'selective' && config.pullMethod !== 'targeted' && typeof api.getRepoZipball === 'function' && typeof __unzipStore === 'function') {
+            // Attempt ZIPball only when the selected method resolves to it.
+            const effectivePullMethod = resolvePullMethod(config.pullMethod, listResult.autoPullMethod);
+            if (mode !== 'selective' && effectivePullMethod !== 'targeted' && typeof api.getRepoZipball === 'function' && typeof __unzipStore === 'function') {
                 try {
                     updateProgress(15, t('正在获取远端 ZIP 压缩包...', 'Requesting remote ZIP archive...'));
                     const zipResult = await api.getRepoZipball({
