@@ -2211,7 +2211,7 @@ body.header-dock-bottom:not(.header-compact) .settings-menu {
     top: calc(100% + 4px);
     left: 50%;
     transform: translateX(-50%);
-    width: min(320px, calc(100vw - 24px));
+    width: min(288px, calc(100vw - 24px));
     padding: 8px;
     border: 1px solid var(--border-color);
     border-radius: 10px;
@@ -2255,77 +2255,6 @@ body.header-dock-bottom:not(.header-compact) .settings-view-sync-panel {
     display: block;
     min-width: 0;
     margin-top: 2px;
-}
-
-.settings-view-sync-info-btn {
-    margin-left: auto;
-    flex-shrink: 0;
-    width: 20px;
-    height: 20px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--border-color);
-    border-radius: 999px;
-    background: var(--bg-secondary);
-    color: var(--text-tertiary);
-    cursor: pointer;
-    position: relative;
-    transition: all 0.15s ease;
-}
-
-.settings-view-sync-info-btn:hover {
-    color: var(--text-primary);
-    border-color: var(--text-secondary);
-    background: var(--bg-tertiary);
-}
-
-.settings-view-sync-tooltip {
-    position: absolute;
-    right: 0;
-    top: calc(100% + 6px);
-    width: min(320px, calc(100vw - 40px));
-    padding: 8px 10px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--bg-elevated);
-    color: var(--text-secondary);
-    font-size: 11px;
-    line-height: 1.5;
-    text-align: left;
-    box-shadow: var(--shadow-lg);
-    opacity: 0;
-    transform: translateY(-2px);
-    pointer-events: none;
-    transition: opacity 0.15s ease, transform 0.15s ease;
-    z-index: 240;
-}
-
-.settings-view-sync-tooltip-line {
-    display: block;
-}
-
-.settings-view-sync-tooltip-line+.settings-view-sync-tooltip-line {
-    margin-top: 4px;
-}
-
-.settings-view-sync-tooltip-key {
-    display: block;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.settings-view-sync-tooltip-value {
-    display: block;
-    min-width: 0;
-    color: var(--text-secondary);
-    margin-top: 1px;
-}
-
-.settings-view-sync-info-btn:hover .settings-view-sync-tooltip,
-.settings-view-sync-info-btn:focus-visible .settings-view-sync-tooltip {
-    opacity: 1;
-    transform: translateY(0);
 }
 
 .settings-view-sync-note+.settings-view-sync-note {

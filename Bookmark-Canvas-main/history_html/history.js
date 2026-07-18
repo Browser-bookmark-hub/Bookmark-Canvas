@@ -2434,8 +2434,9 @@ function __getTreeExpandStateStorageKey(treeContainer) {
         }
     } catch (_) { }
 
-    // Canvas 永久栏目：每个副本独立持久化展开状态（不做同步），
-    // 但按视图分区（page / sidepanel）分别记忆“最后一次状态”。
+    // Canvas permanent sections (including copies) keep a separate state per
+    // card.  The two legacy view partitions are mirrored on every real folder
+    // interaction, so the effective value is always the last change.
     try {
         if (currentView === 'canvas') {
             const section = treeContainer && treeContainer.closest ? treeContainer.closest('.permanent-bookmark-section') : null;
@@ -3571,16 +3572,20 @@ const i18n = {
         'en': 'View Sync'
     },
     canvasViewSyncCameraText: {
-        'zh_CN': '同步相机/模式',
-        'en': 'Sync Camera/Mode'
+        'zh_CN': '同步相机（X、Y、缩放比例）',
+        'en': 'Sync Camera (X, Y, Zoom)'
+    },
+    canvasViewSyncFullscreenText: {
+        'zh_CN': '同步全屏状态',
+        'en': 'Sync Fullscreen State'
     },
     canvasViewSyncExpandScrollText: {
         'zh_CN': '同步展开与滚动',
         'en': 'Sync Expand + Scroll'
     },
     canvasViewSyncHintGlobalText: {
-        'zh_CN': '相机：相机就是我们当前窗口的视图。\n全屏模式：指永久栏目/临时栏目/空白栏目卡片的全屏（最大化）状态。\n展开与滚动：指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。\n内容类：主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。',
-        'en': 'Camera: The camera is the current window viewport.\nFullscreen Mode: Card fullscreen (maximized) state for permanent/temporary/blank cards.\nExpand & Scroll: Folder expanded/collapsed state in permanent or temporary sections, plus the vertical scrollbar position.\nContent State: Main data / appearance / settings are globally shared across Tab and Side Panel.'
+        'zh_CN': '相机：相机就是我们当前窗口的视图。\n全屏模式：指永久栏目/临时栏目/空白栏目卡片的全屏（最大化）状态。\n展开与滚动：永久栏目、临时栏目及其他栏目中的文件夹状态与垂直滚动位置默认全局同步；只有实际操作会更新，最后一次操作生效。\n内容类：主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。',
+        'en': 'Camera: The camera is the current window viewport.\nFullscreen Mode: Card fullscreen (maximized) state for permanent/temporary/blank cards.\nExpand & Scroll: Folder state and vertical scroll position are shared by default across permanent, temporary, and other cards. Only real interactions update them; the last interaction wins.\nContent State: Main data / appearance / settings are globally shared across Tab and Side Panel.'
     },
     canvasViewSyncHintCameraLabel: {
         'zh_CN': '相机：',
@@ -3595,8 +3600,8 @@ const i18n = {
         'en': 'Expand & Scroll:'
     },
     canvasViewSyncHintExpandScrollText: {
-        'zh_CN': '指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。',
-        'en': 'Folder expanded/collapsed state in permanent or temporary sections, plus the vertical scrollbar position.'
+        'zh_CN': '默认全局同步；仅实际操作更新，最后一次操作生效。',
+        'en': 'Shared by default; only real interactions update it, and the last interaction wins.'
     },
     canvasViewSyncHintContentLabel: {
         'zh_CN': '内容类：',
@@ -3611,8 +3616,8 @@ const i18n = {
         'en': 'View State:'
     },
     canvasViewSyncHintViewText: {
-        'zh_CN': '例如相机、全屏模式、展开与滚动（<strong><u>以当前窗口为准</u></strong>），按 标签页 与 侧边栏 <strong><u>分区独立</u></strong>。',
-        'en': 'For example, camera/fullscreen mode/expand/scroll (<strong><u>using current window</u></strong>) are <strong><u>independent</u></strong> between Tab and Side Panel.'
+        'zh_CN': '以当前页面的状态覆盖其他画布页面和侧边栏。',
+        'en': 'Use the current page state to overwrite other canvas pages and side panels.'
     },
     canvasHelpBtnTitle: {
         'zh_CN': '说明',
@@ -4629,32 +4634,12 @@ function applyLanguage() {
     if (canvasViewSyncToggleText) canvasViewSyncToggleText.textContent = i18n.canvasViewSyncToggleText[currentLang];
     const canvasViewSyncCameraText = document.getElementById('canvasViewSyncCameraText');
     if (canvasViewSyncCameraText) canvasViewSyncCameraText.textContent = i18n.canvasViewSyncCameraText[currentLang];
-    const canvasViewSyncExpandScrollText = document.getElementById('canvasViewSyncExpandScrollText');
-    if (canvasViewSyncExpandScrollText) canvasViewSyncExpandScrollText.textContent = i18n.canvasViewSyncExpandScrollText[currentLang];
-    if (window.CanvasModule && typeof window.CanvasModule.updateViewSyncExpandScrollButtonText === 'function') {
-        window.CanvasModule.updateViewSyncExpandScrollButtonText();
-    }
+    const canvasViewSyncFullscreenText = document.getElementById('canvasViewSyncFullscreenText');
+    if (canvasViewSyncFullscreenText) canvasViewSyncFullscreenText.textContent = i18n.canvasViewSyncFullscreenText[currentLang];
     const canvasViewSyncHintViewLabel = document.getElementById('canvasViewSyncHintViewLabel');
     if (canvasViewSyncHintViewLabel) canvasViewSyncHintViewLabel.textContent = i18n.canvasViewSyncHintViewLabel[currentLang];
     const canvasViewSyncHintViewText = document.getElementById('canvasViewSyncHintViewText');
     if (canvasViewSyncHintViewText) canvasViewSyncHintViewText.innerHTML = i18n.canvasViewSyncHintViewText[currentLang];
-    const canvasViewSyncHintInfoBtn = document.getElementById('canvasViewSyncHintInfoBtn');
-    if (canvasViewSyncHintInfoBtn) {
-        const hint = i18n.canvasViewSyncHintGlobalText[currentLang];
-        canvasViewSyncHintInfoBtn.setAttribute('aria-label', hint);
-    }
-    const canvasViewSyncHintCameraLabel = document.getElementById('canvasViewSyncHintCameraLabel');
-    if (canvasViewSyncHintCameraLabel) canvasViewSyncHintCameraLabel.textContent = i18n.canvasViewSyncHintCameraLabel[currentLang];
-    const canvasViewSyncHintCameraText = document.getElementById('canvasViewSyncHintCameraText');
-    if (canvasViewSyncHintCameraText) canvasViewSyncHintCameraText.textContent = i18n.canvasViewSyncHintCameraText[currentLang];
-    const canvasViewSyncHintExpandScrollLabel = document.getElementById('canvasViewSyncHintExpandScrollLabel');
-    if (canvasViewSyncHintExpandScrollLabel) canvasViewSyncHintExpandScrollLabel.textContent = i18n.canvasViewSyncHintExpandScrollLabel[currentLang];
-    const canvasViewSyncHintExpandScrollText = document.getElementById('canvasViewSyncHintExpandScrollText');
-    if (canvasViewSyncHintExpandScrollText) canvasViewSyncHintExpandScrollText.textContent = i18n.canvasViewSyncHintExpandScrollText[currentLang];
-    const canvasViewSyncHintContentLabel = document.getElementById('canvasViewSyncHintContentLabel');
-    if (canvasViewSyncHintContentLabel) canvasViewSyncHintContentLabel.textContent = i18n.canvasViewSyncHintContentLabel[currentLang];
-    const canvasViewSyncHintContentText = document.getElementById('canvasViewSyncHintContentText');
-    if (canvasViewSyncHintContentText) canvasViewSyncHintContentText.textContent = i18n.canvasViewSyncHintContentText[currentLang];
 
     const canvasManageModalTitle = document.getElementById('canvasManageModalTitle');
     if (canvasManageModalTitle) canvasManageModalTitle.textContent = i18n.canvasManageTitle[currentLang];
@@ -5303,6 +5288,13 @@ function updateLanguageDependentUI() {
 // UI 初始化
 // =============================================================================
 
+function collapseCanvasViewSyncPanel() {
+    const viewSyncPanel = document.getElementById('canvasViewSyncPanel');
+    const viewSyncToggle = document.getElementById('canvasViewSyncToggleBtn');
+    if (viewSyncPanel) viewSyncPanel.style.display = 'none';
+    if (viewSyncToggle) viewSyncToggle.setAttribute('aria-expanded', 'false');
+}
+
 function setupSidePanelSettingsMenu() {
     const toggle = document.getElementById('settingsToggle');
     const menu = document.getElementById('settingsMenu');
@@ -5324,12 +5316,7 @@ function setupSidePanelSettingsMenu() {
     };
 
     const closeViewSyncPanel = () => {
-        if (viewSyncPanel) {
-            viewSyncPanel.style.display = 'none';
-        }
-        if (viewSyncToggle) {
-            viewSyncToggle.setAttribute('aria-expanded', 'false');
-        }
+        collapseCanvasViewSyncPanel();
     };
 
     const openFloatingToolsPanel = () => {
@@ -6988,6 +6975,7 @@ function setupTitleSideTools() {
             const floatingToolsToggle = document.getElementById('settingsFloatingToolsToggle');
             if (settingsMenu.hasAttribute('hidden')) {
                 settingsMenu.removeAttribute('hidden');
+                collapseCanvasViewSyncPanel();
                 if (floatingToolsPanel && !floatingToolsPanel.hasAttribute('hidden')) {
                     floatingToolsPanel.setAttribute('hidden', '');
                 }
@@ -6995,6 +6983,7 @@ function setupTitleSideTools() {
                     floatingToolsToggle.setAttribute('aria-expanded', 'false');
                 }
             } else {
+                collapseCanvasViewSyncPanel();
                 settingsMenu.setAttribute('hidden', '');
             }
         });
@@ -9344,8 +9333,20 @@ function setSidePanelFloatingToolsMode(mode) {
 
 function applySidePanelFloatingToolsMode(mode) {
     const normalizedMode = normalizeSidePanelFloatingToolsMode(mode);
+    const pageOnlyNoneRequest = !isSidePanelMode && normalizedMode === SIDE_PANEL_FLOATING_TOOLS_MODES.NONE;
     setSidePanelFloatingToolsMode(normalizedMode);
     updateSidePanelFloatingToolsDisplay();
+
+    if (pageOnlyNoneRequest) {
+        const isEn = String(currentLang || '').toLowerCase().startsWith('en');
+        showCanvasToast(
+            isEn
+                ? '"None" is only available in the side panel. The floating tools were hidden instead.'
+                : '“不显示”仅在侧边栏有效，已改为隐藏悬浮工具窗。',
+            'info',
+            2600
+        );
+    }
 }
 
 function updateFloatingToolsModeControlState() {
@@ -12177,40 +12178,14 @@ const PERMANENT_LAZY_LOADED_COUNTS_KEY = 'canvas-permanent-lazy-loaded-counts';
 let _savePermanentLoadedCountsTimer = null;
 
 function savePermanentLoadedCounts(counts) {
-    if (_savePermanentLoadedCountsTimer) {
-        clearTimeout(_savePermanentLoadedCountsTimer);
-    }
-    _savePermanentLoadedCountsTimer = setTimeout(() => {
-        _savePermanentLoadedCountsTimer = null;
-        try {
-            const payload = counts && typeof counts === 'object' ? counts : {};
-            saveViewState('expand', PERMANENT_LAZY_LOADED_COUNTS_KEY, payload, { partitionKey: 'page' });
-            saveViewState('expand', PERMANENT_LAZY_LOADED_COUNTS_KEY, payload, { partitionKey: 'sidepanel' });
-        } catch (e) {
-            console.warn('[Canvas Permanent] 保存已加载项数记忆失败:', e);
-        }
-    }, 300);
+    // "Load all" is intentionally not remembered.  A refreshed tree starts
+    // from the normal lazy batch instead of rendering every child at once.
+    return false;
 }
 
 function loadPermanentLoadedCounts() {
-    try {
-        const currentPartition = __getCanvasViewPartitionKey();
-        let key = __buildCanvasPartitionedViewStateKey('expand', PERMANENT_LAZY_LOADED_COUNTS_KEY, currentPartition);
-        let counts = __readPartitionedViewJSON(key, null, 'expand');
-        if (counts == null) {
-            const otherPartition = currentPartition === 'sidepanel' ? 'page' : 'sidepanel';
-            const otherKey = __buildCanvasPartitionedViewStateKey('expand', PERMANENT_LAZY_LOADED_COUNTS_KEY, otherPartition);
-            counts = __readPartitionedViewJSON(otherKey, null, 'expand');
-            if (counts != null) {
-                try { saveViewState('expand', PERMANENT_LAZY_LOADED_COUNTS_KEY, counts, { partitionKey: currentPartition }); } catch (_) { }
-            }
-        }
-        if (counts && typeof counts === 'object' && !Array.isArray(counts)) {
-            return counts;
-        }
-    } catch (e) {
-        console.warn('[Canvas Permanent] 加载已加载项数记忆失败:', e);
-    }
+    // Ignore older persisted values too: otherwise an earlier "load all"
+    // action would continue to force a complete tree on every refresh.
     return {};
 }
 
@@ -15134,10 +15109,47 @@ function restoreTreeExpandState(treeContainer) {
         if (!savedState) return;
 
         const expandedIds = JSON.parse(savedState);
-        if (!Array.isArray(expandedIds) || expandedIds.length === 0) return;
+        if (!Array.isArray(expandedIds)) return;
 
         const expandedSet = new Set(expandedIds);
         const nodesToLazyLoad = []; // Canvas 懒加载模式下需要加载子节点的文件夹
+
+        const isCanvasPermanentTree = (() => {
+            try {
+                return currentView === 'canvas'
+                    && !!(treeContainer && treeContainer.closest
+                        && treeContainer.closest('.permanent-bookmark-section'));
+            } catch (_) {
+                return false;
+            }
+        })();
+
+        // For canvas permanent cards the stored list is the complete state,
+        // not just a list of folders to open.  Applying both directions is
+        // what makes a remote collapse take effect immediately as well.
+        if (isCanvasPermanentTree) {
+            treeContainer.querySelectorAll('.tree-item[data-node-id][data-node-type="folder"]').forEach((item) => {
+                const node = item.closest('.tree-node');
+                const children = node ? node.querySelector(':scope > .tree-children') : null;
+                const toggle = item.querySelector('.tree-toggle');
+                const icon = item.querySelector('.tree-icon.fas');
+                if (!children || !toggle) return;
+                const expanded = expandedSet.has(String(item.dataset.nodeId || ''));
+                children.classList.toggle('expanded', expanded);
+                toggle.classList.toggle('expanded', expanded);
+                if (icon) {
+                    icon.classList.toggle('fa-folder-open', expanded);
+                    icon.classList.toggle('fa-folder', !expanded);
+                }
+                if (expanded
+                    && CANVAS_PERMANENT_TREE_LAZY_ENABLED
+                    && __shouldHydratePermanentFolderChildren(item, children)) {
+                    nodesToLazyLoad.push({ parentId: item.dataset.nodeId, children });
+                }
+            });
+        } else if (expandedIds.length === 0) {
+            return;
+        }
 
         const isReadOnlyChangesPreview = (() => {
             try {
@@ -15163,7 +15175,8 @@ function restoreTreeExpandState(treeContainer) {
                         icon.classList.add('fa-folder-open');
                     }
                     // Canvas 懒加载模式：如果子节点未加载，记录下来稍后加载
-                    if ((currentView === 'canvas' || isReadOnlyChangesPreview) &&
+                    if (!isCanvasPermanentTree
+                        && (currentView === 'canvas' || isReadOnlyChangesPreview) &&
                         CANVAS_PERMANENT_TREE_LAZY_ENABLED &&
                         __shouldHydratePermanentFolderChildren(item, children)) {
                         nodesToLazyLoad.push({ parentId: item.dataset.nodeId, children });

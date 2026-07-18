@@ -258,44 +258,19 @@
                             <div class="settings-view-sync-note-main">
                                 <span class="settings-view-sync-note-label" id="canvasViewSyncHintViewLabel">视图类：</span>
                                 <span class="settings-view-sync-note-text"
-                                    id="canvasViewSyncHintViewText">例如相机、全屏模式、展开与滚动（<strong><u>以当前窗口为准</u></strong>），按
-                                    标签页 与 侧边栏 <strong><u>分区独立</u></strong>。</span>
+                                    id="canvasViewSyncHintViewText">以当前页面的状态覆盖其他画布页面和侧边栏。</span>
                             </div>
-                            <button id="canvasViewSyncHintInfoBtn" class="settings-view-sync-info-btn" type="button"
-                                aria-label="查看说明">
-                                <i class="fas fa-question-circle" aria-hidden="true"></i>
-                                <div class="settings-view-sync-tooltip" id="canvasViewSyncHintTooltip" role="tooltip">
-                                    <div class="settings-view-sync-tooltip-line">
-                                        <span class="settings-view-sync-tooltip-key"
-                                            id="canvasViewSyncHintCameraLabel">相机：</span>
-                                        <span class="settings-view-sync-tooltip-value"
-                                            id="canvasViewSyncHintCameraText">相机就是我们当前的视图。</span>
-                                    </div>
-                                    <div class="settings-view-sync-tooltip-line">
-                                        <span class="settings-view-sync-tooltip-key"
-                                            id="canvasViewSyncHintExpandScrollLabel">展开与滚动：</span>
-                                        <span class="settings-view-sync-tooltip-value"
-                                            id="canvasViewSyncHintExpandScrollText">指永久栏目或临时栏目中文件夹的展开状态，以及垂直滚动条的滚动位置。</span>
-                                    </div>
-                                    <div class="settings-view-sync-tooltip-line">
-                                        <span class="settings-view-sync-tooltip-key"
-                                            id="canvasViewSyncHintContentLabel">内容类：</span>
-                                        <span class="settings-view-sync-tooltip-value"
-                                            id="canvasViewSyncHintContentText">主数据/外观/设置始终全局共享，标签页与侧边栏会看到同一份内容。</span>
-                                    </div>
-                                </div>
-                            </button>
                         </div>
                         <div class="settings-view-sync-actions">
                             <button id="canvasViewSyncCameraBtn" class="settings-menu-item settings-view-sync-action"
                                 type="button">
                                 <i class="fas fa-camera"></i>
-                                <span id="canvasViewSyncCameraText">同步相机/模式</span>
+                                <span id="canvasViewSyncCameraText">同步相机（X、Y、缩放比例）</span>
                             </button>
-                            <button id="canvasViewSyncExpandScrollBtn"
-                                class="settings-menu-item settings-view-sync-action" type="button">
-                                <i class="fas fa-stream"></i>
-                                <span id="canvasViewSyncExpandScrollText">同步展开与滚动</span>
+                            <button id="canvasViewSyncFullscreenBtn" class="settings-menu-item settings-view-sync-action"
+                                type="button">
+                                <i class="fas fa-expand"></i>
+                                <span id="canvasViewSyncFullscreenText">同步全屏状态</span>
                             </button>
                         </div>
                     </div>

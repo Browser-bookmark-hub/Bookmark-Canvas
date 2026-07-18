@@ -947,7 +947,25 @@ function saveViewState(kind, baseKey, value, options = {}) {
         : __buildCanvasPartitionedViewStateKey(kind, baseKey, partitionKey);
 
     if (!storageKey) return false;
-    return saveSharedState(storageKey, value, { asJSON: !(options && options.asJSON === false) });
+    const saved = saveSharedState(storageKey, value, { asJSON: !(options && options.asJSON === false) });
+    if (!saved) return false;
+
+    // Folder folding and inner-card scroll positions are one shared interaction
+    // state.  Keep the two legacy view partitions mirrored so every page and
+    // side-panel reads the last real interaction, rather than a stale local
+    // snapshot.  Other view state (for example the camera) stays partitioned.
+    const shouldMirror = (kind === 'expand' || kind === 'scroll')
+        && !(options && options.mirror === false);
+    if (shouldMirror) {
+        CANVAS_VIEW_PARTITIONS.forEach((otherPartition) => {
+            if (otherPartition === partitionKey) return;
+            const otherKey = __buildCanvasPartitionedViewStateKey(kind, baseKey, otherPartition);
+            if (!otherKey) return;
+            saveSharedState(otherKey, value, { asJSON: !(options && options.asJSON === false) });
+        });
+    }
+
+    return true;
 }
 
 function __writeJSON(key, obj) {
@@ -1031,6 +1049,16 @@ function __readCanvasSectionScrollPayload(body) {
     };
 }
 
+function __isCanvasSectionScrollPersistenceBlocked(body) {
+    if (!body || !body.dataset) return false;
+    try {
+        const until = parseInt(body.dataset.scrollPersistBlockUntil || '0', 10) || 0;
+        return until > Date.now();
+    } catch (_) {
+        return false;
+    }
+}
+
 function __setCanvasSectionScrollPerfClass(body, enabled) {
     if (!body || !body.classList) return;
     body.classList.toggle('canvas-scroll-perf-active', !!enabled);
@@ -1059,6 +1087,10 @@ function __flushCanvasSectionScrollPersistence(body, options = {}) {
     const baseKey = String(entry.baseKey || '').trim();
     if (!baseKey) return false;
 
+    // Restoring a stored scrollTop also emits a scroll event in some browsers.
+    // Treat that event as restoration work, never as a new user change.
+    if (__isCanvasSectionScrollPersistenceBlocked(body)) return false;
+
     if (entry.flushTimer) {
         clearTimeout(entry.flushTimer);
         entry.flushTimer = 0;
@@ -1074,11 +1106,21 @@ function __flushCanvasSectionScrollPersistence(body, options = {}) {
     entry.partitionKey = partitionKey;
     entry.latest = payload;
 
+    const storageKey = __buildCanvasPartitionedViewStateKey('scroll', baseKey, partitionKey);
+    const previous = storageKey ? __readPartitionedViewJSON(storageKey, null) : null;
+    if (previous
+        && Number(previous.top) === Number(payload.top)
+        && Number(previous.left) === Number(payload.left)) {
+        return false;
+    }
+
     return saveViewState('scroll', baseKey, payload, { partitionKey });
 }
 
 function __scheduleCanvasSectionScrollPersistence(body, baseKey, options = {}) {
     if (!body || !baseKey) return;
+
+    if (__isCanvasSectionScrollPersistenceBlocked(body)) return;
     const entry = __getCanvasSectionScrollRegistryEntry(body);
     if (!entry) return;
 
@@ -2118,7 +2160,7 @@ const LEGACY_TEMP_SECTION_DEFAULT_WIDTH_V2 = 500;
 const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
     sizes: {
         permanent: { mode: 'manual', width: 600, height: 600, minWidth: PERMANENT_SECTION_MIN_WIDTH, minHeight: PERMANENT_SECTION_MIN_HEIGHT },
-        temp: { mode: 'auto', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT, minWidth: TEMP_SECTION_MIN_WIDTH, minHeight: TEMP_SECTION_MIN_HEIGHT },
+        temp: { mode: 'manual', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT, minWidth: TEMP_SECTION_MIN_WIDTH, minHeight: TEMP_SECTION_MIN_HEIGHT },
         specialTemp: { mode: 'manual', width: TEMP_SECTION_DEFAULT_WIDTH, height: TEMP_SECTION_DEFAULT_HEIGHT, minWidth: TEMP_SECTION_MIN_WIDTH, minHeight: TEMP_SECTION_MIN_HEIGHT },
         mdNode: { width: MD_NODE_DEFAULT_WIDTH, height: MD_NODE_DEFAULT_HEIGHT, minWidth: MD_NODE_MIN_WIDTH, minHeight: MD_NODE_MIN_HEIGHT }
     },
@@ -2681,8 +2723,10 @@ function normalizeCanvasAppearanceSettings(input) {
     }
 
     out.sizes.permanent.mode = (permSize.mode === 'auto') ? 'auto' : 'manual';
-    out.sizes.temp.mode = (tempSize.mode === 'auto') ? 'auto' : 'manual';
-    out.sizes.specialTemp.mode = (specialTempSize.mode === 'auto') ? 'auto' : 'manual';
+    // Tree content must not own card geometry. Existing settings migrate to
+    // fixed dimensions as well.
+    out.sizes.temp.mode = 'manual';
+    out.sizes.specialTemp.mode = 'manual';
 
     out.sizes.permanent = {
         ...__normalizeAppearanceSize(permSize, out.sizes.permanent, {
@@ -4496,83 +4540,17 @@ function __computeTempSectionAutoSize(section, nodeElement, baseSize) {
 }
 
 function applyTempSectionAutoSize(section, options = {}) {
-    if (!section) return;
-    const el = document.getElementById(section.id);
-    if (!el) return;
-    if (el.classList && el.classList.contains('canvas-node-maximized')) return;
-
-    const baseSize = getTempSectionBaseSize(section);
-    const size = __computeTempSectionAutoSize(section, el, baseSize);
-    if (!size) return;
-
-    el.style.width = `${size.width}px`;
-    el.style.height = `${size.height}px`;
-
-    const isSidePanel = typeof __getCanvasViewPartitionKey === 'function' && __getCanvasViewPartitionKey() === 'sidepanel';
-    if (isSidePanel) {
-        return;
-    }
-
-    section.width = size.width;
-    section.height = size.height;
-
-    if (!options || options.save !== false) {
-        saveCanvasManifestOnly();
-        scheduleBoundsUpdate();
-        scheduleScrollbarUpdate();
-        scheduleEdgesRender();
-    }
+    // Card dimensions are explicit user layout.  Tree rendering, expansion,
+    // and lazy loading must never recalculate or persist them.
+    return false;
 }
 
 function applyTempSectionAutoSizeIfNeeded(section) {
-    if (!section) return;
-    const baseSize = getTempSectionBaseSize(section);
-    if (baseSize.mode !== 'auto') return;
-    requestAnimationFrame(() => {
-        applyTempSectionAutoSize(section, { save: true });
-        try { __scheduleCardGroupMembershipRefreshForNodeIds(section.id, { forceAll: true }); } catch (_) { }
-    });
+    return false;
 }
 
 function applyTempSectionAutoSizeAll() {
-    const sections = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [];
-    if (!sections.length) return;
-
-    requestAnimationFrame(() => {
-        let updated = false;
-        const isSidePanel = typeof __getCanvasViewPartitionKey === 'function' && __getCanvasViewPartitionKey() === 'sidepanel';
-        sections.forEach(section => {
-            if (!section || !section.id) return;
-            const el = document.getElementById(section.id);
-            if (!el) return;
-            if (el.classList && el.classList.contains('canvas-node-maximized')) return;
-
-            const baseSize = getTempSectionBaseSize(section);
-            if (baseSize.mode !== 'auto') return;
-
-            const size = __computeTempSectionAutoSize(section, el, baseSize);
-            if (!size) return;
-
-            if (isSidePanel) {
-                el.style.width = `${size.width}px`;
-                el.style.height = `${size.height}px`;
-            } else {
-                if (section.width !== size.width || section.height !== size.height) {
-                    section.width = size.width;
-                    section.height = size.height;
-                    el.style.width = `${size.width}px`;
-                    el.style.height = `${size.height}px`;
-                    updated = true;
-                }
-            }
-        });
-        if (updated) {
-            saveCanvasManifestOnly();
-            scheduleBoundsUpdate();
-            scheduleScrollbarUpdate();
-            scheduleEdgesRender();
-        }
-    });
+    return false;
 }
 
 /**
@@ -8965,21 +8943,6 @@ function __toggleCanvasViewSyncPanel(toggleBtn, panelEl, forceOpen = null) {
     panelEl.style.display = nextOpen ? 'block' : 'none';
 }
 
-function __getExpandScrollSyncButtonText() {
-    const { isEn } = __getLang();
-    const activeDescriptor = __getActiveMaximizedNodeDescriptor();
-    if (activeDescriptor) {
-        return isEn ? 'Sync Expand + Scroll (Current Card)' : '同步展开与滚动（当前栏目）';
-    }
-    return isEn ? 'Sync Expand + Scroll' : '同步展开与滚动';
-}
-
-function __updateViewSyncExpandScrollButtonText() {
-    const textEl = document.getElementById('canvasViewSyncExpandScrollText');
-    if (!textEl) return;
-    textEl.textContent = __getExpandScrollSyncButtonText();
-}
-
 function __copyPartitionedViewStateKindToAllPartitions(kind, sourcePartition) {
     if (!kind || !sourcePartition) return { keyCount: 0, writeCount: 0 };
 
@@ -9226,8 +9189,7 @@ function __syncExpandAndScrollForFullscreenCard(descriptor, sourcePartition) {
         try {
             const tempExpandState = {
                 expanded: Array.from(LAZY_LOAD_THRESHOLD.expandedFolders),
-                collapsed: Array.from(LAZY_LOAD_THRESHOLD.collapsedFolders),
-                loadedCounts: LAZY_LOAD_THRESHOLD.loadedCounts || {}
+                collapsed: Array.from(LAZY_LOAD_THRESHOLD.collapsedFolders)
             };
             saveViewState('expand', TEMP_EXPAND_STATE_KEY, tempExpandState, { partitionKey: sourcePartition });
         } catch (_) { }
@@ -9273,8 +9235,7 @@ function __flushCurrentPartitionExpandAndScrollState(partitionKey) {
     try {
         const tempExpandState = {
             expanded: Array.from(LAZY_LOAD_THRESHOLD.expandedFolders),
-            collapsed: Array.from(LAZY_LOAD_THRESHOLD.collapsedFolders),
-            loadedCounts: LAZY_LOAD_THRESHOLD.loadedCounts || {}
+            collapsed: Array.from(LAZY_LOAD_THRESHOLD.collapsedFolders)
         };
         saveViewState('expand', TEMP_EXPAND_STATE_KEY, tempExpandState, { partitionKey: 'page' });
         saveViewState('expand', TEMP_EXPAND_STATE_KEY, tempExpandState, { partitionKey: 'sidepanel' });
@@ -9482,15 +9443,13 @@ function __syncCameraAcrossAllPartitions() {
         saveViewState('camera', 'pan', pan, { partitionKey });
     });
 
-    __syncFullscreenAcrossAllPartitions({ showToast: false });
-
     __emitCanvasViewSyncSignal('camera', sourcePartition, { zoom, pan });
 
     const { isEn } = __getLang();
     showCanvasToast(
         isEn
-            ? 'Camera + fullscreen mode synced to page + sidepanel.'
-            : '已将相机 + 全屏模式同步到 标签页 + 侧边栏。',
+            ? 'Camera synced to page + sidepanel.'
+            : '已将相机同步到 标签页 + 侧边栏。',
         'success',
         2600
     );
@@ -9601,11 +9560,11 @@ function __syncExpandAndScrollAcrossAllPartitions() {
     );
 }
 
-function __bindCanvasViewSyncPanel(toggleBtnId, panelId, cameraBtnId, expandScrollBtnId) {
+function __bindCanvasViewSyncPanel(toggleBtnId, panelId, cameraBtnId, fullscreenBtnId) {
     const toggleBtn = document.getElementById(toggleBtnId);
     const panelEl = document.getElementById(panelId);
     const cameraBtn = document.getElementById(cameraBtnId);
-    const expandScrollBtn = document.getElementById(expandScrollBtnId);
+    const fullscreenBtn = document.getElementById(fullscreenBtnId);
 
     if (toggleBtn && panelEl && toggleBtn.dataset.bound !== 'true') {
         toggleBtn.dataset.bound = 'true';
@@ -9625,12 +9584,12 @@ function __bindCanvasViewSyncPanel(toggleBtnId, panelId, cameraBtnId, expandScro
         });
     }
 
-    if (expandScrollBtn && expandScrollBtn.dataset.bound !== 'true') {
-        expandScrollBtn.dataset.bound = 'true';
-        expandScrollBtn.addEventListener('click', (e) => {
+    if (fullscreenBtn && fullscreenBtn.dataset.bound !== 'true') {
+        fullscreenBtn.dataset.bound = 'true';
+        fullscreenBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            __syncExpandAndScrollAcrossAllPartitions();
+            __syncFullscreenAcrossAllPartitions();
         });
     }
 
@@ -9641,10 +9600,8 @@ function setupCanvasViewSyncControls() {
         'canvasViewSyncToggleBtn',
         'canvasViewSyncPanel',
         'canvasViewSyncCameraBtn',
-        'canvasViewSyncExpandScrollBtn'
+        'canvasViewSyncFullscreenBtn'
     );
-
-    __updateViewSyncExpandScrollButtonText();
 }
 
 function setupCanvasSidePanelSettingsBtn() {
@@ -23815,8 +23772,7 @@ function saveTempExpandState() {
         try {
             const state = {
                 expanded: Array.from(LAZY_LOAD_THRESHOLD.expandedFolders),
-                collapsed: Array.from(LAZY_LOAD_THRESHOLD.collapsedFolders),
-                loadedCounts: LAZY_LOAD_THRESHOLD.loadedCounts || {}
+                collapsed: Array.from(LAZY_LOAD_THRESHOLD.collapsedFolders)
             };
             // Expand state is partitioned (page/sidepanel) but should behave like a shared user preference.
             // Persist to both partitions so export/sync can see the latest state no matter where it was toggled.
@@ -23830,6 +23786,9 @@ function saveTempExpandState() {
 
 function loadTempExpandState() {
     try {
+        // "Load all" is an in-session rendering action, not state restored
+        // after a refresh.
+        LAZY_LOAD_THRESHOLD.loadedCounts = {};
         const currentPartition = __getCanvasViewPartitionKey();
         let key = __buildCanvasPartitionedViewStateKey('expand', TEMP_EXPAND_STATE_KEY, currentPartition);
         let state = __readPartitionedViewJSON(key, null, 'expand');
@@ -23852,9 +23811,9 @@ function loadTempExpandState() {
                 if (Array.isArray(state.collapsed)) {
                     LAZY_LOAD_THRESHOLD.collapsedFolders = new Set(state.collapsed);
                 }
-                if (state.loadedCounts && typeof state.loadedCounts === 'object' && !Array.isArray(state.loadedCounts)) {
-                    LAZY_LOAD_THRESHOLD.loadedCounts = state.loadedCounts;
-                }
+                // "Load all" is a momentary rendering action, not view state.
+                // Do not revive an old full-tree render after a refresh.
+                LAZY_LOAD_THRESHOLD.loadedCounts = {};
             }
             ;
         }
@@ -28741,7 +28700,120 @@ function __applyDescHeightSettingsRealtimeSync(storageKey, rawValue) {
     });
 }
 
+function __parseSharedCanvasFoldOrScrollStorageKey(storageKey) {
+    const match = String(storageKey || '').match(/^canvas:view:v1:(expand|scroll):(page|sidepanel):(.+)$/);
+    if (!match) return null;
+    return {
+        kind: match[1],
+        partitionKey: match[2],
+        baseKey: match[3]
+    };
+}
+
+function __findCanvasBodyForSharedScroll(baseKey) {
+    const key = String(baseKey || '');
+    if (key === PERMANENT_SECTION_SCROLL_KEY || key.startsWith(`${PERMANENT_SECTION_SCROLL_KEY}:`)) {
+        const copyId = key.slice(PERMANENT_SECTION_SCROLL_KEY.length).replace(/^:/, '');
+        let sectionEl = null;
+        if (copyId) {
+            try {
+                sectionEl = document.querySelector(
+                    `.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`
+                );
+            } catch (_) { }
+        } else {
+            sectionEl = document.getElementById('permanentSection');
+        }
+        return sectionEl ? sectionEl.querySelector('.permanent-section-body') : null;
+    }
+
+    if (key.startsWith('temp-section-scroll:')) {
+        const sectionId = key.slice('temp-section-scroll:'.length);
+        const sectionEl = sectionId ? document.getElementById(sectionId) : null;
+        return sectionEl ? sectionEl.querySelector('.temp-node-body') : null;
+    }
+
+    if (key.startsWith('md-node-scroll:')) {
+        const nodeId = key.slice('md-node-scroll:'.length);
+        const nodeEl = nodeId ? document.getElementById(nodeId) : null;
+        return nodeEl ? nodeEl.querySelector('.md-canvas-editor') : null;
+    }
+
+    return null;
+}
+
+function __applySharedCanvasScrollRealtime(baseKey, rawValue) {
+    const payload = __safeParseCanvasStorageJson(rawValue);
+    if (!payload || typeof payload.top !== 'number') return;
+    const body = __findCanvasBodyForSharedScroll(baseKey);
+    if (!body) return;
+    const target = body.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node') || body;
+    try {
+        __scheduleCanvasBodyScrollRestore(body, {
+            top: payload.top || 0,
+            left: typeof payload.left === 'number' ? payload.left : 0
+        }, {
+            target,
+            fallbackDelays: [10, 50, 100],
+            guardMs: 220
+        });
+    } catch (_) { }
+}
+
+function __applySharedCanvasExpandRealtime(baseKey) {
+    const key = String(baseKey || '');
+    if (key === TEMP_EXPAND_STATE_KEY) {
+        try { loadTempExpandState(); } catch (_) { }
+
+        // Rebuild only already-materialized temporary trees.  Card geometry is
+        // deliberately untouched; this only changes the contents of its body.
+        try {
+            CanvasState.tempSections.forEach((section) => {
+                if (!section || !section.id) return;
+                const sectionEl = document.getElementById(section.id);
+                const tree = sectionEl ? sectionEl.querySelector('.temp-bookmark-tree') : null;
+                if (!tree || tree.dataset.contentUnloaded === 'true') return;
+                refreshTempSectionTreeInPlace(section);
+            });
+        } catch (_) { }
+        return;
+    }
+
+    if (key !== PERMANENT_SECTION_EXPANDED_KEY
+        && !key.startsWith(`${PERMANENT_SECTION_EXPANDED_KEY}:`)) {
+        return;
+    }
+
+    const copyId = key.slice(PERMANENT_SECTION_EXPANDED_KEY.length).replace(/^:/, '');
+    let sectionEl = null;
+    if (copyId) {
+        try {
+            sectionEl = document.querySelector(
+                `.permanent-bookmark-section.permanent-section-copy[data-permanent-section-copy-id="${CSS.escape(copyId)}"]`
+            );
+        } catch (_) { }
+    } else {
+        sectionEl = document.getElementById('permanentSection');
+    }
+    const tree = sectionEl ? sectionEl.querySelector('.bookmark-tree') : null;
+    if (tree && typeof restoreTreeExpandState === 'function') {
+        try { restoreTreeExpandState(tree); } catch (_) { }
+    }
+}
+
+function __applySharedCanvasFoldOrScrollRealtime(storageKey, rawValue) {
+    const parsed = __parseSharedCanvasFoldOrScrollStorageKey(storageKey);
+    if (!parsed || parsed.partitionKey !== __getCanvasViewPartitionKey()) return;
+    if (parsed.kind === 'scroll') {
+        __applySharedCanvasScrollRealtime(parsed.baseKey, rawValue);
+        return;
+    }
+    __applySharedCanvasExpandRealtime(parsed.baseKey);
+}
+
 function __handleCanvasRealtimeLocalStorageSync(key, rawValue) {
+    __applySharedCanvasFoldOrScrollRealtime(key, rawValue);
+
     if (key === BCS_SIGNAL_KEY) {
         const state = __safeParseCanvasStorageJson(rawValue);
         if (state) {
@@ -40273,13 +40345,19 @@ async function __waitForFullscreenBodyReveal(target, descriptor) {
 
 function __applyPersistedScrollPayloadToBody(body, payload, options = {}) {
     if (!body || !payload || typeof payload !== 'object') return false;
-    if (typeof payload.top === 'number') body.scrollTop = payload.top || 0;
-    if (typeof payload.left === 'number') body.scrollLeft = payload.left || 0;
-    if (options && options.guardMs && body.dataset) {
+    // Set the guard before changing scrollTop: a programmatic assignment can
+    // synchronously queue a scroll event, which must not win over the value we
+    // are restoring.
+    if (body.dataset) {
         try {
-            body.dataset.scrollRestoreBlockUntil = String(Date.now() + Math.max(0, Number(options.guardMs) || 0));
+            const guardMs = Number.isFinite(options && options.guardMs)
+                ? Math.max(0, Number(options.guardMs))
+                : 220;
+            body.dataset.scrollPersistBlockUntil = String(Date.now() + guardMs);
         } catch (_) { }
     }
+    if (typeof payload.top === 'number') body.scrollTop = payload.top || 0;
+    if (typeof payload.left === 'number') body.scrollLeft = payload.left || 0;
     return true;
 }
 
@@ -41096,8 +41174,6 @@ function refreshMaximizedNodes(options = {}) {
 }
 
 function updateNodeFullscreenButtons() {
-    __updateViewSyncExpandScrollButtonText();
-
     const buttons = document.querySelectorAll('.canvas-node-fullscreen-btn');
     if (!buttons.length) return;
     const lang = getCanvasLanguage();
@@ -42177,7 +42253,6 @@ window.CanvasModule = {
     clear: clearAllExceptPermanent,
     updateFullscreenButton: updateFullscreenButtonState,
     updateNodeFullscreenButtons: updateNodeFullscreenButtons,
-    updateViewSyncExpandScrollButtonText: __updateViewSyncExpandScrollButtonText,
     openLastFullscreenNode: openLastMaximizedNode,
     scheduleMaximizedNodesRefresh: scheduleMaximizedNodesRefresh,
     stabilizePermanentSectionAnchors: stabilizePermanentSectionAnchors,
