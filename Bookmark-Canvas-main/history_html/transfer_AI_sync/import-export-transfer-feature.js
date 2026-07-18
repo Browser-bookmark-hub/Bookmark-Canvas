@@ -2084,7 +2084,7 @@ function showImportDialog(options = {}) {
                             <span>${isEn ? 'Archive' : '压缩包'}</span>
                         </button>
                     </div>
-                    <div class="import-section-label-large" style="margin-top: 12px;">${isEn ? 'Bookmarks (can be dragged directly onto canvas)' : '书签文件（可直接在画布中拖入）'}</div>
+                    <div class="import-section-label-large" style="margin-top: 12px;">${isEn ? 'Bookmarks (can be dragged directly onto an empty canvas area)' : '书签文件（可直接拖入画布空白处）'}</div>
                     <div class="import-row import-row-2cols">
                         <button class="import-option-btn-compact" id="importHtmlBtn" title="${isEn ? 'Import HTML Bookmarks' : '导入 HTML 书签'}">
                             <i class="fas fa-code"></i>
