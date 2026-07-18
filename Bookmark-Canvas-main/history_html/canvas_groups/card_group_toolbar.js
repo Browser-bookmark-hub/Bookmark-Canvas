@@ -318,6 +318,7 @@ function __cardGroupContextMenuLabels(node) {
         }
     } catch (_) { }
     return {
+        rename: isEn ? 'Rename' : '重命名',
         color: isEn ? 'Color' : '颜色',
         search: isEn ? 'Search in current scope' : '当前范围搜索',
         locate: isEn ? 'Locate' : '定位',
@@ -385,9 +386,90 @@ function __cardGroupOpenContextColorPopover(node, anchorPoint) {
     setTimeout(() => document.addEventListener('mousedown', close, true), 0);
 }
 
+function __cardGroupOpenContextRenamePopover(node, anchorPoint) {
+    if (!node) return;
+    document.querySelectorAll('.card-group-context-rename-popover').forEach((pop) => {
+        try { pop.remove(); } catch (_) { }
+    });
+
+    const lang = (typeof currentLang !== 'undefined') ? currentLang : 'zh';
+    const isEn = String(lang).toLowerCase().startsWith('en');
+    const fallbackLabel = (window.__BCSCardGroup && typeof window.__BCSCardGroup.fallbackLabel === 'function')
+        ? window.__BCSCardGroup.fallbackLabel()
+        : (isEn ? 'Card Group' : '卡片组');
+    const popover = document.createElement('div');
+    popover.className = 'temp-section-rename-popover card-group-context-rename-popover';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'temp-section-rename-popover-input card-group-context-rename-popover-input';
+    input.value = String(node.label || '').trim() || fallbackLabel;
+    input.placeholder = isEn ? 'Rename card group' : '重命名卡片组';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'temp-section-rename-popover-confirm card-group-context-rename-popover-confirm';
+    confirmBtn.title = isEn ? 'Confirm' : '确认';
+    confirmBtn.setAttribute('aria-label', confirmBtn.title);
+    confirmBtn.innerHTML = '<i class="fas fa-check"></i>';
+
+    popover.appendChild(input);
+    popover.appendChild(confirmBtn);
+    getOverlayContainer().appendChild(popover);
+    if (typeof preventCanvasEventsPropagation === 'function') {
+        try { preventCanvasEventsPropagation(popover); } catch (_) { }
+    }
+    __cardGroupPositionContextColorPopover(popover, anchorPoint);
+
+    let closed = false;
+    const close = (commit) => {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('mousedown', onDoc, true);
+        input.removeEventListener('keydown', onKeydown);
+        confirmBtn.removeEventListener('click', onConfirm);
+        if (commit) {
+            try {
+                if (window.__BCSCardGroup && typeof window.__BCSCardGroup.updateCardGroupLabel === 'function') {
+                    window.__BCSCardGroup.updateCardGroupLabel(node, String(input.value || '').trim());
+                }
+            } catch (_) { }
+        }
+        try { popover.remove(); } catch (_) { }
+    };
+    const onDoc = (event) => {
+        if (popover.contains(event.target)) return;
+        close(true);
+    };
+    const onKeydown = (event) => {
+        if (event.key === 'Enter') {
+            if (event.isComposing) return;
+            event.preventDefault();
+            close(true);
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            close(false);
+        }
+    };
+    const onConfirm = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        close(true);
+    };
+    input.addEventListener('keydown', onKeydown);
+    confirmBtn.addEventListener('click', onConfirm);
+    setTimeout(() => document.addEventListener('mousedown', onDoc, true), 0);
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 0);
+}
+
 function __cardGroupHandleContextMenuAction(action, node, options = {}) {
     if (!node) return;
-    if (action === 'card-group-context-color') {
+    if (action === 'card-group-context-rename') {
+        __cardGroupOpenContextRenamePopover(node, options.anchorPoint || null);
+    } else if (action === 'card-group-context-color') {
         __cardGroupOpenContextColorPopover(node, options.anchorPoint || null);
     } else if (action === 'card-group-context-search') {
         try {
@@ -447,6 +529,7 @@ function showCardGroupContextMenu(event, node) {
     const labels = __cardGroupContextMenuLabels(node);
     const lang = (typeof currentLang !== 'undefined') ? currentLang : 'zh_CN';
     const items = [
+        { action: 'card-group-context-rename', label: labels.rename, icon: 'edit' },
         { action: 'card-group-context-color', label: labels.color, icon: 'palette' },
         { action: 'card-group-context-search', label: labels.search, icon: 'search' },
         { action: 'card-group-context-locate', label: labels.locate, icon: 'crosshairs' },
@@ -490,7 +573,7 @@ function showCardGroupContextMenu(event, node) {
             ev.preventDefault();
             ev.stopPropagation();
             const action = item.dataset.action;
-            const anchorPoint = action === 'card-group-context-color'
+            const anchorPoint = action === 'card-group-context-rename' || action === 'card-group-context-color'
                 ? { x: point.x, y: point.y + (item.offsetTop || 0) }
                 : point;
             if (typeof hideContextMenu === 'function') {
