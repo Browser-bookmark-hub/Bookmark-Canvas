@@ -785,7 +785,7 @@
                                 </tr>
                                 <tr>
                                     <td style="padding: 8px; font-weight: bold; color: var(--accent-primary, #0969da);">${escapeHtml(t('定点拉取法', 'Targeted Pull'))}</td>
-                                    <td style="padding: 8px; color: var(--text-primary); font-weight: 600;">${t('速度<span style="color: #cf222e;">慢</span>，但<span style="color: #2da44e;">精准</span>', 'Speed is <span style="color: #cf222e;">slow</span>, but <span style="color: #2da44e;">precise</span>')}</td>
+                                    <td style="padding: 8px; color: var(--text-primary); font-weight: 600;">${t('速度<span style="color: #bc4c00;">一般</span>，但<span style="color: #2da44e;">精准</span>', 'Speed is <span style="color: #bc4c00;">moderate</span>, but <span style="color: #2da44e;">precise</span>')}</td>
                                     <td style="padding: 8px; color: var(--text-secondary);">${t('永久/临时栏目卡片<span style="color: #2da44e; font-weight: bold;">少</span>，仓库其他文件<span style="color: #cf222e; font-weight: bold;">多</span>', 'Canvas cards count is <span style="color: #2da44e; font-weight: bold;">low</span>, other files in repo are <span style="color: #cf222e; font-weight: bold;">many</span>')}</td>
                                 </tr>
                             </tbody>
