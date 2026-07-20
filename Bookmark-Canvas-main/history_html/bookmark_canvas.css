@@ -3662,8 +3662,8 @@ body.canvas-node-maximized-active .canvas-edge-label {
     z-index: 1000;
     font-size: 12px;
     min-width: max-content;
-    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.22s ease, padding 0.22s ease, left 0.22s ease;
-    will-change: left, padding;
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.22s ease, padding 0.22s ease;
+    will-change: padding;
 }
 
 .canvas-floating-toggle-mini {
@@ -3808,6 +3808,94 @@ body.canvas-node-maximized-active .canvas-edge-label {
     top: 50%;
     left: calc(100% + 8px);
     transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+}
+
+/* Batch restore uses the exact same directional hint primitives as the floating tools toggle. */
+.batch-panel-restore-btn .canvas-floating-drag-hint {
+    --canvas-floating-hint-enter-curve: cubic-bezier(0.22, 1, 0.36, 1);
+    --canvas-floating-hint-breathe-curve: cubic-bezier(0.445, 0.05, 0.55, 0.95);
+    --canvas-floating-hint-phase-offset: -2.325s;
+    --canvas-floating-hint-base-transform: translateZ(0);
+    position: absolute;
+    pointer-events: none;
+    user-select: none;
+    opacity: 0;
+    color: var(--text-secondary);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+    filter: saturate(0.94) brightness(0.96);
+    transition: opacity 0.34s var(--canvas-floating-hint-enter-curve), transform 0.52s var(--canvas-floating-hint-enter-curve), filter 0.48s var(--canvas-floating-hint-enter-curve);
+    font-weight: 700;
+    line-height: 1;
+    will-change: opacity, transform;
+}
+
+.batch-panel-restore-btn .canvas-floating-drag-hint-up,
+.batch-panel-restore-btn .canvas-floating-drag-hint-down,
+.batch-panel-restore-btn .canvas-floating-drag-hint-left,
+.batch-panel-restore-btn .canvas-floating-drag-hint-right {
+    display: block;
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid color-mix(in srgb, var(--text-secondary) 65%, var(--border-color) 35%);
+    border-right: none;
+    border-bottom: none;
+    border-radius: 16px 0 0 0;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+    background: transparent;
+}
+
+.batch-panel-restore-btn .canvas-floating-drag-hint-up::after,
+.batch-panel-restore-btn .canvas-floating-drag-hint-down::after,
+.batch-panel-restore-btn .canvas-floating-drag-hint-left::after,
+.batch-panel-restore-btn .canvas-floating-drag-hint-right::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border: 1.5px solid color-mix(in srgb, var(--text-secondary) 48%, transparent);
+    border-right: none;
+    border-bottom: none;
+    border-radius: 10px 0 0 0;
+    opacity: 0.56;
+    transform: scale(0.82);
+    transition: opacity 0.36s var(--canvas-floating-hint-enter-curve), transform 0.52s var(--canvas-floating-hint-enter-curve);
+    will-change: opacity, transform, border-color;
+}
+
+.batch-panel-restore-btn .canvas-floating-drag-hint-up {
+    --canvas-floating-hint-base-transform: translateX(-50%) rotate(45deg);
+    left: 50%;
+    top: -24px;
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+}
+
+.batch-panel-restore-btn .canvas-floating-drag-hint-down {
+    --canvas-floating-hint-base-transform: translateX(-50%) rotate(-135deg);
+    left: 50%;
+    top: calc(100% + 8px);
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+}
+
+.batch-panel-restore-btn .canvas-floating-drag-hint-left {
+    --canvas-floating-hint-base-transform: translateY(-50%) rotate(-45deg);
+    top: 50%;
+    right: calc(100% + 8px);
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+}
+
+.batch-panel-restore-btn .canvas-floating-drag-hint-right {
+    --canvas-floating-hint-base-transform: translateY(-50%) rotate(135deg);
+    top: 50%;
+    left: calc(100% + 8px);
+    transform: var(--canvas-floating-hint-base-transform) scale(0.72);
+}
+
+.batch-panel-restore-btn.canvas-floating-dragging {
+    cursor: grabbing;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+    opacity: 0.96;
+    transition: none !important;
+    will-change: left, top;
 }
 
 .canvas-floating-show-hints .canvas-floating-drag-hint {
@@ -4364,6 +4452,17 @@ html[lang="en"] .canvas-zoom-indicator {
     width: var(--canvas-manual-icon-btn-width);
     min-width: var(--canvas-manual-icon-btn-width);
     flex: 0 0 var(--canvas-manual-icon-btn-width);
+}
+
+/* Side docks retain the original tool layout and rotate the complete surface. */
+.canvas-zoom-indicator:not(.floating-tools-collapsed)[data-dock-edge="right"] {
+    transform: rotate(90deg);
+    transform-origin: center;
+}
+
+.canvas-zoom-indicator:not(.floating-tools-collapsed)[data-dock-edge="left"] {
+    transform: rotate(-90deg);
+    transform-origin: center;
 }
 
 .canvas-floating-tools-toggle-btn {

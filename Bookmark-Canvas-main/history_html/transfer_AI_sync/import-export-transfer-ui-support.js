@@ -1772,12 +1772,34 @@ async function showBackupDialog() {
         }
     };
 
-    if (importBtn) importBtn.addEventListener('click', showImportDialog);
-    if (exportBtn) exportBtn.addEventListener('click', exportCanvas);
-    if (backupBtn) backupBtn.addEventListener('click', () => { try { showBackupDialog(); } catch (e) { console.warn(e); } });
-    if (githubConfigBtn) githubConfigBtn.addEventListener('click', () => runGithubAction('showConfigDialog'));
-    if (githubPushBtn) githubPushBtn.addEventListener('click', () => runGithubAction('push'));
-    if (githubPullBtn) githubPullBtn.addEventListener('click', () => runGithubAction('pull'));
+    const closeCanvasManageModal = () => {
+        try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+    };
+
+    if (importBtn) importBtn.addEventListener('click', () => {
+        closeCanvasManageModal();
+        showImportDialog();
+    });
+    if (exportBtn) exportBtn.addEventListener('click', () => {
+        closeCanvasManageModal();
+        exportCanvas();
+    });
+    if (backupBtn) backupBtn.addEventListener('click', () => {
+        closeCanvasManageModal();
+        try { showBackupDialog(); } catch (e) { console.warn(e); }
+    });
+    if (githubConfigBtn) githubConfigBtn.addEventListener('click', () => {
+        closeCanvasManageModal();
+        runGithubAction('showConfigDialog');
+    });
+    if (githubPushBtn) githubPushBtn.addEventListener('click', () => {
+        closeCanvasManageModal();
+        runGithubAction('push');
+    });
+    if (githubPullBtn) githubPullBtn.addEventListener('click', () => {
+        closeCanvasManageModal();
+        runGithubAction('pull');
+    });
     if (importOtherBtn) {
         importOtherBtn.addEventListener('click', (e) => {
             e.stopPropagation();

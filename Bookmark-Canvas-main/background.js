@@ -46,6 +46,175 @@ let canvasPermanentBookmarkDirtyOperation = Promise.resolve();
 const activeForegroundPorts = new Map();
 let foregroundActivePortListenerRegistered = false;
 
+const CANVAS_CLIPBOARD_STORAGE_KEY = 'bcs:clipboard-history';
+const CANVAS_CLIPBOARD_MIN_LIMIT = 1;
+const CANVAS_CLIPBOARD_MAX_LIMIT = 50;
+const CANVAS_CLIPBOARD_DEFAULT_LIMIT = 7;
+let canvasClipboardOperation = Promise.resolve();
+
+function cloneCanvasClipboardValue(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_) {
+    return value;
+  }
+}
+
+function normalizeCanvasClipboardState(raw) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+  const limit = Math.min(
+    CANVAS_CLIPBOARD_MAX_LIMIT,
+    Math.max(CANVAS_CLIPBOARD_MIN_LIMIT, Number.parseInt(input.limit, 10) || CANVAS_CLIPBOARD_DEFAULT_LIMIT)
+  );
+  const entries = Array.isArray(input.entries) ? input.entries.filter(Boolean).slice(0, limit) : [];
+  const activeEntryId = entries.some((entry) => entry && entry.id === input.activeEntryId)
+    ? input.activeEntryId
+    : null;
+  return { version: 1, limit, activeEntryId, entries };
+}
+
+function runCanvasClipboardOperation(task) {
+  const run = canvasClipboardOperation.then(task, task);
+  canvasClipboardOperation = run.catch(() => {});
+  return run;
+}
+
+function supersedePriorCanvasClipboardCuts(state) {
+  if (!Array.isArray(state.entries)) return;
+  state.entries.forEach((entry) => {
+    if (!entry || entry.originalOperation !== 'cut') return;
+    if (entry.cutState !== 'pending' && entry.cutState !== 'claimed') return;
+    entry.cutState = 'superseded';
+    entry.currentOperation = null;
+  });
+}
+
+function promoteLatestCanvasClipboardEntry(state) {
+  if (state.activeEntryId || !Array.isArray(state.entries)) return null;
+  const entry = state.entries.find((item) => item && item.cutState !== 'claimed');
+  if (!entry) return null;
+  if (entry.originalOperation === 'cut' && entry.cutState === 'pending') {
+    entry.cutState = 'superseded';
+  }
+  entry.currentOperation = 'copy';
+  entry.updatedAt = Date.now();
+  state.activeEntryId = entry.id;
+  return entry;
+}
+
+async function updateCanvasClipboardState(mutator) {
+  return runCanvasClipboardOperation(async () => {
+    const items = await storageLocalGet([CANVAS_CLIPBOARD_STORAGE_KEY]);
+    const state = normalizeCanvasClipboardState(items[CANVAS_CLIPBOARD_STORAGE_KEY]);
+    const result = await mutator(state);
+    const normalized = normalizeCanvasClipboardState(state);
+    const success = await storageLocalSet({ [CANVAS_CLIPBOARD_STORAGE_KEY]: normalized });
+    return { success, state: normalized, ...result };
+  });
+}
+
+function buildCanvasClipboardActivePayload(state) {
+  const entry = state.entries.find((item) => item && item.id === state.activeEntryId);
+  if (!entry || !entry.currentOperation) return null;
+  if (entry.kind === 'text') {
+    return { action: 'copy', source: 'text', text: entry.data && entry.data.text, entryId: entry.id };
+  }
+  const payload = cloneCanvasClipboardValue(entry.data || {});
+  payload.action = entry.currentOperation;
+  payload.entryId = entry.id;
+  return payload;
+}
+
+async function handleCanvasClipboardMutation(message) {
+  const operation = String(message && message.operation || '');
+  return updateCanvasClipboardState(async (state) => {
+    if (operation === 'add-entry') {
+      const entry = cloneCanvasClipboardValue(message.entry);
+      if (!entry || !entry.id) return { error: 'invalid_entry' };
+      supersedePriorCanvasClipboardCuts(state);
+      state.entries = state.entries.filter((item) => item && item.id !== entry.id);
+      state.entries.unshift(entry);
+      state.entries = state.entries.slice(0, state.limit);
+      state.activeEntryId = entry.id;
+      return { activePayload: buildCanvasClipboardActivePayload(state) };
+    }
+
+    if (operation === 'activate-text') {
+      const id = String(message.entryId || '');
+      const entry = state.entries.find((item) => item && item.id === id && item.kind === 'text');
+      if (!entry) return { error: 'entry_not_found' };
+      supersedePriorCanvasClipboardCuts(state);
+      entry.currentOperation = 'copy';
+      entry.updatedAt = Date.now();
+      state.activeEntryId = id;
+      return { activePayload: buildCanvasClipboardActivePayload(state) };
+    }
+
+    if (operation === 'remove-entry') {
+      const id = String(message.entryId || '');
+      state.entries = state.entries.filter((entry) => entry && entry.id !== id);
+      if (state.activeEntryId === id) state.activeEntryId = null;
+      promoteLatestCanvasClipboardEntry(state);
+      return { activePayload: buildCanvasClipboardActivePayload(state) };
+    }
+
+    if (operation === 'clear') {
+      state.entries = [];
+      state.activeEntryId = null;
+      return { activePayload: null };
+    }
+
+    if (operation === 'set-limit') {
+      state.limit = Math.min(
+        CANVAS_CLIPBOARD_MAX_LIMIT,
+        Math.max(CANVAS_CLIPBOARD_MIN_LIMIT, Number.parseInt(message.limit, 10) || CANVAS_CLIPBOARD_DEFAULT_LIMIT)
+      );
+      state.entries = state.entries.slice(0, state.limit);
+      if (!state.entries.some((entry) => entry && entry.id === state.activeEntryId)) state.activeEntryId = null;
+      promoteLatestCanvasClipboardEntry(state);
+      return { activePayload: buildCanvasClipboardActivePayload(state) };
+    }
+
+    if (operation === 'cancel-cut') {
+      const entry = state.entries.find((item) => item && item.id === state.activeEntryId);
+      const expectedId = String(message.entryId || '');
+      if (!entry || entry.currentOperation !== 'cut' || (expectedId && entry.id !== expectedId)) return { cancelled: false };
+      entry.cutState = 'cancelled';
+      entry.currentOperation = null;
+      entry.updatedAt = Date.now();
+      state.activeEntryId = null;
+      return { cancelled: true, activePayload: null };
+    }
+
+    if (operation === 'claim-active-structured') {
+      const payload = buildCanvasClipboardActivePayload(state);
+      if (!payload || payload.source === 'text') return { activePayload: null, claimed: false };
+      const entry = state.entries.find((item) => item && item.id === state.activeEntryId);
+      if (entry.currentOperation === 'cut') {
+        entry.cutState = 'claimed';
+        entry.currentOperation = null;
+        entry.updatedAt = Date.now();
+        state.activeEntryId = null;
+        return { activePayload: payload, claimed: true };
+      }
+      return { activePayload: payload, claimed: false };
+    }
+
+    if (operation === 'finish-claimed-cut') {
+      const id = String(message.entryId || '');
+      const entry = state.entries.find((item) => item && item.id === id);
+      if (!entry || entry.cutState !== 'claimed') return { finished: false };
+      entry.cutState = message.consumed === false ? 'pending' : 'consumed';
+      entry.currentOperation = message.consumed === false ? 'cut' : null;
+      entry.updatedAt = Date.now();
+      state.activeEntryId = message.consumed === false ? id : null;
+      return { finished: true, activePayload: buildCanvasClipboardActivePayload(state) };
+    }
+
+    return { error: 'unsupported_operation' };
+  });
+}
+
 function hasRunnableCanvasForegroundPort() {
   for (const state of activeForegroundPorts.values()) {
     if (state === CANVAS_FOREGROUND_PORT_STATE_RUNNABLE) return true;
@@ -1025,6 +1194,13 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: e?.message || String(e) });
       }
     })();
+    return true;
+  }
+
+  if (message.action === 'canvasClipboardMutate') {
+    handleCanvasClipboardMutation(message)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
     return true;
   }
 

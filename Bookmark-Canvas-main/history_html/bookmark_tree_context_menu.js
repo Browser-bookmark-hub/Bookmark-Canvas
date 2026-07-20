@@ -38,6 +38,55 @@ let currentContextNode = null;
 let bookmarkClipboard = null; // 剪贴板 { action: 'cut'|'copy', nodeId, nodeData }
 let infoNoteTextareaExternalCloseGuardUntil = 0;
 
+function setBookmarkClipboardState(nextClipboard, options = {}) {
+    bookmarkClipboard = nextClipboard || null;
+    clipboardOperation = bookmarkClipboard ? bookmarkClipboard.action : null;
+    if (options.persist !== false && bookmarkClipboard && window.CanvasClipboard && typeof window.CanvasClipboard.addStructured === 'function') {
+        window.CanvasClipboard.addStructured(bookmarkClipboard).catch(() => {});
+    }
+    if (bookmarkClipboard) showPasteButton();
+    else hidePasteButton();
+}
+
+async function finalizeBookmarkClipboardPaste(clipboard) {
+    if (!clipboard || clipboard.action !== 'cut') return;
+    if (window.CanvasClipboard && typeof window.CanvasClipboard.finishClaimedCut === 'function') {
+        await window.CanvasClipboard.finishClaimedCut(clipboard.entryId, true);
+        setBookmarkClipboardState(window.CanvasClipboard.getActivePayload(), { persist: false });
+    } else {
+        setBookmarkClipboardState(null, { persist: false });
+    }
+    unmarkCutNode();
+}
+
+async function restoreBookmarkClipboardCutClaim(clipboard) {
+    if (!clipboard || clipboard.action !== 'cut') return;
+    if (window.CanvasClipboard && typeof window.CanvasClipboard.finishClaimedCut === 'function') {
+        await window.CanvasClipboard.finishClaimedCut(clipboard.entryId, false);
+    }
+}
+
+async function getLatestBookmarkClipboardForPaste() {
+    if (window.CanvasClipboard && typeof window.CanvasClipboard.claimActiveStructuredForPaste === 'function') {
+        return window.CanvasClipboard.claimActiveStructuredForPaste();
+    }
+    return bookmarkClipboard;
+}
+
+window.addEventListener('canvas-clipboard-changed', (event) => {
+    const activePayload = event && event.detail ? event.detail.activePayload : null;
+    bookmarkClipboard = activePayload && activePayload.source !== 'text' ? activePayload : null;
+    clipboardOperation = bookmarkClipboard ? bookmarkClipboard.action : null;
+    try {
+        syncDismissedCutMarkIdentity();
+        unmarkCutNode();
+        if (bookmarkClipboard && bookmarkClipboard.action === 'cut' && Array.isArray(bookmarkClipboard.nodeIds)) {
+            bookmarkClipboard.nodeIds.forEach((id) => markCutNode(id));
+        }
+        if (bookmarkClipboard) showPasteButton(); else hidePasteButton();
+    } catch (_) {}
+});
+
 function isInfoNoteTextareaExternalCloseGuardActive() {
     return Date.now() < infoNoteTextareaExternalCloseGuardUntil;
 }
@@ -3683,6 +3732,7 @@ let lastClickedNode = null; // 上次点击的节点（用于Shift选择）
 let lastClickedElement = null; // 上次点击的元素（用于永久栏目副本定位）
 let selectionSnapshot = new Set(); // 范围选择快照
 let selectMode = false; // 是否处于Select模式
+let lastKeyboardCanvasPointer = null; // 鼠标在画布中的最近位置，供对象快捷键定位栏目
 try {
     Object.defineProperty(window, 'selectMode', {
         get: () => selectMode,
@@ -3749,6 +3799,7 @@ function __isSelectModeUiTarget(target) {
     if (!target || !target.closest) return false;
     return !!(
         target.closest('#batch-action-panel') ||
+        target.closest('#batch-panel-restore-btn') ||
         target.closest('#batch-toolbar') ||
         target.closest('#bookmark-context-menu') ||
         target.closest('#bookmark-context-submenu') ||
@@ -3760,6 +3811,117 @@ function __isSelectModeUiTarget(target) {
     );
 }
 
+// 和右键“添加/粘贴”菜单共用同一类栏目空白区域：
+// 书签树、永久栏目 body、临时栏目 body 或树视图容器。
+// 不把栏目标题、按钮或节点本身算作空白。
+function __isBookmarkTreeBlankTarget(target) {
+    if (!target || !target.closest) return false;
+    if (!target.closest('.permanent-bookmark-section, .temp-canvas-node')) return false;
+    if (!target.closest('.bookmark-tree, .temp-bookmark-tree, .permanent-section-body, .temp-node-body, .tree-view-container')) return false;
+    if (target.closest('.tree-item[data-node-id]')) return false;
+    if (target.closest('button, a, input, textarea, select, [contenteditable="true"], label')) return false;
+    return true;
+}
+
+let pendingCutCancelPromise = null;
+let dismissedCutMarkIdentity = '';
+let dismissedCutMarkCardKeys = new Set();
+
+function getBookmarkCardKey(section) {
+    if (!section || !section.classList) return '';
+    if (section.classList.contains('temp-canvas-node')) {
+        return `temp:${String(section.dataset && section.dataset.sectionId || '')}`;
+    }
+    if (section.classList.contains('permanent-bookmark-section')) {
+        return `permanent:${getPermanentColumnKeyFromElement(section) || 'origin'}`;
+    }
+    return '';
+}
+
+function syncDismissedCutMarkIdentity() {
+    const identity = bookmarkClipboard && bookmarkClipboard.action === 'cut'
+        ? String(bookmarkClipboard.entryId || bookmarkClipboard.timestamp || '')
+        : '';
+    if (identity !== dismissedCutMarkIdentity) {
+        dismissedCutMarkIdentity = identity;
+        dismissedCutMarkCardKeys.clear();
+    }
+    return identity;
+}
+
+function dismissCutMarksInBookmarkCard(section) {
+    if (!section || !bookmarkClipboard || bookmarkClipboard.action !== 'cut') return;
+    syncDismissedCutMarkIdentity();
+    const cardKey = getBookmarkCardKey(section);
+    if (cardKey) dismissedCutMarkCardKeys.add(cardKey);
+    section.querySelectorAll('.tree-item.cut-marked').forEach((node) => node.classList.remove('cut-marked'));
+}
+
+function deselectBookmarkCard(section) {
+    if (!section || !section.querySelectorAll) return;
+    const ids = new Set();
+    section.querySelectorAll('.tree-item.selected[data-node-id]').forEach((node) => {
+        if (node.dataset.nodeId) ids.add(node.dataset.nodeId);
+        node.classList.remove('selected');
+    });
+    ids.forEach((nodeId) => {
+        // 同一永久书签可能同时出现在主栏目和副本中；其它卡片仍选中时保留全局选择数据。
+        if (!document.querySelector(`.tree-item.selected[data-node-id="${CSS.escape(nodeId)}"]`)) {
+            selectedNodes.delete(nodeId);
+            selectedNodeMeta.delete(nodeId);
+        }
+    });
+    if (lastClickedElement && !lastClickedElement.classList.contains('selected')) {
+        lastClickedNode = null;
+        lastClickedElement = null;
+    }
+    selectionSnapshot = new Set(selectedNodes);
+    if (selectedNodes.size === 0) lastBatchSelectionInfo = null;
+    updateBatchToolbar();
+    updateBatchPanelCount();
+}
+
+function clearBookmarkCardTransientState(target) {
+    const section = target && target.closest
+        ? target.closest('.permanent-bookmark-section, .temp-canvas-node')
+        : null;
+    if (!section) return;
+    deselectBookmarkCard(section);
+    dismissCutMarksInBookmarkCard(section);
+}
+
+// 取消待剪切状态：橙色标记要立即消失，随后同步持久剪贴板，避免其它页面再把它恢复。
+function cancelPendingBookmarkCut() {
+    if (!bookmarkClipboard || bookmarkClipboard.action !== 'cut') return Promise.resolve(false);
+    const entryId = bookmarkClipboard.entryId || null;
+    bookmarkClipboard.__canvasClipboardCancelled = true;
+    unmarkCutNode();
+    bookmarkClipboard = null;
+    clipboardOperation = null;
+    try { hidePasteButton(); } catch (_) {}
+
+    if (!window.CanvasClipboard || typeof window.CanvasClipboard.cancelActiveCut !== 'function') {
+        return Promise.resolve(true);
+    }
+    if (!pendingCutCancelPromise) {
+        pendingCutCancelPromise = Promise.resolve(window.CanvasClipboard.cancelActiveCut(entryId))
+            .catch((error) => {
+                console.warn('[剪切] 取消待剪切状态失败:', error);
+                return false;
+            })
+            .finally(() => { pendingCutCancelPromise = null; });
+    }
+    return pendingCutCancelPromise;
+}
+
+// 普通剪切不一定会进入批量选择模式；因此栏目书签树的空白点击也要能取消它。
+document.addEventListener('click', (event) => {
+    const target = event && event.target;
+    if (__isBookmarkTreeBlankTarget(target)) {
+        clearBookmarkCardTransientState(target);
+    }
+}, true);
+
 function bindSelectModeGlobalHandlers() {
     if (selectModeGlobalClickHandler || selectModeGlobalContextMenuHandler || selectModeGlobalDragEndHandler) return;
 
@@ -3770,7 +3932,13 @@ function bindSelectModeGlobalHandlers() {
         if (Date.now() < selectModeJustDraggedUntil) return;
 
         const treeItem = target.closest ? target.closest('.tree-item[data-node-id]') : null;
-        if (!treeItem) return;
+        if (!treeItem) {
+            // 只清除当前栏目卡片的选择与待剪切视觉状态，不影响其它栏目。
+            if (__isBookmarkTreeBlankTarget(target)) {
+                clearBookmarkCardTransientState(target);
+            }
+            return;
+        }
 
         // 允许折叠按钮（及其右侧一定范围）触发展开/收起，不视为选择
         const toggle = treeItem.querySelector ? treeItem.querySelector('.tree-toggle') : null;
@@ -3934,6 +4102,13 @@ document.addEventListener('click', (e) => {
 const BATCH_PANEL_STATE_MAP_KEY = 'batchPanelStateMap';
 const BATCH_PANEL_LEGACY_KEY = 'batchPanelState';
 const BATCH_PANEL_GLOBAL_STATE_KEY = 'batchPanelGlobalState';
+const BATCH_PANEL_RESTORE_DOCK_KEY = 'batchPanelRestoreDockV2';
+const BATCH_PANEL_MINIMIZED_KEY = 'batchPanelMinimizedV1';
+const BATCH_PANEL_RESTORE_DRAG_ACTIVATE_THRESHOLD = 8;
+const BATCH_PANEL_RESTORE_HINT_HOLD_DELAY_MS = 160;
+const BATCH_PANEL_RESTORE_DRAG_SWITCH_THRESHOLD = 42;
+const BATCH_PANEL_RESTORE_CORNER_SWITCH_THRESHOLD = 0.08;
+const BATCH_PANEL_RESTORE_CORNER_SWITCH_CONFIRM_DISTANCE = 14;
 const PERMANENT_SECTION_ANCHOR_ID = 'permanent-root';
 let currentBatchPanelAnchorInfo = null; // 当前批量面板定位信息
 let lastBatchSelectionInfo = null; // 最近一次选择所属栏目
@@ -4023,9 +4198,11 @@ function __ensureBatchHelpAnchors() {
         });
     };
 
-    // 1) Open / Group
+    // 1) Open / Group / New Window / Manual Selection
     add('batch-open', 1);
     add('batch-open-tab-group', 1);
+    add('batch-open-new-window', 1);
+    add('batch-open-manual-selection', 1);
     // 2) Temp / Merge
     add('batch-to-temp-section', 2);
     add('batch-merge-folder', 2);
@@ -4042,8 +4219,14 @@ function getBatchHelpHtml(lang) {
         return `
 <div class="batch-help-popover-title">说明</div>
 
+<div class="batch-help-card batch-help-card-overview" id="batch-help-card-overview">
+  <div class="batch-help-card-title">选择规则</div>
+  <div class="batch-help-line">操作逻辑遵循常见 PC 文件管理方式。选择项目时使用 <strong class="batch-help-key-emphasis">Alt / Option / Shift</strong>；不使用 Ctrl / Command，以避免与画布快捷键冲突。</div>
+  <div class="batch-help-line"><u>点击当前栏目内、书签树项目之外的空白处（包括四周边缘和书签树下方），会清除该栏目全部高亮。</u>全局剪贴板内容不受影响。</div>
+</div>
+
 <div class="batch-help-card" id="batch-help-card-open">
-  <div class="batch-help-card-title"><span class="batch-help-badge">1</span>打开 / 标签组</div>
+  <div class="batch-help-card-title"><span class="batch-help-badge">1</span>打开 / 标签组 / 新窗口 / 手动选择</div>
   <div class="batch-help-line">选中书签：直接打开。</div>
   <div class="batch-help-line">选中文件夹：只处理<strong>直接子书签</strong>（一层），不包含子文件夹里的书签。</div>
 </div>
@@ -4056,8 +4239,19 @@ function getBatchHelpHtml(lang) {
 
 <div class="batch-help-card" id="batch-help-card-copy-cut">
   <div class="batch-help-card-title"><span class="batch-help-badge">3</span>复制 / 剪切</div>
-  <div class="batch-help-line">复制/剪切会写入剪贴板；在目标文件夹上<strong>右键</strong>选择“粘贴”完成落地。</div>
+  <div class="batch-help-line">复制/剪切会写入剪贴板；可在目标文件夹上<strong>右键</strong>选择“粘贴”，也可用 <strong>Ctrl / Command + V</strong> 按光标位置粘贴。</div>
   <div class="batch-help-line">文件夹会按结构复制/剪切（包含子文件夹）。</div>
+  <div class="batch-help-shortcuts" aria-label="通用快捷键">
+    <div class="batch-help-shortcuts-title">通用快捷键（批量模式）</div>
+    <div class="batch-help-shortcut-row"><span class="batch-help-shortcut-keys"><kbd>Ctrl</kbd><span>/</span><kbd>Command</kbd><span>+</span><kbd>A</kbd></span><span>选中光标所在栏目中的全部书签/文件夹</span></div>
+    <div class="batch-help-shortcut-row"><span class="batch-help-shortcut-keys"><kbd>Ctrl</kbd><span>/</span><kbd>Command</kbd><span>+</span><kbd>X</kbd></span><span>剪切已选项目</span></div>
+    <div class="batch-help-shortcut-row"><span class="batch-help-shortcut-keys"><kbd>Ctrl</kbd><span>/</span><kbd>Command</kbd><span>+</span><kbd>C</kbd></span><span>复制已选项目</span></div>
+    <div class="batch-help-shortcut-row"><span class="batch-help-shortcut-keys"><kbd>Ctrl</kbd><span>/</span><kbd>Command</kbd><span>+</span><kbd>V</kbd></span><span class="batch-help-shortcut-action">粘贴到光标所在位置<button class="batch-help-pointer-info-btn" type="button" data-batch-help-pointer-info aria-expanded="false" aria-controls="batch-help-pointer-info" title="查看光标落点说明"><i class="fas fa-info-circle"></i></button></span></div>
+    <div class="batch-help-pointer-info" id="batch-help-pointer-info" hidden>
+      <div class="batch-help-pointer-info-title">光标落点</div>
+      <ul><li>文件夹：粘贴到文件夹内；书签：粘贴在同级位置下方。</li><li>临时栏目空白：粘贴到该栏目根部；永久栏目空白：粘贴到浏览器书签栏根部。</li><li>画布空白：在光标处新建“粘贴”临时栏目后落地。</li><li>仅画布内的书签/文件夹剪贴板会被接管；文本仍使用浏览器原生粘贴。</li></ul>
+    </div>
+  </div>
 </div>
 
 <div class="batch-help-card" id="batch-help-card-export">
@@ -4069,8 +4263,14 @@ function getBatchHelpHtml(lang) {
     return `
 <div class="batch-help-popover-title">Help</div>
 
+<div class="batch-help-card batch-help-card-overview" id="batch-help-card-overview">
+  <div class="batch-help-card-title">Selection Rules</div>
+  <div class="batch-help-line">The interaction follows familiar desktop file-management behavior. Use <strong class="batch-help-key-emphasis">Alt / Option / Shift</strong> when selecting items; Ctrl / Command is reserved to avoid conflicts with canvas shortcuts.</div>
+  <div class="batch-help-line"><u>Clicking blank space inside the current card but outside its bookmark-tree items, including the surrounding edges and space below the tree, clears every highlight in that card.</u> The global clipboard remains unchanged.</div>
+</div>
+
 <div class="batch-help-card" id="batch-help-card-open">
-  <div class="batch-help-card-title"><span class="batch-help-badge">1</span>Open / Group</div>
+  <div class="batch-help-card-title"><span class="batch-help-badge">1</span>Open / Tab Group / New Window / Manual Select</div>
   <div class="batch-help-line">Bookmark: opens directly.</div>
   <div class="batch-help-line">Folder: applies to <strong>direct child bookmarks</strong> only (one level), not bookmarks inside subfolders.</div>
 </div>
@@ -4083,8 +4283,19 @@ function getBatchHelpHtml(lang) {
 
 <div class="batch-help-card" id="batch-help-card-copy-cut">
   <div class="batch-help-card-title"><span class="batch-help-badge">3</span>Copy / Cut</div>
-  <div class="batch-help-line">Copy/Cut writes into clipboard; <strong>right-click</strong> the target folder and Paste.</div>
+  <div class="batch-help-line">Copy/Cut writes into clipboard; <strong>right-click</strong> the target folder and Paste, or use <strong>Ctrl / Command + V</strong> to paste at the cursor location.</div>
   <div class="batch-help-line">Folders preserve structure (recursive).</div>
+  <div class="batch-help-shortcuts" aria-label="General shortcuts">
+    <div class="batch-help-shortcuts-title">General Shortcuts (Batch Mode)</div>
+    <div class="batch-help-shortcut-row"><span class="batch-help-shortcut-keys"><kbd>Ctrl</kbd><span>/</span><kbd>Command</kbd><span>+</span><kbd>A</kbd></span><span>Select all bookmark/folder items in the card under the cursor</span></div>
+    <div class="batch-help-shortcut-row"><span class="batch-help-shortcut-keys"><kbd>Ctrl</kbd><span>/</span><kbd>Command</kbd><span>+</span><kbd>X</kbd></span><span>Cut selected items</span></div>
+    <div class="batch-help-shortcut-row"><span class="batch-help-shortcut-keys"><kbd>Ctrl</kbd><span>/</span><kbd>Command</kbd><span>+</span><kbd>C</kbd></span><span>Copy selected items</span></div>
+    <div class="batch-help-shortcut-row"><span class="batch-help-shortcut-keys"><kbd>Ctrl</kbd><span>/</span><kbd>Command</kbd><span>+</span><kbd>V</kbd></span><span class="batch-help-shortcut-action">Paste at the cursor location<button class="batch-help-pointer-info-btn" type="button" data-batch-help-pointer-info aria-expanded="false" aria-controls="batch-help-pointer-info" title="Show cursor placement rules"><i class="fas fa-info-circle"></i></button></span></div>
+    <div class="batch-help-pointer-info" id="batch-help-pointer-info" hidden>
+      <div class="batch-help-pointer-info-title">Cursor placement</div>
+      <ul><li>Folder: paste inside it. Bookmark: paste below it at the same level.</li><li>Blank temp card: paste at its root. Blank permanent card: paste at the browser Bookmarks Bar root.</li><li>Blank canvas: creates a new “Paste” temp card at the cursor, then pastes there.</li><li>Only structured bookmark/folder clipboard content is handled here; text keeps native browser paste behavior.</li></ul>
+    </div>
+  </div>
 </div>
 
 <div class="batch-help-card" id="batch-help-card-export">
@@ -4119,7 +4330,7 @@ function showBatchHelpPopover() {
         el.id = 'batch-help-popover-floating';
         el.innerHTML = `
             <div class="batch-help-popover-inner">
-                <button class="batch-help-popover-close" type="button" aria-label="close">×</button>
+                <button class="batch-help-popover-close canvas-manage-modal-close" type="button" aria-label="close"><i class="fas fa-times"></i></button>
                 <div class="batch-help-popover-body">${getBatchHelpHtml(lang)}</div>
             </div>
         `;
@@ -4136,6 +4347,17 @@ function showBatchHelpPopover() {
                 hideBatchHelpPopover();
             });
         }
+        el.querySelectorAll('[data-batch-help-pointer-info]').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const info = el.querySelector('.batch-help-pointer-info');
+                if (!info) return;
+                const willOpen = info.hidden;
+                info.hidden = !willOpen;
+                btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            });
+        });
         const onDocClick = (ev) => {
             if (!batchHelpPopoverEl) return;
             const t = ev && ev.target;
@@ -4217,6 +4439,9 @@ function flashBatchActionStatus(action) {
     try {
         const panel = document.getElementById('batch-action-panel');
         if (panel) {
+            panel.classList.remove('batch-action-success');
+            void panel.offsetWidth;
+            panel.classList.add('batch-action-success');
             panel.querySelectorAll(`.context-menu-item[data-action="${action}"]`).forEach((el) => {
                 el.classList.remove('action-success');
                 // Force reflow to restart animation
@@ -4235,6 +4460,7 @@ function flashBatchActionStatus(action) {
         }
         setTimeout(() => {
             if (panel) {
+                panel.classList.remove('batch-action-success');
                 panel.querySelectorAll(`.context-menu-item[data-action="${action}"]`).forEach((el) => el.classList.remove('action-success'));
             }
             if (toolbar) {
@@ -6328,6 +6554,7 @@ function hideContextMenu() {
 
 // 显示粘贴按钮
 function showPasteButton() {
+    if (!contextMenu) return;
     const pasteBtn = contextMenu.querySelector('[data-action="paste"]');
     if (pasteBtn) {
         pasteBtn.style.display = 'inline-flex';
@@ -6342,6 +6569,7 @@ function showPasteButton() {
 
 // 隐藏粘贴按钮
 function hidePasteButton() {
+    if (!contextMenu) return;
     const pasteBtn = contextMenu.querySelector('[data-action="paste"]');
     if (pasteBtn) {
         pasteBtn.style.display = 'none';
@@ -8652,18 +8880,15 @@ function copyTempNodes(sectionId, nodeIds) {
     const ids = Array.isArray(nodeIds) ? nodeIds : [nodeIds];
     const payload = manager.extractPayload(sectionId, ids);
 
-    bookmarkClipboard = {
+    setBookmarkClipboardState({
         action: 'copy',
         source: 'temporary',
         sectionId,
         nodeIds: ids,
         payload,
         timestamp: Date.now()
-    };
-    clipboardOperation = 'copy';
+    });
     unmarkCutNode();
-    showPasteButton();
-
     ;
 }
 
@@ -8672,46 +8897,60 @@ async function cutTempNodes(sectionId, nodeIds) {
     const ids = Array.isArray(nodeIds) ? nodeIds : [nodeIds];
     const payload = manager.extractPayload(sectionId, ids);
 
-    bookmarkClipboard = {
+    setBookmarkClipboardState({
         action: 'cut',
         source: 'temporary',
         sectionId,
         nodeIds: ids,
         payload,
         timestamp: Date.now()
-    };
-    clipboardOperation = 'cut';
+    });
 
     unmarkCutNode();
     ids.forEach(id => markCutNode(id));
-    showPasteButton();
-
     ;
 }
 
 async function pasteIntoTemp(context, pasteBelow = false) {
-    if (!bookmarkClipboard) return;
+    const clipboard = await getLatestBookmarkClipboardForPaste();
+    if (!clipboard) return;
     const manager = ensureTempManager();
-    const target = getTempPasteTarget(context, pasteBelow);
 
     try {
-        if (bookmarkClipboard.source === 'temporary') {
-            if (bookmarkClipboard.action === 'copy') {
-                manager.insertFromPayload(target.sectionId, target.parentId, bookmarkClipboard.payload, target.index);
-            } else if (bookmarkClipboard.action === 'cut') {
-                if (bookmarkClipboard.sectionId === target.sectionId) {
-                    manager.moveWithin(target.sectionId, bookmarkClipboard.nodeIds, target.parentId, target.index);
-                } else {
-                    manager.moveAcross(bookmarkClipboard.sectionId, target.sectionId, bookmarkClipboard.nodeIds, target.parentId, target.index);
+        const target = getTempPasteTarget(context, pasteBelow);
+        if (clipboard.source === 'temporary') {
+            if (clipboard.action === 'copy') {
+                manager.insertFromPayload(target.sectionId, target.parentId, clipboard.payload, target.index);
+            } else if (clipboard.action === 'cut') {
+                const sourceIds = Array.isArray(clipboard.nodeIds) ? clipboard.nodeIds : [];
+                const fallbackItems = Array.isArray(clipboard.payload) ? clipboard.payload : [];
+                const existingSourceIds = [];
+                const missingPayload = [];
+                sourceIds.forEach((id, index) => {
+                    const sourceItem = manager.extractPayload(clipboard.sectionId, [id]);
+                    if (Array.isArray(sourceItem) && sourceItem.length) existingSourceIds.push(id);
+                    else if (fallbackItems[index]) missingPayload.push(fallbackItems[index]);
+                });
+
+                if (existingSourceIds.length) {
+                    if (clipboard.sectionId === target.sectionId) {
+                        manager.moveWithin(target.sectionId, existingSourceIds, target.parentId, target.index);
+                    } else {
+                        manager.moveAcross(clipboard.sectionId, target.sectionId, existingSourceIds, target.parentId, target.index);
+                    }
+                }
+                if (missingPayload.length) {
+                    const offset = typeof target.index === 'number' ? target.index + existingSourceIds.length : target.index;
+                    manager.insertFromPayload(target.sectionId, target.parentId, missingPayload, offset);
                 }
             }
-        } else if (bookmarkClipboard.source === 'permanent' || bookmarkClipboard.source === 'mixed') {
-            let payload = bookmarkClipboard.payload;
+        } else if (clipboard.source === 'permanent' || clipboard.source === 'mixed') {
+            let payload = clipboard.payload;
             if (!payload || !payload.length) {
                 payload = [];
-                if (chrome && chrome.bookmarks && bookmarkClipboard.nodeIds) {
+                if (chrome && chrome.bookmarks && clipboard.nodeIds) {
                     await __ctxEnsurePermanentMetadataLoaded();
-                    for (const id of bookmarkClipboard.nodeIds) {
+                    for (const id of clipboard.nodeIds) {
                         const node = await readPermanentNodeForPayload(id);
                         if (node) {
                             payload.push(serializeBookmarkNode(node));
@@ -8721,7 +8960,7 @@ async function pasteIntoTemp(context, pasteBelow = false) {
             }
 
             if (payload && payload.length) {
-                if (bookmarkClipboard.source === 'mixed' && bookmarkClipboard.action === 'copy') {
+                if (clipboard.source === 'mixed' && clipboard.action === 'copy') {
                     const tempPayload = payload.filter(item => String(item && item.__canvasPayloadSource || '') !== 'permanent');
                     const permanentPayload = payload.filter(item => String(item && item.__canvasPayloadSource || '') === 'permanent');
                     let insertIndex = target.index;
@@ -8737,8 +8976,8 @@ async function pasteIntoTemp(context, pasteBelow = false) {
                 }
             }
 
-            if (bookmarkClipboard.source !== 'mixed' && bookmarkClipboard.action === 'cut' && bookmarkClipboard.nodeIds) {
-                for (const id of bookmarkClipboard.nodeIds) {
+            if (clipboard.source !== 'mixed' && clipboard.action === 'cut' && clipboard.nodeIds) {
+                for (const id of clipboard.nodeIds) {
                     try {
                         if (chrome && chrome.bookmarks) {
                             await removePermanentBookmarkNode(id, true);
@@ -8750,12 +8989,9 @@ async function pasteIntoTemp(context, pasteBelow = false) {
             }
         }
 
-        // 统一清理剪贴板状态
-        bookmarkClipboard = null;
-        clipboardOperation = null;
-        unmarkCutNode();
-        hidePasteButton();
+        await finalizeBookmarkClipboardPaste(clipboard);
     } catch (error) {
+        await restoreBookmarkClipboardCutClaim(clipboard);
         console.error('[临时栏目] 粘贴失败:', error);
         const lang = currentLang || 'zh_CN';
         alert(lang === 'zh_CN' ? `粘贴失败: ${error.message}` : `Paste failed: ${error.message}`);
@@ -12523,15 +12759,14 @@ async function cutBookmark(nodeId, nodeTitle, isFolder) {
 
         await __ctxEnsurePermanentMetadataLoaded();
 
-        bookmarkClipboard = {
+        setBookmarkClipboardState({
             action: 'cut',
             source: 'permanent',
             nodeIds: [nodeId],
             nodeData: node,
             payload: node ? [serializeBookmarkNode(node)] : [],
             timestamp: Date.now()
-        };
-        clipboardOperation = 'cut';
+        });
 
         ;
 
@@ -12554,16 +12789,14 @@ async function copyBookmark(nodeId, nodeTitle, isFolder) {
 
         await __ctxEnsurePermanentMetadataLoaded();
 
-        bookmarkClipboard = {
+        setBookmarkClipboardState({
             action: 'copy',
             source: 'permanent',
             nodeIds: [nodeId],
             nodeData: node,
             payload: node ? [serializeBookmarkNode(node)] : [],
             timestamp: Date.now()
-        };
-        clipboardOperation = 'copy';
-        showPasteButton();
+        });
 
         ;
 
@@ -12579,7 +12812,8 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
         return;
     }
 
-    if (!bookmarkClipboard) {
+    const clipboard = await getLatestBookmarkClipboardForPaste();
+    if (!clipboard) {
         return;
     }
 
@@ -12608,8 +12842,8 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
             }
         }
 
-        if (bookmarkClipboard.source === 'temporary' || bookmarkClipboard.source === 'mixed') {
-            const payload = bookmarkClipboard.payload || [];
+        if (clipboard.source === 'temporary' || clipboard.source === 'mixed') {
+            const payload = clipboard.payload || [];
             if (payload.length) {
                 const totalNodes = countPayloadNodes(payload);
                 const useBulkMute = totalNodes > 1;
@@ -12653,19 +12887,16 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                 }
             }
 
-            if (bookmarkClipboard.source !== 'mixed' && bookmarkClipboard.action === 'cut' && bookmarkClipboard.sectionId && bookmarkClipboard.nodeIds) {
+            if (clipboard.source !== 'mixed' && clipboard.action === 'cut' && clipboard.sectionId && clipboard.nodeIds) {
                 const manager = getTempManager();
                 if (manager) {
-                    manager.removeItems(bookmarkClipboard.sectionId, bookmarkClipboard.nodeIds);
+                    try { manager.removeItems(clipboard.sectionId, clipboard.nodeIds); } catch (_) {}
                 }
             }
-            bookmarkClipboard = null;
-            clipboardOperation = null;
-            unmarkCutNode();
-            hidePasteButton();
-        } else if (bookmarkClipboard.source === 'permanent') {
-            if (bookmarkClipboard.action === 'cut' && bookmarkClipboard.nodeIds) {
-                const totalNodes = bookmarkClipboard.nodeIds.length;
+            await finalizeBookmarkClipboardPaste(clipboard);
+        } else if (clipboard.source === 'permanent') {
+            if (clipboard.action === 'cut' && clipboard.nodeIds) {
+                const totalNodes = clipboard.nodeIds.length;
                 const useBulkMute = totalNodes > 1;
                 let muteSession = null;
                 let loadingToast = null;
@@ -12686,7 +12917,7 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                     // Pre-fetch original nodes to get oldParentId and oldIndex
                     let originalNodeMap = new Map();
                     try {
-                        const originalNodes = await chrome.bookmarks.get(bookmarkClipboard.nodeIds);
+                        const originalNodes = await chrome.bookmarks.get(clipboard.nodeIds);
                         originalNodes.forEach(node => {
                             if (node) {
                                 originalNodeMap.set(node.id, {
@@ -12699,7 +12930,11 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                         console.warn('[粘贴] 获取原始节点信息失败:', err);
                     }
 
-                    for (const id of bookmarkClipboard.nodeIds) {
+                    const fallbackPayload = clipboard.payload || [];
+                    const tagUpdates = [];
+                    const noteUpdates = [];
+                    for (let itemIndex = 0; itemIndex < clipboard.nodeIds.length; itemIndex++) {
+                        const id = clipboard.nodeIds[itemIndex];
                         const target = { parentId: targetFolderId };
                         if (typeof insertIndex === 'number') {
                             target.index = insertIndex;
@@ -12713,11 +12948,18 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                                 : `正在移动: ${current}/${total}`;
                             loadingToast.update(msg);
                         }
-                        await movePermanentBookmarkNode(id, target, {
-                            createdEvents,
-                            oldParentId: orig.oldParentId,
-                            oldIndex: orig.oldIndex
-                        });
+                        try {
+                            await movePermanentBookmarkNode(id, target, {
+                                createdEvents,
+                                oldParentId: orig.oldParentId,
+                                oldIndex: orig.oldIndex
+                            });
+                        } catch (moveError) {
+                            // A deleted source must not invalidate the cut snapshot.
+                            const fallback = fallbackPayload[itemIndex];
+                            if (!fallback) throw moveError;
+                            await duplicateNode(fallback, targetFolderId, { index: target.index, tagUpdates, noteUpdates, createdEvents, progressTracker, loadingToast });
+                        }
                         if (typeof insertIndex === 'number') {
                             insertIndex++;
                         }
@@ -12725,14 +12967,15 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                     if (useBulkMute && createdEvents.length > 0 && window.__canvasBookmarkBulkMode && typeof window.__canvasBookmarkBulkMode.flushEvents === 'function') {
                         await window.__canvasBookmarkBulkMode.flushEvents(createdEvents, 'paste-permanent-cut');
                     }
+                    await __ctxFlushPermanentMetadataUpdates(tagUpdates, noteUpdates, 'paste-permanent-cut-fallback');
                 } finally {
                     if (loadingToast) loadingToast.close();
                     if (useBulkMute && typeof endBookmarkBulkMute === 'function' && muteSession && muteSession.active) {
                         await endBookmarkBulkMute('paste-permanent-cut', { refreshTree: true });
                     }
                 }
-            } else if (bookmarkClipboard.action === 'copy') {
-                const payload = bookmarkClipboard.payload || (bookmarkClipboard.nodeData ? [bookmarkClipboard.nodeData] : []);
+            } else if (clipboard.action === 'copy') {
+                const payload = clipboard.payload || (clipboard.nodeData ? [clipboard.nodeData] : []);
                 const totalNodes = countPayloadNodes(payload);
                 const useBulkMute = totalNodes > 1;
                 let muteSession = null;
@@ -12774,15 +13017,13 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
                     }
                 }
             }
-            bookmarkClipboard = null;
-            clipboardOperation = null;
-            unmarkCutNode();
-            hidePasteButton();
+            await finalizeBookmarkClipboardPaste(clipboard);
         }
 
         // 不调用 refreshBookmarkTree()，让 onMoved/onCreated 事件触发增量更新
 
     } catch (error) {
+        await restoreBookmarkClipboardCutClaim(clipboard);
         console.error('[粘贴] 失败:', error);
         const lang = currentLang || 'zh_CN';
         alert(lang === 'zh_CN' ? `粘贴失败: ${error.message}` : `Paste failed: ${error.message}`);
@@ -12849,10 +13090,14 @@ async function duplicateNode(node, parentId, options = {}) {
 
 // 标记被剪切的节点
 function markCutNode(nodeId) {
-    const node = document.querySelector(`.tree-item[data-node-id="${nodeId}"]`);
-    if (node) {
-        node.classList.add('cut-marked');
-    }
+    syncDismissedCutMarkIdentity();
+    document.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`).forEach((node) => {
+        const section = node.closest('.permanent-bookmark-section, .temp-canvas-node');
+        const cardKey = getBookmarkCardKey(section);
+        if (!cardKey || !dismissedCutMarkCardKeys.has(cardKey)) {
+            node.classList.add('cut-marked');
+        }
+    });
 }
 
 // 取消标记
@@ -13264,15 +13509,13 @@ async function copySelected() {
                     payload.push(...markClipboardPayloadSource([serializeBookmarkNode(node)], 'permanent'));
                 }
             }
-            bookmarkClipboard = {
+            setBookmarkClipboardState({
                 action: 'copy',
                 source: 'mixed',
                 payload,
                 timestamp: Date.now()
-            };
-            clipboardOperation = 'copy';
+            });
             unmarkCutNode();
-            showPasteButton();
             flashBatchActionStatus('batch-copy');
         } catch (error) {
             console.error('[多选] 复制失败:', error);
@@ -13281,15 +13524,13 @@ async function copySelected() {
     }
 
     if (tempNodes.length) {
-        bookmarkClipboard = {
+        setBookmarkClipboardState({
             action: 'copy',
             source: 'temporary',
             payload: tempPayload,
             timestamp: Date.now()
-        };
-        clipboardOperation = 'copy';
+        });
         unmarkCutNode();
-        showPasteButton();
         flashBatchActionStatus('batch-copy');
         return;
     }
@@ -13303,16 +13544,14 @@ async function copySelected() {
                 payload.push(serializeBookmarkNode(node));
             }
         }
-        bookmarkClipboard = {
+        setBookmarkClipboardState({
             action: 'copy',
             source: 'permanent',
             nodeIds: permanentIds,
             payload,
             timestamp: Date.now()
-        };
-        clipboardOperation = 'copy';
+        });
         unmarkCutNode();
-        showPasteButton();
         flashBatchActionStatus('batch-copy');
         ;
     } catch (error) {
@@ -13451,26 +13690,14 @@ function enterSelectMode() {
     // 关闭右键菜单
     hideContextMenu();
 
-    // 检查上次的显示状态，决定是显示批量菜单还是工具栏
-    try {
-        const savedState = localStorage.getItem('batchPanelState');
-        if (savedState) {
-            const state = JSON.parse(savedState);
-            if (state.visible === false) {
-                // 上次是隐藏状态，显示工具栏
-                ;
-                updateBatchToolbar();
-                if (toolbar) {
-                    toolbar.style.display = 'flex';
-                }
-                return;
-            }
-        }
-    } catch (e) {
-        console.error('[Select模式] 读取保存状态失败:', e);
+    // 收起状态会在下次进入选择模式时保留，使用恢复图标提示用户展开面板。
+    if (isBatchPanelMinimized()) {
+        setTimeout(() => {
+            if (selectMode) showBatchPanelRestoreButton({ attention: true });
+        }, 100);
+        return;
     }
 
-    // 默认或上次是显示状态，自动显示批量菜单
     setTimeout(() => {
         const fakeEvent = { preventDefault: () => { }, stopPropagation: () => { } };
         showBatchContextMenu(fakeEvent);
@@ -13482,6 +13709,7 @@ function enterSelectMode() {
 
 // 退出Select模式
 function exitSelectMode() {
+    hideBatchPanelRestoreButton();
     selectMode = false;
     unbindSelectModeGlobalHandlers();
 
@@ -13497,6 +13725,7 @@ function exitSelectMode() {
     // 清空选中
     deselectAll();
     updateBatchToolbar();
+    cancelPendingBookmarkCut();
 
     lastClickedNode = null;
     lastClickedElement = null;
@@ -13516,6 +13745,8 @@ function exitSelectMode() {
 
 // 隐藏批量操作面板
 function hideBatchActionPanel() {
+    hideBatchPanelRestoreButton();
+    cancelPendingBookmarkCut();
     const batchPanel = document.getElementById('batch-action-panel');
     if (batchPanel) {
         batchPanel.style.display = 'none';
@@ -13604,6 +13835,8 @@ function hideSelectModeOverlay() {
 function showBatchContextMenu(e) {
     e.preventDefault();
     e.stopPropagation();
+    setBatchPanelMinimized(false);
+    hideBatchPanelRestoreButton();
 
     ;
 
@@ -13622,6 +13855,7 @@ function showBatchContextMenu(e) {
     let batchPanel = document.getElementById('batch-action-panel');
     if (batchPanel) {
         // 如果已存在，只需确保显示
+        hideBatchPanelRestoreButton();
         batchPanel.style.display = 'block';
         if (batchPanel.parentNode !== getOverlayContainer()) {
             getOverlayContainer().appendChild(batchPanel);
@@ -13671,9 +13905,7 @@ function showBatchContextMenu(e) {
                     icon: 'crosshairs'
                 },
                 { action: 'batch-to-temp-section', label: lang === 'zh_CN' ? '临时栏目' : 'To Temp', icon: 'layer-group' },
-                { action: 'batch-merge-folder', label: lang === 'zh_CN' ? '合并' : 'Merge', icon: 'folder-plus', disabled: mergeDisabled },
-                { action: 'batch-add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag' },
-                { action: 'batch-clear-tags', label: lang === 'zh_CN' ? '清除标签' : 'Clear Tags', icon: 'times-circle' }
+                { action: 'batch-merge-folder', label: lang === 'zh_CN' ? '合并' : 'Merge', icon: 'folder-plus', disabled: mergeDisabled }
             ]
         },
         // 编辑组
@@ -13684,6 +13916,8 @@ function showBatchContextMenu(e) {
                 { action: 'batch-cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', disabled: cutDisabled },
                 { action: 'batch-delete', label: lang === 'zh_CN' ? '删除' : 'DELETE', icon: 'trash-alt' },
                 { action: 'batch-rename', label: lang === 'zh_CN' ? '改名' : 'Rename', icon: 'edit' },
+                { action: 'batch-add-tags', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag' },
+                { action: 'batch-clear-tags', label: lang === 'zh_CN' ? '清除标签' : 'Clear Tags', icon: 'times-circle' },
                 { action: 'batch-edit-note', label: lang === 'zh_CN' ? '编辑笔记' : 'Edit Notes', icon: 'sticky-note' },
                 { action: 'batch-clear-note', label: lang === 'zh_CN' ? '清除笔记' : 'Clear Notes', icon: 'eraser' }
             ]
@@ -13714,10 +13948,11 @@ function showBatchContextMenu(e) {
     batchPanel.innerHTML = `
         <div class="batch-panel-header" id="batch-panel-header">
             <span class="batch-panel-title" title="${lang === 'zh_CN' ? '拖动移动窗口' : 'Drag to move'}">${lang === 'zh_CN' ? '批量操作' : 'Batch Actions'}</span>
+            <button class="batch-panel-hide-btn" type="button" title="${lang === 'zh_CN' ? '收起批量操作面板' : 'Collapse batch panel'}" aria-label="${lang === 'zh_CN' ? '收起批量操作面板' : 'Collapse batch panel'}"><i class="fas fa-compress"></i></button>
             <button class="batch-panel-help-btn" type="button" data-action="batch-help" title="${lang === 'zh_CN' ? '说明' : 'Help'}">?</button>
-            <span class="batch-panel-count" id="batch-panel-count" title="${lang === 'zh_CN' ? '点击取消全部选择' : 'Click to cancel all selection'}">${selectedNodes.size}${lang === 'zh_CN' ? '项｜取消' : ' items｜Cancel'}</span>
-            <button class="batch-panel-exit-btn" data-action="exit-select-mode" title="${lang === 'zh_CN' ? '退出Select模式' : 'Exit Select Mode'}">
-                <i class="fas fa-times"></i> ${lang === 'zh_CN' ? '退出' : 'Exit'}
+            <button class="batch-panel-cancel-btn" type="button" title="${lang === 'zh_CN' ? '取消全部选择' : 'Clear all selection'}">${lang === 'zh_CN' ? '取消' : 'Clear'}</button>
+            <button class="batch-panel-exit-btn" type="button" data-action="exit-select-mode" aria-label="${lang === 'zh_CN' ? '退出Select模式' : 'Exit Select Mode'}" title="${lang === 'zh_CN' ? '退出Select模式' : 'Exit Select Mode'}">
+                <i class="fas fa-times"></i>
             </button>
         </div>
         <div class="batch-panel-resize-handles">
@@ -13834,6 +14069,7 @@ function showBatchContextMenu(e) {
                 try { hideBatchActionPanel(); } catch (_) { }
                 try { hideSelectModeOverlay(); } catch (_) { }
                 try { if (typeof deselectAll === 'function') deselectAll(); } catch (_) { }
+                try { cancelPendingBookmarkCut(); } catch (_) { }
                 try { updateBatchToolbar(); } catch (_) { }
                 try {
                     if (window.CanvasModule && typeof window.CanvasModule.resetCanvasCtrlState === 'function') {
@@ -13845,8 +14081,8 @@ function showBatchContextMenu(e) {
         });
     }
 
-    // 绑定计数/取消选择按钮事件
-    const countCancelBtn = batchPanel.querySelector('#batch-panel-count');
+    // 绑定独立的取消选择按钮事件
+    const countCancelBtn = batchPanel.querySelector('.batch-panel-cancel-btn');
     if (countCancelBtn) {
         countCancelBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -13854,6 +14090,14 @@ function showBatchContextMenu(e) {
             if (typeof deselectAll === 'function') {
                 deselectAll();
             }
+        });
+    }
+
+    const headerHideBtn = batchPanel.querySelector('.batch-panel-hide-btn');
+    if (headerHideBtn) {
+        headerHideBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            minimizeBatchPanel();
         });
     }
 
@@ -15255,6 +15499,10 @@ async function batchCut() {
             return;
         }
         await batchCutTemp();
+        // A cut payload is now owned by the global clipboard. Keeping the
+        // source nodes selected makes the next batch operation look mixed.
+        deselectAll();
+        flashBatchActionStatus('batch-cut');
         return;
     }
     const permanentIds = caps.permanentIds;
@@ -15268,17 +15516,17 @@ async function batchCut() {
                 payload.push(serializeBookmarkNode(node));
             }
         }
-        bookmarkClipboard = {
+        setBookmarkClipboardState({
             action: 'cut',
             source: 'permanent',
             nodeIds: permanentIds,
             payload,
             timestamp: Date.now()
-        };
-        clipboardOperation = 'cut';
+        });
         unmarkCutNode();
         permanentIds.forEach(id => markCutNode(id));
-        showPasteButton();
+        // The cut mark is independent from the transient batch selection.
+        deselectAll();
         flashBatchActionStatus('batch-cut');
         ;
     } catch (error) {
@@ -16075,9 +16323,153 @@ function updateBatchToolbar() {
 
 // ==================== 快捷键支持 ====================
 
+function getKeyboardCanvasPointerContext() {
+    const pointer = lastKeyboardCanvasPointer;
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!pointer || !workspace) return null;
+    const workspaceRect = workspace.getBoundingClientRect();
+    if (pointer.clientX < workspaceRect.left || pointer.clientX > workspaceRect.right || pointer.clientY < workspaceRect.top || pointer.clientY > workspaceRect.bottom) {
+        return null;
+    }
+
+    const element = document.elementFromPoint(pointer.clientX, pointer.clientY);
+    if (!element) return { kind: 'blank', workspace, workspaceRect, pointer };
+    const treeItem = element.closest && element.closest('.tree-item[data-node-id]');
+    const tempSection = element.closest && element.closest('.temp-canvas-node[data-section-id]');
+    const permanentSection = element.closest && element.closest('.permanent-bookmark-section');
+
+    if (treeItem) {
+        const treeType = treeItem.dataset.treeType || (tempSection ? 'temporary' : 'permanent');
+        return {
+            kind: 'node', workspace, workspaceRect, pointer, element, treeItem, treeType,
+            nodeId: treeItem.dataset.nodeId || null,
+            sectionId: treeType === 'temporary'
+                ? (treeItem.dataset.sectionId || (tempSection && tempSection.dataset.sectionId) || null)
+                : PERMANENT_SECTION_ANCHOR_ID,
+            isFolder: treeItem.dataset.nodeType === 'folder',
+            sectionElement: tempSection || permanentSection || null
+        };
+    }
+
+    if (tempSection) {
+        return {
+            kind: 'temp-root', workspace, workspaceRect, pointer, element,
+            sectionId: tempSection.dataset.sectionId || null,
+            sectionElement: tempSection
+        };
+    }
+    if (permanentSection) {
+        return { kind: 'permanent-root', workspace, workspaceRect, pointer, element, sectionElement: permanentSection };
+    }
+    return { kind: 'blank', workspace, workspaceRect, pointer, element };
+}
+
+function selectAllInKeyboardCanvasCard(context) {
+    const card = context && context.sectionElement;
+    if (!card) return false;
+    const items = Array.from(card.querySelectorAll('.tree-item[data-node-id]'));
+    if (!items.length) return false;
+
+    deselectAll();
+    items.forEach((node) => {
+        const nodeId = node.dataset.nodeId;
+        if (!nodeId) return;
+        const treeType = node.dataset.treeType || (context.kind === 'temp-root' ? 'temporary' : 'permanent');
+        selectedNodes.add(nodeId);
+        selectedNodeMeta.set(nodeId, {
+            treeType,
+            sectionId: treeType === 'temporary'
+                ? (node.dataset.sectionId || context.sectionId || null)
+                : PERMANENT_SECTION_ANCHOR_ID,
+            nodeType: node.dataset.nodeType || 'bookmark'
+        });
+        node.classList.add('selected');
+        lastClickedNode = nodeId;
+        lastClickedElement = node;
+    });
+    selectionSnapshot = new Set(selectedNodes);
+    updateBatchToolbar();
+    updateBatchPanelCount();
+    return selectedNodes.size > 0;
+}
+
+async function resolveKeyboardPermanentRootId() {
+    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.getTree !== 'function') return null;
+    try {
+        const tree = await chrome.bookmarks.getTree();
+        const root = Array.isArray(tree) ? tree[0] : null;
+        const bar = root && Array.isArray(root.children)
+            ? root.children.find((node) => node && (node.id === '1' || /书签栏|Bookmarks Bar/i.test(node.title || '')))
+            : null;
+        return bar && bar.id ? bar.id : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+async function pasteClipboardAtKeyboardCanvasPointer(context) {
+    if (!bookmarkClipboard || !context) return false;
+    if (context.kind === 'node') {
+        if (context.treeType === 'temporary') {
+            await pasteIntoTemp({ sectionId: context.sectionId, nodeId: context.nodeId, isFolder: context.isFolder }, false);
+        } else {
+            await pasteBookmark(context.nodeId, context.isFolder, false);
+        }
+        return true;
+    }
+    if (context.kind === 'temp-root') {
+        await pasteIntoTemp({ sectionId: context.sectionId, nodeId: null, isFolder: false }, false);
+        return true;
+    }
+    if (context.kind === 'permanent-root') {
+        const rootId = await resolveKeyboardPermanentRootId();
+        if (!rootId) return false;
+        await pasteBookmark(rootId, true, false);
+        return true;
+    }
+    if (context.kind !== 'blank' || !window.CanvasModule || typeof window.CanvasModule.createEmptyTempSection !== 'function') return false;
+
+    const state = window.CanvasModule.CanvasState || {};
+    const zoom = Number(state.zoom) > 0 ? Number(state.zoom) : 1;
+    const panX = Number(state.panOffsetX) || 0;
+    const panY = Number(state.panOffsetY) || 0;
+    const x = (context.pointer.clientX - context.workspaceRect.left - panX) / zoom;
+    const y = (context.pointer.clientY - context.workspaceRect.top - panY) / zoom;
+    const sectionId = window.CanvasModule.createEmptyTempSection(x, y, {
+        title: (currentLang || 'zh_CN') === 'zh_CN' ? '粘贴' : 'Paste',
+        label: (currentLang || 'zh_CN') === 'zh_CN' ? '粘贴' : 'Paste',
+        source: 'clipboard-paste'
+    });
+    if (!sectionId) return false;
+    await pasteIntoTemp({ sectionId, nodeId: null, isFolder: false }, false);
+    return true;
+}
+
 // 初始化快捷键
 function initKeyboardShortcuts() {
+    if (document.documentElement.dataset.canvasObjectShortcutsBound === 'true') return;
+    document.documentElement.dataset.canvasObjectShortcutsBound = 'true';
+
+    document.addEventListener('pointermove', (event) => {
+        const workspace = document.getElementById('canvasWorkspace');
+        if (!workspace) return;
+        const rect = workspace.getBoundingClientRect();
+        if (event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) {
+            lastKeyboardCanvasPointer = { clientX: event.clientX, clientY: event.clientY };
+        } else {
+            lastKeyboardCanvasPointer = null;
+        }
+    }, true);
+
     document.addEventListener('keydown', (e) => {
+        const keyboardTarget = e.target && e.target.nodeType === Node.ELEMENT_NODE
+            ? e.target
+            : (e.target && e.target.parentElement ? e.target.parentElement : null);
+        // Keep browser-native shortcuts for text fields and canvas text editors.
+        if (keyboardTarget && keyboardTarget.closest('input, textarea, select, [contenteditable="true"], .md-canvas-editor, .temp-node-description-editor, .permanent-section-tip-editor')) {
+            return;
+        }
+
         // ESC - 退出Select模式
         if (e.key === 'Escape' && selectMode) {
             // 如果当前正在进行拖拽，优先交给拖拽系统处理，不要退出选择模式
@@ -16088,14 +16480,46 @@ function initKeyboardShortcuts() {
             return;
         }
 
-        // 只在Select模式下响应其他快捷键
-        if (!selectMode) return;
+        const hasCustomSelection = selectedNodes.size > 0;
+        const hasCommandModifier = e.ctrlKey || e.metaKey;
+        const key = String(e.key || '').toLowerCase();
 
-        // Ctrl/Cmd + A - 全选
-        if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        // Cmd/Ctrl + A selects only the bookmark/folder nodes in the card
+        // currently under the pointer, never every card on the canvas.
+        if (hasCommandModifier && key === 'a' && selectMode) {
+            const pointerContext = getKeyboardCanvasPointerContext();
+            if (!pointerContext || !pointerContext.sectionElement) return;
             e.preventDefault();
-            selectAll();
+            selectAllInKeyboardCanvasCard(pointerContext);
+            return;
         }
+
+        if (!hasCommandModifier) return;
+
+        if (key === 'c' && hasCustomSelection) {
+            e.preventDefault();
+            copySelected();
+            return;
+        }
+
+        if (key === 'x' && hasCustomSelection) {
+            e.preventDefault();
+            cutSelected();
+            return;
+        }
+
+        if (key === 'v') {
+            // A text clipboard keeps its native paste behavior; only structured
+            // bookmark/folder clipboard content is pasted through the canvas.
+            const pointerContext = getKeyboardCanvasPointerContext();
+            if (!bookmarkClipboard || !pointerContext) return;
+            e.preventDefault();
+            pasteClipboardAtKeyboardCanvasPointer(pointerContext).catch((error) => {
+                console.warn('[快捷键] 粘贴失败:', error);
+            });
+            return;
+        }
+
     });
 
     ;
@@ -16116,7 +16540,7 @@ function updateBatchPanelCount() {
 
     const lang = currentLang || 'zh_CN';
     const count = selectedNodes.size;
-    countElement.textContent = `${count}${lang === 'zh_CN' ? '项｜取消' : ' items｜Cancel'}`;
+    countElement.textContent = `${count}${lang === 'zh_CN' ? ' 项' : ' items'}`;
 
     ;
 
@@ -16898,8 +17322,409 @@ function saveBatchPanelState(panel, anchorInfo) {
     }
 }
 
+// 仅收起面板，当前选择和剪切板状态继续保留。
+function minimizeBatchPanel() {
+    try { hideBatchHelpPopover(); } catch (_) { }
+    const batchPanel = document.getElementById('batch-action-panel');
+    if (batchPanel) {
+        // 先记录位置和尺寸；此处不把“当前收起”固化为下次默认隐藏。
+        saveBatchPanelState(batchPanel);
+        batchPanel.style.display = 'none';
+    }
+    setBatchPanelMinimized(true);
+    showBatchPanelRestoreButton();
+}
+
+function isBatchPanelMinimized() {
+    try { return localStorage.getItem(BATCH_PANEL_MINIMIZED_KEY) === 'true'; } catch (_) { return false; }
+}
+
+function setBatchPanelMinimized(minimized) {
+    try { localStorage.setItem(BATCH_PANEL_MINIMIZED_KEY, minimized ? 'true' : 'false'); } catch (_) { }
+}
+
+function showBatchPanelRestoreButton(options = {}) {
+    const host = getBatchPanelRestoreHost();
+    if (!host) return;
+
+    let button = document.getElementById('batch-panel-restore-btn');
+    if (!button) {
+        button = document.createElement('button');
+        button.id = 'batch-panel-restore-btn';
+        button.className = 'batch-panel-restore-btn';
+        button.type = 'button';
+        button.innerHTML = '<i class="fas fa-tasks" aria-hidden="true"></i>';
+        button.addEventListener('pointerdown', beginBatchPanelRestoreDrag);
+        button.addEventListener('pointermove', moveBatchPanelRestoreDrag);
+        button.addEventListener('pointerup', finishBatchPanelRestoreDrag);
+        button.addEventListener('pointercancel', cancelBatchPanelRestoreDrag);
+        button.addEventListener('click', (event) => {
+            if (button.dataset.dragged === 'true') {
+                delete button.dataset.dragged;
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            showBatchPanel();
+        });
+    }
+
+    if (button.parentElement !== host) host.appendChild(button);
+    const isZh = (currentLang || 'zh_CN') === 'zh_CN';
+    const label = isZh ? '打开批量操作面板' : 'Open batch panel';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.hidden = false;
+    applyBatchPanelRestoreDock(button, readBatchPanelRestoreDock());
+    bindBatchPanelRestoreResize();
+    if (options.attention === true) {
+        button.classList.remove('batch-panel-restore-attention');
+        void button.offsetWidth;
+        button.classList.add('batch-panel-restore-attention');
+    }
+}
+
+function hideBatchPanelRestoreButton() {
+    const button = document.getElementById('batch-panel-restore-btn');
+    if (button) button.remove();
+}
+
+function getBatchPanelRestoreHost() {
+    return document.getElementById('canvasWorkspace') || document.body;
+}
+
+function getBatchPanelRestoreBounds() {
+    const host = getBatchPanelRestoreHost();
+    if (!host) return null;
+    if (host === document.body) {
+        return { host, left: 0, top: 0, width: window.innerWidth, height: window.innerHeight, fixed: true };
+    }
+    const rect = host.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    return { host, left: rect.left, top: rect.top, width: rect.width, height: rect.height, fixed: false };
+}
+
+function normalizeBatchPanelRestoreDock(state) {
+    const edge = String(state && state.edge || '').toLowerCase();
+    const ratio = Number(state && state.ratio);
+    return {
+        edge: ['left', 'right', 'top', 'bottom'].includes(edge) ? edge : 'right',
+        ratio: Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : 0.75
+    };
+}
+
+function readBatchPanelRestoreDock() {
+    try {
+        return normalizeBatchPanelRestoreDock(JSON.parse(localStorage.getItem(BATCH_PANEL_RESTORE_DOCK_KEY) || 'null'));
+    } catch (_) {
+        return normalizeBatchPanelRestoreDock(null);
+    }
+}
+
+function writeBatchPanelRestoreDock(state) {
+    const normalized = normalizeBatchPanelRestoreDock(state);
+    try { localStorage.setItem(BATCH_PANEL_RESTORE_DOCK_KEY, JSON.stringify(normalized)); } catch (_) { }
+    return normalized;
+}
+
+function getBatchPanelRestoreSize(edge) {
+    return (edge === 'left' || edge === 'right')
+        ? { width: 18, height: 24 }
+        : { width: 24, height: 18 };
+}
+
+function applyBatchPanelRestoreDock(button, state) {
+    const bounds = getBatchPanelRestoreBounds();
+    if (!button || !bounds) return;
+    const dock = normalizeBatchPanelRestoreDock(state);
+    const size = getBatchPanelRestoreSize(dock.edge);
+    // 完全复用悬浮工具窗收起按钮的锚点和图标偏移：
+    // 锚点距画布边缘 10px，图标再按各边 CSS 的 4px/12px 偏移伸出。
+    const margin = 10;
+    const anchorWidth = size.width;
+    const anchorHeight = size.height;
+    const anchorMaxLeft = Math.max(margin, bounds.width - anchorWidth - margin);
+    const anchorMaxTop = Math.max(margin, bounds.height - anchorHeight - margin);
+    let left = margin;
+    let top = margin;
+    if (dock.edge === 'left') {
+        left = margin + 4;
+        top = margin + ((anchorMaxTop - margin) * dock.ratio) - 12;
+    } else if (dock.edge === 'right') {
+        left = anchorMaxLeft - 22;
+        top = margin + ((anchorMaxTop - margin) * dock.ratio) - 12;
+    } else if (dock.edge === 'top') {
+        left = margin + ((anchorMaxLeft - margin) * dock.ratio) + 12;
+        top = margin + 4;
+    } else {
+        left = margin + ((anchorMaxLeft - margin) * dock.ratio) + 12;
+        top = anchorMaxTop - 22;
+    }
+
+    button.style.position = bounds.fixed ? 'fixed' : 'absolute';
+    button.style.left = `${Math.round(bounds.fixed ? bounds.left + left : left)}px`;
+    button.style.top = `${Math.round(bounds.fixed ? bounds.top + top : top)}px`;
+    button.dataset.dockEdge = dock.edge;
+}
+
+function resolveBatchPanelRestoreDockFromPointer(clientX, clientY, options = {}) {
+    const bounds = getBatchPanelRestoreBounds();
+    if (!bounds) return null;
+    const localX = Math.max(0, Math.min(bounds.width, clientX - bounds.left));
+    const localY = Math.max(0, Math.min(bounds.height, clientY - bounds.top));
+    const distances = [
+        { edge: 'left', value: localX },
+        { edge: 'right', value: bounds.width - localX },
+        { edge: 'top', value: localY },
+        { edge: 'bottom', value: bounds.height - localY }
+    ];
+    distances.sort((a, b) => a.value - b.value);
+
+    let edge = String(options.forcedEdge || '').toLowerCase();
+    if (!['left', 'right', 'top', 'bottom'].includes(edge)) {
+        edge = distances[0].edge;
+        const currentEdge = String(options.currentEdge || '').toLowerCase();
+        const currentMatch = distances.find((item) => item.edge === currentEdge);
+        if (currentMatch && (currentMatch.value - distances[0].value) <= 10) {
+            edge = currentEdge;
+        }
+    }
+    const size = getBatchPanelRestoreSize(edge);
+    const margin = 10;
+    const available = edge === 'left' || edge === 'right'
+        ? Math.max(1, bounds.height - size.height - margin * 2)
+        : Math.max(1, bounds.width - size.width - margin * 2);
+    // This receives the same virtual dock anchor coordinate as the reference
+    // floating tools button, not the visible icon's offset position.
+    const anchorCoordinate = edge === 'left' || edge === 'right' ? localY : localX;
+    return normalizeBatchPanelRestoreDock({ edge, ratio: (anchorCoordinate - margin) / available });
+}
+
+function getBatchPanelRestoreAnchorPoint(state) {
+    const bounds = getBatchPanelRestoreBounds();
+    if (!bounds) return null;
+    const dock = normalizeBatchPanelRestoreDock(state);
+    const size = getBatchPanelRestoreSize(dock.edge);
+    const margin = 10;
+    const anchorMaxLeft = Math.max(margin, bounds.width - size.width - margin);
+    const anchorMaxTop = Math.max(margin, bounds.height - size.height - margin);
+    let left = margin;
+    let top = margin;
+
+    if (dock.edge === 'left') {
+        top = margin + ((anchorMaxTop - margin) * dock.ratio);
+    } else if (dock.edge === 'right') {
+        left = anchorMaxLeft;
+        top = margin + ((anchorMaxTop - margin) * dock.ratio);
+    } else {
+        left = margin + ((anchorMaxLeft - margin) * dock.ratio);
+        top = dock.edge === 'top' ? margin : anchorMaxTop;
+    }
+
+    return { left: bounds.left + left, top: bounds.top + top };
+}
+
+function resolveBatchPanelRestoreAdjacentEdgeFromCorner(currentEdge, ratio, dx, dy) {
+    const edge = normalizeBatchPanelRestoreDock({ edge: currentEdge }).edge;
+    const safeRatio = normalizeBatchPanelRestoreDock({ ratio }).ratio;
+    const nearStart = safeRatio <= BATCH_PANEL_RESTORE_CORNER_SWITCH_THRESHOLD;
+    const nearEnd = safeRatio >= (1 - BATCH_PANEL_RESTORE_CORNER_SWITCH_THRESHOLD);
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (edge === 'left' || edge === 'right') {
+        const towardInner = edge === 'left' ? dx > 0 : dx < 0;
+        if (nearStart && dy < -BATCH_PANEL_RESTORE_DRAG_ACTIVATE_THRESHOLD) return 'top';
+        if (nearEnd && dy > BATCH_PANEL_RESTORE_DRAG_ACTIVATE_THRESHOLD) return 'bottom';
+        if (!towardInner || absDx < BATCH_PANEL_RESTORE_DRAG_SWITCH_THRESHOLD || absDx < absDy) return null;
+        if (nearStart) return 'top';
+        if (nearEnd) return 'bottom';
+        return null;
+    }
+
+    const towardInner = edge === 'top' ? dy > 0 : dy < 0;
+    if (nearStart && dx < -BATCH_PANEL_RESTORE_DRAG_ACTIVATE_THRESHOLD) return 'left';
+    if (nearEnd && dx > BATCH_PANEL_RESTORE_DRAG_ACTIVATE_THRESHOLD) return 'right';
+    if (!towardInner || absDy < BATCH_PANEL_RESTORE_DRAG_SWITCH_THRESHOLD || absDy <= absDx) return null;
+    if (nearStart) return 'left';
+    if (nearEnd) return 'right';
+    return null;
+}
+
+function confirmBatchPanelRestoreCornerEdgeSwitch(drag, event, currentEdge, candidateEdge) {
+    if (!drag || !candidateEdge || candidateEdge === currentEdge) {
+        if (drag) drag.cornerSwitchCandidate = null;
+        return currentEdge;
+    }
+
+    const candidate = drag.cornerSwitchCandidate;
+    if (!candidate || candidate.edge !== candidateEdge) {
+        drag.cornerSwitchCandidate = {
+            edge: candidateEdge,
+            x: event.clientX,
+            y: event.clientY
+        };
+        return currentEdge;
+    }
+
+    if (Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) < BATCH_PANEL_RESTORE_CORNER_SWITCH_CONFIRM_DISTANCE) {
+        return currentEdge;
+    }
+
+    drag.cornerSwitchCandidate = null;
+    return candidateEdge;
+}
+
+function resolveBatchPanelRestoreFinalEdgeFromRelease(edge, dx, dy) {
+    const currentEdge = normalizeBatchPanelRestoreDock({ edge }).edge;
+    const horizontalDominant = Math.abs(dx) >= Math.abs(dy);
+    if (currentEdge === 'left') {
+        return horizontalDominant && dx >= BATCH_PANEL_RESTORE_DRAG_SWITCH_THRESHOLD ? 'right' : 'left';
+    }
+    if (currentEdge === 'right') {
+        return horizontalDominant && dx <= -BATCH_PANEL_RESTORE_DRAG_SWITCH_THRESHOLD ? 'left' : 'right';
+    }
+    if (currentEdge === 'top') {
+        return !horizontalDominant && dy >= BATCH_PANEL_RESTORE_DRAG_SWITCH_THRESHOLD ? 'bottom' : 'top';
+    }
+    return !horizontalDominant && dy <= -BATCH_PANEL_RESTORE_DRAG_SWITCH_THRESHOLD ? 'top' : 'bottom';
+}
+
+function resolveBatchPanelRestoreDockDuringDrag(event, drag, dx, dy) {
+    const current = drag && drag.currentDock ? drag.currentDock : readBatchPanelRestoreDock();
+    const adjacentCandidate = resolveBatchPanelRestoreAdjacentEdgeFromCorner(current.edge, current.ratio, dx, dy);
+    const adjacentEdge = confirmBatchPanelRestoreCornerEdgeSwitch(drag, event, current.edge, adjacentCandidate);
+    const targetX = event.clientX - (drag.anchorOffsetX || 0);
+    const targetY = event.clientY - (drag.anchorOffsetY || 0);
+    return resolveBatchPanelRestoreDockFromPointer(targetX, targetY, {
+        currentEdge: adjacentEdge || current.edge,
+        forcedEdge: adjacentEdge || ''
+    }) || current;
+}
+
+function resolveBatchPanelRestoreFinalDockState(event, drag, dx, dy) {
+    const current = drag && drag.currentDock ? drag.currentDock : readBatchPanelRestoreDock();
+    const edge = resolveBatchPanelRestoreFinalEdgeFromRelease(current.edge, dx, dy);
+    const targetX = event.clientX - (drag.anchorOffsetX || 0);
+    const targetY = event.clientY - (drag.anchorOffsetY || 0);
+    return resolveBatchPanelRestoreDockFromPointer(targetX, targetY, {
+        currentEdge: edge,
+        forcedEdge: edge
+    }) || { edge, ratio: current.ratio };
+}
+
+function clearBatchPanelRestoreHintHoldTimer(button) {
+    if (!button || button.__batchRestoreHintHoldTimer == null) return;
+    window.clearTimeout(button.__batchRestoreHintHoldTimer);
+    button.__batchRestoreHintHoldTimer = null;
+}
+
+function clearBatchPanelRestoreDragVisualState(button) {
+    if (!button) return;
+    clearBatchPanelRestoreHintHoldTimer(button);
+    button.classList.remove('canvas-floating-hold-active');
+    button.classList.remove('canvas-floating-dragging');
+}
+
+function scheduleBatchPanelRestoreHintReveal(button) {
+    clearBatchPanelRestoreHintHoldTimer(button);
+    button.__batchRestoreHintHoldTimer = window.setTimeout(() => {
+        button.__batchRestoreHintHoldTimer = null;
+        if (!button.__batchRestoreDrag) return;
+        button.classList.add('canvas-floating-hold-active');
+    }, BATCH_PANEL_RESTORE_HINT_HOLD_DELAY_MS);
+}
+
+function beginBatchPanelRestoreDrag(event) {
+    if (event.button !== 0) return;
+    const button = event.currentTarget;
+    clearBatchPanelRestoreDragVisualState(button);
+    const initialDock = readBatchPanelRestoreDock();
+    const anchorPoint = getBatchPanelRestoreAnchorPoint(initialDock);
+    button.__batchRestoreDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+        currentDock: initialDock,
+        cornerSwitchCandidate: null,
+        anchorOffsetX: anchorPoint ? event.clientX - anchorPoint.left : 0,
+        anchorOffsetY: anchorPoint ? event.clientY - anchorPoint.top : 0
+    };
+    button.dataset.dockEdge = initialDock.edge;
+    try { button.setPointerCapture(event.pointerId); } catch (_) { }
+    scheduleBatchPanelRestoreHintReveal(button);
+    event.preventDefault();
+}
+
+function moveBatchPanelRestoreDrag(event) {
+    const button = event.currentTarget;
+    const drag = button.__batchRestoreDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) >= BATCH_PANEL_RESTORE_DRAG_ACTIVATE_THRESHOLD) {
+        drag.moved = true;
+        clearBatchPanelRestoreHintHoldTimer(button);
+        button.classList.add('canvas-floating-hold-active');
+        button.classList.add('canvas-floating-dragging');
+    }
+    if (!drag.moved) return;
+    const dock = resolveBatchPanelRestoreDockDuringDrag(event, drag, dx, dy);
+    if (dock) {
+        drag.currentDock = dock;
+        applyBatchPanelRestoreDock(button, dock);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+}
+
+function finishBatchPanelRestoreDrag(event) {
+    const button = event.currentTarget;
+    const drag = button.__batchRestoreDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (drag.moved) {
+        const dx = event.clientX - drag.startX;
+        const dy = event.clientY - drag.startY;
+        const dock = resolveBatchPanelRestoreFinalDockState(event, drag, dx, dy);
+        if (dock) {
+            writeBatchPanelRestoreDock(dock);
+            applyBatchPanelRestoreDock(button, dock);
+        }
+        button.dataset.dragged = 'true';
+    }
+    try { button.releasePointerCapture(event.pointerId); } catch (_) { }
+    delete button.__batchRestoreDrag;
+    clearBatchPanelRestoreDragVisualState(button);
+}
+
+function cancelBatchPanelRestoreDrag(event) {
+    const button = event.currentTarget;
+    if (!button.__batchRestoreDrag || button.__batchRestoreDrag.pointerId !== event.pointerId) return;
+    try { button.releasePointerCapture(event.pointerId); } catch (_) { }
+    delete button.__batchRestoreDrag;
+    clearBatchPanelRestoreDragVisualState(button);
+}
+
+function bindBatchPanelRestoreResize() {
+    if (document.documentElement.dataset.batchPanelRestoreResizeBound === 'true') return;
+    document.documentElement.dataset.batchPanelRestoreResizeBound = 'true';
+    window.addEventListener('resize', () => {
+        const button = document.getElementById('batch-panel-restore-btn');
+        if (button) applyBatchPanelRestoreDock(button, readBatchPanelRestoreDock());
+    });
+}
+
 // 隐藏批量面板，显示顶部工具栏
 function hideBatchPanel() {
+    setBatchPanelMinimized(false);
+    hideBatchPanelRestoreButton();
+    // “关闭”是全局退出，不保留当前栏目的待剪切橙色状态。
+    if (selectMode) {
+        exitSelectMode();
+        return;
+    }
+    cancelPendingBookmarkCut();
     const batchPanel = document.getElementById('batch-action-panel');
     if (batchPanel) {
         batchPanel.style.display = 'none';
@@ -16919,6 +17744,8 @@ function hideBatchPanel() {
 
 // 显示批量面板，隐藏顶部工具栏
 function showBatchPanel() {
+    setBatchPanelMinimized(false);
+    hideBatchPanelRestoreButton();
     const batchPanel = document.getElementById('batch-action-panel');
 
     // 如果面板不存在，创建它

@@ -3063,7 +3063,7 @@ function requestSidebarMenuColorSyncRefresh() {
 // - 外观尺寸：sizes.specialTemp
 // - 外观颜色：colors.specialTemp
 // - 颜色锁行为：与常规临时栏目共用同一套设置
-const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add', 'file-import', 'import-html-bookmarks', 'import-json-bookmarks']);
+const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add', 'file-import', 'import-html-bookmarks', 'import-json-bookmarks', 'clipboard-paste']);
 
 function __isSpecialTempSection(section) {
     if (!section) return false;
@@ -3737,6 +3737,15 @@ _Tip: This card can be freely edited or deleted_
 
 ---
 
+### 批量/选中操作（批量模式）
+
+- **\`Ctrl / Command + A\`**：选中光标所在栏目中的全部书签/文件夹
+- **\`Ctrl / Command + X\`**：剪切已选项目
+- **\`Ctrl / Command + C\`**：复制已选项目
+- **\`Ctrl / Command + V\`**：粘贴到光标所在位置。文件夹内；书签同级位置下方；临时栏目根部；永久栏目书签栏根部；画布空白会新建“粘贴”临时栏目。文本保持浏览器原生粘贴。
+
+---
+
 ### 触控板操作
 
 - **\`双指捏合\`**：缩放画布
@@ -3779,6 +3788,15 @@ _快捷键可在左上角「管理」中自定义_
 ### Space Key Operations
 
 - **\`Space + Left Click\` (hold)**: Drag global canvas
+
+---
+
+### Batch / Selection Operations (Batch Mode)
+
+- **\`Ctrl / Command + A\`**: Select all bookmark/folder items in the card under the cursor
+- **\`Ctrl / Command + X\`**: Cut selected items
+- **\`Ctrl / Command + C\`**: Copy selected items
+- **\`Ctrl / Command + V\`**: Paste at the cursor location. Inside a folder; below a bookmark at the same level; at a temp card root; at the Bookmarks Bar root for a blank permanent card; or in a new “Paste” temp card on blank canvas. Text keeps native browser paste behavior.
 
 ---
 
@@ -3929,6 +3947,15 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 </ul>
 
 <hr>
+<h3>批量/选中操作（批量模式）</h3>
+<ul>
+<li><strong><code>Ctrl / Command + A</code></strong>：选中光标所在栏目中的全部书签/文件夹</li>
+<li><strong><code>Ctrl / Command + X</code></strong>：剪切已选项目</li>
+<li><strong><code>Ctrl / Command + C</code></strong>：复制已选项目</li>
+<li><strong><code>Ctrl / Command + V</code></strong>：粘贴到光标所在位置。文件夹内；书签同级位置下方；临时栏目根部；永久栏目书签栏根部；画布空白会新建“粘贴”临时栏目。文本保持浏览器原生粘贴。</li>
+</ul>
+
+<hr>
 <h3>触控板操作</h3>
 <ul>
 <li><strong><code>双指捏合</code></strong>：缩放画布</li>
@@ -3970,6 +3997,15 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <h3>Space Key Operations</h3>
 <ul>
 <li><strong><code>Space + Left Click</code> (hold)</strong>: Drag global canvas</li>
+</ul>
+
+<hr>
+<h3>Batch / Selection Operations (Batch Mode)</h3>
+<ul>
+<li><strong><code>Ctrl / Command + A</code></strong>: Select all bookmark/folder items in the card under the cursor</li>
+<li><strong><code>Ctrl / Command + X</code></strong>: Cut selected items</li>
+<li><strong><code>Ctrl / Command + C</code></strong>: Copy selected items</li>
+<li><strong><code>Ctrl / Command + V</code></strong>: Paste at the cursor location. Inside a folder; below a bookmark at the same level; at a temp card root; at the Bookmarks Bar root for a blank permanent card; or in a new “Paste” temp card on blank canvas. Text keeps native browser paste behavior.</li>
 </ul>
 
 <hr>
@@ -8737,6 +8773,7 @@ function setupCanvasManageModal() {
             manageModal.style.position = '';
             manageModal.style.left = '';
             manageModal.style.top = '';
+            resetSettingsAnchoredModalSizing(manageModal);
         }
 
         updateShortcutDisplays();
@@ -8789,6 +8826,7 @@ function setupCanvasManageModal() {
             otherManageModal.style.position = '';
             otherManageModal.style.left = '';
             otherManageModal.style.top = '';
+            resetSettingsAnchoredModalSizing(otherManageModal);
         }
     };
 
@@ -8884,6 +8922,7 @@ const positionManageModalUnderSettingsBtn = (modalEl) => {
         modalEl.style.position = '';
         modalEl.style.left = '';
         modalEl.style.top = '';
+        resetSettingsAnchoredModalSizing(modalEl);
         return;
     }
 
@@ -8891,19 +8930,32 @@ const positionManageModalUnderSettingsBtn = (modalEl) => {
     modalEl.style.maxHeight = `calc(100vh - 16px)`;
 
     const anchorRect = anchorBtn.getBoundingClientRect();
-    const modalRect = modalEl.getBoundingClientRect();
     const gap = 8;
     const viewportPadding = 8;
+    const spaceBelow = window.innerHeight - anchorRect.bottom - viewportPadding;
+    const spaceAbove = anchorRect.top - viewportPadding;
+    let modalRect = modalEl.getBoundingClientRect();
+    const placeAbove = spaceBelow < modalRect.height && spaceAbove > spaceBelow;
+    const availableHeight = Math.max(0, (placeAbove ? spaceAbove : spaceBelow) - gap);
+
+    // Keep tall secondary panels on the anchored side of the title bar and
+    // scroll their content instead of clamping the whole panel toward it.
+    modalEl.style.maxHeight = `${Math.round(availableHeight)}px`;
+    const modalHeader = modalEl.querySelector('.canvas-manage-modal-header');
+    const modalBody = modalEl.querySelector('.canvas-manage-modal-body');
+    if (modalBody && modalHeader) {
+        modalBody.style.maxHeight = `${Math.max(0, Math.round(availableHeight - modalHeader.offsetHeight))}px`;
+    }
+    modalRect = modalEl.getBoundingClientRect();
+
     const minLeft = viewportPadding;
     const maxLeft = Math.max(minLeft, window.innerWidth - modalRect.width - viewportPadding);
     const targetCenterX = anchorRect.left + (anchorRect.width / 2);
     let left = targetCenterX - (modalRect.width / 2);
     left = Math.min(Math.max(left, minLeft), maxLeft);
 
-    const spaceBelow = window.innerHeight - anchorRect.bottom - viewportPadding;
-    const spaceAbove = anchorRect.top - viewportPadding;
     let top = anchorRect.bottom + gap;
-    if (spaceBelow < modalRect.height && spaceAbove > spaceBelow) {
+    if (placeAbove) {
         top = anchorRect.top - modalRect.height - gap;
     }
     const minTop = viewportPadding;
@@ -8914,6 +8966,38 @@ const positionManageModalUnderSettingsBtn = (modalEl) => {
     modalEl.style.left = `${Math.round(left)}px`;
     modalEl.style.top = `${Math.round(top)}px`;
 };
+
+function resetSettingsAnchoredModalSizing(modalEl) {
+    if (!modalEl) return;
+    modalEl.style.maxHeight = '';
+    const modalBody = modalEl.querySelector('.canvas-manage-modal-body');
+    if (modalBody) modalBody.style.maxHeight = '';
+}
+
+const SETTINGS_ANCHORED_MODAL_IDS = [
+    'canvasClipboardModal',
+    'canvasManageModal',
+    'canvasShortcutsModal',
+    'canvasOpenSourceModal'
+];
+
+let settingsAnchoredModalResizeFrame = null;
+
+function repositionSettingsAnchoredModals() {
+    SETTINGS_ANCHORED_MODAL_IDS.forEach((modalId) => {
+        const modal = document.getElementById(modalId);
+        if (!modal || modal.style.display === 'none' || modal.style.position !== 'fixed') return;
+        positionManageModalUnderSettingsBtn(modal);
+    });
+}
+
+window.addEventListener('resize', () => {
+    if (settingsAnchoredModalResizeFrame !== null) return;
+    settingsAnchoredModalResizeFrame = window.requestAnimationFrame(() => {
+        settingsAnchoredModalResizeFrame = null;
+        repositionSettingsAnchoredModals();
+    });
+});
 
 let __canvasViewSyncLastSignalTimestamp = 0;
 let __canvasViewSyncConsumedSignalIds = [];
@@ -32472,6 +32556,7 @@ function openCanvasShortcutsModal(options = {}) {
         modal.style.position = '';
         modal.style.left = '';
         modal.style.top = '';
+        resetSettingsAnchoredModalSizing(modal);
     }
 
     updateShortcutDisplays();

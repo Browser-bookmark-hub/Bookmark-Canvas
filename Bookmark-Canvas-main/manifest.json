@@ -49,6 +49,7 @@
     "sidePanel",
     "bookmarks",
     "storage",
+    "clipboardWrite",
     "unlimitedStorage",
     "downloads",
     "tabs",

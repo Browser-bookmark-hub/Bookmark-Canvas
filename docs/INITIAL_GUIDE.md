@@ -56,6 +56,13 @@
 
 - **Hold `Space + Left Click`:** pan the global canvas.
 
+### Batch / Selection Operations (Batch Mode)
+
+- **`Ctrl / Command + A`:** select all bookmark and folder items in the card under the cursor.
+- **`Ctrl / Command + X`:** cut selected items.
+- **`Ctrl / Command + C`:** copy selected items.
+- **`Ctrl / Command + V`:** paste at the cursor: inside a folder, below a bookmark at the same level, at a Temporary Section root, at the Bookmarks Bar root for a blank Permanent Section, or in a new `Paste` Temporary Section on blank canvas. Text keeps native browser paste behavior.
+
 ### Trackpad Operations
 
 - **Pinch:** zoom the canvas.

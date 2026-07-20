@@ -583,6 +583,156 @@ option {
     transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
+/* 批量面板收起后，恢复把手与悬浮工具窗一样独立停靠在画布边缘。 */
+.batch-panel-restore-btn {
+    position: absolute;
+    z-index: 300;
+    width: 18px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    box-shadow: none;
+    cursor: pointer;
+    touch-action: none;
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        color 0.15s ease,
+        box-shadow 0.15s ease,
+        background 0.15s ease,
+        border-color 0.2s ease,
+        border-radius 0.2s ease,
+        width 0.2s ease,
+        height 0.2s ease;
+}
+
+.batch-panel-restore-btn:hover,
+.batch-panel-restore-btn:focus-visible {
+    width: 32px;
+    height: 32px;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
+    outline: none;
+}
+
+.batch-panel-restore-btn i {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1;
+    transform: none;
+}
+
+.batch-panel-restore-btn[data-dock-edge="top"],
+.batch-panel-restore-btn[data-dock-edge="bottom"] {
+    width: 24px;
+    height: 18px;
+}
+
+.batch-panel-restore-btn[data-dock-edge="left"]:hover,
+.batch-panel-restore-btn[data-dock-edge="left"]:focus-visible {
+    width: 32px;
+    height: 32px;
+    transform: translateY(-4px) scale(1.05);
+}
+
+.batch-panel-restore-btn[data-dock-edge="right"]:hover,
+.batch-panel-restore-btn[data-dock-edge="right"]:focus-visible {
+    width: 32px;
+    height: 32px;
+    transform: translate(-14px, -4px) scale(1.05);
+}
+
+.batch-panel-restore-btn[data-dock-edge="top"]:hover,
+.batch-panel-restore-btn[data-dock-edge="top"]:focus-visible {
+    width: 32px;
+    height: 32px;
+    transform: translateX(-4px) scale(1.05);
+}
+
+.batch-panel-restore-btn[data-dock-edge="bottom"]:hover,
+.batch-panel-restore-btn[data-dock-edge="bottom"]:focus-visible {
+    width: 32px;
+    height: 32px;
+    transform: translate(-4px, -14px) scale(1.05);
+}
+
+.batch-panel-restore-btn::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    pointer-events: auto;
+}
+
+.batch-panel-restore-btn::before {
+    content: "";
+    position: absolute;
+    left: -16px;
+    top: -8px;
+    width: 56px;
+    height: 56px;
+    background: transparent;
+    pointer-events: auto;
+    border-radius: 0;
+    z-index: -1;
+}
+
+.batch-panel-restore-btn:hover::before,
+.batch-panel-restore-btn:focus-visible::before {
+    left: -12px;
+    top: -10px;
+    width: 56px;
+    height: 56px;
+}
+
+.batch-panel-restore-btn[data-dock-edge="left"]::after {
+    left: -16px;
+    top: -10px;
+    width: 60px;
+    height: calc(100% + 20px);
+}
+
+.batch-panel-restore-btn[data-dock-edge="right"]::after {
+    right: -16px;
+    top: -10px;
+    width: 60px;
+    height: calc(100% + 20px);
+}
+
+.batch-panel-restore-btn[data-dock-edge="top"]::after {
+    left: -10px;
+    top: -16px;
+    width: calc(100% + 20px);
+    height: 60px;
+}
+
+.batch-panel-restore-btn[data-dock-edge="bottom"]::after {
+    left: -10px;
+    bottom: -16px;
+    width: calc(100% + 20px);
+    height: 60px;
+}
+
+@keyframes batch-panel-restore-attention {
+    0%, 100% { opacity: 0.55; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.28); }
+}
+
+.batch-panel-restore-btn.batch-panel-restore-attention {
+    animation: batch-panel-restore-attention 0.46s ease-in-out 3;
+}
+
 .header-left {
     display: flex;
     flex-direction: column;
@@ -656,7 +806,9 @@ option {
 }
 
 .header-toggle-hint-up,
-.header-toggle-hint-down {
+.header-toggle-hint-down,
+.header-toggle-hint-left,
+.header-toggle-hint-right {
     display: block;
     width: 22px;
     height: 22px;
@@ -669,7 +821,9 @@ option {
 }
 
 .header-toggle-hint-up::after,
-.header-toggle-hint-down::after {
+.header-toggle-hint-down::after,
+.header-toggle-hint-left::after,
+.header-toggle-hint-right::after {
     content: "";
     position: absolute;
     inset: 4px;
@@ -697,6 +851,18 @@ option {
     transform: var(--sidebar-toggle-hint-base-transform) scale(0.72);
 }
 
+.header-toggle-hint-left {
+    --sidebar-toggle-hint-base-transform: translateY(-50%) rotate(-45deg);
+    top: 50%;
+    right: calc(100% + 10px);
+}
+
+.header-toggle-hint-right {
+    --sidebar-toggle-hint-base-transform: translateY(-50%) rotate(135deg);
+    top: 50%;
+    left: calc(100% + 10px);
+}
+
 .header-toggle-show-hints .header-toggle-hint {
     opacity: 0.73;
     transform: var(--sidebar-toggle-hint-base-transform) scale(0.96);
@@ -707,6 +873,32 @@ option {
     opacity: 0.39;
     transform: scale(0.91);
     animation: sidebar-toggle-hint-ripple 3.1s var(--sidebar-toggle-hint-breathe-curve, cubic-bezier(0.445, 0.05, 0.55, 0.95)) var(--sidebar-toggle-hint-phase-offset, -2.325s) infinite;
+}
+
+.header-toggle-show-hints[data-drag-guide="up"] .header-toggle-hint-down,
+.header-toggle-show-hints[data-drag-guide="up"] .header-toggle-hint-left,
+.header-toggle-show-hints[data-drag-guide="up"] .header-toggle-hint-right,
+.header-toggle-show-hints[data-drag-guide="down"] .header-toggle-hint-up,
+.header-toggle-show-hints[data-drag-guide="down"] .header-toggle-hint-left,
+.header-toggle-show-hints[data-drag-guide="down"] .header-toggle-hint-right,
+.header-toggle-show-hints[data-drag-guide="left"] .header-toggle-hint-up,
+.header-toggle-show-hints[data-drag-guide="left"] .header-toggle-hint-down,
+.header-toggle-show-hints[data-drag-guide="left"] .header-toggle-hint-right,
+.header-toggle-show-hints[data-drag-guide="right"] .header-toggle-hint-up,
+.header-toggle-show-hints[data-drag-guide="right"] .header-toggle-hint-down,
+.header-toggle-show-hints[data-drag-guide="right"] .header-toggle-hint-left {
+    opacity: 0;
+    transform: var(--sidebar-toggle-hint-base-transform) scale(0.72);
+    animation: none;
+}
+
+.header-toggle-show-hints[data-drag-guide="up"] .header-toggle-hint-up,
+.header-toggle-show-hints[data-drag-guide="down"] .header-toggle-hint-down,
+.header-toggle-show-hints[data-drag-guide="left"] .header-toggle-hint-left,
+.header-toggle-show-hints[data-drag-guide="right"] .header-toggle-hint-right {
+    opacity: 0.82;
+    transform: var(--sidebar-toggle-hint-base-transform) scale(1);
+    animation: sidebar-toggle-hint-breathe 3.1s var(--sidebar-toggle-hint-breathe-curve, cubic-bezier(0.445, 0.05, 0.55, 0.95)) var(--sidebar-toggle-hint-phase-offset, -2.325s) infinite;
 }
 
 .header-toggle-hold-active {
@@ -2093,7 +2285,7 @@ body.header-dock-bottom:not(.header-compact) .quick-add-menu {
     transform: translateY(-50%);
     width: max-content;
     max-width: min(220px, calc(100vw - 48px));
-    padding: 6px 8px;
+    padding: 3px 7px;
     border-radius: 8px;
     border: 1px solid var(--border-color);
     background: var(--bg-elevated);
@@ -2462,7 +2654,7 @@ body.header-dock-bottom:not(.header-compact) .settings-storage-block .clear-drop
 }
 
 .settings-storage-block .clear-dropdown-item {
-    font-size: 12px;
+    font-size: 11px;
     padding: 8px 10px;
     border-radius: 8px;
 }
@@ -4031,7 +4223,7 @@ body.sidebar-resizing * {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 8px;
+    padding: 3px 7px;
     border-radius: 6px;
     cursor: pointer;
     transition: background-color 0.12s ease, color 0.12s ease;
@@ -4436,7 +4628,7 @@ html.side-panel-mode #editBookmarkModal .modal-body {
 }
 
 .edit-bookmark-field label {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-secondary);
 }
@@ -6876,9 +7068,9 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     max-width: 95vw;
     max-height: 85vh;
     background: var(--bg-elevated) !important;
-    border: 1px solid rgba(148, 163, 184, 0.4);
-    border-radius: 10px;
-    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.22);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.24);
     z-index: 99999;
     animation: panelFadeIn 0.25s ease-out;
     display: flex;
@@ -6886,8 +7078,9 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     padding-bottom: 6px;
     /* Safe padding buffer to elevate content scrollbars away from edge resize handles */
     resize: none;
-    overflow: visible;
-    /* 允许四边 resize handle 伸出面板，内容滚动交给 .batch-panel-content */
+    overflow: hidden;
+    /* 内容必须裁切在面板内；缩放热区在内侧边缘，并由内容留白避开。 */
+    min-height: 0;
 }
 
 @keyframes panelFadeIn {
@@ -6906,12 +7099,11 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     justify-content: space-between;
     align-items: center;
     gap: 6px;
-    padding: 4px 7px;
-    /* 更小的padding，极致紧凑 */
-    background: rgba(37, 99, 235, 0.12) !important;
-    color: white;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 0.8);
-    border-radius: 9px 9px 0 0;
+    padding: 3px 7px;
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 7px 7px 0 0;
     flex-shrink: 0;
     min-height: 0;
     /* 移除最小高度 */
@@ -6926,77 +7118,79 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .batch-panel-title {
-    font-weight: 600;
+    font-weight: 700;
     font-size: 11px;
-    /* 更小的字体 */
     margin-right: auto;
     line-height: 1.2;
     /* 紧凑行高 */
 }
 
-.batch-panel-count {
+.batch-panel-cancel-btn {
+    height: 18px;
+    padding: 0 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
     font-size: 10px;
-    /* 更小的字体 */
-    padding: 2px 6px;
-    /* 更小的padding */
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 10px;
+    font-family: inherit;
     line-height: 1.2;
     cursor: pointer;
-    user-select: none;
-    transition: background-color 0.15s, transform 0.1s;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.batch-panel-count:hover {
-    background: rgba(255, 255, 255, 0.35);
+.batch-panel-cancel-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
 }
 
-.batch-panel-count:active {
-    transform: scale(0.95);
+.batch-panel-cancel-btn:active {
+    background: var(--bg-tertiary);
 }
 
 .batch-panel-exit-btn {
-    background: rgba(244, 67, 54, 0.92);
-    color: white;
-    border: 1px solid rgba(255, 255, 255, 0.7);
+    position: relative;
+    z-index: 10005;
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    width: 20px;
+    height: 20px;
+    padding: 0;
     border-radius: 4px;
-    padding: 2px 6px;
-    /* 更小的padding */
-    font-size: 10px;
-    /* 更小的字体 */
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 2px;
-    /* 更小的gap */
-    transition: all 0.2s;
-    font-weight: 500;
+    justify-content: center;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+    font-weight: 600;
     line-height: 1.2;
 }
 
 .batch-panel-exit-btn:hover {
-    background: rgba(244, 67, 54, 1);
-    border-color: rgba(255, 255, 255, 0.8);
-    transform: scale(1.05);
+    background: rgba(185, 28, 28, 0.08);
+    border-color: rgba(185, 28, 28, 0.4);
+    color: #b91c1c;
 }
 
 .batch-panel-exit-btn:active {
-    transform: scale(0.98);
+    background: rgba(185, 28, 28, 0.12);
 }
 
 .batch-panel-exit-btn i {
-    font-size: 13px;
+    font-size: 11px;
 }
 
 .batch-panel-help-btn {
-    width: 15px;
-    height: 15px;
+    width: 18px;
+    height: 18px;
     border-radius: 999px;
-    border: 1px solid rgba(148, 163, 184, 0.7);
-    background: rgba(255, 255, 255, 0.22);
-    color: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--border-color);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
     font-weight: 700;
-    font-size: 9px;
+    font-size: 10px;
     line-height: 1;
     cursor: pointer;
     display: inline-flex;
@@ -7005,8 +7199,30 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     padding: 0;
 }
 
+.batch-panel-hide-btn {
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.batch-panel-hide-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
 .batch-panel-help-btn:hover {
-    background: rgba(255, 255, 255, 0.32);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
 }
 
 
@@ -7015,67 +7231,86 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     left: 16px;
     top: 16px;
     width: 360px;
+    max-height: calc(100vh - 32px);
     z-index: 100000;
 }
 
 .batch-help-popover-inner {
     position: relative;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 32px);
+    min-height: 0;
     background: var(--bg-elevated);
     border: 1px solid var(--border-color);
-    border-radius: 14px;
-    box-shadow: 0 18px 56px rgba(15, 23, 42, 0.28);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.24);
     color: var(--text-primary);
     overflow: hidden;
 }
 
 .batch-help-popover-close {
     position: absolute;
-    top: 10px;
+    top: 7px;
     right: 10px;
-    width: 22px;
-    height: 22px;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.35);
-    background: rgba(255, 255, 255, 0.16);
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 16px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 0;
 }
 
 .batch-help-popover-body {
-    padding: 12px 12px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 7px;
+    padding: 10px;
     font-size: 12px;
     line-height: 1.45;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;
+}
+
+.batch-help-popover-body::-webkit-scrollbar {
+    width: 6px;
+}
+
+.batch-help-popover-body::-webkit-scrollbar-thumb {
+    background: rgba(140, 140, 140, 0.45);
+    border-radius: 99px;
+}
+
+.batch-help-popover-title {
+    margin-right: 28px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
 }
 
 .batch-help-card {
-    margin-top: 10px;
-    padding: 10px 10px;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    background: rgba(255, 255, 255, 0.12);
+    padding: 9px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
 }
 
 .batch-help-card-title {
     display: flex;
     align-items: center;
-    gap: 0;
-    font-weight: 800;
-    margin-bottom: 4px;
+    gap: 8px;
+    font-weight: 700;
+    margin-bottom: 5px;
 }
 
 .batch-help-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
-    border-radius: 999px;
-    margin-right: 8px;
-    background: rgba(96, 165, 250, 0.9);
-    color: rgba(15, 23, 42, 0.9);
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    margin-right: 0;
+    background: #2563eb;
+    border: 1px solid #1d4ed8;
+    color: #fff;
     font-size: 11px;
     font-weight: 900;
     flex: 0 0 auto;
@@ -7090,16 +7325,25 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     transform: translateY(-50%);
     width: 16px;
     height: 16px;
-    border-radius: 999px;
-    background: rgba(96, 165, 250, 0.18);
-    border: 1px solid rgba(96, 165, 250, 0.55);
-    color: rgba(96, 165, 250, 0.95);
+    border-radius: 4px;
+    background: rgba(37, 99, 235, 0.12) !important;
+    border: 1px solid rgba(37, 99, 235, 0.62);
+    box-shadow: none;
+    color: #1d4ed8;
     font-size: 11px;
     font-weight: 900;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     pointer-events: none;
+    opacity: 1;
+    z-index: 2;
+}
+
+[data-theme="dark"] .batch-help-anchor {
+    background: rgba(96, 165, 250, 0.14) !important;
+    border-color: rgba(96, 165, 250, 0.65);
+    color: #60a5fa;
 }
 
 /* Expand the button's right padding when a help badge is present to prevent layout/text overlap */
@@ -7108,19 +7352,124 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     padding-right: 30px !important;
 }
 
-/* Align success checkmark left of help badge when both are present */
-.batch-panel-content .context-menu-item.has-help-badge.action-success::after {
-    right: 28px;
-}
-
-
 .batch-help-section-title {
     margin-top: 6px;
     font-weight: 700;
 }
 
 .batch-help-line {
+    margin-top: 3px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.batch-help-key-emphasis {
+    color: #f97316;
+}
+
+.batch-help-shortcuts {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 7px;
+    padding-top: 7px;
+    border-top: 1px solid var(--border-color);
+}
+
+.batch-help-shortcuts-title {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.batch-help-shortcut-row {
+    display: grid;
+    grid-template-columns: minmax(112px, max-content) minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.batch-help-shortcut-keys {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 3px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.batch-help-shortcut-keys kbd {
+    min-width: 16px;
+    padding: 1px 4px;
+    border: 1px solid var(--border-color);
+    border-bottom-color: var(--border-hover);
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 10px;
+    line-height: 1.25;
+    text-align: center;
+}
+
+.batch-help-shortcut-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.batch-help-pointer-info-btn {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.batch-help-pointer-info-btn:hover,
+.batch-help-pointer-info-btn[aria-expanded="true"] {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.batch-help-pointer-info[hidden] { display: none; }
+
+.batch-help-pointer-info {
     margin-top: 4px;
+    padding: 7px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.batch-help-pointer-info-title {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.batch-help-pointer-info ul {
+    margin: 4px 0 0;
+    padding-left: 15px;
+}
+
+.batch-help-pointer-info li + li { margin-top: 2px; }
+
+@media (max-width: 480px) {
+    .batch-help-shortcut-row { grid-template-columns: 1fr; gap: 2px; margin-top: 3px; }
 }
 
 .batch-panel-content .context-menu-item,
@@ -7128,50 +7477,15 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     position: relative;
 }
 
-.batch-panel-content .context-menu-item.action-success::after {
-    content: "\2713";
-    position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%) scale(0.7);
-    color: rgba(34, 197, 94, 0.95);
-    font-weight: 900;
-    opacity: 0;
-    animation: batchActionTick 0.9s ease-out;
+.batch-panel-content .context-menu-item[data-action="batch-copy"].action-success,
+.batch-panel-content .context-menu-item[data-action="batch-cut"].action-success {
+    border-color: #22c55e !important;
+    box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.45);
 }
 
-.batch-toolbar .batch-btn.action-success::after {
-    content: "\2713";
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%) scale(0.7);
-    color: rgba(34, 197, 94, 0.95);
-    font-weight: 900;
-    opacity: 0;
-    animation: batchActionTick 0.9s ease-out;
-}
-
-@keyframes batchActionTick {
-    0% {
-        opacity: 0;
-        transform: translateY(-50%) scale(0.6);
-    }
-
-    18% {
-        opacity: 1;
-        transform: translateY(-50%) scale(1);
-    }
-
-    80% {
-        opacity: 1;
-        transform: translateY(-50%) scale(1);
-    }
-
-    100% {
-        opacity: 0;
-        transform: translateY(-50%) scale(0.9);
-    }
+.batch-action-panel.batch-action-success {
+    border-color: #16a34a !important;
+    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.8), 0 12px 32px rgba(22, 163, 74, 0.18);
 }
 
 [data-theme="dark"] .batch-menu-group {
@@ -7201,71 +7515,71 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 /* 四边 - 增加可拖动区域的宽度 (Shifted outside panel bounds to prevent scrollbar overlapping) */
 .resize-n {
-    top: -10px;
-    left: 0;
-    right: 0;
-    height: 12px;
+    top: 0;
+    left: 14px;
+    right: 14px;
+    height: 6px;
     cursor: ns-resize;
 }
 
 .resize-s {
-    bottom: -10px;
-    left: 0;
-    right: 0;
-    height: 12px;
+    bottom: 0;
+    left: 14px;
+    right: 14px;
+    height: 8px;
     cursor: ns-resize;
 }
 
 .resize-w {
-    left: -10px;
-    top: 0;
-    bottom: 0;
-    width: 12px;
+    left: 0;
+    top: 28px;
+    bottom: 14px;
+    width: 8px;
     cursor: ew-resize;
 }
 
 /* 【修复】右侧resize handle完全在栏目外部，避免与垂直滚动条冲突 */
 .resize-e {
-    right: -10px;
-    top: 0;
-    bottom: 0;
-    width: 12px;
+    right: 0;
+    top: 28px;
+    bottom: 14px;
+    width: 8px;
     cursor: ew-resize;
 }
 
 /* 四角 - 更大的可拖动区域 */
 .resize-nw {
-    top: -10px;
-    left: -10px;
-    width: 28px;
-    height: 28px;
+    top: 0;
+    left: 0;
+    width: 14px;
+    height: 14px;
     cursor: nwse-resize;
     z-index: 10004 !important;
 }
 
 .resize-ne {
-    top: -10px;
-    right: -10px;
-    width: 28px;
-    height: 28px;
+    top: 0;
+    right: 0;
+    width: 12px;
+    height: 12px;
     cursor: nesw-resize;
     z-index: 10004 !important;
 }
 
 .resize-sw {
-    bottom: -10px;
-    left: -10px;
-    width: 28px;
-    height: 28px;
+    bottom: 0;
+    left: 0;
+    width: 14px;
+    height: 14px;
     cursor: nesw-resize;
     z-index: 10004 !important;
 }
 
 .resize-se {
-    bottom: -10px;
-    right: -10px;
-    width: 28px;
-    height: 28px;
+    bottom: 0;
+    right: 0;
+    width: 14px;
+    height: 14px;
     cursor: nwse-resize;
     z-index: 10004 !important;
 }
@@ -7380,11 +7694,14 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .batch-panel-content {
-    padding: 6px;
+    padding: 6px 14px 14px 10px;
     flex: 0 1 auto;
     /* 改为不自动增长，只根据内容大小 */
     overflow-y: auto;
     overflow-x: hidden;
+    min-height: 0;
+    max-height: 100%;
+    box-sizing: border-box;
     background: transparent;
     scrollbar-width: thin;
     scrollbar-color: rgba(140, 140, 140, 0.35) transparent;
@@ -7421,7 +7738,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     transition: all 0.2s ease;
     font-size: 11px;
     color: var(--text-primary);
-    background: var(--bg-elevated) !important;
+    background: var(--bg-secondary) !important;
     border: 1px solid var(--border-color);
     min-width: 0;
     box-sizing: border-box;
@@ -7434,13 +7751,13 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .batch-panel-content .context-menu-item:hover {
-    background: rgba(226, 232, 240, 0.92) !important;
+    background: var(--bg-tertiary) !important;
 }
 
 .batch-panel-content .context-menu-item i {
     width: 13px;
     font-size: 12px;
-    color: var(--accent-primary);
+    color: var(--text-secondary);
 }
 
 /* 退出按钮红色样式 */
@@ -7522,22 +7839,92 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 [data-theme="dark"] .batch-action-panel {
     background: var(--bg-elevated) !important;
-    border-color: rgba(59, 130, 246, 0.45);
-    box-shadow: 0 18px 50px rgba(2, 6, 23, 0.6);
+    border-color: var(--border-color);
+    box-shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
 }
 
 [data-theme="dark"] .batch-panel-header {
-    background: rgba(59, 130, 246, 0.18) !important;
+    background: var(--bg-secondary) !important;
 }
 
 [data-theme="dark"] .batch-panel-content .context-menu-item {
-    background: var(--bg-elevated) !important;
-    color: rgba(226, 232, 240, 0.95);
-    border-color: rgba(96, 165, 250, 0.35);
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary);
+    border-color: var(--border-color);
 }
 
 [data-theme="dark"] .batch-panel-content .context-menu-item:hover {
-    background: rgba(59, 130, 246, 0.24) !important;
+    background: var(--bg-tertiary) !important;
+}
+
+/* Keep resize feedback neutral inside the batch panel without changing canvas cards. */
+.batch-action-panel .resize-handle:hover {
+    background: rgba(100, 116, 139, 0.06);
+}
+
+.batch-action-panel .resize-n:hover,
+.batch-action-panel .resize-s:hover {
+    border-top-color: rgba(100, 116, 139, 0.4);
+}
+
+.batch-action-panel .resize-w:hover,
+.batch-action-panel .resize-e:hover {
+    border-left-color: rgba(100, 116, 139, 0.4);
+}
+
+.batch-action-panel .resize-nw:hover,
+.batch-action-panel .resize-ne:hover,
+.batch-action-panel .resize-sw:hover,
+.batch-action-panel .resize-se:hover {
+    background: rgba(100, 116, 139, 0.1);
+}
+
+.batch-action-panel .resize-se::after {
+    background: linear-gradient(135deg,
+            transparent 0%,
+            transparent 46%,
+            rgba(100, 116, 139, 0.48) 46%,
+            rgba(100, 116, 139, 0.48) 50%,
+            transparent 50%,
+            transparent 96%,
+            rgba(100, 116, 139, 0.48) 96%);
+}
+
+.batch-action-panel .resize-nw::after,
+.batch-action-panel .resize-ne::after,
+.batch-action-panel .resize-sw::after {
+    background: rgba(100, 116, 139, 0.4);
+}
+
+[data-theme="dark"] .batch-action-panel .resize-handle:hover {
+    background: rgba(148, 163, 184, 0.08);
+}
+
+[data-theme="dark"] .batch-action-panel .resize-n:hover,
+[data-theme="dark"] .batch-action-panel .resize-s:hover {
+    border-top-color: rgba(148, 163, 184, 0.5);
+}
+
+[data-theme="dark"] .batch-action-panel .resize-w:hover,
+[data-theme="dark"] .batch-action-panel .resize-e:hover {
+    border-left-color: rgba(148, 163, 184, 0.5);
+}
+
+[data-theme="dark"] .batch-action-panel .resize-se::after {
+    background: linear-gradient(135deg,
+            transparent 0%,
+            transparent 46%,
+            rgba(148, 163, 184, 0.52) 46%,
+            rgba(148, 163, 184, 0.52) 50%,
+            transparent 50%,
+            transparent 96%,
+            rgba(148, 163, 184, 0.52) 96%);
+}
+
+[data-theme="dark"] .batch-action-panel .resize-nw::after,
+[data-theme="dark"] .batch-action-panel .resize-ne::after,
+[data-theme="dark"] .batch-action-panel .resize-sw::after {
+    background: rgba(148, 163, 184, 0.44);
 }
 
 /* 横向布局样式 - 默认一行显示 */

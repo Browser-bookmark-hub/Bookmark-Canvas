@@ -3299,6 +3299,10 @@ const i18n = {
         'zh_CN': '画布管理',
         'en': 'Canvas Management'
     },
+    settingsCanvasClipboardText: {
+        'zh_CN': '剪贴板',
+        'en': 'Clipboard'
+    },
     settingsOtherManageText: {
         'zh_CN': '其他管理',
         'en': 'Other Manage'
@@ -3659,6 +3663,13 @@ const i18n = {
 <ul>
 <li><strong>空格 + 左键（按住）</strong>：拖动全局画布</li>
 </ul>
+<h3>批量/选中操作（批量模式）</h3>
+<ul>
+<li><strong>Ctrl / Command + A</strong>：选中光标所在栏目中的全部书签/文件夹</li>
+<li><strong>Ctrl / Command + X</strong>：剪切已选项目</li>
+<li><strong>Ctrl / Command + C</strong>：复制已选项目</li>
+<li><strong>Ctrl / Command + V</strong>：粘贴到光标所在位置。文件夹内；书签同级位置下方；临时栏目根部；永久栏目书签栏根部；画布空白会新建“粘贴”临时栏目。文本保持浏览器原生粘贴。</li>
+</ul>
 <h3>触控板操作</h3>
 <ul>
 <li><strong>双指捏合</strong>：缩放画布</li>
@@ -3677,6 +3688,13 @@ const i18n = {
 <h3>Space Key Operations</h3>
 <ul>
 <li><strong>Space + Left Click (hold)</strong>: Drag global canvas</li>
+</ul>
+<h3>Batch / Selection Operations (Batch Mode)</h3>
+<ul>
+<li><strong>Ctrl / Command + A</strong>: Select all bookmark/folder items in the card under the cursor</li>
+<li><strong>Ctrl / Command + X</strong>: Cut selected items</li>
+<li><strong>Ctrl / Command + C</strong>: Copy selected items</li>
+<li><strong>Ctrl / Command + V</strong>: Paste at the cursor location. Inside a folder; below a bookmark at the same level; at a temp card root; at the Bookmarks Bar root for a blank permanent card; or in a new “Paste” temp card on blank canvas. Text keeps native browser paste behavior.</li>
 </ul>
 <h3>Touchpad Operations</h3>
 <ul>
@@ -4000,6 +4018,34 @@ const i18n = {
     canvasHelpSpaceTitle: {
         'zh_CN': '空格键操作',
         'en': 'Space Key Actions'
+    },
+    canvasHelpBatchOperationsTitle: {
+        'zh_CN': '批量/选中操作（批量模式）',
+        'en': 'Batch / Selection Operations (Batch Mode)'
+    },
+    canvasHelpBatchOperationsA: {
+        'zh_CN': '选中光标所在栏目中的全部书签/文件夹',
+        'en': 'Select all bookmark/folder items in the card under the cursor'
+    },
+    canvasHelpBatchOperationsX: {
+        'zh_CN': '剪切已选项目',
+        'en': 'Cut selected items'
+    },
+    canvasHelpBatchOperationsC: {
+        'zh_CN': '复制已选项目',
+        'en': 'Copy selected items'
+    },
+    canvasHelpBatchOperationsV: {
+        'zh_CN': '粘贴到光标所在位置',
+        'en': 'Paste at the cursor location'
+    },
+    canvasHelpBatchOperationsPointer: {
+        'zh_CN': '文件夹内；书签同级位置下方；临时栏目根部；永久栏目书签栏根部；画布空白会新建“粘贴”临时栏目。文本保持浏览器原生粘贴。',
+        'en': 'Inside a folder; below a bookmark at the same level; at a temp card root; at the Bookmarks Bar root for a blank permanent card; or in a new “Paste” temp card on blank canvas. Text keeps native browser paste behavior.'
+    },
+    canvasHelpPointerInfoButton: {
+        'zh_CN': '查看光标落点说明',
+        'en': 'Show cursor placement rules'
     },
     canvasHelpSpaceKey: {
         'zh_CN': '空格',
@@ -4835,6 +4881,28 @@ function applyLanguage() {
         }
     });
 
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        const key = el.getAttribute('data-i18n-title');
+        if (!key || !i18n[key] || !i18n[key][currentLang]) return;
+        const text = i18n[key][currentLang];
+        el.title = text;
+        el.setAttribute('aria-label', text);
+    });
+
+    document.querySelectorAll('[data-canvas-help-pointer-info]').forEach((btn) => {
+        if (btn.dataset.pointerInfoBound === 'true') return;
+        btn.dataset.pointerInfoBound = 'true';
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const info = document.getElementById(btn.getAttribute('aria-controls'));
+            if (!info) return;
+            const willOpen = info.hidden;
+            info.hidden = !willOpen;
+            btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        });
+    });
+
     const editCtrlKeyBtn = document.getElementById('editCtrlKeyBtn');
     if (editCtrlKeyBtn) editCtrlKeyBtn.title = i18n.canvasShortcutEditTitle[currentLang];
     const editSpaceKeyBtn = document.getElementById('editSpaceKeyBtn');
@@ -4952,6 +5020,8 @@ function applyLanguage() {
     if (settingsSidePanelText) settingsSidePanelText.textContent = i18n.settingsSidePanelText[currentLang];
     const settingsCanvasManageText = document.getElementById('settingsCanvasManageText');
     if (settingsCanvasManageText) settingsCanvasManageText.textContent = i18n.settingsCanvasManageText[currentLang];
+    const settingsCanvasClipboardText = document.getElementById('settingsCanvasClipboardText');
+    if (settingsCanvasClipboardText) settingsCanvasClipboardText.textContent = i18n.settingsCanvasClipboardText[currentLang];
     const settingsOtherManageText = document.getElementById('settingsOtherManageText');
     if (settingsOtherManageText) settingsOtherManageText.textContent = i18n.settingsOtherManageText[currentLang];
     const settingsThemeText = document.getElementById('settingsThemeText');
@@ -5161,6 +5231,9 @@ function toggleLanguage() {
 
     // 手动更新需要多语言的UI元素（不涉及书签树内容）
     updateLanguageDependentUI();
+    if (window.CanvasClipboard && typeof window.CanvasClipboard.refreshLanguage === 'function') {
+        window.CanvasClipboard.refreshLanguage();
+    }
 
     // [User Request] 更新搜索组件语言
     if (typeof window.updateSearchUILanguage === 'function') {
@@ -5444,6 +5517,12 @@ function setupSidePanelSettingsMenu() {
             }
             return;
         }
+        if (action === 'open-canvas-clipboard') {
+            if (window.CanvasClipboard && typeof window.CanvasClipboard.open === 'function') {
+                window.CanvasClipboard.open();
+            }
+            return;
+        }
         if (action === 'open-canvas-manage') {
             const canvasBtn = document.getElementById('canvasOpenManageBridgeBtn');
             if (canvasBtn && typeof canvasBtn.click === 'function') {
@@ -5485,7 +5564,6 @@ function setupCanvasFloatingToolsMenu() {
     if (toggleBtn.dataset.bound === 'true') return;
     toggleBtn.dataset.bound = 'true';
 
-    ensureCanvasFloatingDragHints(toggleBtn);
     bindCanvasFloatingToolsGlobalDragEvents();
     bindCanvasFloatingToolsResizeHandler();
 
@@ -5510,7 +5588,6 @@ function setupCanvasFloatingMiniToggle() {
     if (!btn || btn.dataset.bound === 'true') return;
     btn.dataset.bound = 'true';
 
-    ensureCanvasFloatingDragHints(btn);
     bindCanvasFloatingToolsGlobalDragEvents();
     bindCanvasFloatingToolsResizeHandler();
 
@@ -9106,6 +9183,7 @@ const CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD = 8;
 const CANVAS_FLOATING_HINT_HOLD_DELAY_MS = 160;
 const CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD = 42;
 const CANVAS_FLOATING_CORNER_SWITCH_THRESHOLD = 0.08;
+const CANVAS_FLOATING_CORNER_SWITCH_CONFIRM_DISTANCE = 14;
 
 let canvasFloatingToolsDockStateCache = null;
 let canvasFloatingToolsDragSession = null;
@@ -9449,9 +9527,8 @@ function getCanvasFloatingToolsWorkspaceRect() {
     return rect;
 }
 
-function getCanvasFloatingToolsIndicatorSize(mode) {
+function getCanvasFloatingToolsIndicatorSize(mode, dockEdge = null) {
     const zoomIndicator = document.getElementById('canvasZoomIndicator');
-    const miniToggle = document.getElementById('canvasFloatingToggleMini');
     if (!zoomIndicator) {
         return {
             width: 0,
@@ -9460,19 +9537,12 @@ function getCanvasFloatingToolsIndicatorSize(mode) {
     }
 
     if (mode === SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN) {
-        if (miniToggle) {
-            const rect = miniToggle.getBoundingClientRect();
-            if (rect && Number.isFinite(rect.width) && rect.width > 0 && Number.isFinite(rect.height) && rect.height > 0) {
-                return {
-                    width: rect.width,
-                    height: rect.height
-                };
-            }
-        }
-        return {
-            width: 24,
-            height: 32
-        };
+        // The collapsed control has fixed edge-specific CSS dimensions. Reading
+        // an animated or hovered DOM rect makes the dock anchor jump.
+        const edge = normalizeCanvasFloatingDockEdge(dockEdge || readCanvasFloatingToolsDockState().edge);
+        return (edge === 'left' || edge === 'right')
+            ? { width: 18, height: 24 }
+            : { width: 24, height: 18 };
     }
 
     const rect = zoomIndicator.getBoundingClientRect();
@@ -9588,7 +9658,7 @@ function resolveCanvasFloatingIndicatorPosition(state, options = {}) {
     const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
     if (!workspaceRect) return null;
 
-    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
+    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode, dock.edge);
     const margin = CANVAS_FLOATING_EDGE_MARGIN_PX;
     const maxLeft = Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
     const minLeft = margin;
@@ -9637,6 +9707,24 @@ function applyCanvasFloatingToolsDockState(state, options = {}) {
     if (position) {
         zoomIndicator.style.left = `${position.left}px`;
         zoomIndicator.style.top = `${position.top}px`;
+
+        // A side-docked expanded tool window is rotated. Align its rendered
+        // outer rectangle, rather than its unrotated layout box, to the dock.
+        if (mode === SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN
+            && (position.edge === 'left' || position.edge === 'right')) {
+            const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
+            const renderedRect = zoomIndicator.getBoundingClientRect();
+            if (workspaceRect && renderedRect) {
+                const desiredLeft = workspaceRect.left + position.left;
+                const desiredTop = workspaceRect.top + position.top;
+                const deltaX = desiredLeft - renderedRect.left;
+                const deltaY = desiredTop - renderedRect.top;
+                if (Number.isFinite(deltaX) && Number.isFinite(deltaY)) {
+                    zoomIndicator.style.left = `${position.left + deltaX}px`;
+                    zoomIndicator.style.top = `${position.top + deltaY}px`;
+                }
+            }
+        }
     }
     zoomIndicator.dataset.dockEdge = normalized.edge;
 
@@ -9650,13 +9738,6 @@ function resolveCanvasFloatingDockStateFromPointer(clientX, clientY, options = {
     const mode = normalizeSidePanelFloatingToolsMode(options.mode || getSidePanelFloatingToolsMode());
     const workspaceRect = getCanvasFloatingToolsWorkspaceRect();
     if (!workspaceRect) return null;
-
-    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode);
-    const margin = CANVAS_FLOATING_EDGE_MARGIN_PX;
-    const maxLeft = Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
-    const minLeft = margin;
-    const maxTop = Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
-    const minTop = margin;
 
     const localX = clampCanvasFloatingValue(clientX - workspaceRect.left, 0, workspaceRect.width);
     const localY = clampCanvasFloatingValue(clientY - workspaceRect.top, 0, workspaceRect.height);
@@ -9678,6 +9759,13 @@ function resolveCanvasFloatingDockStateFromPointer(clientX, clientY, options = {
             edge = preferredEdge;
         }
     }
+
+    const indicatorSize = getCanvasFloatingToolsIndicatorSize(mode, edge);
+    const margin = CANVAS_FLOATING_EDGE_MARGIN_PX;
+    const maxLeft = Math.max(margin, workspaceRect.width - indicatorSize.width - margin);
+    const minLeft = margin;
+    const maxTop = Math.max(margin, workspaceRect.height - indicatorSize.height - margin);
+    const minTop = margin;
 
     let ratio = 0;
     if (edge === 'left' || edge === 'right') {
@@ -9718,93 +9806,10 @@ function getCanvasFloatingDragButtons() {
     return [miniToggle, inlineToggleBtn].filter(Boolean);
 }
 
-function ensureCanvasFloatingDragHints(btn) {
-    if (!btn) return;
-    const hintDefs = [
-        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-up', selector: '.canvas-floating-drag-hint-up' },
-        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-down', selector: '.canvas-floating-drag-hint-down' },
-        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-left', selector: '.canvas-floating-drag-hint-left' },
-        { className: 'canvas-floating-drag-hint canvas-floating-drag-hint-right', selector: '.canvas-floating-drag-hint-right' }
-    ];
-
-    hintDefs.forEach((def) => {
-        let hint = btn.querySelector(def.selector);
-        if (!hint) {
-            hint = document.createElement('span');
-            hint.className = def.className;
-            hint.setAttribute('aria-hidden', 'true');
-            btn.appendChild(hint);
-        }
-    });
-}
-
 function clearCanvasFloatingHintHoldTimer() {
     if (canvasFloatingToolsHintHoldTimer == null) return;
     window.clearTimeout(canvasFloatingToolsHintHoldTimer);
     canvasFloatingToolsHintHoldTimer = null;
-}
-
-function setCanvasFloatingDragGuide(edge) {
-    const normalized = edge === 'up' || edge === 'down' || edge === 'left' || edge === 'right'
-        ? edge
-        : '';
-    const buttons = getCanvasFloatingDragButtons();
-    buttons.forEach((btn) => {
-        if (!btn) return;
-        if (canvasFloatingToolsDragSession && btn === canvasFloatingToolsDragSession.sourceBtn && normalized) {
-            btn.dataset.dragGuide = normalized;
-        } else {
-            delete btn.dataset.dragGuide;
-        }
-    });
-}
-
-function getCanvasFloatingAllowedDragDirections(edge) {
-    return new Set(['left', 'right', 'up', 'down']);
-}
-
-function getCanvasFloatingDragGuideDirection(dx, dy, edge) {
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-    if (absDx < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD && absDy < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
-        return null;
-    }
-
-    const primary = absDx >= absDy
-        ? (dx >= 0 ? 'right' : 'left')
-        : (dy >= 0 ? 'down' : 'up');
-
-    const allowed = getCanvasFloatingAllowedDragDirections(edge);
-    if (allowed.has(primary)) return primary;
-    return null;
-}
-
-function getCanvasFloatingGuideDirectionAtCurrentDock(dx, dy, dockState) {
-    const edge = normalizeCanvasFloatingDockEdge(dockState && dockState.edge);
-    const ratio = normalizeCanvasFloatingDockRatio(dockState && dockState.ratio);
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-    if (absDx < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD && absDy < CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
-        return null;
-    }
-
-    if (edge === 'left' || edge === 'right') {
-        const movingHorizontal = absDx >= absDy && absDx >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD;
-        if (movingHorizontal) {
-            return dx >= 0 ? 'right' : 'left';
-        }
-        return dy >= 0 ? 'down' : 'up';
-    }
-
-    if (edge === 'top' || edge === 'bottom') {
-        const movingVertical = absDy > absDx && absDy >= CANVAS_FLOATING_DRAG_SWITCH_THRESHOLD;
-        if (movingVertical) {
-            return dy >= 0 ? 'down' : 'up';
-        }
-        return dx >= 0 ? 'right' : 'left';
-    }
-
-    return getCanvasFloatingDragGuideDirection(dx, dy, edge);
 }
 
 function resolveCanvasFloatingAdjacentEdgeFromCorner(currentEdge, ratio, dx, dy) {
@@ -9842,6 +9847,30 @@ function resolveCanvasFloatingAdjacentEdgeFromCorner(currentEdge, ratio, dx, dy)
     }
 
     return null;
+}
+
+function confirmCanvasFloatingCornerEdgeSwitch(dragSession, event, currentEdge, candidateEdge) {
+    if (!dragSession || !candidateEdge || candidateEdge === currentEdge) {
+        if (dragSession) dragSession.cornerSwitchCandidate = null;
+        return currentEdge;
+    }
+
+    const candidate = dragSession.cornerSwitchCandidate;
+    if (!candidate || candidate.edge !== candidateEdge) {
+        dragSession.cornerSwitchCandidate = {
+            edge: candidateEdge,
+            x: event.clientX,
+            y: event.clientY
+        };
+        return currentEdge;
+    }
+
+    if (Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) < CANVAS_FLOATING_CORNER_SWITCH_CONFIRM_DISTANCE) {
+        return currentEdge;
+    }
+
+    dragSession.cornerSwitchCandidate = null;
+    return candidateEdge;
 }
 
 function resolveCanvasFloatingFinalEdgeFromRelease(edge, dx, dy) {
@@ -9905,11 +9934,8 @@ function resolveCanvasFloatingDockStateDuringDrag(event, dragSession, dx, dy) {
     const absDx = Math.abs(dx);
     const absDy = Math.abs(dy);
 
-    let forcedEdge = edge;
     const adjacent = resolveCanvasFloatingAdjacentEdgeFromCorner(edge, ratio, dx, dy);
-    if (adjacent) {
-        forcedEdge = adjacent;
-    }
+    const forcedEdge = confirmCanvasFloatingCornerEdgeSwitch(dragSession, event, edge, adjacent);
 
     const targetX = event.clientX - (dragSession.dragOffsetX || 0);
     const targetY = event.clientY - (dragSession.dragOffsetY || 0);
@@ -9939,7 +9965,6 @@ function scheduleCanvasFloatingHintReveal() {
     canvasFloatingToolsHintHoldTimer = window.setTimeout(() => {
         canvasFloatingToolsHintHoldTimer = null;
         if (!canvasFloatingToolsDragSession || !canvasFloatingToolsDragSession.sourceBtn) return;
-        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-show-hints');
         setCanvasFloatingHoldVisualActive(true);
     }, CANVAS_FLOATING_HINT_HOLD_DELAY_MS);
 }
@@ -9948,10 +9973,8 @@ function clearCanvasFloatingDragVisualState() {
     const buttons = getCanvasFloatingDragButtons();
     buttons.forEach((btn) => {
         if (!btn) return;
-        btn.classList.remove('canvas-floating-show-hints');
         btn.classList.remove('canvas-floating-hold-active');
         btn.classList.remove('canvas-floating-dragging');
-        delete btn.dataset.dragGuide;
     });
 
     const zoomIndicator = document.getElementById('canvasZoomIndicator');
@@ -9983,8 +10006,6 @@ function beginCanvasFloatingToolsDrag(event, sourceBtn, mode) {
     if (event.button !== 0) return;
 
     clearCanvasFloatingToolsDragSession();
-    ensureCanvasFloatingDragHints(sourceBtn);
-
     const initialState = readCanvasFloatingToolsDockState();
     canvasFloatingToolsDragSession = {
         pointerId: event.pointerId,
@@ -9993,6 +10014,7 @@ function beginCanvasFloatingToolsDrag(event, sourceBtn, mode) {
         moved: false,
         sourceBtn,
         mode,
+        cornerSwitchCandidate: null,
         currentDockState: {
             edge: initialState.edge,
             ratio: initialState.ratio
@@ -10023,10 +10045,8 @@ function beginCanvasFloatingToolsDrag(event, sourceBtn, mode) {
         sourceBtn.setPointerCapture(event.pointerId);
     } catch (_) { }
 
-    sourceBtn.classList.remove('canvas-floating-show-hints');
     sourceBtn.classList.remove('canvas-floating-hold-active');
     sourceBtn.classList.remove('canvas-floating-dragging');
-    setCanvasFloatingDragGuide(null);
     scheduleCanvasFloatingHintReveal();
     event.preventDefault();
 }
@@ -10041,7 +10061,6 @@ function handleCanvasFloatingToolsDragMove(event) {
     if (!canvasFloatingToolsDragSession.moved && dragDistance >= CANVAS_FLOATING_DRAG_ACTIVATE_THRESHOLD) {
         canvasFloatingToolsDragSession.moved = true;
         clearCanvasFloatingHintHoldTimer();
-        canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-show-hints');
         canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-hold-active');
         canvasFloatingToolsDragSession.sourceBtn.classList.add('canvas-floating-dragging');
         const zoomIndicator = document.getElementById('canvasZoomIndicator');
@@ -10069,7 +10088,6 @@ function handleCanvasFloatingToolsDragMove(event) {
             ratio: applied.ratio
         };
         canvasFloatingToolsDragSession.sourceBtn.dataset.dockEdge = applied.edge;
-        setCanvasFloatingDragGuide(getCanvasFloatingGuideDirectionAtCurrentDock(dx, dy, applied));
     }
 
     event.preventDefault();
@@ -11310,6 +11328,8 @@ function initHeaderToggle() {
     let dragSession = null;
     let hintUp = null;
     let hintDown = null;
+    let hintLeft = null;
+    let hintRight = null;
     let hintHoldTimer = null;
     let holdVisualActive = false;
     let dragGuideDirection = null;
@@ -11428,6 +11448,26 @@ function initHeaderToggle() {
                 toggleBtn.appendChild(hintDown);
             }
         }
+
+        if (!hintLeft || !hintLeft.isConnected) {
+            hintLeft = toggleBtn.querySelector('.header-toggle-hint-left');
+            if (!hintLeft) {
+                hintLeft = document.createElement('span');
+                hintLeft.className = 'header-toggle-hint header-toggle-hint-left';
+                hintLeft.setAttribute('aria-hidden', 'true');
+                toggleBtn.appendChild(hintLeft);
+            }
+        }
+
+        if (!hintRight || !hintRight.isConnected) {
+            hintRight = toggleBtn.querySelector('.header-toggle-hint-right');
+            if (!hintRight) {
+                hintRight = document.createElement('span');
+                hintRight.className = 'header-toggle-hint header-toggle-hint-right';
+                hintRight.setAttribute('aria-hidden', 'true');
+                toggleBtn.appendChild(hintRight);
+            }
+        }
     }
 
     function clearHintHoldTimer() {
@@ -11447,7 +11487,7 @@ function initHeaderToggle() {
     }
 
     function normalizeDragGuideDirection(direction) {
-        if (direction === 'up' || direction === 'down') return direction;
+        if (direction === 'up' || direction === 'down' || direction === 'left' || direction === 'right') return direction;
         return null;
     }
 
@@ -11455,6 +11495,8 @@ function initHeaderToggle() {
         const next = normalizeDragGuideDirection(direction);
         if (dragGuideDirection === next) return;
         dragGuideDirection = next;
+        if (next) toggleBtn.dataset.dragGuide = next;
+        else delete toggleBtn.dataset.dragGuide;
         updateToggleIcon(currentHeaderState);
     }
 
@@ -11469,10 +11511,9 @@ function initHeaderToggle() {
     function getDragGuideDirection(dx, dy) {
         const absDx = Math.abs(dx);
         const absDy = Math.abs(dy);
-        if (absDy >= TOGGLE_DRAG_DIRECTION_THRESHOLD && absDy >= absDx) {
-            return dy < 0 ? 'up' : 'down';
-        }
-        return null;
+        if (Math.max(absDx, absDy) < TOGGLE_DRAG_DIRECTION_THRESHOLD) return null;
+        if (absDy >= absDx) return dy < 0 ? 'up' : 'down';
+        return dx < 0 ? 'left' : 'right';
     }
 
     function applyHeaderDockSide(dockSide, options = {}) {
@@ -11850,9 +11891,9 @@ function initHeaderToggle() {
                 return;
             }
 
-            setDragGuideDirection(null);
-            toggleBtn.classList.remove('header-toggle-show-hints');
-            setHoldVisualActive(false);
+            setDragGuideDirection(getDragGuideDirection(dx, dy));
+            toggleBtn.classList.add('header-toggle-show-hints');
+            setHoldVisualActive(true);
 
             const targetLeft = compactDragSession.startLeft + dx;
             compactDragSession.pendingLeft = targetLeft;

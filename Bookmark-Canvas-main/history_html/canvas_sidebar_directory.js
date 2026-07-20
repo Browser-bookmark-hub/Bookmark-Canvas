@@ -42,7 +42,7 @@
     return false;
   }
 
-  const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add', 'file-import', 'import-html-bookmarks', 'import-json-bookmarks']);
+  const SPECIAL_TEMP_SOURCE_SET = new Set(['browser-drop', 'search-result', 'batch', 'quick-add', 'file-import', 'import-html-bookmarks', 'import-json-bookmarks', 'clipboard-paste']);
   const DIRECTORY_COLOR_DEFAULTS = Object.freeze({
     permanent: '#10b981',
     temp: '#2563eb',
