@@ -285,6 +285,22 @@
     return module.CanvasState;
   }
 
+  function formatAnchorZoomPercent(zoom) {
+    const module = getCanvasModule();
+    if (module && typeof module.formatDisplayZoomPercent === 'function') {
+      return module.formatDisplayZoomPercent(zoom);
+    }
+
+    const state = getCanvasState();
+    const baseZoom = Number(state && state.baseZoom);
+    const rawZoom = Number(zoom);
+    const displayZoom = (Number.isFinite(rawZoom) && rawZoom > 0 ? rawZoom : 1)
+      / (Number.isFinite(baseZoom) && baseZoom > 0 ? baseZoom : 1);
+    return displayZoom < 0.1
+      ? `${(displayZoom * 100).toFixed(1)}%`
+      : `${Math.round(displayZoom * 100)}%`;
+  }
+
   function normalizeHexColor(value, fallback) {
     const raw = normalizeText(value);
     if (!raw) return fallback;
@@ -4564,7 +4580,7 @@
         const index = slot.originalIndex;
         const slotNum = index + 1;
         const displayName = slot.name || (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
-        const zoomPercent = Math.round(slot.zoom * 100);
+        const zoomPercent = formatAnchorZoomPercent(slot.zoom);
         const absoluteTimeStr = slot.timestamp ? formatAbsoluteTime(slot.timestamp, isEn) : '';
         
         html += `
@@ -4587,7 +4603,7 @@
               </div>
             </div>
             <div class="anchor-slot-info">
-              <span class="anchor-slot-coords">X: ${Math.round(slot.x)} | Y: ${Math.round(slot.y)} | ${zoomPercent}%</span>
+              <span class="anchor-slot-coords">X: ${Math.round(slot.x)} | Y: ${Math.round(slot.y)} | ${zoomPercent}</span>
               ${absoluteTimeStr ? `<span class="anchor-slot-time">${absoluteTimeStr}</span>` : ''}
             </div>
           </div>
@@ -4684,7 +4700,7 @@
           defaultName = `${timeShortStr} | ${m}月${d}日`;
         }
         const displayName = item.name || defaultName;
-        const zoomPercent = Math.round(item.zoom * 100);
+        const zoomPercent = formatAnchorZoomPercent(item.zoom);
         
         html += `
           <div class="anchor-slot-row history-item-card" data-index="${index}">
@@ -4703,7 +4719,7 @@
               </div>
             </div>
             <div class="anchor-slot-info">
-              X: ${Math.round(item.x)} | Y: ${Math.round(item.y)} | ${zoomPercent}%
+              X: ${Math.round(item.x)} | Y: ${Math.round(item.y)} | ${zoomPercent}
             </div>
           </div>
         `;

@@ -183,13 +183,22 @@ GitHub 仓库可以是让外部 AI 工具、DeepWiki 或其他连接器读取数
 
 外部 Deep Research 能力可以直接调用，也可以未来通过连接器组合；初期不需要自建研究 Agent。只有当“选择来源、分批读取、引用约束、报告格式”等需求已经被实践证明需要固定编排时，才考虑自行组合工具调用。重点始终是书签数据的选择范围、来源引用与人工确认，而不是重复制造研究模型。
 
-### 2. RAG 与推荐的位置
+### 2. 画布类别探针：前端 / 客户端的直接 AI 功能
+
+这是一个可由未来客户端或扩展前端直接提供的 AI 功能候选，不取代 Deep Research Skill。它先从用户当前看到的画布范围出发，再逐步探索不同视图之间的关系：
+
+- **锚点**：以 `x`、`y` 与缩放比例描述用户当前可见的画布视图。该可视化范围内的卡片内容及其关联性是第一优先级。
+- **探针**：比较不同锚点之间的联系，同时处理视图重叠部分，避免重复读取或重复生成结果。
+- **UI 与写入位置**：需要探索如何在画布中呈现锚点 UI，以及 AI 结果应写入 Obsidian 侧还是 `.canvas` 数据中。
+- **交互方式**：可通过画布 CLI，或直接与原始文件交互；具体读写边界仍须沿用范围选择、来源可追溯与人工确认。
+
+### 3. RAG 与推荐的位置
 
 RAG 并非当前第一目标。现有数据本身已有较强结构：书签、URL、Markdown/说明、分类、卡片和画布关系。先利用这些显式结构和每次任务的最小上下文包，通常比先把所有内容切块向量化更直接。
 
 书签记录与推荐可在后续作为辅助：利用浏览记录、时间桶及本地计算产生候选结果，再由书签画布的栏目和说明提供语义解释。书签备份则只在需要时提供变化审计或标签补充。两者的结果都不应自动改动用户的书签或画布。
 
-### 3. 可能的入口位置（仅作预留）
+### 4. 可能的入口位置（仅作预留）
 
 如果之后在扩展中提供 AI 入口，已有的 UI 位置可以作为候选：
 
@@ -258,5 +267,8 @@ RAG 并非当前第一目标。现有数据本身已有较强结构：书签、U
 - Buku：<https://github.com/jarun/buku>（SQLite 书签 CLI 的对照）
 - Obsidian CLI：<https://obsidian.md/help/cli>（运行中客户端的自动化 CLI 对照）
 - lark-cli：<https://github.com/larksuite/lark-cli>（Skill 编排与机器可读命令的对照）
-- 语义关联与搜索参考：<https://github.com/howoii/SmartBookmark>
+- **画布类别探针（AI 化前端 / 客户端功能）**：
+  - Cannoli：<https://github.com/DeabLabs/cannoli>
+  - Obsidian Augmented Canvas：<https://github.com/metacorp/obsidian-augmented-canvas>
+  - 语义关联与搜索参考：<https://github.com/howoii/SmartBookmark>
 - 连接器 / 文档产品调研入口：<https://deepwiki.com/>、<https://docs.getoutline.com/s/guide>

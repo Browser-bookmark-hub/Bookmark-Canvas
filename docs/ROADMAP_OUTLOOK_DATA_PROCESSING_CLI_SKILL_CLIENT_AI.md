@@ -125,6 +125,15 @@ Priority order:
 3. consider semantic search, RAG, recommendations, or composed Agent workflows;
 4. only then discuss automatic organization, writing, and cross-system automation.
 
+### Canvas Category Probe: direct AI for the front end or client
+
+This is a candidate AI feature that a future client or the extension front end could provide directly; it does not replace the Deep Research Skill. Start from the portion of the canvas the user is currently viewing, then explore relationships between views:
+
+- **Anchor:** use `x`, `y`, and zoom level to describe the visible canvas view. Card content and relationships within that visual scope are the first priority.
+- **Probe:** compare relationships between different anchors while handling overlapping view areas, so content is not read or generated twice.
+- **UI and write location:** explore an in-canvas anchor UI and whether AI results belong on the Obsidian side or in `.canvas` data.
+- **Interaction:** use a Canvas CLI or interact directly with the original files; all read/write behavior must still use explicit scope, traceable sources, and human confirmation.
+
 RAG is not the first goal: bookmarks, URLs, Markdown / descriptions, categories, cards, and canvas relationships are already explicit structure. Bookmark Record and Recommend can later supply behavior-based candidates; Bookmark Backup can supply change audit or Tag supplementation. Neither should automatically modify user data.
 
 Potential UI locations are only placeholders: the floating tool window, section titles or blank canvas context menus, and a floating dialog that visibly shows scope, sources, and results. This does not commit the extension to an Agent SDK. OpenAI Agents SDK's TypeScript implementation is a possible future-client or tool-layer reference, but MV3 compatibility, key handling, and service-worker lifetime require separate validation.
@@ -170,5 +179,9 @@ Any future standalone client, major module, or full rewrite should begin with cl
 - Bookmark ecosystem: <https://github.com/orgs/Browser-bookmark-hub/repositories>
 - [Bookmark Canvas](https://github.com/Browser-bookmark-hub/Bookmark-Canvas), [Bookmark Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup), and [Bookmark Record and Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
 - [Push & Analyze structure](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend/blob/main/docs/PUSH_AND_ANALYZE_STRUCTURE.md)
-- [Buku](https://github.com/jarun/buku), [Obsidian CLI](https://obsidian.md/help/cli), [lark-cli](https://github.com/larksuite/lark-cli), and [SmartBookmark](https://github.com/howoii/SmartBookmark)
+- [Buku](https://github.com/jarun/buku), [Obsidian CLI](https://obsidian.md/help/cli), and [lark-cli](https://github.com/larksuite/lark-cli)
+- **Canvas Category Probe (AI front-end / client function):**
+  - [Cannoli](https://github.com/DeabLabs/cannoli)
+  - [Obsidian Augmented Canvas](https://github.com/metacorp/obsidian-augmented-canvas)
+  - Semantic association and search reference: [SmartBookmark](https://github.com/howoii/SmartBookmark)
 - Connector / documentation-product research: <https://deepwiki.com/> and <https://docs.getoutline.com/s/guide>

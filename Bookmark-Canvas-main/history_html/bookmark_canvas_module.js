@@ -33097,6 +33097,18 @@ function getCanvasDisplayZoom() {
     return z / base;
 }
 
+// Keep every user-facing zoom percentage on the same display scale as the
+// floating zoom controls. Anchors persist the raw zoom value so restoration
+// remains exact; this helper only normalizes the value shown in the UI.
+function formatCanvasDisplayZoomPercent(zoom) {
+    const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
+    const rawZoom = Number(zoom);
+    const displayZoom = (Number.isFinite(rawZoom) && rawZoom > 0 ? rawZoom : CanvasState.zoom) / base;
+    return displayZoom < 0.1
+        ? `${(displayZoom * 100).toFixed(1)}%`
+        : `${Math.round(displayZoom * 100)}%`;
+}
+
 function getCanvasZoomForScrollFactor() {
     // [UX] 缩到极小时，滚动速度会因为 1/zoom 急剧变快；
     // 用户反馈：显示缩放 < 25% 时速度不要再继续变快（保持曲率/速度一致）。
@@ -37878,15 +37890,7 @@ function setCanvasZoom(zoom, centerX = null, centerY = null, options = {}) {
     // 更新显示
     const zoomValue = document.getElementById('zoomValue');
     if (zoomValue) {
-        const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
-        const displayZoom = zoom / base;
-        zoomValue.textContent = (displayZoom * 100).toFixed(0) + '%';
-        // [Fix] 如果小于 10%，显示一位小数
-        if (displayZoom < 0.1) {
-            zoomValue.textContent = (displayZoom * 100).toFixed(1) + '%';
-        } else {
-            zoomValue.textContent = Math.round(displayZoom * 100) + '%';
-        }
+        zoomValue.textContent = formatCanvasDisplayZoomPercent(zoom);
     }
 
     // 保存缩放级别
@@ -42259,6 +42263,7 @@ window.CanvasModule = {
     loadFolderChildren: loadFolderChildren,
     getTempSection: getTempSection,
     setZoom: setCanvasZoom,
+    formatDisplayZoomPercent: formatCanvasDisplayZoomPercent,
     syncViewportVisualState: () => {
         if (__isCanvasViewportVisualSyncEligible()) __scheduleCanvasViewportVisualSync();
     },
