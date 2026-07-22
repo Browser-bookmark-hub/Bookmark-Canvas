@@ -5721,17 +5721,17 @@ function serializeTempItemForClipboard(item) {
     const out = {
         title: item.title,
         url: item.url || '',
-        type: item.type,
-        children: (item.children || []).map(child => serializeTempItemForClipboard(child))
+        type: item.type
     };
-    if (Array.isArray(item.tags) && item.tags.length) {
-        out.tags = item.tags.map((t) => (t && typeof t === 'object') ? { color: t.color, text: t.text } : null).filter(Boolean);
-    }
     const note = __normalizeTempItemNoteInput(item.note);
     if (note) {
         out.note = note;
         out.noteColor = __normalizeTempItemNoteColorInput(item.noteColor);
     }
+    if (Array.isArray(item.tags) && item.tags.length) {
+        out.tags = item.tags.map((t) => (t && typeof t === 'object') ? { color: t.color, text: t.text } : null).filter(Boolean);
+    }
+    out.children = (item.children || []).map(child => serializeTempItemForClipboard(child));
     return out;
 }
 
@@ -5744,9 +5744,19 @@ function createTempItemFromPayload(sectionId, payload, options = {}) {
         sectionId,
         title: hasExplicitTitle ? payload.title : (payload.url || '未命名'),
         url: payload.url || '',
-        type: payload.type === 'folder' ? 'folder' : (payload.url ? 'bookmark' : 'folder'),
-        children: []
+        type: payload.type === 'folder' ? 'folder' : (payload.url ? 'bookmark' : 'folder')
     };
+
+    const inlineNote = __normalizeTempItemNoteInput(payload.note);
+    if (inlineNote) {
+        __applyNoteMetaToTempItem(item, inlineNote, payload.noteColor);
+    } else if (payload.id) {
+        const noteMeta = __getCachedPermanentNoteMetaForTempPayload(payload.id);
+        if (noteMeta.note) {
+            __applyNoteMetaToTempItem(item, noteMeta.note, noteMeta.color);
+        }
+    }
+
     // Phase 3 scaffold: pass-through `tags` array on temp-section items. The UI / palette
     // is not implemented yet, but the field must round-trip through clone / save / export.
     if (Array.isArray(payload.tags) && payload.tags.length) {
@@ -5764,15 +5774,7 @@ function createTempItemFromPayload(sectionId, payload, options = {}) {
         }
     }
 
-    const inlineNote = __normalizeTempItemNoteInput(payload.note);
-    if (inlineNote) {
-        __applyNoteMetaToTempItem(item, inlineNote, payload.noteColor);
-    } else if (payload.id) {
-        const noteMeta = __getCachedPermanentNoteMetaForTempPayload(payload.id);
-        if (noteMeta.note) {
-            __applyNoteMetaToTempItem(item, noteMeta.note, noteMeta.color);
-        }
-    }
+    item.children = [];
 
     if (payload.children && payload.children.length) {
         const childOptions = {

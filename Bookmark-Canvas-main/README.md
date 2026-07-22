@@ -79,8 +79,255 @@ Screenshot and video assets are intentionally kept at the repository root rather
 
 ---
 
-## License
 
+## License
 [GPL-3.0](LICENSE).
+
+## Format
+
+The following R2-R7 format examples are mirrored from [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template). Sample data packages are available from [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases); every version includes a current exported data package.
+
+<ins>If an Agent reads this section, it must read both linked materials above and must not skip AGENTS_template.</ins>
+
+### R2. Permanent Main JSON Example
+Use this shape only when the user explicitly asks to edit the permanent browser-bookmark tree.
+The `identityMap` metadata entry below points to the bookmark node with the same `syncId` in `tree`; `tags` may contain multiple entries, while `note` is a single note and `noteColor` is its sibling field.
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 3,
+  "sectionType": "permanent",
+  "slot": "A",
+  "title": "Permanent Bookmarks",
+  "descriptionMd": "Describe what this permanent bookmark tree contains.",
+  "fileRole": "primary",
+  "fileNote": "Primary permanent file: canonical bookmark tree source.",
+  "identityMap": [
+    {
+      "syncId": "syncId_20260530_hash_2i6f661",
+      "note": "Check whether this promo-code search is still useful before keeping it.",
+      "noteColor": "orange",
+      "tags": [
+        {
+          "color": "green",
+          "text": "coupon"
+        },
+        {
+          "color": "purple",
+          "text": "promo"
+        }
+      ]
+    }
+  ],
+  "tree": {
+    "title": "",
+    "id": "syncId_20260530_hash_4xl2x2i",
+    "children": [
+      {
+        "title": "Bookmarks Bar",
+        "id": "syncId_20260530_hash_1c4v645",
+        "parentId": "syncId_20260530_hash_4xl2x2i",
+        "folderType": "bookmarks-bar",
+        "syncing": false,
+        "children": [
+          {
+            "title": "windsurf promo code - Google Search",
+            "id": "syncId_20260530_hash_2i6f661",
+            "parentId": "syncId_20260530_hash_1c4v645",
+            "url": "https://www.google.com/search?q=windsurf+promo+code"
+          }
+        ]
+      },
+      {
+        "title": "Other Bookmarks",
+        "id": "syncId_20260530_hash_8r5t1v6",
+        "parentId": "syncId_20260530_hash_4xl2x2i",
+        "folderType": "other",
+        "syncing": false,
+        "children": []
+      }
+    ]
+  }
+}
+```
+
+<a id="ref-r3"></a>
+### R3. Permanent Copy Anchor Example
+A permanent copy is a view anchor, not another bookmark tree.
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 2,
+  "sectionType": "permanent",
+  "slot": "B",
+  "title": "Permanent Bookmarks",
+  "fileRole": "copy-anchor",
+  "anchorOnly": true,
+  "fileNote": "Permanent copy anchor file: tree content is inherited from primary file; this file keeps per-copy description and canvas anchor.",
+  "inheritFrom": "<vault-relative path to slot A json>",
+  "copyId": "permanent-copy-1780113045642-gtjhd",
+  "descriptionMd": "Copy-specific notes."
+}
+```
+
+<a id="ref-r4"></a>
+### R4. Regular Temporary Section Examples
+
+Top-level regular chain section:
+The child bookmark below shows `tags` and `note`/`noteColor` as sibling metadata on the same temporary item; omit these fields when an item has no metadata.
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 2,
+  "sectionType": "temporary",
+  "id": "temp-section-A-1",
+  "label": "A-1",
+  "title": "Research set",
+  "tempKind": "regular",
+  "source": "",
+  "descriptionMd": "A sandbox bookmark tree. This does not directly edit browser bookmarks.",
+  "items": [
+    {
+      "id": "tempId_20260530_hash_6u3p4w4",
+      "sectionId": "temp-section-A-1",
+      "title": "AI",
+      "url": "",
+      "type": "folder",
+      "children": [
+        {
+          "id": "tempId_20260530_hash_1z42o1g",
+          "sectionId": "temp-section-A-1",
+          "title": "GitHub Trending · JavaScript",
+          "url": "https://github.com/trending/javascript?since=daily",
+          "type": "bookmark",
+          "note": "Daily JavaScript trending page; useful for discovery.",
+          "noteColor": "blue",
+          "tags": [
+            {
+              "color": "orange",
+              "text": "trends"
+            },
+            {
+              "color": "blue",
+              "text": "JavaScript"
+            }
+          ],
+          "children": []
+        }
+      ]
+    }
+  ],
+  "originPermanent": {
+    "copyId": null
+  },
+  "sequenceNumber": 1
+}
+```
+Derived chain section:
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 2,
+  "sectionType": "temporary",
+  "id": "temp-section-A-1-1",
+  "label": "A-1-1",
+  "title": "Research set - refined",
+  "tempKind": "regular",
+  "source": "",
+  "descriptionMd": "Derived from A-1; keep only the refined subset.",
+  "items": [],
+  "originPermanent": {
+    "copyId": null
+  },
+  "sequenceNumber": 1
+}
+```
+
+<a id="ref-r5"></a>
+### R5. AI Special Temporary Section Example
+Use this when AI adds suggested bookmarks or a generated bookmark tree and no existing target was specified. If the user or context names an existing target, follow [S2](#s2-ai-generated-bookmark-routing).
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 2,
+  "sectionType": "temporary",
+  "id": "temp-section-AI",
+  "label": "AI",
+  "title": "AI title here",
+  "tempKind": "special",
+  "source": "ai-generated",
+  "descriptionMd": "Describe the generated bookmark tree and why these links were grouped.",
+  "items": [
+    {
+      "id": "tempId_20260530_hash_x6k2d5e",
+      "sectionId": "temp-section-AI",
+      "title": "Generated links",
+      "url": "",
+      "type": "folder",
+      "children": [
+        {
+          "id": "tempId_20260530_hash_8a4c1d2",
+          "sectionId": "temp-section-AI",
+          "title": "Example generated bookmark",
+          "url": "https://example.com/",
+          "type": "bookmark",
+          "note": "Explain why this generated link is useful.",
+          "noteColor": "blue",
+          "tags": [
+            {
+              "color": "purple",
+              "text": "AI"
+            }
+          ],
+          "children": []
+        }
+      ]
+    }
+  ],
+  "sequenceNumber": 4
+}
+```
+
+<a id="ref-r6"></a>
+### R6. .canvas Example
+Paths in file nodes are vault-relative, not relative to the `.canvas` file; `inheritFrom` in permanent copy anchors uses the same vault-relative path convention. When file references are added, deleted, moved, renamed, or edited, match the prefix style already used in the current `.canvas` and update every affected `file` / `inheritFrom` reference; follow Obsidian JSON Canvas path handling.
+Complete canvas data package root directories can have three prefix styles: existing vault root uses `<canvas-data-package-root-name>/Permanent/...`; existing vault subfolder uses `<vault-subdir>/<canvas-data-package-root-name>/Permanent/...`; using the canvas data package root directory itself as a standalone vault uses `Permanent/...` with no canvas-data-package-root-name prefix.
+In the example below, `<prefix>` means empty, `<canvas-data-package-root-name>/`, or `<vault-subdir>/<canvas-data-package-root-name>/`.
+For a default single-arrow edge from `fromNode` to `toNode`, omit `fromEnd` and `toEnd`; add `toEnd: "none"` only for no-arrow edges, and `fromEnd: "arrow"` for two-ended arrows.
+This is only a structural example. In real edits, do not treat `.canvas` as a text template; parse it as JSON, modify the object, and serialize it back so quotes, backslashes, and multilingual text cannot corrupt the JSON.
+```json
+{
+  "nodes": [
+    { "id": "permanent-section", "type": "file", "file": "<prefix>Permanent/A-PermanentBookmarks.json", "x": 0, "y": 0, "width": 600, "height": 600, "color": "4" },
+    { "id": "permanent-section-copy-permanent-copy-1780113045642-gtjhd", "type": "file", "file": "<prefix>{{PERMANENT_MD_REL_2}}", "x": 720, "y": 0, "width": 600, "height": 600, "color": "4" },
+    { "id": "card-group-ai", "type": "group", "x": -40, "y": 700, "width": 1320, "height": 620, "label": "AI workspace", "color": "5" },
+    { "id": "temp-section-AI", "type": "file", "file": "<prefix>Temporary/Special temporary/AI title.json", "x": 0, "y": 760, "width": 525, "height": 380, "color": "#e9973f" },
+    { "id": "md-node-ai-prompt", "type": "text", "text": "Prompt or notes for this generated bookmark set.", "x": 600, "y": 760, "width": 420, "height": 260, "color": "#888888" }
+  ],
+  "edges": [
+    { "id": "edge-ai-1", "fromNode": "md-node-ai-prompt", "fromSide": "right", "toNode": "temp-section-AI", "toSide": "left", "color": "#999999", "label": "generated set" }
+  ]
+}
+```
+
+<a id="ref-r7"></a>
+### R7. Tag Palette and Note Metadata
+```json
+{
+  "note": "Plain-text bookmark/folder note.",
+  "noteColor": "orange",
+  "tags": [
+    {
+      "color": "blue",
+      "text": "design reference"
+    }
+  ]
+}
+```
+- In the example above, `tags[].color` and `noteColor` are lowercase English palette names only: `red`, `orange`, `yellow`, `green`, `blue`, `purple`, `gray`.
+- The exported color value must be the lowercase English name only; do not write hex values (such as `#0a84ff`), `colorHex`, Obsidian canvas color numbers, or CSS variable names.
+- Permanent `identityMap` entries add `syncId` to the same shape; temporary items inline these fields directly.
+- `noteColor` is a sibling field of `note` and `tags`, not part of a tag object; do not write it as `{ "color": "...", "text": "..." }`.
+
 
 ## [Back to top](#switch-to-中文文档)

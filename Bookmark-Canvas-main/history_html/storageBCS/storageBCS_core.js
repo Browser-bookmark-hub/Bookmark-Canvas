@@ -1317,9 +1317,6 @@ function __stripPermanentLocalIdsFromTreeNode(nodeInput, context = {}) {
         output.url = rawUrl;
         return output;
     }
-    output.children = (Array.isArray(nodeInput.children) ? nodeInput.children : [])
-        .map((child) => __stripPermanentLocalIdsFromTreeNode(child))
-        .filter(Boolean);
     if (context && context.isRootChild) {
         const folderType = __normalizeBookmarkFolderType(nodeInput.folderType || nodeInput.folder_type || '');
         const syncing = __canPersistBookmarkRootSyncing(folderType)
@@ -1328,6 +1325,9 @@ function __stripPermanentLocalIdsFromTreeNode(nodeInput, context = {}) {
         if (folderType) output.folderType = folderType;
         if (syncing !== null) output.syncing = syncing;
     }
+    output.children = (Array.isArray(nodeInput.children) ? nodeInput.children : [])
+        .map((child) => __stripPermanentLocalIdsFromTreeNode(child))
+        .filter(Boolean);
     return output;
 }
 
@@ -1361,9 +1361,6 @@ function __buildPermanentSyncTreeNode(nodeInput, context = {}) {
         output.url = rawUrl;
         return output;
     }
-    output.children = (Array.isArray(nodeInput.children) ? nodeInput.children : [])
-        .map((child) => __buildPermanentSyncTreeNode(child))
-        .filter(Boolean);
     if (context && context.isRootChild) {
         const folderType = __normalizeBookmarkFolderType(nodeInput.folderType || nodeInput.folder_type || '');
         const syncing = __canPersistBookmarkRootSyncing(folderType)
@@ -1372,6 +1369,9 @@ function __buildPermanentSyncTreeNode(nodeInput, context = {}) {
         if (folderType) output.folderType = folderType;
         if (syncing !== null) output.syncing = syncing;
     }
+    output.children = (Array.isArray(nodeInput.children) ? nodeInput.children : [])
+        .map((child) => __buildPermanentSyncTreeNode(child))
+        .filter(Boolean);
     return output;
 }
 
@@ -1381,13 +1381,13 @@ function __buildPermanentSyncTreeFromSandboxTree(treeInput) {
     const rootId = String(root.id || '').trim();
     const rootParentId = String(root.parentId || '').trim();
     const output = {
-        title: String(root.title || root.name || '').trim(),
-        children: (Array.isArray(root.children) ? root.children : [])
-            .map((child) => __buildPermanentSyncTreeNode(child, { isRootChild: true }))
-            .filter(Boolean)
+        title: String(root.title || root.name || '').trim()
     };
     if (rootId) output.id = rootId;
     if (rootParentId) output.parentId = rootParentId;
+    output.children = (Array.isArray(root.children) ? root.children : [])
+        .map((child) => __buildPermanentSyncTreeNode(child, { isRootChild: true }))
+        .filter(Boolean);
     return output;
 }
 
@@ -2913,10 +2913,7 @@ function __buildPermanentTreeProtocolNode(nodeInput, options = {}) {
     }
 
     const node = {
-        title: String(nodeInput.title || nodeInput.name || 'Folder').trim() || 'Folder',
-        children: (Array.isArray(nodeInput.children) ? nodeInput.children : [])
-            .map((child) => __buildPermanentTreeProtocolNode(child, { preserveIds }))
-            .filter(Boolean)
+        title: String(nodeInput.title || nodeInput.name || 'Folder').trim() || 'Folder'
     };
     withPreservedIds(node);
 
@@ -2928,6 +2925,10 @@ function __buildPermanentTreeProtocolNode(nodeInput, options = {}) {
         if (folderType) node.folderType = folderType;
         if (syncing !== null) node.syncing = syncing;
     }
+
+    node.children = (Array.isArray(nodeInput.children) ? nodeInput.children : [])
+        .map((child) => __buildPermanentTreeProtocolNode(child, { preserveIds }))
+        .filter(Boolean);
 
     return node;
 }
@@ -2942,10 +2943,7 @@ function __normalizePermanentTreeSnapshotForProtocol(rawTree, options = {}) {
     const sourceRoot = source[0] && typeof source[0] === 'object' ? source[0] : { title: '', children: [] };
     const rootChildren = Array.isArray(sourceRoot.children) ? sourceRoot.children : [];
     const normalizedRoot = {
-        title: String(sourceRoot.title || sourceRoot.name || '').trim(),
-        children: rootChildren
-            .map((child) => __buildPermanentTreeProtocolNode(child, { isRootChild: true, preserveIds }))
-            .filter(Boolean)
+        title: String(sourceRoot.title || sourceRoot.name || '').trim()
     };
     if (preserveIds) {
         const rootId = String(sourceRoot.id || sourceRoot.syncId || '').trim();
@@ -2953,6 +2951,9 @@ function __normalizePermanentTreeSnapshotForProtocol(rawTree, options = {}) {
         if (rootId) normalizedRoot.id = rootId;
         if (rootParentId) normalizedRoot.parentId = rootParentId;
     }
+    normalizedRoot.children = rootChildren
+        .map((child) => __buildPermanentTreeProtocolNode(child, { isRootChild: true, preserveIds }))
+        .filter(Boolean);
 
     return [normalizedRoot];
 }
@@ -7185,7 +7186,6 @@ function __buildTempSectionProtocolItemPayload(itemInput, sectionIdFallback = ''
     payload.title = title;
     payload.url = rawUrl;
     payload.type = kind;
-    payload.children = children;
 
     const dateAdded = __parseCanvasProtocolDateValue(source.dateAdded);
     if (dateAdded > 0) payload.dateAdded = dateAdded;
@@ -7216,6 +7216,8 @@ function __buildTempSectionProtocolItemPayload(itemInput, sectionIdFallback = ''
         if (typeof source[key] === 'undefined') return;
         payload[key] = __cloneCanvasProtocolJson(source[key]);
     });
+
+    payload.children = children;
 
     return payload;
 }

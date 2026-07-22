@@ -93,8 +93,254 @@
 
 ---
 
-## License
 
+## License
 [GPL-3.0](../../Bookmark-Canvas-main/LICENSE)。
+
+## 格式
+
+以下 R2-R7 格式示例来自 [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)。示例数据包可参考 [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases)，每个版本都会提供当前导出的数据包。
+
+<ins>若 Agent 读取到此处，请务必阅读上述两个链接，至少不可跳过 AGENTS_template。</ins>
+
+### R2. 永久栏目主文件示例
+只有用户明确要求修改永久浏览器书签树时才使用这种形状。
+下面 `identityMap` 里的 metadata 条目通过同一个 `syncId` 指向 `tree` 里的书签节点；`tags` 可多条，`note` 只有一条，`noteColor` 是 note 的并列字段。
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 3,
+  "sectionType": "permanent",
+  "slot": "A",
+  "title": "Permanent Bookmarks",
+  "descriptionMd": "说明当前永久书签树包含什么。",
+  "fileRole": "primary",
+  "fileNote": "永久栏目主文件：书签树的规范真相源。",
+  "identityMap": [
+    {
+      "syncId": "syncId_20260530_hash_2i6f661",
+      "note": "保留前确认这个促销码搜索是否仍然有用。",
+      "noteColor": "orange",
+      "tags": [
+        {
+          "color": "green",
+          "text": "coupon"
+        },
+        {
+          "color": "purple",
+          "text": "promo"
+        }
+      ]
+    }
+  ],
+  "tree": {
+    "title": "",
+    "id": "syncId_20260530_hash_4xl2x2i",
+    "children": [
+      {
+        "title": "Bookmarks Bar",
+        "id": "syncId_20260530_hash_1c4v645",
+        "parentId": "syncId_20260530_hash_4xl2x2i",
+        "folderType": "bookmarks-bar",
+        "syncing": false,
+        "children": [
+          {
+            "title": "windsurf promo code - Google 搜索",
+            "id": "syncId_20260530_hash_2i6f661",
+            "parentId": "syncId_20260530_hash_1c4v645",
+            "url": "https://www.google.com/search?q=windsurf+promo+code"
+          }
+        ]
+      },
+      {
+        "title": "Other Bookmarks",
+        "id": "syncId_20260530_hash_8r5t1v6",
+        "parentId": "syncId_20260530_hash_4xl2x2i",
+        "folderType": "other",
+        "syncing": false,
+        "children": []
+      }
+    ]
+  }
+}
+```
+
+<a id="ref-r3"></a>
+### R3. 永久栏目副本锚点示例
+永久栏目副本是视图锚点，不是另一份书签树。
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 2,
+  "sectionType": "permanent",
+  "slot": "B",
+  "title": "Permanent Bookmarks",
+  "fileRole": "copy-anchor",
+  "anchorOnly": true,
+  "fileNote": "永久栏目副本锚点文件：树内容继承自主文件；此文件仅保留副本说明与画布锚点。",
+  "inheritFrom": "<vault 相对的 slot A json 路径>",
+  "copyId": "permanent-copy-1780113045642-gtjhd",
+  "descriptionMd": "副本自己的说明。"
+}
+```
+
+<a id="ref-r4"></a>
+### R4. 普通链式临时栏目示例
+顶层普通链式栏目：
+下面子书签同时展示 `tags` 与 `note`/`noteColor` 作为同一个临时 item 的并列 metadata；没有 metadata 的 item 可省略这些字段。
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 2,
+  "sectionType": "temporary",
+  "id": "temp-section-A-1",
+  "label": "A-1",
+  "title": "Research set",
+  "tempKind": "regular",
+  "source": "",
+  "descriptionMd": "这是书签沙盒，不会直接修改浏览器永久书签。",
+  "items": [
+    {
+      "id": "tempId_20260530_hash_6u3p4w4",
+      "sectionId": "temp-section-A-1",
+      "title": "AI",
+      "url": "",
+      "type": "folder",
+      "children": [
+        {
+          "id": "tempId_20260530_hash_1z42o1g",
+          "sectionId": "temp-section-A-1",
+          "title": "GitHub Trending · JavaScript",
+          "url": "https://github.com/trending/javascript?since=daily",
+          "type": "bookmark",
+          "note": "每日 JavaScript 趋势页面，适合做技术发现。",
+          "noteColor": "blue",
+          "tags": [
+            {
+              "color": "orange",
+              "text": "趋势"
+            },
+            {
+              "color": "blue",
+              "text": "JavaScript"
+            }
+          ],
+          "children": []
+        }
+      ]
+    }
+  ],
+  "originPermanent": {
+    "copyId": null
+  },
+  "sequenceNumber": 1
+}
+```
+派生链式栏目：
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 2,
+  "sectionType": "temporary",
+  "id": "temp-section-A-1-1",
+  "label": "A-1-1",
+  "title": "Research set - refined",
+  "tempKind": "regular",
+  "source": "",
+  "descriptionMd": "从 A-1 派生；只保留精简后的子集。",
+  "items": [],
+  "originPermanent": {
+    "copyId": null
+  },
+  "sequenceNumber": 1
+}
+```
+
+<a id="ref-r5"></a>
+### R5. AI 特殊临时栏目示例
+AI 新增书签建议或生成书签树且没有现成指定落点时，使用这种栏目；若用户或上下文已经指定已有落点，按 [S2](#s2-ai-生成书签的路由优先级) 路由。
+```json
+{
+  "format": "bookmark-canvas-section",
+  "schemaVersion": 2,
+  "sectionType": "temporary",
+  "id": "temp-section-AI",
+  "label": "AI",
+  "title": "AI title here",
+  "tempKind": "special",
+  "source": "ai-generated",
+  "descriptionMd": "说明这棵生成书签树的内容，以及这些链接为什么被分到一起。",
+  "items": [
+    {
+      "id": "tempId_20260530_hash_x6k2d5e",
+      "sectionId": "temp-section-AI",
+      "title": "Generated links",
+      "url": "",
+      "type": "folder",
+      "children": [
+        {
+          "id": "tempId_20260530_hash_8a4c1d2",
+          "sectionId": "temp-section-AI",
+          "title": "生成书签示例",
+          "url": "https://example.com/",
+          "type": "bookmark",
+          "note": "说明这条生成链接为什么有用。",
+          "noteColor": "blue",
+          "tags": [
+            {
+              "color": "purple",
+              "text": "AI"
+            }
+          ],
+          "children": []
+        }
+      ]
+    }
+  ],
+  "sequenceNumber": 4
+}
+```
+
+<a id="ref-r6"></a>
+### R6. .canvas 示例
+file 节点路径是 vault 相对路径，不是相对 `.canvas` 文件本身；永久副本锚点里的 `inheritFrom` 也使用同一套 vault 相对路径。新增、删除、移动、重命名或修改文件引用时，要匹配当前 `.canvas` 已经使用的前缀风格，并同步所有受影响的 `file` / `inheritFrom` 引用；路径处理参考 Obsidian JSON Canvas 即可。
+完整画布数据包根目录有三种前缀形态：放在已有 vault 根目录时是 `<画布数据包根目录名>/永久栏目/...`；放在已有 vault 子目录时是 `<vault子目录>/<画布数据包根目录名>/永久栏目/...`；把画布数据包根目录本身作为独立 vault 时没有画布数据包根目录名前缀，直接是 `永久栏目/...`。
+下面示例里的 `<前缀>` 表示空字符串、`<画布数据包根目录名>/` 或 `<vault子目录>/<画布数据包根目录名>/`。
+从 `fromNode` 指向 `toNode` 的默认单箭头边省略 `fromEnd` 和 `toEnd`；只有无箭头才写 `toEnd: "none"`，双端箭头才写 `fromEnd: "arrow"`。
+下面只是结构示例；实际编辑时不要把 `.canvas` 当文本模板手工拼接，必须通过 JSON 解析后修改对象并序列化写回，避免引号、反斜杠或多语言文本破坏 JSON。
+```json
+{
+  "nodes": [
+    { "id": "permanent-section", "type": "file", "file": "<前缀>永久栏目/A书签树（永久栏目）.json", "x": 0, "y": 0, "width": 600, "height": 600, "color": "4" },
+    { "id": "permanent-section-copy-permanent-copy-1780113045642-gtjhd", "type": "file", "file": "<前缀>{{PERMANENT_MD_REL_2}}", "x": 720, "y": 0, "width": 600, "height": 600, "color": "4" },
+    { "id": "card-group-ai", "type": "group", "x": -40, "y": 700, "width": 1320, "height": 620, "label": "AI workspace", "color": "5" },
+    { "id": "temp-section-AI", "type": "file", "file": "<前缀>临时栏目/特殊临时栏目/AI title.json", "x": 0, "y": 760, "width": 525, "height": 380, "color": "#e9973f" },
+    { "id": "md-node-ai-prompt", "type": "text", "text": "Prompt or notes for this generated bookmark set.", "x": 600, "y": 760, "width": 420, "height": 260, "color": "#888888" }
+  ],
+  "edges": [
+    { "id": "edge-ai-1", "fromNode": "md-node-ai-prompt", "fromSide": "right", "toNode": "temp-section-AI", "toSide": "left", "color": "#999999", "label": "generated set" }
+  ]
+}
+```
+
+<a id="ref-r7"></a>
+### R7. tag 调色板与 note 元数据
+```json
+{
+  "note": "纯文本书签/文件夹备注。",
+  "noteColor": "orange",
+  "tags": [
+    {
+      "color": "blue",
+      "text": "设计参考"
+    }
+  ]
+}
+```
+- 上例中，`tags[].color` 和 `noteColor` 都是小写英文调色板色名，只能使用：`red`、`orange`、`yellow`、`green`、`blue`、`purple`、`gray`。
+- 导出颜色值只能是上述小写英文，不可写成十六进制（如 `#0a84ff`）、`colorHex`、Obsidian canvas 颜色编号或 CSS 变量名。
+- 永久栏目 `identityMap` 条目在上面形态基础上再带 `syncId`；临时栏目 item 则直接内联这些字段。
+- `noteColor` 是 `note` 的并列字段，也是 `tags` 的并列字段，不是 tag 对象的一部分；不要写成 `{ "color": "...", "text": "..." }`。
+
 
 ## [返回顶部](#switch-to-english)
