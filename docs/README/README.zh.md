@@ -1,30 +1,12 @@
 ## Switch to [English](../../README.md)...
 
-[![Linux.do](https://img.shields.io/badge/Linux.do-Portfolio-FFD700?logo=discourse&logoColor=white)](https://linux.do/u/kk1/activity/portfolio)
 [![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases)
 
 ### 简介
 
 `书签画布（Bookmark Canvas）` 是一款面向 Chrome / Edge 的 Manifest V3 书签管理器。它把浏览器书签与基于 JSON Canvas 的可视化工作区结合：浏览器书签对应的**永久栏目**、独立的**临时栏目**、**空白栏目**、**卡片组**和有方向的连接线，可以共同组织在同一张画布中。
 
-画布数据包可在本地导入导出，也可推送到或从个人 GitHub 仓库拉取。导出和推送的数据包会附带 [AI 约束模板](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)，供兼容的 AI 客户端在处理前理解数据边界。
-
-### 初始引导
-
-空画布首次打开时，可见三张说明卡片：**画布基础**、**快捷操作**、**特色功能**。完整的三部分内容见 [`初始引导.md`](../%E5%88%9D%E5%A7%8B%E5%BC%95%E5%AF%BC.md)，建议优先熟悉以下六条规则：
-
-1. **基本交互**：永久栏目直接对应浏览器书签树。<ins>将永久栏目或临时栏目中的书签、文件夹拖动到画布空白区域，可生成新的临时栏目</ins>；永久栏目采用对象复制的副本规则，临时栏目采用可进可出的移动规则。<ins>书签和文件夹也可在栏目之间相互拖动</ins>。
-2. **侧边栏与 HTML 页面**：点击扩展图标可打开侧边栏，<ins>侧边栏适合使用卡片全屏模式</ins>。点击「HTML 页面」可打开或定位书签画布标签页，也可使用：
-   - `Ctrl + Shift + X`（macOS 为 `Command + Shift + X`）：通过扩展 action 打开侧边栏。
-   - `Ctrl + Shift + Space`（macOS 为 `Command + Shift + Space`）：打开或定位书签画布标签页。
-3. **缩放与平面滚动**：`Ctrl + 滚轮` 缩放，`空格 + 左键` 拖动画布；触控板双指捏合缩放、双指滑动拖动画布。`Shift + 滚轮` 横向滚动，可避开栏目内部的垂直滚动捕获。
-4. **批量/选中操作（批量模式）**：`Ctrl / Command + A` 选中光标所在栏目中的全部书签/文件夹；`Ctrl / Command + X` 剪切已选项目；`Ctrl / Command + C` 复制已选项目。`Ctrl / Command + V` 按光标位置粘贴：文件夹内、书签同级位置下方、临时栏目根部、空白永久栏目的书签栏根部；画布空白会新建「粘贴」临时栏目。文本保持浏览器原生粘贴。
-5. **鼠标规则**：
-   - **`Ctrl + 左键`**：拖动画布或移动卡片。
-   - **`Ctrl + 右键`**：调整卡片大小；再次 `Ctrl + 右键` 完成调整。
-   - **空白处左键拖动**：框选元素，形成临时选区组。
-   - **普通右键**：打开当前对象的菜单（永久栏目、永久栏目副本、临时栏目、特殊临时栏目、空白栏目、卡片组、连接线、临时选区组、画布空白区域），可进行全屏、定位、置顶、设置颜色、重命名、删除或<ins>导出</ins>。
-6. **推送 / 拉取安全**：推送会清理已配置的远端同步目录。⚠️ <ins>请勿在其中放入无关笔记或媒体，否则可能被彻底删除；画布不支持视频、音频、图片、PDF 等外部文件节点</ins>。详见 [`限制与妥协.md`](../%E9%99%90%E5%88%B6%E4%B8%8E%E5%A6%A5%E5%8D%8F.md)。
+画布数据包（示例数据包可参考 [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) 的部分版本）可在本地导入导出，也可推送到或从个人 GitHub 仓库拉取。导出和推送的数据包会附带 [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)，供兼容的 AI 客户端在处理前理解数据边界。
 
 ### 预览
 
@@ -38,11 +20,38 @@
 | :---: | :---: |
 | 截图位置预留 | 截图位置预留 |
 
-截图资源将放在 [`Screenshots and videos/`](../../Screenshots%20and%20videos/)；其中已预留命名与嵌入位置，后续添加媒体时无需重写 README。
+截图资源将放在 [`Media and icons/`](../../Media%20and%20icons/)；其中已预留命名与嵌入位置，后续添加媒体时无需重写 README。
 
 #### 视频预览
 
-[`Screenshots and videos/`](../../Screenshots%20and%20videos/) 中已预留画布工作流、导入导出和 GitHub 同步演示的视频位置。
+[`Media and icons/`](../../Media%20and%20icons/) 中已预留画布工作流、导入导出和 GitHub 同步演示的视频位置。
+
+### 初始引导
+
+空画布首次打开时，可见三张说明卡片：**画布基础**、**快捷操作**、**特色功能**。完整的三部分内容见 [`初始引导.md`](../%E5%88%9D%E5%A7%8B%E5%BC%95%E5%AF%BC.md)，建议优先熟悉以下六条规则：
+
+1. **基本交互**：永久栏目直接对应浏览器书签树。<ins>将永久栏目或临时栏目中的书签、文件夹拖动到画布空白区域，可生成新的临时栏目</ins>；永久栏目采用对象复制的副本规则，临时栏目采用可进可出的移动规则。<ins>书签和文件夹也可在栏目之间相互拖动</ins>。
+2. **侧边栏与 HTML 页面**：点击扩展图标可打开侧边栏，<ins>侧边栏适合使用卡片全屏模式</ins>。点击「HTML 页面」可打开或定位书签画布标签页，也可使用：
+   - `Ctrl + Shift + X`（macOS 为 `Command + Shift + X`）：通过扩展 action 打开侧边栏。
+   - `Ctrl + Shift + Space`（macOS 为 `Command + Shift + Space`）：打开或定位书签画布标签页。
+3. **缩放与平面滚动**：
+   - **`Ctrl + 滚轮`**：缩放画布。
+   - **`空格 + 左键`**：拖动画布。
+   - **触控板双指捏合 / 双指滑动**：分别缩放 / 拖动画布。
+   - **`Shift + 滚轮`**：横向滚动，可避开栏目内部的垂直滚动捕获。
+4. **批量/选中操作（批量模式）**：
+   - **`Shift | Option/Alt + 左键单击`**：在批量或单个选中模式下选中书签/文件夹；进入批量模式后，直接左键单击也可以选中。
+   - **`Ctrl / Command + A`**：选中光标所在栏目中的全部书签/文件夹。
+   - **`Ctrl / Command + X`**：剪切已选项目。
+   - **`Ctrl / Command + C`**：复制已选项目。
+   - **`Ctrl / Command + V`**：按光标位置粘贴：文件夹内、书签同级位置下方、临时栏目根部、空白永久栏目的书签栏根部；画布空白会新建「粘贴」临时栏目。
+   - **文本**：保持浏览器原生粘贴行为。
+5. **鼠标规则**：
+   - **`Ctrl + 左键`**：拖动画布或移动卡片。
+   - **`Ctrl + 右键`**：调整卡片大小；再次 `Ctrl + 右键` 完成调整。
+   - **空白处左键拖动**：框选元素，形成临时选区组。
+   - **普通右键**：打开当前对象的菜单（永久栏目、永久栏目副本、临时栏目、特殊临时栏目、空白栏目、卡片组、连接线、临时选区组、画布空白区域），可进行全屏、定位、置顶、设置颜色、重命名、删除或<ins>导出</ins>。
+6. **推送 / 拉取安全**：推送会清理已配置的远端同步目录。⚠️ <ins>请勿在其中放入无关笔记或媒体，否则可能被彻底删除；画布不支持视频、音频、图片、PDF 等外部文件节点</ins>。详见 [`限制与妥协.md`](../%E9%99%90%E5%88%B6%E4%B8%8E%E5%A6%A5%E5%8D%8F.md)。
 
 ### 路线图
 
@@ -99,7 +108,7 @@
 
 ## 格式
 
-以下 R2-R7 格式示例来自 [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)。示例数据包可参考 [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases)，每个版本都会提供当前导出的数据包。
+以下 R2-R7 格式示例来自 [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)。示例数据包可参考 [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) 的部分版本。
 
 <ins>若 Agent 读取到此处，请务必阅读上述两个链接，至少不可跳过 AGENTS_template。</ins>
 
@@ -258,7 +267,7 @@
 
 <a id="ref-r5"></a>
 ### R5. AI 特殊临时栏目示例
-AI 新增书签建议或生成书签树且没有现成指定落点时，使用这种栏目；若用户或上下文已经指定已有落点，按 [S2](#s2-ai-生成书签的路由优先级) 路由。
+AI 新增书签建议或生成书签树且没有现成指定落点时，使用这种栏目；若用户或上下文已经指定已有落点，按 [S2](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/blob/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template/AGENTS_template_zh.md#s2-ai-%E7%94%9F%E6%88%90%E4%B9%A6%E7%AD%BE%E7%9A%84%E8%B7%AF%E7%94%B1%E4%BC%98%E5%85%88%E7%BA%A7) 路由。
 ```json
 {
   "format": "bookmark-canvas-section",

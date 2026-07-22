@@ -1,30 +1,12 @@
 ## Switch to [中文文档](docs/README/README.zh.md)...
 
-[![Linux.do](https://img.shields.io/badge/Linux.do-Portfolio-FFD700?logo=discourse&logoColor=white)](https://linux.do/u/kk1/activity/portfolio)
 [![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases)
 
 ### Overview
 
 `Bookmark Canvas` is a Manifest V3 bookmark manager for Chrome / Edge. It combines browser bookmarks with a visual workspace built on JSON Canvas: browser-backed **Permanent Sections**, independent **Temporary Sections**, **Blank Sections**, **Card Groups**, and directional connections can live together on one canvas.
 
-Use the canvas to keep bookmark trees spatially organized without turning it into a second file manager. Canvas packages can be imported and exported locally, or **Push**ed to and **Pull**ed from a GitHub repository. The exported package includes [AI rule templates](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template) so compatible AI clients can understand the data boundary before working with it.
-
-### Initial Guide
-
-When an empty canvas first opens, three guide cards are visible: **Canvas Basics**, **Quick Actions**, and **Features**. The complete three-part [Initial Guide](docs/INITIAL_GUIDE.md) covers Canvas Basics, Quick Actions, and Features, and we recommend becoming familiar with these six rules first:
-
-1. **Basic interaction:** Permanent Sections directly represent the browser bookmark tree. <ins>Drag a bookmark or folder from a Permanent Section or Temporary Section onto a blank canvas area to create a new Temporary Section</ins>. Permanent Sections use an object-copy rule; Temporary Sections use move semantics in both directions. <ins>Bookmarks and folders can also be dragged between sections</ins>.
-2. **Side Panel and HTML Page:** click the extension icon to open the Side Panel, where <ins>card fullscreen is especially useful</ins>. Click **HTML Page** to open or locate the Bookmark Canvas tab, or use:
-   - `Ctrl + Shift + X` (`Command + Shift + X` on macOS): open the Side Panel through the extension action.
-   - `Ctrl + Shift + Space` (`Command + Shift + Space` on macOS): open or locate the Bookmark Canvas tab.
-3. **Zoom and pan:** use `Ctrl + Scroll` to zoom and `Space + Left Click` to pan the canvas; on a trackpad, pinch zooms and two-finger scrolling pans. `Shift + Scroll` moves horizontally and bypasses section-level vertical-scroll capture.
-4. **Batch / selection operations (Batch Mode):** `Ctrl / Command + A` selects all bookmark and folder items in the card under the cursor; `Ctrl / Command + X` cuts selected items; `Ctrl / Command + C` copies them. `Ctrl / Command + V` pastes at the cursor: inside a folder, below a bookmark at the same level, at a Temporary Section root, at the Bookmarks Bar root for a blank Permanent Section, or in a new `Paste` Temporary Section on blank canvas. Text keeps native browser paste behavior.
-5. **Mouse rules:**
-   - **`Ctrl + Left Click`:** pan the canvas or move a card.
-   - **`Ctrl + Right Click`:** resize a card; use `Ctrl + Right Click` again to finish.
-   - **Left-drag on a blank area:** select elements into a temporary selection group.
-   - **Ordinary right-click:** open the current object's menu (Permanent Section, Permanent Section Copy, Temporary Section, Special Temporary Section, Blank Section, Card Group, connection line, temporary selection group, or blank canvas area) for fullscreen, locate, pin, color, rename, delete, or <ins>export</ins>.
-6. **Push / Pull safety:** Push cleans the configured remote sync directory. ⚠️ <ins>Do **not** keep unrelated notes or media there: they can be permanently deleted. External file nodes such as video, audio, image, and PDF nodes are not supported</ins>. See [Limitations and Compromises](docs/LIMITATIONS_AND_COMPROMISES.md).
+Use the canvas to keep bookmark trees spatially organized without turning it into a second file manager. Canvas packages (sample data packages are available from selected [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases)) can be imported and exported locally, or **Push**ed to and **Pull**ed from a GitHub repository. The exported package includes [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template) so compatible AI clients can understand the data boundary before working with it.
 
 ### Preview
 
@@ -38,11 +20,38 @@ When an empty canvas first opens, three guide cards are visible: **Canvas Basics
 | :---: | :---: |
 | Screenshot slot reserved | Screenshot slot reserved |
 
-Screenshot assets will be added under [`Screenshots and videos/`](Screenshots%20and%20videos/). The naming and embedding slots are prepared there so media can be added without rewriting this README.
+Screenshot assets will be added under [`Media and icons/`](Media%20and%20icons/). The naming and embedding slots are prepared there so media can be added without rewriting this README.
 
 #### Video Preview
 
-Video slots are reserved in [`Screenshots and videos/`](Screenshots%20and%20videos/) for a canvas walkthrough and an import/export or GitHub sync walkthrough.
+Video slots are reserved in [`Media and icons/`](Media%20and%20icons/) for a canvas walkthrough and an import/export or GitHub sync walkthrough.
+
+### Initial Guide
+
+When an empty canvas first opens, three guide cards are visible: **Canvas Basics**, **Quick Actions**, and **Features**. The complete three-part [Initial Guide](docs/INITIAL_GUIDE.md) covers Canvas Basics, Quick Actions, and Features, and we recommend becoming familiar with these six rules first:
+
+1. **Basic interaction:** Permanent Sections directly represent the browser bookmark tree. <ins>Drag a bookmark or folder from a Permanent Section or Temporary Section onto a blank canvas area to create a new Temporary Section</ins>. Permanent Sections use an object-copy rule; Temporary Sections use move semantics in both directions. <ins>Bookmarks and folders can also be dragged between sections</ins>.
+2. **Side Panel and HTML Page:** click the extension icon to open the Side Panel, where <ins>card fullscreen is especially useful</ins>. Click **HTML Page** to open or locate the Bookmark Canvas tab, or use:
+   - `Ctrl + Shift + X` (`Command + Shift + X` on macOS): open the Side Panel through the extension action.
+   - `Ctrl + Shift + Space` (`Command + Shift + Space` on macOS): open or locate the Bookmark Canvas tab.
+3. **Zoom and pan:**
+   - **`Ctrl + Scroll`:** zoom the canvas.
+   - **`Space + Left Click`:** pan the canvas.
+   - **Trackpad pinch / two-finger scroll:** zoom / pan respectively.
+   - **`Shift + Scroll`:** move horizontally and bypass section-level vertical-scroll capture.
+4. **Batch / selection operations (Batch Mode):**
+   - **`Shift | Option/Alt + Left Click`:** select bookmarks/folders in batch or single-selection mode; left click also selects items in batch mode.
+   - **`Ctrl / Command + A`:** select all bookmark and folder items in the card under the cursor.
+   - **`Ctrl / Command + X`:** cut selected items.
+   - **`Ctrl / Command + C`:** copy selected items.
+   - **`Ctrl / Command + V`:** paste at the cursor: inside a folder, below a bookmark at the same level, at a Temporary Section root, at the Bookmarks Bar root for a blank Permanent Section, or in a new `Paste` Temporary Section on blank canvas.
+   - **Text:** keep native browser paste behavior.
+5. **Mouse rules:**
+   - **`Ctrl + Left Click`:** pan the canvas or move a card.
+   - **`Ctrl + Right Click`:** resize a card; use `Ctrl + Right Click` again to finish.
+   - **Left-drag on a blank area:** select elements into a temporary selection group.
+   - **Ordinary right-click:** open the current object's menu (Permanent Section, Permanent Section Copy, Temporary Section, Special Temporary Section, Blank Section, Card Group, connection line, temporary selection group, or blank canvas area) for fullscreen, locate, pin, color, rename, delete, or <ins>export</ins>.
+6. **Push / Pull safety:** Push cleans the configured remote sync directory. ⚠️ <ins>Do **not** keep unrelated notes or media there: they can be permanently deleted. External file nodes such as video, audio, image, and PDF nodes are not supported</ins>. See [Limitations and Compromises](docs/LIMITATIONS_AND_COMPROMISES.md).
 
 ### Roadmap
 
@@ -99,7 +108,7 @@ Video slots are reserved in [`Screenshots and videos/`](Screenshots%20and%20vide
 
 ## Format
 
-The following R2-R7 format examples are mirrored from [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template). Sample data packages are available from [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases); every version includes a current exported data package.
+The following R2-R7 format examples are mirrored from [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template). Sample data packages are available from selected [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases).
 
 <ins>If an Agent reads this section, it must read both linked materials above and must not skip AGENTS_template.</ins>
 
@@ -259,7 +268,7 @@ Derived chain section:
 
 <a id="ref-r5"></a>
 ### R5. AI Special Temporary Section Example
-Use this when AI adds suggested bookmarks or a generated bookmark tree and no existing target was specified. If the user or context names an existing target, follow [S2](#s2-ai-generated-bookmark-routing).
+Use this when AI adds suggested bookmarks or a generated bookmark tree and no existing target was specified. If the user or context names an existing target, follow [S2](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/blob/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template/AGENTS_template_en.md#s2-ai-generated-bookmark-routing).
 ```json
 {
   "format": "bookmark-canvas-section",
