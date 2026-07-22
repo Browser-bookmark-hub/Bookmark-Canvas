@@ -9021,8 +9021,7 @@ function serializeBookmarkNode(node) {
         title: node.title,
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
-        __canvasPayloadSource: 'permanent',
-        children: (node.children || []).map(serializeBookmarkNode)
+        __canvasPayloadSource: 'permanent'
     };
     if (node.id && window.TagSystem && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
         const cachedTags = window.TagSystem.getPermNodeTagsCached(node.id);
@@ -9046,6 +9045,7 @@ function serializeBookmarkNode(node) {
             }
         } catch (_) { }
     }
+    out.children = (node.children || []).map(serializeBookmarkNode);
     return out;
 }
 
@@ -15983,17 +15983,17 @@ async function batchExportJSON() {
             const out = {
                 title: item.title,
                 url: item.url || null,
-                type: item.type,
-                children: (item.children || []).map(serializeTempItem).filter(Boolean)
+                type: item.type
             };
-            if (Array.isArray(item.tags) && item.tags.length) {
-                out.tags = item.tags.map(t => ({ color: t.color, text: t.text }));
-            }
             const note = __ctxNormalizeNote(item.note);
             if (note) {
                 out.note = note;
                 out.noteColor = __ctxNormalizeNoteColor(item.noteColor);
             }
+            if (Array.isArray(item.tags) && item.tags.length) {
+                out.tags = item.tags.map(t => ({ color: t.color, text: t.text }));
+            }
+            out.children = (item.children || []).map(serializeTempItem).filter(Boolean);
             return out;
         };
         if (manager && tempNodes.length) {
@@ -18569,17 +18569,17 @@ function __serializeTempTreeItem(item) {
     const out = {
         title: item.title || '',
         url: item.url || '',
-        type: item.type || (item.url ? 'bookmark' : 'folder'),
-        children: (item.children || []).map(__serializeTempTreeItem).filter(Boolean)
+        type: item.type || (item.url ? 'bookmark' : 'folder')
     };
-    if (Array.isArray(item.tags) && item.tags.length) {
-        out.tags = item.tags.map((tag) => (tag && typeof tag === 'object') ? { color: tag.color, text: tag.text || '' } : null).filter(Boolean);
-    }
     const note = __ctxNormalizeNote(item.note);
     if (note) {
         out.note = note;
         out.noteColor = __ctxNormalizeNoteColor(item.noteColor);
     }
+    if (Array.isArray(item.tags) && item.tags.length) {
+        out.tags = item.tags.map((tag) => (tag && typeof tag === 'object') ? { color: tag.color, text: tag.text || '' } : null).filter(Boolean);
+    }
+    out.children = (item.children || []).map(__serializeTempTreeItem).filter(Boolean);
     return out;
 }
 

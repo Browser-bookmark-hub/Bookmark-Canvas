@@ -301,6 +301,8 @@ AI 应先根据用户原话、前文上下文、当前文件/目录、项目结�
         "title": "Bookmarks Bar",
         "id": "syncId_20260530_hash_1c4v645",
         "parentId": "syncId_20260530_hash_4xl2x2i",
+        "folderType": "bookmarks-bar",
+        "syncing": false,
         "children": [
           {
             "title": "windsurf promo code - Google 搜索",
@@ -308,17 +310,15 @@ AI 应先根据用户原话、前文上下文、当前文件/目录、项目结�
             "parentId": "syncId_20260530_hash_1c4v645",
             "url": "https://www.google.com/search?q=windsurf+promo+code"
           }
-        ],
-        "folderType": "bookmarks-bar",
-        "syncing": false
+        ]
       },
       {
         "title": "Other Bookmarks",
         "id": "syncId_20260530_hash_8r5t1v6",
         "parentId": "syncId_20260530_hash_4xl2x2i",
-        "children": [],
         "folderType": "other",
-        "syncing": false
+        "syncing": false,
+        "children": []
       }
     ]
   }
@@ -373,7 +373,6 @@ AI 应先根据用户原话、前文上下文、当前文件/目录、项目结�
           "title": "GitHub Trending · JavaScript",
           "url": "https://github.com/trending/javascript?since=daily",
           "type": "bookmark",
-          "children": [],
           "note": "每日 JavaScript 趋势页面，适合做技术发现。",
           "noteColor": "blue",
           "tags": [
@@ -385,7 +384,8 @@ AI 应先根据用户原话、前文上下文、当前文件/目录、项目结�
               "color": "blue",
               "text": "JavaScript"
             }
-          ]
+          ],
+          "children": []
         }
       ]
     }
@@ -419,7 +419,6 @@ AI 应先根据用户原话、前文上下文、当前文件/目录、项目结�
 <a id="ref-r5"></a>
 ### R5. AI 特殊临时栏目示例
 AI 新增书签建议或生成书签树且没有现成指定落点时，使用这种栏目；若用户或上下文已经指定已有落点，按 [S2](#s2-ai-生成书签的路由优先级) 路由。
-基础 AI 特殊临时栏目示例不默认展示 `tags` 或 `note`；只有任务需要时，才按 [A6](#a6-tag--note-元数据协议) / [R7](#ref-r7) 在具体 item 上添加 metadata。
 ```json
 {
   "format": "bookmark-canvas-section",
@@ -438,7 +437,24 @@ AI 新增书签建议或生成书签树且没有现成指定落点时，使用�
       "title": "Generated links",
       "url": "",
       "type": "folder",
-      "children": []
+      "children": [
+        {
+          "id": "tempId_20260530_hash_8a4c1d2",
+          "sectionId": "temp-section-AI",
+          "title": "生成书签示例",
+          "url": "https://example.com/",
+          "type": "bookmark",
+          "note": "说明这条生成链接为什么有用。",
+          "noteColor": "blue",
+          "tags": [
+            {
+              "color": "purple",
+              "text": "AI"
+            }
+          ],
+          "children": []
+        }
+      ]
     }
   ],
   "sequenceNumber": 4

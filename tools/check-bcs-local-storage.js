@@ -886,6 +886,17 @@
         return readContentPayload(rawValue) || rawValue;
     }
 
+    function buildTempSectionCanonicalExportPayload(payload) {
+        const bridge = global && global.CanvasProtocolBridge ? global.CanvasProtocolBridge : null;
+        if (bridge && typeof bridge.buildTempSectionJsonProtocol === 'function') {
+            try {
+                const normalized = bridge.buildTempSectionJsonProtocol(payload);
+                if (isRecord(normalized)) return normalized;
+            } catch (_) { }
+        }
+        return payload;
+    }
+
     function downloadObsidianStyleBusinessFiles(report) {
         const storage = report && report.bcsLocalStorageExport && report.bcsLocalStorageExport.storage
             ? report.bcsLocalStorageExport.storage
@@ -942,7 +953,10 @@
                 const label = sanitizeDownloadName(payload.label || `A-${index + 1}`, `A-${index + 1}`);
                 const title = sanitizeDownloadName(String(payload.title || label).replace(/:/g, '_'), label);
                 const kind = String(payload.tempKind || '').trim().toLowerCase() === 'special' ? '特殊临时栏目' : '常规链式';
-                downloadJsonPayload(`${kind} - ${label} ${title}.json`, payload);
+                downloadJsonPayload(
+                    `${kind} - ${label} ${title}.json`,
+                    buildTempSectionCanonicalExportPayload(payload)
+                );
                 count += 1;
             });
 

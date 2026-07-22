@@ -249,8 +249,7 @@ function serializeBookmarkNode(node) {
         title: node.title,
         url: node.url || '',
         type: node.url ? 'bookmark' : 'folder',
-        __canvasPayloadSource: 'permanent',
-        children: (node.children || []).map(child => serializeBookmarkNode(child))
+        __canvasPayloadSource: 'permanent'
     };
     if (node.id && window.TagSystem && typeof window.TagSystem.getPermNodeTagsCached === 'function') {
         const cachedTags = window.TagSystem.getPermNodeTagsCached(node.id);
@@ -274,6 +273,7 @@ function serializeBookmarkNode(node) {
             }
         } catch (_) {}
     }
+    out.children = (node.children || []).map(child => serializeBookmarkNode(child));
     return out;
 }
 

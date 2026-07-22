@@ -138,6 +138,16 @@ RAG is not the first goal: bookmarks, URLs, Markdown / descriptions, categories,
 
 Potential UI locations are only placeholders: the floating tool window, section titles or blank canvas context menus, and a floating dialog that visibly shows scope, sources, and results. This does not commit the extension to an Agent SDK. OpenAI Agents SDK's TypeScript implementation is a possible future-client or tool-layer reference, but MV3 compatibility, key handling, and service-worker lifetime require separate validation.
 
+### Shared AI special sections and export compatibility
+
+[`AGENTS_template`](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template) documents the current package protocol. Its [R5 AI Special Temporary Section Example](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/blob/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template/AGENTS_template_en.md#r5-ai-special-temporary-section-example) is also a practical shared-workspace pattern: people can invite others to co-build a bounded bookmark set, then exchange it as an exported package.
+
+The compatibility direction is to let other ecosystem projects export scoped data that can be carried by Bookmark Canvas packages without taking over its canvas model. The Generation Skill is in progress and will use the same package boundaries rather than create an incompatible parallel format. Initial ecosystem references are [Bookmark Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup) and [Bookmark Record and Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend).
+
+| Shared AI special section |
+| :---: |
+| Screenshot slot reserved |
+
 ## 6. Client direction: driven by protocol, not a reverse extension rewrite
 
 A client is a medium- to long-term option only after Skill trials, data protocols, and real processing needs are clear. It could be a Bookmark Canvas–centered standalone client, a lighter local-data/index consumer, or a tool layer for local databases, search, and research rather than a replacement for the extension.

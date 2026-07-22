@@ -301,6 +301,8 @@ The `identityMap` metadata entry below points to the bookmark node with the same
         "title": "Bookmarks Bar",
         "id": "syncId_20260530_hash_1c4v645",
         "parentId": "syncId_20260530_hash_4xl2x2i",
+        "folderType": "bookmarks-bar",
+        "syncing": false,
         "children": [
           {
             "title": "windsurf promo code - Google Search",
@@ -308,17 +310,15 @@ The `identityMap` metadata entry below points to the bookmark node with the same
             "parentId": "syncId_20260530_hash_1c4v645",
             "url": "https://www.google.com/search?q=windsurf+promo+code"
           }
-        ],
-        "folderType": "bookmarks-bar",
-        "syncing": false
+        ]
       },
       {
         "title": "Other Bookmarks",
         "id": "syncId_20260530_hash_8r5t1v6",
         "parentId": "syncId_20260530_hash_4xl2x2i",
-        "children": [],
         "folderType": "other",
-        "syncing": false
+        "syncing": false,
+        "children": []
       }
     ]
   }
@@ -374,7 +374,6 @@ The child bookmark below shows `tags` and `note`/`noteColor` as sibling metadata
           "title": "GitHub Trending · JavaScript",
           "url": "https://github.com/trending/javascript?since=daily",
           "type": "bookmark",
-          "children": [],
           "note": "Daily JavaScript trending page; useful for discovery.",
           "noteColor": "blue",
           "tags": [
@@ -386,7 +385,8 @@ The child bookmark below shows `tags` and `note`/`noteColor` as sibling metadata
               "color": "blue",
               "text": "JavaScript"
             }
-          ]
+          ],
+          "children": []
         }
       ]
     }
@@ -420,7 +420,6 @@ Derived chain section:
 <a id="ref-r5"></a>
 ### R5. AI Special Temporary Section Example
 Use this when AI adds suggested bookmarks or a generated bookmark tree and no existing target was specified. If the user or context names an existing target, follow [S2](#s2-ai-generated-bookmark-routing).
-The base AI special temporary example does not include `tags` or `note` by default; add metadata to specific items only when the task needs it, following [A6](#a6-tag--note-metadata-contract) / [R7](#ref-r7).
 ```json
 {
   "format": "bookmark-canvas-section",
@@ -439,7 +438,24 @@ The base AI special temporary example does not include `tags` or `note` by defau
       "title": "Generated links",
       "url": "",
       "type": "folder",
-      "children": []
+      "children": [
+        {
+          "id": "tempId_20260530_hash_8a4c1d2",
+          "sectionId": "temp-section-AI",
+          "title": "Example generated bookmark",
+          "url": "https://example.com/",
+          "type": "bookmark",
+          "note": "Explain why this generated link is useful.",
+          "noteColor": "blue",
+          "tags": [
+            {
+              "color": "purple",
+              "text": "AI"
+            }
+          ],
+          "children": []
+        }
+      ]
     }
   ],
   "sequenceNumber": 4
