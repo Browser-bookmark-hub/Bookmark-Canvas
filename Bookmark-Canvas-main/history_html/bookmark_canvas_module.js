@@ -42985,8 +42985,8 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Special temp sections</b>: Drop / Search / Batch / Add / Import / Custom.<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
-            : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量 / 添加 / 导入 / 任意。<br><b>提示</b>：数量很多时不建议使用自适应。'}
+            ? '<b>Special temp sections</b>: Drop / Search / Batch / Add / Import / Paste / Any source (extension).<br><b>Tip</b>: Auto-fit is not recommended when you have many of these sections.'
+            : '<b>特殊临时栏目</b>：拖入 / 搜索 / 批量 / 添加 / 导入 / 粘贴 / 任意来源（扩展）。<br><b>提示</b>：数量很多时不建议使用自适应。'}
             </div>
         </div>
         <div class="perf-help-popover" id="appearanceTempColorHelpPopover">
@@ -42999,8 +42999,8 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="otherTempColorHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Global switch</b>: one-tap unify all temp section locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: new splits always inherit the parent\'s current color at the moment of creation (regardless of whether the parent is locked). Subsequent color following is determined by the "Auto-lock after inheriting color during split" setting.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br><b>Special temp sections</b> (Drop / Search / Batch / Add / Import / Custom) now use their own default color in Appearance.'
-            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：新分裂的临时栏目总是继承产生时的父级当前颜色（无论父级是否被锁定）。后续颜色跟随取决于「分裂继承颜色后自动上锁」设置。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加 / 导入 / 任意）现在使用外观中的独立默认颜色。'}
+            ? '<b>Global switch</b>: one-tap unify all temp section locks. On = unlock all. Off = lock all. Manual locks take over until you flip global again.<br><b>Lock</b>: stop color following. <b>Unlock</b>: resume following.<br>Inheritance works like a chain: an unlocked chain passes color down, any lock breaks the chain below.<br><b>Split rule</b>: new splits always inherit the parent\'s current color at the moment of creation (regardless of whether the parent is locked). Subsequent color following is determined by the "Auto-lock after inheriting color during split" setting.<br>Parent = the immediate upper level in the sequence. Example: A-1 is parent of A-1-1; A-1-1 is parent of A-1-1-1.<br><b>Special temp sections</b> (Drop / Search / Batch / Add / Import / Paste / Any source extension) now use their own default color in Appearance.'
+            : '<b>全局开关</b>：一键统一所有临时栏目的锁。开=全解锁；关=全锁住。之后由单个锁控制，除非再次拨动全局。<br><b>锁住</b>：停止颜色跟随；<b>解锁</b>：恢复跟随。<br><span class="temp-color-chain-key">继承像链条一样：<br>解锁会往下传，任何一处锁住都会在此处断链。</span><br><b>分裂规则</b>：新分裂的临时栏目总是继承产生时的父级当前颜色（无论父级是否被锁定）。后续颜色跟随取决于「分裂继承颜色后自动上锁」设置。<br>父级=序号中直接上一层，例如 A-1 是 A-1-1 的父级；A-1-1 是 A-1-1-1 的父级。<br><b>特殊临时栏目</b>（拖入 / 搜索 / 批量 / 添加 / 导入 / 粘贴 / 任意来源（扩展））现在使用外观中的独立默认颜色。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherTempColorAutoLockHelpPopover">
