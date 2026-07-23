@@ -1,10 +1,10 @@
 ## Switch to [中文文档](docs/README/README.zh.md)...
 
-[![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases)
+[![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) [![GitHub Bookmark-Backup](https://img.shields.io/badge/GitHub-Bookmark--Backup-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Backup) [![GitHub Bookmark-Record-Recommend](https://img.shields.io/badge/GitHub-Bookmark--Record--Recommend-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
 
 ### Overview
 
-`Bookmark Canvas` is a Manifest V3 bookmark manager for Chrome / Edge. It combines browser bookmarks with a visual workspace built on JSON Canvas: browser-backed **Permanent Sections**, independent **Temporary Sections**, **Blank Sections**, **Card Groups**, and directional connections can live together on one canvas.
+`Bookmark-Canvas` is a Manifest V3 bookmark manager for Chrome / Edge. It combines browser bookmarks with a visual workspace built on JSON Canvas: browser-backed **Permanent Sections**, independent **Temporary Sections**, **Blank Sections**, **Card Groups**, and directional connections can live together on one canvas.
 
 Use the canvas to keep bookmark trees spatially organized without turning it into a second file manager. Canvas packages (sample data packages are available from selected [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases)) can be imported and exported locally, or **Push**ed to and **Pull**ed from a GitHub repository. The exported package includes [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template) so compatible AI clients can understand the data boundary before working with it.
 
@@ -81,9 +81,9 @@ When an empty canvas first opens, three guide cards are visible: **Canvas Basics
 
 **Bookmark ecosystem**
 
-- [Bookmark Canvas](https://github.com/Browser-bookmark-hub/Bookmark-Canvas)
-- [Bookmark Record and Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
-- [Bookmark Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup)
+- [Bookmark-Canvas](https://github.com/Browser-bookmark-hub/Bookmark-Canvas)
+- [Bookmark-Record-Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
+- [Bookmark-Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup)
 
 **External projects**
 
@@ -92,19 +92,6 @@ When an empty canvas first opens, three guide cards are visible: **Canvas Basics
 - [xyflow](https://github.com/xyflow/xyflow)
 - [Obsidian Editing Toolbar](https://github.com/PKM-er/obsidian-editing-toolbar)
 - [AltSnap](https://github.com/RamonUnch/AltSnap)
-
-### Data & Privacy
-
-- Canvas data, settings, local indexes, and caches are stored in the browser extension's local storage / IndexedDB by default; this project does not operate a dedicated backend service.
-- GitHub Push / Pull is optional and only accesses the repository configured by the user.
-- Permissions include bookmarks, storage, downloads, tabs, tab groups, windows, active-tab access, favicon access, idle state, and host access; they support bookmark management, canvas interaction, favicon display, and related browser integration.
-- See the [Privacy Policy](PRIVACY_POLICY.md) for the complete data-handling and permission explanation.
-
----
-
-
-## License
-[GPL-3.0](Bookmark-Canvas-main/LICENSE).
 
 ## Format
 
@@ -352,5 +339,14 @@ This is only a structural example. In real edits, do not treat `.canvas` as a te
 - Permanent `identityMap` entries add `syncId` to the same shape; temporary items inline these fields directly.
 - `noteColor` is a sibling field of `note` and `tags`, not part of a tag object; do not write it as `{ "color": "...", "text": "..." }`.
 
+## Data & Privacy
+
+- Canvas data, settings, local indexes, and caches are stored in the browser extension's local storage / IndexedDB by default; this project does not operate a dedicated backend service.
+- GitHub Push / Pull is optional and only accesses the repository configured by the user.
+- Permissions include bookmarks, storage, downloads, tabs, tab groups, windows, active-tab access, favicon access, idle state, and host access; they support bookmark management, canvas interaction, favicon display, and related browser integration.
+- See the [Privacy Policy](PRIVACY_POLICY.md) for the complete data-handling and permission explanation.
+
+## License
+[GPL-3.0](Bookmark-Canvas-main/LICENSE).
 
 ## [Back to top](#switch-to-中文文档)

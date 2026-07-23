@@ -1,10 +1,10 @@
 ## Switch to [English](../../README.md)...
 
-[![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases)
+[![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) [![GitHub Bookmark-Backup](https://img.shields.io/badge/GitHub-Bookmark--Backup-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Backup) [![GitHub Bookmark-Record-Recommend](https://img.shields.io/badge/GitHub-Bookmark--Record--Recommend-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
 
 ### 简介
 
-`书签画布（Bookmark Canvas）` 是一款面向 Chrome / Edge 的 Manifest V3 书签管理器。它把浏览器书签与基于 JSON Canvas 的可视化工作区结合：浏览器书签对应的**永久栏目**、独立的**临时栏目**、**空白栏目**、**卡片组**和有方向的连接线，可以共同组织在同一张画布中。
+`书签画布（Bookmark-Canvas）` 是一款面向 Chrome / Edge 的 Manifest V3 书签管理器。它把浏览器书签与基于 JSON Canvas 的可视化工作区结合：浏览器书签对应的**永久栏目**、独立的**临时栏目**、**空白栏目**、**卡片组**和有方向的连接线，可以共同组织在同一张画布中。
 
 画布数据包（示例数据包可参考 [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) 的部分版本）可在本地导入导出，也可推送到或从个人 GitHub 仓库拉取。导出和推送的数据包会附带 [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)，供兼容的 AI 客户端在处理前理解数据边界。
 
@@ -81,9 +81,9 @@
 
 **生态项目**
 
-- [书签画布（Bookmark Canvas）](https://github.com/Browser-bookmark-hub/Bookmark-Canvas)
-- [书签记录与推荐（Bookmark Record and Recommend）](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
-- [书签备份（Bookmark Backup）](https://github.com/Browser-bookmark-hub/Bookmark-Backup)
+- 书签画布（[Bookmark-Canvas](https://github.com/Browser-bookmark-hub/Bookmark-Canvas)）
+- 书签记录与推荐（[Bookmark-Record-Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)）
+- 书签备份（[Bookmark-Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup)）
 
 **外部参考**
 
@@ -92,19 +92,6 @@
 - [xyflow](https://github.com/xyflow/xyflow)
 - [Obsidian Editing Toolbar](https://github.com/PKM-er/obsidian-editing-toolbar)
 - [AltSnap](https://github.com/RamonUnch/AltSnap)
-
-### 数据与隐私
-
-- 画布数据、设置、本地索引和缓存默认保存在浏览器扩展的本地存储 / IndexedDB；本项目不运营专用后端服务。
-- GitHub 推送 / 拉取为可选功能，只会访问用户自行配置的仓库。
-- 书签、存储、下载、标签页、标签组、窗口、当前标签页、favicon、idle 状态与站点访问等权限，用于书签管理、画布交互、图标显示及相关浏览器集成。
-- 完整的数据处理与权限说明见英文版 [Privacy Policy](../../PRIVACY_POLICY.md)。
-
----
-
-
-## License
-[GPL-3.0](../../Bookmark-Canvas-main/LICENSE)。
 
 ## 格式
 
@@ -351,5 +338,14 @@ file 节点路径是 vault 相对路径，不是相对 `.canvas` 文件本身；
 - 永久栏目 `identityMap` 条目在上面形态基础上再带 `syncId`；临时栏目 item 则直接内联这些字段。
 - `noteColor` 是 `note` 的并列字段，也是 `tags` 的并列字段，不是 tag 对象的一部分；不要写成 `{ "color": "...", "text": "..." }`。
 
+## 数据与隐私
+
+- 画布数据、设置、本地索引和缓存默认保存在浏览器扩展的本地存储 / IndexedDB；本项目不运营专用后端服务。
+- GitHub 推送 / 拉取为可选功能，只会访问用户自行配置的仓库。
+- 书签、存储、下载、标签页、标签组、窗口、当前标签页、favicon、idle 状态与站点访问等权限，用于书签管理、画布交互、图标显示及相关浏览器集成。
+- 完整的数据处理与权限说明见英文版 [Privacy Policy](../../PRIVACY_POLICY.md)。
+
+## License
+[GPL-3.0](../../Bookmark-Canvas-main/LICENSE)。
 
 ## [返回顶部](#switch-to-english)
