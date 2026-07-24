@@ -1058,16 +1058,14 @@ function getScopeFromContext(context) {
         }
     } catch (_) {}
 
-    // Temporary sections: use *display label* first (supports split labels like A1/A1-1), fall back to alpha label.
+    // Temporary sections use their explicit display label. IDs handle duplicates.
     if (type === 'temporary' && context && context.sectionId) {
         try {
             const sec = (window.CanvasModule && window.CanvasModule.temp && typeof window.CanvasModule.temp.getSection === 'function')
                 ? window.CanvasModule.temp.getSection(context.sectionId)
                 : (typeof getTempSection === 'function' ? getTempSection(context.sectionId) : null);
             const explicit = (sec && typeof sec.label === 'string') ? sec.label.trim() : '';
-            const alpha = (!explicit && sec && sec.sequenceNumber) ? toAlphaLabel(sec.sequenceNumber) : '';
-            const autoLabel = alpha ? `${alpha}-1` : '';
-            const label = explicit || autoLabel;
+            const label = explicit || 'unknown';
 
             const explicitTitle = (sec && typeof sec.title === 'string') ? sec.title.trim() : '';
             cardTitle = explicitTitle || ((window.currentLang || 'zh_CN') === 'zh_CN' ? '临时栏目' : 'Temp Section');
@@ -14475,14 +14473,17 @@ async function batchToTempSection(triggerEvent) {
     let newSectionId = null;
     try {
         if (permanentIds.length) {
-            const originPermanent = resolvePermanentOriginMeta();
+            const permanentLabelContext = resolvePermanentOriginMeta();
             newSectionId = await canvas.createTempNode({
                 source: 'permanent',
                 multi: true,
                 permanentIds,
-                originPermanent,
+                permanentCopyId: permanentLabelContext && permanentLabelContext.copyId,
+                permanentDisplayIndex: permanentLabelContext && permanentLabelContext.displayIndex,
+                permanentIsOriginal: !!(permanentLabelContext && !permanentLabelContext.copyId),
                 title: sectionTitle,
                 label: sectionLabel,
+                tempKind: 'special',
                 colorLocked: true,
                 pinned: true
             }, canvasX, canvasY);
@@ -14491,6 +14492,7 @@ async function batchToTempSection(triggerEvent) {
                 title: sectionTitle,
                 label: sectionLabel,
                 source: 'batch',
+                tempKind: 'special',
                 colorLocked: true,
                 pinned: true
             });

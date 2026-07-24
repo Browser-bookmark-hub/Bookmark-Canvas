@@ -821,6 +821,13 @@ async function handleDragEnd(e) {
     if (draggedNode) {
         draggedNode.classList.remove('dragging');
     }
+    
+    // 强力清理：移除所有可能残留的 dragging 类
+    try {
+        document.querySelectorAll('.tree-item.dragging').forEach(el => {
+            el.classList.remove('dragging');
+        });
+    } catch (_) { }
 
     const dropX = (window.__lastDragClientX !== undefined && window.__lastDragClientX !== 0) ? window.__lastDragClientX : e.clientX;
     const dropY = (window.__lastDragClientY !== undefined && window.__lastDragClientY !== 0) ? window.__lastDragClientY : e.clientY;
@@ -992,6 +999,35 @@ async function handleDragEnd(e) {
         __hoverExpandState.timers.clear();
         __hoverExpandState.lastDragEndTime = Date.now();
         __hoverExpandState.lastAt.clear();
+    } catch (_) { }
+
+    // 修复拖动结束后快捷面板不显示的问题：强制刷新hover状态
+    try {
+        // 延迟执行，确保dragging类已完全移除
+        setTimeout(() => {
+            const x = e.clientX || window.__lastDragClientX || 0;
+            const y = e.clientY || window.__lastDragClientY || 0;
+            if (x === 0 && y === 0) return;
+            
+            const elementUnderCursor = document.elementFromPoint(x, y);
+            const treeItem = elementUnderCursor?.closest('.tree-item[data-node-id]');
+            
+            if (treeItem) {
+                // 找到快捷面板元素
+                const hoverActions = treeItem.querySelector('.tree-item-hover-actions');
+                if (hoverActions) {
+                    // 强制设置样式，然后立即移除，触发重绘
+                    hoverActions.style.opacity = '1';
+                    hoverActions.style.pointerEvents = 'auto';
+                    
+                    // 50ms后移除内联样式，让CSS规则接管
+                    setTimeout(() => {
+                        hoverActions.style.opacity = '';
+                        hoverActions.style.pointerEvents = '';
+                    }, 50);
+                }
+            }
+        }, 10);
     } catch (_) { }
 
     ;

@@ -226,11 +226,7 @@ The child bookmark below shows `tags` and `note`/`noteColor` as sibling metadata
         }
       ]
     }
-  ],
-  "originPermanent": {
-    "copyId": null
-  },
-  "sequenceNumber": 1
+  ]
 }
 ```
 Derived chain section:
@@ -245,11 +241,7 @@ Derived chain section:
   "tempKind": "regular",
   "source": "",
   "descriptionMd": "Derived from A-1; keep only the refined subset.",
-  "items": [],
-  "originPermanent": {
-    "copyId": null
-  },
-  "sequenceNumber": 1
+  "items": []
 }
 ```
 
@@ -293,8 +285,7 @@ Use this when AI adds suggested bookmarks or a generated bookmark tree and no ex
         }
       ]
     }
-  ],
-  "sequenceNumber": 4
+  ]
 }
 ```
 

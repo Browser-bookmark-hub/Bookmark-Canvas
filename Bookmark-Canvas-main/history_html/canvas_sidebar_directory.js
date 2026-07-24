@@ -549,14 +549,7 @@
   function getTempSectionLabel(section) {
     if (!section) return '';
     const explicit = normalizeText(section.label);
-    if (explicit) return explicit;
-    if (section.isSnapshot) {
-      return t('导入', 'Import');
-    }
-    const seq = toPositiveInt(section.sequenceNumber);
-    if (!seq) return '';
-    const alpha = toAlphaLabel(seq);
-    return alpha ? `${alpha}-1` : '';
+    return explicit || 'unknown';
   }
 
   function getTempSplitDepth(label) {
@@ -587,9 +580,6 @@
 
     const sourceRaw = normalizeText(section.source).toLowerCase();
     if (sourceRaw && SPECIAL_TEMP_SOURCE_SET.has(sourceRaw)) return true;
-
-    const seq = toPositiveInt(section.sequenceNumber);
-    if (!seq) return true;
 
     const labelRaw = normalizeText(section.label);
     if (!labelRaw) return false;
@@ -899,13 +889,11 @@
   }
 
   function sortTempSections(a, b) {
-    const as = toPositiveInt(a && a.sequenceNumber);
-    const bs = toPositiveInt(b && b.sequenceNumber);
-    if (as && bs && as !== bs) return as - bs;
-    if (as && !bs) return -1;
-    if (!as && bs) return 1;
-    const nameA = getTempSectionDisplayText(a);
-    const nameB = getTempSectionDisplayText(b);
+    const aSpecial = isSpecialTempSection(a);
+    const bSpecial = isSpecialTempSection(b);
+    if (aSpecial !== bSpecial) return aSpecial ? 1 : -1;
+    const nameA = getTempSectionLabel(a) || getTempSectionDisplayText(a);
+    const nameB = getTempSectionLabel(b) || getTempSectionDisplayText(b);
     const cmp = compareText(nameA, nameB);
     if (cmp !== 0) return cmp;
     return compareText(a && a.id, b && b.id);

@@ -743,6 +743,9 @@
             if (payload.sectionType !== 'temporary') {
                 fail(report, 'temporary', 'Temporary section payload must have sectionType `temporary`.', { key, id, actual: payload.sectionType });
             }
+            if (!String(payload.label || '').trim()) {
+                fail(report, 'temporary', 'Temporary section payload must contain a non-empty `label`.', { key, id });
+            }
             if (payload.id && String(payload.id) !== id) {
                 warn(report, 'temporary', 'Temporary section payload id differs from storage key suffix.', { key, id, payloadId: payload.id });
             }

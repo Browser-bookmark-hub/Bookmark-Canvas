@@ -90,10 +90,10 @@ This file helps AI agents and coding agents edit an exported Bookmark Canvas pac
 ### A4. Temporary Section Contract
 - Temporary sections are bookmark sandboxes. Editing them does not mean directly editing the browser bookmark tree.
 - Regular chain sections live under `Temporary/General Chain/` with labels like `A-1`, `A-1-1`, `B-1`. A derived chain may intentionally carry over many items from its parent chain. See [R4](#ref-r4).
-- If a regular section has an explicit `label`, that label is authoritative. Without one, the fallback top-level label is generated from `sequenceNumber` through `toAlphaLabel()`: 1 => A-1, 2 => B-1, 3 => C-1, 27 => AA-1. See [R1.4](#ref-r1-4).
-- For sections created from a permanent origin, the label family follows that origin: slot A uses `A-N`, copy/slot B uses `B-N`; scan existing same-family labels and use max+1, so a second slot-A section is `A-2`, not `B-1`.
+- Every temporary section must carry an explicit `label`; if an external input omits it, use the fixed protocol value `unknown`. See [R1.4](#ref-r1-4).
+- For sections created from a permanent origin, choose the label family at creation only: slot A uses `A-N`, copy/slot B uses `B-N`; scan existing same-family labels and use max+1, so a second slot-A section is `A-2`, not `B-1`. Do not persist a permanent-origin reference after creation.
 - Runtime section IDs mirror labels: `temp-section-A-1`, `temp-section-A-1-1`. Every item inside the section must use the same `sectionId`.
-- Special temporary sections live under `Temporary/Special temporary/` and use `tempKind: "special"` with a human label such as Drop, Search, Add, Import, or AI. See [R5](#ref-r5).
+- Special temporary sections live under `Temporary/Special temporary/` and use `tempKind: "special"` with an explicit human label such as `New`, `Drop`, `Search`, `Import`, or AI. Their splits append `-N` to the parent label and remain `special`. See [R5](#ref-r5).
 - For repeated special labels, scan existing same-label IDs and use the next suffix, for example `temp-section-AI`, then `temp-section-AI-2`. See [R1.5](#ref-r1-5).
 - Temporary item IDs use `tempId_YYYYMMDD_hash_<token7>`, where `token7` is lowercase letters/digits only. Folders use `type: "folder"` and bookmarks use `type: "bookmark"` with `url`. See [R1.1](#ref-r1-1), [R1.3](#ref-r1-3), and [R4](#ref-r4).
 
@@ -188,8 +188,8 @@ Execution rules:
 ### S4. ID and Numbering Rules
 - Permanent new nodes: `syncId_YYYYMMDD_hash_<token7>`; `token7` is lowercase letters/digits only, and `parentId` must point to the parent syncId. See [R1.1](#ref-r1-1) and [R1.2](#ref-r1-2).
 - Temporary new items: `tempId_YYYYMMDD_hash_<token7>`; `token7` is lowercase letters/digits only, and every nested item keeps the section ID in `sectionId`. See [R1.1](#ref-r1-1) and [R1.3](#ref-r1-3).
-- Regular temporary labels: explicit `label` wins. Only sections without an explicit label use `{Alpha}-1` from `sequenceNumber` by `toAlphaLabel()`; examples: 1 A-1, 2 B-1, 3 C-1, 27 AA-1. See [R1.4](#ref-r1-4).
-- Permanent-origin regular sections use the origin family instead: slot A creates `A-N`, copy/slot B creates `B-N`, scanning existing same-family labels and using max+1.
+- Regular temporary labels are explicit and required. For external input without one, use the fixed protocol value `unknown`. See [R1.4](#ref-r1-4).
+- Permanent-origin regular sections choose their family only while being created: slot A creates `A-N`, copy/slot B creates `B-N`, scanning existing same-family labels and using max+1.
 - Derived regular labels can extend the chain, for example `A-1-1`; preserve parent-child chain intent when editing. See [R4](#ref-r4).
 - Special temporary IDs use the label and duplicate suffixes, for example `temp-section-AI`, `temp-section-AI-2`. See [R1.5](#ref-r1-5).
 
@@ -252,8 +252,8 @@ Execution rules:
 <a id="ref-r1-4"></a>
 #### R1.4 Regular Temporary Section Labels and IDs
 - Regular temporary section ids are label-based: `temp-section-A-1`, `temp-section-A-1-1`, `temp-section-B-1`.
-- Regular labels use explicit `label` first. Without an explicit label, fallback top-level labels use `{Alpha}-1`, where `Alpha = toAlphaLabel(sequenceNumber)`. Examples: sequenceNumber 1 => A-1, 2 => B-1, 3 => C-1, 27 => AA-1.
-- Permanent-origin regular sections do not advance by raw `sequenceNumber`: slot A creates `A-N`, copy/slot B creates `B-N`, scanning existing same-family labels and using max+1. Example: if `A-1` exists, another slot-A section becomes `A-2`.
+- Regular labels are explicit and required. Missing external labels use the fixed protocol value `unknown`.
+- Permanent-origin regular sections choose their family only at creation: slot A creates `A-N`, copy/slot B creates `B-N`, scanning existing same-family labels and using max+1. Example: if `A-1` exists, another slot-A section becomes `A-2`.
 - Regular derived labels can extend the chain, for example `A-1-1`. Treat chain inheritance as semantic: derived sections may intentionally reuse most of the parent section, but they do not have to be identical.
 <a id="ref-r1-5"></a>
 #### R1.5 Special Temporary Section IDs
@@ -390,11 +390,7 @@ The child bookmark below shows `tags` and `note`/`noteColor` as sibling metadata
         }
       ]
     }
-  ],
-  "originPermanent": {
-    "copyId": null
-  },
-  "sequenceNumber": 1
+  ]
 }
 ```
 Derived chain section:
@@ -409,11 +405,7 @@ Derived chain section:
   "tempKind": "regular",
   "source": "",
   "descriptionMd": "Derived from A-1; keep only the refined subset.",
-  "items": [],
-  "originPermanent": {
-    "copyId": null
-  },
-  "sequenceNumber": 1
+  "items": []
 }
 ```
 
@@ -457,8 +449,7 @@ Use this when AI adds suggested bookmarks or a generated bookmark tree and no ex
         }
       ]
     }
-  ],
-  "sequenceNumber": 4
+  ]
 }
 ```
 

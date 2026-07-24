@@ -108,7 +108,6 @@ const CanvasState = {
     tempSections: [],
     tempSectionCounter: 0,
     tempItemCounter: 0,
-    tempSectionSequenceNumber: 0,
     tempSectionLastColor: null,
     tempSectionPrevColor: null,
     colorCursor: 0,
@@ -3057,7 +3056,7 @@ function requestSidebarMenuColorSyncRefresh() {
 }
 
 // [Special Temp 接入约定]
-// 新数据优先用 section.tempKind = 'special' 标记；旧数据仍回退 source / label 判定。
+// 临时栏目优先使用 section.tempKind = 'special' 标记；source / 固定标签用于外部协议兜底。
 // 新增固定来源的“特殊临时栏目”时，可为 section.source 分配稳定值，并加入下面集合。
 // 命中后会自动接入：
 // - 外观尺寸：sizes.specialTemp
@@ -4879,32 +4878,7 @@ function toAlphaLabel(n) {
 function getTempSectionLabel(section) {
     if (!section) return '';
     const explicit = (typeof section.label === 'string') ? section.label.trim() : '';
-    if (explicit) return explicit;
-    if (section.isSnapshot) {
-        const { isEn } = __getLang();
-        return isEn ? 'Import' : '导入';
-    }
-    if (section.sequenceNumber) {
-        const alpha = toAlphaLabel(section.sequenceNumber);
-        return alpha ? `${alpha}-1` : '';
-    }
-    return '';
-}
-
-function __normalizeTempSectionLabelToDashScheme(labelRaw) {
-    const label = String(labelRaw || '').trim();
-    if (!label) return '';
-
-    // New scheme already: "A-1" / "A-1-1" ...
-    if (/^[A-Za-z]+-\d/.test(label)) return label;
-
-    // Old scheme: "A1" / "A1-1" / "AA12-3" ...
-    const m = label.match(/^([A-Za-z]+)(\d.*)$/);
-    if (!m) return label;
-
-    const alpha = m[1].toUpperCase();
-    const rest = m[2];
-    return `${alpha}-1-${rest}`;
+    return explicit || 'unknown';
 }
 
 function __normalizeExistingTempSectionLabels() {
@@ -4913,24 +4887,11 @@ function __normalizeExistingTempSectionLabels() {
     try {
         (CanvasState.tempSections || []).forEach((section) => {
             if (!section) return;
-            if (typeof section.label !== 'string') return;
-            const before = section.label;
+            const before = (typeof section.label === 'string') ? section.label : '';
             const trimmed = before.trim();
-            if (!trimmed) {
-                try { delete section.label; } catch (_) { section.label = null; }
-                changed = true;
-                changedSections.push(section);
-                return;
-            }
-            const normalized = __normalizeTempSectionLabelToDashScheme(trimmed);
-            if (normalized !== trimmed) {
+            const normalized = getTempSectionLabel(section);
+            if (normalized !== trimmed || normalized !== before) {
                 section.label = normalized;
-                changed = true;
-                changedSections.push(section);
-                return;
-            }
-            if (trimmed !== before) {
-                section.label = trimmed;
                 changed = true;
                 changedSections.push(section);
             }
@@ -4956,17 +4917,6 @@ function applyTempSectionBadge(badge, label) {
     badge.classList.toggle('temp-node-sequence-badge-wide', shouldUseWideBadge(label));
 }
 
-function __getTempSectionOriginPermanent(section) {
-    if (!section || !section.originPermanent || typeof section.originPermanent !== 'object') return null;
-    const origin = section.originPermanent;
-    const copyIdRaw = (origin && typeof origin.copyId === 'string') ? origin.copyId.trim() : '';
-    const copyId = copyIdRaw ? copyIdRaw : null;
-    const displayIndex = __normalizePositiveInt(origin ? origin.displayIndex : null);
-    const payload = { copyId };
-    if (copyId && displayIndex) payload.displayIndex = displayIndex;
-    return payload;
-}
-
 function __hasAnyPermanentSectionCopies() {
     try {
         const copies = __readPermanentSectionCopies();
@@ -4986,105 +4936,6 @@ function __resolvePermanentCopyDisplayIndex(copyId) {
     } catch (_) {
         return null;
     }
-}
-
-function getTempSectionOriginBadgeText(section) {
-    if (!section) return '';
-
-    let idx = 0;
-
-    // 1. Try explicit origin info
-    // 1. Try explicit origin info
-    if (section.originPermanent) {
-        if (section.originPermanent.copyId) {
-            // It's a copy. displayIndex 1 -> Global 2 ("B")
-            // If displayIndex is missing, assume 1 (First Copy) -> 2
-            const rawIdx = typeof section.originPermanent.displayIndex === 'number' ? section.originPermanent.displayIndex : 1;
-            idx = rawIdx + 1;
-        } else {
-            // It's original. Global 1 ("A")
-            idx = 1;
-        }
-    }
-
-    // 2. Fallback: Infer from label (e.g. "B-1" -> B -> 2)
-    // This ensures badge remains even if origin link is lost but label persists
-    if ((!idx || idx < 1) && typeof section.label === 'string') {
-        const m = section.label.trim().match(/^([A-Z]+)-/);
-        if (m) {
-            try {
-                const letters = m[1];
-                let n = 0;
-                for (let i = 0; i < letters.length; i++) {
-                    n = n * 26 + (letters.charCodeAt(i) - 64);
-                }
-                idx = n;
-            } catch (_) { }
-        }
-    }
-
-    if (idx >= 1) {
-        return `#${toAlphaLabel(idx)}`;
-    }
-
-    return '';
-}
-
-function __clearTempSectionOriginForDeletedPermanentCopy(copyId) {
-    if (!copyId) return;
-    let changed = false;
-    const changedSections = [];
-    try {
-        if (Array.isArray(CanvasState.tempSections)) {
-            CanvasState.tempSections.forEach((section) => {
-                if (!section || !section.originPermanent || typeof section.originPermanent !== 'object') return;
-                const originCopyId = (typeof section.originPermanent.copyId === 'string') ? section.originPermanent.copyId : null;
-                if (originCopyId && originCopyId === copyId) {
-                    try { delete section.originPermanent; } catch (_) { section.originPermanent = null; }
-                    changed = true;
-                    changedSections.push(section);
-                }
-            });
-        }
-    } catch (_) { }
-
-    if (changed) {
-        try { saveTempSectionsPatch(changedSections); } catch (_) { }
-        try { __updateTempSectionOriginBadges(); } catch (_) { }
-    }
-}
-
-function __updateTempSectionOriginBadges() {
-    try {
-        const canvasContent = document.getElementById('canvasContent');
-        const scope = canvasContent || document;
-        const nodes = scope.querySelectorAll('.temp-canvas-node[data-section-id]');
-        if (!nodes || !nodes.length) return;
-
-        const byId = new Map();
-        if (Array.isArray(CanvasState.tempSections)) {
-            CanvasState.tempSections.forEach((sec) => {
-                if (sec && sec.id) byId.set(sec.id, sec);
-            });
-        }
-
-        nodes.forEach((nodeEl) => {
-            const sectionId = nodeEl && nodeEl.dataset ? nodeEl.dataset.sectionId : null;
-            if (!sectionId) return;
-            const section = byId.get(sectionId);
-            if (!section) return;
-            const badge = nodeEl.querySelector('[data-temp-origin-badge]');
-            if (!badge) return;
-            const text = getTempSectionOriginBadgeText(section);
-            if (text) {
-                badge.textContent = text;
-                badge.style.display = 'inline-flex';
-            } else {
-                badge.textContent = '';
-                badge.style.display = 'none';
-            }
-        });
-    } catch (_) { }
 }
 
 function isDescendantLabel(parentLabel, candidateLabel) {
@@ -5128,7 +4979,12 @@ function buildTempSectionLabelMap() {
     const map = new Map();
     CanvasState.tempSections.forEach(section => {
         const label = getTempSectionLabel(section);
-        if (label) map.set(label, section);
+        if (!label) return;
+        if (map.has(label)) {
+            map.set(label, null);
+        } else {
+            map.set(label, section);
+        }
     });
     return map;
 }
@@ -5161,10 +5017,14 @@ function propagateTempSectionColor(parentSection, color, options = {}) {
     const parentLabel = getTempSectionLabel(parentSection);
     if (!parentLabel) return;
     const labelMap = buildTempSectionLabelMap();
+    // Duplicate labels are valid, so label-only lineage is safe only when the
+    // parent and child labels each resolve to exactly one runtime section.
+    if (labelMap.get(parentLabel) !== parentSection) return;
     CanvasState.tempSections.forEach(section => {
         if (!section || section.id === parentSection.id) return;
         const label = getTempSectionLabel(section);
         if (label && isDescendantLabel(parentLabel, label)) {
+            if (labelMap.get(label) !== section) return;
             if (__isTempSectionColorLocked(section)) return;
             if (hasLockedAncestor(parentLabel, label, labelMap)) return;
             updateTempSectionColor(section, color, options);
@@ -5452,7 +5312,7 @@ function allocateTempSectionId(meta) {
 
 // Builds `temp-section-<label-chain>` from a section meta stub.
 //   - Regular chain section with explicit chain label ("A-1-1") → temp-section-A-1-1
-//   - Chain top-level (no explicit label, has sequenceNumber)  → temp-section-A-1
+//   - Every section has an explicit label; missing input is normalized to unknown.
 //   - Special section (drop/import/etc.) with descriptive label → temp-section-<label>
 // Special-section collisions are resolved later by `makeUniqueTempSectionId` with `-2/-3` suffixes.
 // doc 最终修复计划 §3.7: 特殊来源集合必须与目录识别保持一致。
@@ -5466,7 +5326,6 @@ function __isSpecialTempSource(source) {
 }
 function buildTempSectionIdFromMeta(meta) {
     const explicitLabelRaw = (meta && typeof meta.label === 'string') ? meta.label.trim() : '';
-    const seq = Number(meta && meta.sequenceNumber) || 0;
     const source = String(meta && meta.source || '').trim();
     const sanitize = (s) => String(s || '')
         .replace(/[^A-Za-z0-9一-鿿_-]/g, '_')
@@ -5486,12 +5345,8 @@ function buildTempSectionIdFromMeta(meta) {
             return `temp-section-${safe}`;
         }
     }
-    if (seq) {
-        const alpha = toAlphaLabel(seq);
-        if (alpha) return `temp-section-${alpha}-1`;
-    }
-    // Fallback that should never trigger for a properly built section.
-    return `temp-section-orphan-${seq || Date.now().toString(36)}`;
+    // Fallback for malformed external input; normalizers persist unknown before saving.
+    return 'temp-section-unknown';
 }
 
 // doc 最终修复计划 §3.6: 把 baseId 转换为当前 CanvasState 中唯一的 sectionId。
@@ -5517,12 +5372,11 @@ function buildTempSectionIdFromSection(section) {
     if (!section) return '';
     return buildTempSectionIdFromMeta({
         label: section.label,
-        sequenceNumber: section.sequenceNumber,
         source: section.source
     });
 }
 
-// Unified rewrite: when a section's label / sequenceNumber changes such that its computed
+// Unified rewrite: when a section's label changes such that its computed
 // `temp-section-<label-chain>` id no longer matches its current `section.id`, this function
 // rewrites every dependent reference in one pass:
 //   - CanvasState.tempSections[*].id
@@ -7364,10 +7218,9 @@ async function createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, folder
         : '';
 
     // 创建临时栏目
-    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+    const label = isEn ? 'Drop' : '拖入';
     const sectionId = allocateTempSectionId({
-        label: isEn ? 'Drop' : '拖入',
-        sequenceNumber,
+        label,
         source: 'browser-drop'
     });
 
@@ -7394,8 +7247,8 @@ async function createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, folder
         id: sectionId,
         title: sourceInfo,
         descriptionMd: __normalizeCanvasMarkdownSource(description),
-        label: isEn ? 'Drop' : '拖入',
-        sequenceNumber,
+        label,
+        tempKind: 'special',
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
@@ -7484,18 +7337,17 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         : '';
 
     // 创建临时栏目
-    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+    const label = isEn ? 'Drop' : '拖入';
     const sectionId = allocateTempSectionId({
-        label: isEn ? 'Drop' : '拖入',
-        sequenceNumber,
+        label,
         source: 'browser-drop'
     });
     const section = {
         id: sectionId,
         title: sourceInfo,
         descriptionMd: __normalizeCanvasMarkdownSource(description),  // 添加说明
-        label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
-        sequenceNumber,
+        label,
+        tempKind: 'special',
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
@@ -7664,9 +7516,9 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
             const originSection = item.closest('.permanent-bookmark-section') || document.getElementById('permanentSection');
             CanvasState.dragState.permanentOriginSection = originSection || null;
             try {
-                CanvasState.dragState.permanentOriginMeta = __getOriginPermanentFromPermanentSectionElement(originSection);
+                CanvasState.dragState.permanentLabelContext = __getPermanentLabelContextFromSectionElement(originSection);
             } catch (_) {
-                CanvasState.dragState.permanentOriginMeta = null;
+                CanvasState.dragState.permanentLabelContext = null;
             }
             if (originSection) {
                 originSection.classList.add('drag-origin-active');
@@ -7811,7 +7663,7 @@ function enhanceBookmarkTreeForCanvas(treeContainer) {
                 originSection.classList.remove('drag-origin-active');
             }
             CanvasState.dragState.permanentOriginSection = null;
-            CanvasState.dragState.permanentOriginMeta = null;
+            CanvasState.dragState.permanentLabelContext = null;
             // 兜底：移除所有可能残留的高亮
             try {
                 const canvasContent = document.getElementById('canvasContent');
@@ -11216,7 +11068,6 @@ function __updatePermanentSectionIndexBadges() {
             __setPermanentSectionIndexBadge(sectionEl, idx ? `#${toAlphaLabel(idx + 1)}` : '');
             __ensurePermanentSectionLowDetailOverlay(sectionEl);
         });
-        try { __updateTempSectionOriginBadges(); } catch (_) { }
     } catch (_) { }
 }
 
@@ -11784,8 +11635,6 @@ function removePermanentSectionCopy(sectionEl) {
         const next = copies.filter(c => c && c.id !== copyId);
         __writePermanentSectionCopies(next);
 
-        // Remove origin marks from temp sections to avoid stale/duplicate #n confusion.
-        try { __clearTempSectionOriginForDeletedPermanentCopy(copyId); } catch (_) { }
     }
 
     try { removeEdgesForNode(canvasNodeId, { skipSave: true }); } catch (_) { }
@@ -12467,11 +12316,11 @@ function handlePermanentDragStart(e, data, type) {
     try {
         const originSection = e && e.target && e.target.closest ? e.target.closest('.permanent-bookmark-section') : null;
         CanvasState.dragState.permanentOriginSection = originSection || null;
-        CanvasState.dragState.permanentOriginMeta = __getOriginPermanentFromPermanentSectionElement(originSection);
+        CanvasState.dragState.permanentLabelContext = __getPermanentLabelContextFromSectionElement(originSection);
         if (originSection) originSection.classList.add('drag-origin-active');
     } catch (_) {
         CanvasState.dragState.permanentOriginSection = null;
-        CanvasState.dragState.permanentOriginMeta = null;
+        CanvasState.dragState.permanentLabelContext = null;
     }
 
     e.dataTransfer.effectAllowed = 'copy';
@@ -12581,7 +12430,7 @@ async function handlePermanentDragEnd(e) {
     CanvasState.dragState.cardGroupOwnerIdsBeforeDrag = null;
     CanvasState.dragState.dragSource = null;
     CanvasState.dragState.permanentOriginSection = null;
-    CanvasState.dragState.permanentOriginMeta = null;
+    CanvasState.dragState.permanentLabelContext = null;
     CanvasState.dragState.childElements = []; // 清空子元素数组
     try {
         const canvasContent = document.getElementById('canvasContent');
@@ -12599,7 +12448,7 @@ async function handlePermanentDragEnd(e) {
 // IX. TEMP SECTION MANAGEMENT (临时节点/栏目管理)
 // =================================================================================
 
-function __normalizeOriginPermanentPayload(payload) {
+function __normalizePermanentLabelContext(payload) {
     if (!payload || typeof payload !== 'object') return null;
     const copyIdRaw = (typeof payload.copyId === 'string') ? payload.copyId.trim() : '';
     const copyId = copyIdRaw ? copyIdRaw : null;
@@ -12609,7 +12458,7 @@ function __normalizeOriginPermanentPayload(payload) {
     return out;
 }
 
-function __getOriginPermanentFromPermanentSectionElement(permanentSectionEl) {
+function __getPermanentLabelContextFromSectionElement(permanentSectionEl) {
     if (!permanentSectionEl) return null;
 
     if (__isPermanentSectionCopy(permanentSectionEl)) {
@@ -12625,17 +12474,12 @@ function __getOriginPermanentFromPermanentSectionElement(permanentSectionEl) {
     return { copyId: null };
 }
 
-function __resolveOriginPermanentForNewTempSection(data) {
+function __resolvePermanentLabelContextForNewTempSection(data) {
     const fromPermanent = !!((data && data.source === 'permanent') || (CanvasState.dragState && CanvasState.dragState.dragSource === 'permanent'));
     if (!fromPermanent) return null;
 
-    // Explicit payload (future-proof)
-    try {
-        const normalized = __normalizeOriginPermanentPayload(data && data.originPermanent);
-        if (normalized) return normalized;
-    } catch (_) { }
-
-    // Pointer drag / external callers
+    // Pointer drag / external callers. This context is consumed during label
+    // allocation and is never attached to the temporary section.
     try {
         const copyIdRaw = (data && typeof data.permanentCopyId === 'string') ? data.permanentCopyId.trim() : '';
         const copyId = copyIdRaw ? copyIdRaw : null;
@@ -12652,21 +12496,21 @@ function __resolveOriginPermanentForNewTempSection(data) {
 
     // Drag state meta (covers multi-selection payload where data has no source fields)
     try {
-        const normalized = __normalizeOriginPermanentPayload(CanvasState.dragState && CanvasState.dragState.permanentOriginMeta);
+        const normalized = __normalizePermanentLabelContext(CanvasState.dragState && CanvasState.dragState.permanentLabelContext);
         if (normalized) return normalized;
     } catch (_) { }
 
     // Drag state origin element
     try {
         const originEl = CanvasState.dragState && CanvasState.dragState.permanentOriginSection;
-        const meta = __getOriginPermanentFromPermanentSectionElement(originEl);
+        const meta = __getPermanentLabelContextFromSectionElement(originEl);
         if (meta) return meta;
     } catch (_) { }
 
     // Fallback: query the highlighted origin in DOM (native drag)
     try {
         const active = document.querySelector('.permanent-bookmark-section.drag-origin-active');
-        const meta = __getOriginPermanentFromPermanentSectionElement(active);
+        const meta = __getPermanentLabelContextFromSectionElement(active);
         if (meta) return meta;
     } catch (_) { }
 
@@ -12704,9 +12548,6 @@ async function createTempNode(data, x, y) {
             await window.NoteSystem.ensurePermNotesLoaded();
         } catch (_) {}
     }
-    // Ensure new sequenceNumber continues from existing sections
-    try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
-    const forceSequenceLabel = !!(data && data.forceSequenceLabel);
     const explicitTitle = (data && typeof data.title === 'string') ? data.title.trim() : '';
     const explicitLabel = (data && typeof data.label === 'string') ? data.label.trim() : '';
     const isTempSplit = !!(data && data.source === 'temporary' && data.sectionId);
@@ -12715,7 +12556,7 @@ async function createTempNode(data, x, y) {
     let inheritedColor = null;
     let explicitLock = null;
     let splitPayload = [];
-    let originPermanent = null;
+    let permanentLabelContext = null;
     let parentSection = null;
 
     if (data && typeof data.colorLocked === 'boolean') {
@@ -12749,16 +12590,10 @@ async function createTempNode(data, x, y) {
             } catch (error) {
                 console.warn('[Canvas] 获取分裂栏目数据失败:', error);
             }
-            try {
-                const inheritedOrigin = __normalizeOriginPermanentPayload(parentSection.originPermanent);
-                if (inheritedOrigin) originPermanent = { ...inheritedOrigin };
-            } catch (_) { }
         }
     } else {
         try {
-            if (!forceSequenceLabel) {
-                originPermanent = __resolveOriginPermanentForNewTempSection(data);
-            }
+            permanentLabelContext = __resolvePermanentLabelContextForNewTempSection(data);
         } catch (_) { }
     }
 
@@ -12766,7 +12601,6 @@ async function createTempNode(data, x, y) {
         ? getCanvasAppearanceSettings().names.temp.mode
         : 'timestamp';
     const splitTitle = __resolveTempSplitTitle(data, splitPayload);
-    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const isDragBased = !!(data && (data.source === 'permanent' || data.source === 'temporary' || data.multi));
     let resolvedTitle = (!isDragBased && explicitTitle) ? explicitTitle : '';
     if (!resolvedTitle) {
@@ -12794,15 +12628,15 @@ async function createTempNode(data, x, y) {
     let resolvedLabel = '';
     if (explicitLabel) {
         resolvedLabel = explicitLabel;
-    } else if (!forceSequenceLabel) {
+    } else {
         if (inheritedLabel) {
             resolvedLabel = inheritedLabel;
-        } else if (!isTempSplit && originPermanent) {
+        } else if (!isTempSplit && permanentLabelContext) {
             // Generate label from permanent copy origin: A -> A-1, B -> B-1
             try {
                 let baseLabel = '';
-                if (originPermanent.copyId) {
-                    const idx = originPermanent.displayIndex || __resolvePermanentCopyDisplayIndex(originPermanent.copyId);
+                if (permanentLabelContext.copyId) {
+                    const idx = permanentLabelContext.displayIndex || __resolvePermanentCopyDisplayIndex(permanentLabelContext.copyId);
                     if (idx) baseLabel = toAlphaLabel(idx + 1);
                 } else {
                     baseLabel = toAlphaLabel(1); // Original -> A
@@ -12825,17 +12659,25 @@ async function createTempNode(data, x, y) {
             } catch (_) { }
         }
     }
+    if (!resolvedLabel) resolvedLabel = 'unknown';
+
+    const requestedTempKind = (data && typeof data.tempKind === 'string') ? data.tempKind.trim().toLowerCase() : '';
+    const tempKind = isTempSplit
+        ? (__isSpecialTempSection(parentSection) ? 'special' : 'regular')
+        : ((requestedTempKind === 'regular' || requestedTempKind === 'special')
+            ? requestedTempKind
+            : (((data && data.source === 'permanent') || permanentLabelContext) ? 'regular' : 'special'));
 
     const sectionId = allocateTempSectionId({
         label: resolvedLabel,
-        sequenceNumber,
         source: undefined // 见上方 §2.6 注释
     });
 
     const section = {
         id: sectionId,
         title: resolvedTitle,
-        sequenceNumber: sequenceNumber,
+        label: resolvedLabel,
+        tempKind,
         color: inheritedColor || pickTempSectionColor(),
         colorLocked: (typeof explicitLock === 'boolean') ? explicitLock : __getDefaultTempColorLockedState(),
         x,
@@ -12845,17 +12687,8 @@ async function createTempNode(data, x, y) {
         pinned: !!(data && data.pinned),
         items: []
     };
-    if (originPermanent) {
-        section.originPermanent = originPermanent;
-    }
-    // 标签（序号 badge）规则：
-    // - 默认不写入 label，让 UI 使用 sequenceNumber -> A-1/B-1/C-1...
-    // - 分裂/继承场景仍可写入 label
-    // - forceSequenceLabel=true 时，强制不写入 label（避免 A-2/B-2... 这类“分裂序号”）
-    if (resolvedLabel) {
-        section.label = resolvedLabel;
-    }
-
+    const source = (data && typeof data.source === 'string') ? data.source.trim() : '';
+    if (source && tempKind === 'special') section.source = source;
     const finalBaseSize = getTempSectionBaseSize(section);
     section.width = finalBaseSize.width;
     section.height = finalBaseSize.height;
@@ -12945,27 +12778,20 @@ async function createTempNode(data, x, y) {
 }
 
 function createEmptyTempSection(x, y, options = {}) {
-    // Ensure new sequenceNumber continues from existing sections
-    try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
-    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
+    const { isEn } = __getLang();
     const title = (options && typeof options.title === 'string' && options.title.trim())
         ? options.title.trim()
         : getDefaultTempSectionTitle();
     const label = (options && typeof options.label === 'string' && options.label.trim())
         ? options.label.trim()
-        : '';
+        : (isEn ? 'New' : '新建');
     const source = (options && typeof options.source === 'string' && options.source.trim())
         ? options.source.trim()
         : '';
-    const sectionId = allocateTempSectionId({ label, sequenceNumber, source });
-    // 创建时按 source/label 先做一次特殊判定，确保默认颜色从一开始就正确。
-    const isSpecialSource = __isSpecialTempSection({
-        source: (options && typeof options.source === 'string') ? options.source : '',
-        label: (options && typeof options.label === 'string') ? options.label : ''
-    });
+    const sectionId = allocateTempSectionId({ label, source });
     const color = (options && typeof options.color === 'string' && options.color.trim())
         ? options.color.trim()
-        : (isSpecialSource ? getSpecialTempSectionDefaultColor() : pickTempSectionColor());
+        : getSpecialTempSectionDefaultColor();
     const colorLocked = (options && typeof options.colorLocked === 'boolean')
         ? options.colorLocked
         : __getDefaultTempColorLockedState();
@@ -12986,7 +12812,8 @@ function createEmptyTempSection(x, y, options = {}) {
     const section = {
         id: sectionId,
         title,
-        sequenceNumber,
+        label,
+        tempKind: 'special',
         color,
         colorLocked: colorLocked,
         x: (typeof x === 'number' && isFinite(x)) ? x : 0,
@@ -12997,9 +12824,6 @@ function createEmptyTempSection(x, y, options = {}) {
         items: initialItems
     };
 
-    if (label) {
-        section.label = label;
-    }
     if (source) {
         section.source = source;
     }
@@ -23585,7 +23409,6 @@ function patchTempSectionShellInPlace(section, options = {}) {
         __patchTempSectionDescriptionInPlace(section, nodeElement, options);
     }
 
-    try { __updateTempSectionOriginBadges(); } catch (_) { }
     return true;
 }
 window.patchTempSectionShellInPlace = patchTempSectionShellInPlace;
@@ -25602,10 +25425,6 @@ function removeTempNode(sectionId, options = {}) {
     // Remove all edges connected to this section
     removeEdgesForNode(sectionId, { skipSave: true });
 
-    // ⚠️序号规则：删除某个临时栏目后，其他临时栏目的序号不应变化
-    // 仅当所有临时栏目都被清空时，才重置全局序号计数器（下次从 A 重新开始）
-    __resetTempSectionSequenceCounterIfEmpty();
-
     if (!skipSave) {
         saveCanvasSectionDelta({
             deleteSectionIds: [sectionId]
@@ -25749,7 +25568,6 @@ function _doClearCanvas(includeCopies) {
     CanvasState.tempSections = [];
     CanvasState.mdNodes = [];
     CanvasState.edges = [];
-    try { CanvasState.tempSectionSequenceNumber = 0; } catch (_) { }
 
     // 4. 清除选中状态
     CanvasState.selectedEdgeId = null;
@@ -26145,9 +25963,6 @@ function executeClickToClearDeletion() {
         try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
     }
 
-    // 删除后不重排序号；仅在全部清空时重置计数器
-    __resetTempSectionSequenceCounterIfEmpty();
-
     // 清除连接线选中状态
     CanvasState.selectedEdgeId = null;
     try { if (typeof hideEdgeToolbar === 'function') hideEdgeToolbar(); } catch (_) { }
@@ -26227,55 +26042,6 @@ function cancelClickToClearMode() {
     if (toolbar) toolbar.remove();
 
     clickToClearSelectedIds.clear();
-}
-
-// 重新计算所有临时栏目的序号，使其连续
-function reorderSectionSequenceNumbers() {
-    // 按当前序号排序
-    const sortedSections = CanvasState.tempSections
-        .filter(s => s.sequenceNumber) // 只处理有序号的
-        .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
-
-    // 重新分配序号 1, 2, 3, ...（显示为 A, B, C, ...）
-    sortedSections.forEach((section, index) => {
-        const newSequenceNumber = index + 1;
-        if (section.sequenceNumber !== newSequenceNumber) {
-            section.sequenceNumber = newSequenceNumber;
-            ;
-
-            // 更新DOM中的序号显示
-            const element = document.getElementById(section.id);
-            if (element) {
-                const badge = element.querySelector('.temp-node-sequence-badge');
-                if (badge) {
-                    applyTempSectionBadge(badge, getTempSectionLabel(section));
-                }
-            }
-        }
-    });
-
-    // 更新全局序号计数器为最大序号
-    CanvasState.tempSectionSequenceNumber = sortedSections.length;
-}
-
-function __resetTempSectionSequenceCounterIfEmpty() {
-    try {
-        if (!Array.isArray(CanvasState.tempSections) || CanvasState.tempSections.length === 0) {
-            CanvasState.tempSectionSequenceNumber = 0;
-            ;
-        }
-    } catch (_) { }
-}
-
-function __syncTempSectionSequenceCounterFromExisting() {
-    try {
-        let maxSeq = 0;
-        (CanvasState.tempSections || []).forEach((section) => {
-            const n = parseInt(section && section.sequenceNumber, 10);
-            if (Number.isFinite(n)) maxSeq = Math.max(maxSeq, n);
-        });
-        CanvasState.tempSectionSequenceNumber = maxSeq;
-    } catch (_) { }
 }
 
 // 注意：这个函数已经不需要了，因为永久栏目在renderCurrentView中直接创建到canvas-content中
@@ -27576,7 +27342,11 @@ function __normalizeCanvasTempStateForRuntime(stateInput, options = {}) {
     if (preserveRaw) {
         return {
             ...parsedState,
-            sections: sections.map((section) => __cloneCanvasProtocolJson(section)).filter(Boolean),
+            sections: sections.map((section) => {
+                const cloned = __cloneCanvasProtocolJson(section);
+                if (!cloned || typeof cloned !== 'object') return null;
+                return cloned;
+            }).filter(Boolean),
             tempSectionCounter: Number(parsedState.tempSectionCounter) || sections.length || 0,
             tempItemCounter: Number(parsedState.tempItemCounter) || 0,
             colorCursor: Number(parsedState.colorCursor) || 0,
@@ -27685,7 +27455,7 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external', optio
                     const dormantChanged = oldSection.dormant !== newSection.dormant;
                     const titleChanged = getTempSectionDisplayTitle(oldSection) !== getTempSectionDisplayTitle(newSection);
                     const badgeChanged = getTempSectionLabel(oldSection) !== getTempSectionLabel(newSection);
-                    const sourceChanged = oldSection.source !== newSection.source || oldSection.tempKind !== newSection.tempKind || JSON.stringify(oldSection.originPermanent || null) !== JSON.stringify(newSection.originPermanent || null);
+                    const sourceChanged = oldSection.source !== newSection.source || oldSection.tempKind !== newSection.tempKind;
                     const colorLockChanged = oldSection.colorLocked !== newSection.colorLocked;
                     const descriptionChanged = oldSection.description !== newSection.description ||
                         oldSection.descriptionMd !== newSection.descriptionMd ||
@@ -28184,8 +27954,7 @@ function __applyCanvasSectionDeltaPatch(manifestInput, records, rawSignal, sourc
                     || section.descDisplayRows !== entry.restored.descDisplayRows
                     || section.descEditMode !== entry.restored.descEditMode
                     || section.descEditRows !== entry.restored.descEditRows
-                    || section.suppressPlaceholder !== entry.restored.suppressPlaceholder
-                    || JSON.stringify(section.originPermanent || null) !== JSON.stringify(entry.restored.originPermanent || null);
+                    || section.suppressPlaceholder !== entry.restored.suppressPlaceholder;
                 const itemsChanged = JSON.stringify(section.items || []) !== JSON.stringify(entry.restored.items || []);
                 Object.assign(section, entry.restored);
                 if (shellChanged) {
@@ -28357,8 +28126,7 @@ function __applyCanvasTempSectionPatchRecords(records, rawSignal, source = 'exte
                 || section.descDisplayRows !== restored.descDisplayRows
                 || section.descEditMode !== restored.descEditMode
                 || section.descEditRows !== restored.descEditRows
-                || section.suppressPlaceholder !== restored.suppressPlaceholder
-                || JSON.stringify(section.originPermanent || null) !== JSON.stringify(restored.originPermanent || null);
+                || section.suppressPlaceholder !== restored.suppressPlaceholder;
 
             Object.assign(section, restored);
             if (shellChanged) {
@@ -29153,16 +28921,7 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
     refreshTempSectionCounters();
     __refreshCanvasNodeCounters();
 
-    // 恢复序号计数器（找到最大的序号）
-    let maxSequenceNumber = 0;
-    CanvasState.tempSections.forEach(section => {
-        if (section.sequenceNumber && section.sequenceNumber > maxSequenceNumber) {
-            maxSequenceNumber = section.sequenceNumber;
-        }
-    });
-    CanvasState.tempSectionSequenceNumber = maxSequenceNumber;
-
-    // 序号系统升级：把旧版的 A1 / A1-1 ... 统一转换为 A-1-1 / A-1-1-1 ...（不影响用户自定义的新格式）
+    // Normalize display labels and remove retired metadata before rendering.
     try { __normalizeExistingTempSectionLabels(); } catch (_) { }
 
     let shouldRenderShellOnly = false;

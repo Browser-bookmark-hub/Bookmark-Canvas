@@ -90,10 +90,10 @@
 ### A4. 临时栏目协议
 - 临时栏目是书签沙盒；永久栏目才是浏览器书签树。
 - 普通链式临时栏目在 `临时栏目/常规链式/`，标号如 `A-1`、`A-1-1`、`B-1`。链式派生可能有传递性，子链可以承接父链的大部分内容，也可能按需求只保留一部分。见 [R4](#ref-r4)。
-- 普通链式若有显式 `label`，以 `label` 为准；无显式 label 时才由 `sequenceNumber` 经 `toAlphaLabel()` 生成兜底顶层标号：1 => A-1，2 => B-1，3 => C-1，27 => AA-1。见 [R1.4](#ref-r1-4)。
-- 从永久栏目来源创建的普通链式按来源槽位编号：主永久栏目/slot A 使用 `A-N`，永久副本/slot B 使用 `B-N`；新增时扫描同族已有标号取 max+1，所以第二个 A 来源栏目是 `A-2`，不是 `B-1`。
+- 每个临时栏目都必须有显式 `label`；外部输入缺失时使用固定协议值 `unknown`。见 [R1.4](#ref-r1-4)。
+- 从永久栏目来源创建普通链式时，只在创建瞬间按来源槽位选择标签族：主永久栏目/slot A 使用 `A-N`，永久副本/slot B 使用 `B-N`；新增时扫描同族已有标号取 max+1，所以第二个 A 来源栏目是 `A-2`，不是 `B-1`。创建后不得持久化永久来源关系。
 - 运行时 section ID 与标号绑定：`temp-section-A-1`、`temp-section-A-1-1`。栏目内每个 item 的 `sectionId` 必须一致。
-- 特殊临时栏目在 `临时栏目/特殊临时栏目/`，使用 `tempKind: "special"`，label 可以是拖入、搜索、添加、导入、AI 等中文或英文标签。见 [R5](#ref-r5)。
+- 特殊临时栏目在 `临时栏目/特殊临时栏目/`，使用 `tempKind: "special"`，label 必须显式填写，例如 `新建`、`拖入`、`搜索`、`导入`、AI。分裂时在父 label 后追加 `-N`，且仍为 `special`。见 [R5](#ref-r5)。
 - 同类特殊标签重复时，扫描已有同类 ID 后取 max+1，例如 `temp-section-AI`、`temp-section-AI-2`；用户可见的 `label` 仍可保持 `AI`。见 [R1.5](#ref-r1-5)。
 - 临时 item ID 使用 `tempId_YYYYMMDD_hash_<token7>`，其中 `token7` 只能是小写字母/数字。文件夹用 `type: "folder"`，书签用 `type: "bookmark"` 并带 `url`。见 [R1.1](#ref-r1-1)、[R1.3](#ref-r1-3) 与 [R4](#ref-r4)。
 
@@ -188,8 +188,8 @@ AI 应先根据用户原话、前文上下文、当前文件/目录、项目结�
 ### S4. ID 与编号规则
 - 永久栏目新增节点：`syncId_YYYYMMDD_hash_<token7>`；`token7` 只能是小写字母/数字，`parentId` 必须指向父节点 syncId。见 [R1.1](#ref-r1-1) 与 [R1.2](#ref-r1-2)。
 - 临时栏目新增 item：`tempId_YYYYMMDD_hash_<token7>`；`token7` 只能是小写字母/数字，嵌套 item 的 `sectionId` 都必须等于所在栏目 ID。见 [R1.1](#ref-r1-1) 与 [R1.3](#ref-r1-3)。
-- 普通链式标号：显式 `label` 优先；没有显式 label 时才用 `{字母}-1` 兜底，字母由 `sequenceNumber` 经 `toAlphaLabel()` 得到，示例：1 A-1，2 B-1，3 C-1，27 AA-1。见 [R1.4](#ref-r1-4)。
-- 从永久栏目来源创建的普通链式按来源族递增：slot A 是 `A-N`，slot B 是 `B-N`，扫描已有同族标号取 max+1。
+- 普通链式标号必须显式填写；外部输入没有 label 时使用固定协议值 `unknown`。见 [R1.4](#ref-r1-4)。
+- 从永久栏目来源创建的普通链式只在创建时按来源族递增：slot A 是 `A-N`，slot B 是 `B-N`，扫描已有同族标号取 max+1。
 - 派生普通链式可以继续扩展，如 `A-1-1`；编辑时保留父子链式意图。见 [R4](#ref-r4)。
 - 特殊临时栏目 ID 使用标签和重复后缀，如 `temp-section-AI`、`temp-section-AI-2`。见 [R1.5](#ref-r1-5)。
 
@@ -252,8 +252,8 @@ AI 应先根据用户原话、前文上下文、当前文件/目录、项目结�
 <a id="ref-r1-4"></a>
 #### R1.4 普通链式栏目 ID / label
 - 普通链式临时栏目 id 按标号生成：`temp-section-A-1`、`temp-section-A-1-1`、`temp-section-B-1`。
-- 普通链式标号优先使用显式 `label`。没有显式 label 时，兜底顶层标号才是 `{字母}-1`，字母由 `sequenceNumber` 经 `toAlphaLabel()` 得到。示例：sequenceNumber 1 => A-1，2 => B-1，3 => C-1，27 => AA-1。
-- 从永久栏目来源创建的普通链式不按裸 `sequenceNumber` 递进，而是按来源族递增：slot A 生成 `A-N`，永久副本/slot B 生成 `B-N`，扫描已有同族标号取 max+1。例如已有 `A-1` 时，另一个 A 来源栏目应为 `A-2`。
+- 普通链式标号必须显式填写；外部输入没有 label 时使用固定协议值 `unknown`。
+- 从永久栏目来源创建的普通链式只在创建瞬间按来源族递增：slot A 生成 `A-N`，永久副本/slot B 生成 `B-N`，扫描已有同族标号取 max+1。例如已有 `A-1` 时，另一个 A 来源栏目应为 `A-2`。
 - 普通链式派生标号可以继续扩展，如 `A-1-1`。链式继承是语义关系：派生栏目可以承接父栏目的大部分内容，但不要求完全一致。
 <a id="ref-r1-5"></a>
 #### R1.5 特殊临时栏目 ID
@@ -389,11 +389,7 @@ AI 应先根据用户原话、前文上下文、当前文件/目录、项目结�
         }
       ]
     }
-  ],
-  "originPermanent": {
-    "copyId": null
-  },
-  "sequenceNumber": 1
+  ]
 }
 ```
 派生链式栏目：
@@ -408,11 +404,7 @@ AI 应先根据用户原话、前文上下文、当前文件/目录、项目结�
   "tempKind": "regular",
   "source": "",
   "descriptionMd": "从 A-1 派生；只保留精简后的子集。",
-  "items": [],
-  "originPermanent": {
-    "copyId": null
-  },
-  "sequenceNumber": 1
+  "items": []
 }
 ```
 
@@ -456,8 +448,7 @@ AI 新增书签建议或生成书签树且没有现成指定落点时，使用�
         }
       ]
     }
-  ],
-  "sequenceNumber": 4
+  ]
 }
 ```
 

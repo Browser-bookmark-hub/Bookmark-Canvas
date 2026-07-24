@@ -1907,7 +1907,8 @@ function __getCanvasBookmarkImportBatchMeta(type) {
     const normalizedType = String(type || '').trim().toLowerCase();
     return {
         source: normalizedType === 'html' ? 'import-html-bookmarks' : 'import-json-bookmarks',
-        label: isEn ? 'Import' : '导入'
+        label: isEn ? 'Import' : '导入',
+        tempKind: 'special'
     };
 }
 
@@ -2502,13 +2503,11 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
 
     // 创建一个新的临时栏目容器
     // 在当前视口中找一个空白位置
-    const sectionMeta = { source: 'import-html-bookmarks', label: isEn ? 'Import' : '导入' };
+    const sectionMeta = { source: 'import-html-bookmarks', label: isEn ? 'Import' : '导入', tempKind: 'special' };
     const baseSize = getTempSectionBaseSize(sectionMeta);
     const position = __resolveCanvasImportPlacement(baseSize.width, baseSize.height, options);
-    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const sectionId = allocateTempSectionId({
         label: sectionMeta.label,
-        sequenceNumber,
         source: sectionMeta.source
     });
     const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
@@ -2524,8 +2523,8 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
         width: baseSize.width,
         height: baseSize.height,
         source: sectionMeta.source,
-        sequenceNumber,
         label: sectionMeta.label,
+        tempKind: sectionMeta.tempKind,
         items: []
     };
 
@@ -3123,19 +3122,17 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
     // 创建一个新的临时栏目容器
     // 在当前视口中找一个空白位置
     const fallbackImportLabel = isEn ? 'Import' : '导入';
-    const protocolLabel = String(tempProtocolMeta && tempProtocolMeta.label || '').trim();
+    const protocolLabel = String(tempProtocolMeta && tempProtocolMeta.label || '').trim() || 'unknown';
     const protocolSource = String(tempProtocolMeta && tempProtocolMeta.source || '').trim();
     const protocolTempKindRaw = String(tempProtocolMeta && tempProtocolMeta.tempKind || '').trim().toLowerCase();
     const protocolTempKind = (protocolTempKindRaw === 'special' || protocolTempKindRaw === 'regular')
         ? protocolTempKindRaw
         : '';
-    const protocolSequenceNumber = __normalizePositiveInt(tempProtocolMeta && tempProtocolMeta.sequenceNumber);
     const sectionMeta = importedViaCanvasTempProtocol
         ? {
             source: protocolSource,
             label: protocolLabel,
-            tempKind: protocolTempKind,
-            sequenceNumber: protocolSequenceNumber || undefined
+            tempKind: protocolTempKind || 'special'
         }
         : {
             source: 'import-json-bookmarks',
@@ -3144,11 +3141,8 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         };
     const baseSize = getTempSectionBaseSize(sectionMeta);
     const position = __resolveCanvasImportPlacement(baseSize.width, baseSize.height, options);
-    const nextSequenceNumber = ++CanvasState.tempSectionSequenceNumber;
-    const sequenceNumberForId = protocolSequenceNumber || nextSequenceNumber;
     const sectionId = allocateTempSectionId({
         label: sectionMeta.label,
-        sequenceNumber: sequenceNumberForId,
         source: sectionMeta.source
     });
     const fileNameTitle = String(importFileName || '').replace(/[\r\n]/g, ' ').trim();
@@ -3164,7 +3158,6 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
             ? tempProtocolMeta.descriptionMd
             : ''
     );
-    const protocolOriginPermanent = __normalizeOriginPermanentPayload(tempProtocolMeta && tempProtocolMeta.originPermanent);
     const section = {
         id: sectionId,
         title: sectionTitle,
@@ -3179,15 +3172,9 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         tempKind: sectionMeta.tempKind,
         items: items.map(item => convertToTempItem(item, sectionId)).filter(Boolean)
     };
-    if (protocolSequenceNumber) {
-        section.sequenceNumber = protocolSequenceNumber;
-    }
     if (protocolDescriptionMd) {
         section.descriptionMd = protocolDescriptionMd;
         section.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(protocolDescriptionMd));
-    }
-    if (protocolOriginPermanent) {
-        section.originPermanent = protocolOriginPermanent;
     }
 
     CanvasState.tempSections.push(section);

@@ -736,10 +736,8 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
     }
 
     // 创建临时栏目
-    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const sectionId = allocateTempSectionId({
         label: isEn ? 'Drop' : '拖入',
-        sequenceNumber,
         source: 'browser-drop'
     });
     const items = [];
@@ -760,8 +758,8 @@ async function createTempNodeFromMultipleUrls(urls, dropX, dropY) {
     const section = {
         id: sectionId,
         title: getDefaultTempSectionTitle(),
-        sequenceNumber: sequenceNumber,
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
+        tempKind: 'special',
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,
@@ -874,17 +872,15 @@ async function createTempNodeFromBookmarkFolder(folder, dropX, dropY) {
         const totalCount = countBookmarks(children);
 
         // 创建临时栏目（使用默认标题格式）
-        const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
         const sectionId = allocateTempSectionId({
             label: isEn ? 'Drop' : '拖入',
-            sequenceNumber,
             source: 'browser-drop'
         });
         const section = {
             id: sectionId,
             title: getDefaultTempSectionTitle(),
-            sequenceNumber: sequenceNumber,
             label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
+            tempKind: 'special',
             color: getSpecialTempSectionDefaultColor(),
             colorLocked: __getDefaultTempColorLockedState(),
             x: dropX,
@@ -983,10 +979,8 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         ? (isEn ? `Source: ${sourcePath}` : `来源路径：${sourcePath}`)
         : '';
 
-    const sequenceNumber = ++CanvasState.tempSectionSequenceNumber;
     const sectionId = allocateTempSectionId({
         label: isEn ? 'Drop' : '拖入',
-        sequenceNumber,
         source: 'browser-drop'
     });
     const section = {
@@ -994,7 +988,7 @@ async function createTempNodeFromBrowserBookmark(bookmark, dropX, dropY) {
         title: sourceInfo,
         descriptionMd: __normalizeCanvasMarkdownSource(description),  // 添加说明
         label: isEn ? 'Drop' : '拖入',  // 左边标签：拖入
-        sequenceNumber,
+        tempKind: 'special',
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
         x: dropX,

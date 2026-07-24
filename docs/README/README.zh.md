@@ -225,11 +225,7 @@
         }
       ]
     }
-  ],
-  "originPermanent": {
-    "copyId": null
-  },
-  "sequenceNumber": 1
+  ]
 }
 ```
 派生链式栏目：
@@ -244,11 +240,7 @@
   "tempKind": "regular",
   "source": "",
   "descriptionMd": "从 A-1 派生；只保留精简后的子集。",
-  "items": [],
-  "originPermanent": {
-    "copyId": null
-  },
-  "sequenceNumber": 1
+  "items": []
 }
 ```
 
@@ -292,8 +284,7 @@ AI 新增书签建议或生成书签树且没有现成指定落点时，使用�
         }
       ]
     }
-  ],
-  "sequenceNumber": 4
+  ]
 }
 ```
 

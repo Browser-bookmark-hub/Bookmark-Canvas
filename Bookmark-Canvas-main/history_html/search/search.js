@@ -4007,7 +4007,6 @@ function collectSectionSearchContentSignature(activeCanvasState) {
             id: normalizeCanvasSearchString(section.id),
             title: normalizeCanvasSearchString(title),
             label,
-            sequenceNumber: normalizeCanvasSearchString(section.sequenceNumber || null),
             description: normalizeCanvasSearchString((section.description || '').replace(/<[^>]+>/g, ' ').trim()),
             originDisplayIndex: normalizeCanvasSearchString(getTempSectionOriginDisplayIndex(section, label) || ''),
             color: normalizeCanvasSearchString(getTempSectionSearchColor(section)),
@@ -4239,31 +4238,26 @@ function getTempSectionSearchColor(section) {
 
 function getTempSectionSearchLabel(section) {
     if (!section || typeof section !== 'object') return '';
-    let label = (typeof section.label === 'string') ? section.label.trim() : '';
-    const sequenceNumber = section.sequenceNumber || null;
-    if (!label && sequenceNumber) {
-        const alpha = toAlpha(sequenceNumber);
-        if (alpha) label = `${alpha}-1`;
-    }
-    return label;
+    const label = (typeof section.label === 'string') ? section.label.trim() : '';
+    return label || 'unknown';
 }
 
 function getTempSectionOriginDisplayIndex(section, label = '') {
-    if (!section || typeof section !== 'object') return null;
-    let originDisplayIndex = null;
-    if (section.originPermanent && typeof section.originPermanent === 'object') {
-        if (typeof section.originPermanent.displayIndex === 'number') {
-            originDisplayIndex = section.originPermanent.displayIndex;
-        } else if (section.originPermanent.copyId === null) {
-            originDisplayIndex = 1;
-        }
+    // Only regular chain sections represent permanent-section column families.
+    // Special labels (for example AI-2) are user-visible names, not origins.
+    if (!section || String(section.tempKind || '').trim().toLowerCase() !== 'regular') {
+        return null;
     }
     const safeLabel = normalizeCanvasSearchString(label).trim();
-    if (safeLabel && /^[A-Z]-/i.test(safeLabel)) {
-        const inferredIndex = safeLabel.charAt(0).toUpperCase().charCodeAt(0) - 64;
-        if (inferredIndex >= 1) originDisplayIndex = inferredIndex;
+    const match = safeLabel.match(/^([A-Z]+)-\d+(?:-\d+)*$/);
+    if (!match) return null;
+
+    let originDisplayIndex = 0;
+    const letters = match[1].toUpperCase();
+    for (let i = 0; i < letters.length; i++) {
+        originDisplayIndex = (originDisplayIndex * 26) + (letters.charCodeAt(i) - 64);
     }
-    return originDisplayIndex;
+    return originDisplayIndex > 0 ? originDisplayIndex : null;
 }
 
 function buildCanvasSearchDateFields(timestamp) {
@@ -4377,16 +4371,8 @@ function checkCanvasSearchMultiColumnMode() {
     if (activeCanvasState && activeCanvasState.tempSections) {
         for (const section of activeCanvasState.tempSections) {
             if (!section) continue;
-            let idx = 1;
-            if (section.originPermanent && typeof section.originPermanent.displayIndex === 'number') {
-                idx = section.originPermanent.displayIndex;
-            }
-            const label = (typeof section.label === 'string') ? section.label.trim() : '';
-            if (label && /^[A-Z]-/i.test(label)) {
-                const letter = label.charAt(0).toUpperCase();
-                const inferred = letter.charCodeAt(0) - 64;
-                if (inferred > idx) idx = inferred;
-            }
+            const label = getTempSectionSearchLabel(section);
+            const idx = getTempSectionOriginDisplayIndex(section, label) || 1;
             if (idx > maxIndexFound) maxIndexFound = idx;
         }
     }
@@ -4400,7 +4386,6 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
     const title = section.title || section.name || '';
     const description = (section.description || '').replace(/<[^>]+>/g, ' ').trim();
     const label = getTempSectionSearchLabel(section);
-    const sequenceNumber = section.sequenceNumber || null;
     const originDisplayIndex = getTempSectionOriginDisplayIndex(section, label);
     const color = getTempSectionSearchColor(section);
     const metrics = getCanvasSearchBoxMetrics(section, color);
@@ -4410,7 +4395,6 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
         type: 'temp-section',
         title: title,
         label: label,
-        sequenceNumber: sequenceNumber,
         description: description,
         originDisplayIndex: originDisplayIndex,
         x: metrics.x,
@@ -5876,7 +5860,6 @@ function detectDirtyKeysFromLiveState() {
         if (cached.title !== liveTitle ||
             cached.description !== liveDesc ||
             normalizeCanvasSearchString(cached.label) !== normalizeCanvasSearchString(liveLabel) ||
-            normalizeCanvasSearchString(cached.sequenceNumber) !== normalizeCanvasSearchString(sec.sequenceNumber || null) ||
             normalizeCanvasSearchNumber(cached.originDisplayIndex, 0) !== normalizeCanvasSearchNumber(liveOriginDisplayIndex, 0) ||
             normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(liveColor)) {
             detected.add(`bcs:section:${sec.id}`);

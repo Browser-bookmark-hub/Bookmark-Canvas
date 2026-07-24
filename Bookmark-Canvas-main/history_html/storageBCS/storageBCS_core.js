@@ -3384,8 +3384,6 @@ function __buildTempSectionJsonProtocol(section) {
         isSnapshot: sectionMeta.isSnapshot ? true : undefined,
         items
     };
-    if (sectionMeta.originPermanent) payload.originPermanent = sectionMeta.originPermanent;
-    if (sectionMeta.sequenceNumber) payload.sequenceNumber = sectionMeta.sequenceNumber;
     [
         'descFontSize',
         'descDisplayMode',
@@ -3878,17 +3876,6 @@ function __buildImportedTempSectionFromJsonMarkdown(node, parsedMarkdown, conten
         label = parsed.label;
     }
 
-    let sequenceNumber = parsedJsonProtocol && parsedJsonProtocol.sectionMeta
-        ? __normalizePositiveInt(parsedJsonProtocol.sectionMeta.sequenceNumber)
-        : null;
-    const labelForSeq = label || '';
-    if (!sequenceNumber && labelForSeq) {
-        const alphaMatch = labelForSeq.match(/^([A-Z]+)/i);
-        const alphaPart = alphaMatch ? alphaMatch[1] : labelForSeq;
-        const seq = __alphaLabelToNumber(alphaPart);
-        if (seq) sequenceNumber = seq;
-    }
-
     const parsedTempKindRaw = String(
         parsedJsonProtocol && parsedJsonProtocol.sectionMeta && parsedJsonProtocol.sectionMeta.tempKind || ''
     ).trim().toLowerCase();
@@ -3905,10 +3892,7 @@ function __buildImportedTempSectionFromJsonMarkdown(node, parsedMarkdown, conten
         || __inferTempSectionSourceFromFilePath(node.file)
         || ''
     ).trim();
-    if (inferredSource && !label) {
-        const sourceLabel = __getSpecialTempSectionLabelBySource(inferredSource, isEn);
-        if (sourceLabel) label = sourceLabel;
-    }
+    label = label || 'unknown';
 
     const protocolInput = parsedJsonProtocol || {
         sectionMeta: {
@@ -3916,7 +3900,6 @@ function __buildImportedTempSectionFromJsonMarkdown(node, parsedMarkdown, conten
             title,
             tempKind: inferredTempKind,
             source: inferredSource,
-            sequenceNumber,
             descriptionMd: String(
                 parsedMarkdown && parsedMarkdown.descriptionMarkdown == null
                     ? ''
@@ -4741,8 +4724,6 @@ function __applyImportedTempState(state) {
     });
     try { renderEdges(); } catch (_) { }
 
-    // 导入：不重排序号；仅同步全局计数器，保证新建栏目不会复用旧序号
-    try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
     try { refreshTempSectionCounters(); } catch (_) { }
     try { __refreshCanvasNodeCounters(); } catch (_) { }
     try { updateCanvasScrollBounds(); } catch (_) { }
@@ -4965,10 +4946,14 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
         || fallbackTitle
         || (isEn ? 'Temp Section' : '临时栏目')
     ).trim() || (isEn ? 'Temp Section' : '临时栏目');
+    const snapshotLabel = isEn ? 'Import' : '导入';
     const protocolInput = {
         sectionMeta: {
             title,
             source: 'obsidian-permanent-reference',
+            tempKind: 'special',
+            label: snapshotLabel,
+            isSnapshot: true,
             descriptionMd: String(
                 (parsedMarkdown && typeof parsedMarkdown.descriptionMarkdown === 'string')
                     ? parsedMarkdown.descriptionMarkdown
@@ -4985,9 +4970,7 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
         width: node.width,
         height: node.height,
         color: convertObsidianColor(node.color) || '#fb464c',
-        isSnapshot: true,
-        tempKind: 'special',
-        label: isEn ? 'Import' : '导入'
+        isSnapshot: true
     });
     if (restored) return restored;
 
@@ -5008,7 +4991,7 @@ function __buildImportedTempSectionFromPermanentMarkdown(node, parsedMarkdown, d
         source: 'obsidian-permanent-reference',
         isSnapshot: true,
         tempKind: 'special',
-        label: isEn ? 'Import' : '导入'
+        label: snapshotLabel
     };
 }
 
@@ -5796,9 +5779,6 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     }
     CanvasState.mdNodes.push(...remappedNodes.mdNodes);
     CanvasState.edges.push(...remappedEdges);
-
-    // 导入：不重排序号；仅同步全局计数器，保证新建栏目不会复用旧序号
-    try { __syncTempSectionSequenceCounterFromExisting(); } catch (_) { }
 
     // 7. Restore Scrolls (Mapped to new IDs)
     Object.keys(remappedScrolls).forEach(scKey => {
@@ -7092,19 +7072,13 @@ function __toStableCanvasJson(value) {
 }
 
 function __normalizeTempSectionProtocolLabel(section) {
-    const rawLabel = getTempSectionLabel(section);
-    return __normalizeTempSectionLabelToDashScheme(rawLabel || '').trim();
+    const rawLabel = section && typeof section.label === 'string' ? section.label : '';
+    return rawLabel.trim() || 'unknown';
 }
 
 function __normalizeTempSectionProtocolRootId(section) {
     const label = __normalizeTempSectionProtocolLabel(section);
     if (label) return `tmp/${label}`;
-
-    const sequenceNumber = __normalizePositiveInt(section && section.sequenceNumber);
-    if (sequenceNumber) {
-        const alpha = toAlphaLabel(sequenceNumber) || `S${sequenceNumber}`;
-        return `tmp/${alpha}-1`;
-    }
 
     const rawSectionId = String(section && section.id || '').trim();
     const safeSectionId = rawSectionId
@@ -7238,14 +7212,8 @@ function __buildTempSectionProtocolMeta(section) {
     };
     if (section && section.isSnapshot) meta.isSnapshot = true;
 
-    if (normalizedLabel) meta.label = normalizedLabel;
+    meta.label = normalizedLabel;
     if (normalizedSource) meta.source = normalizedSource;
-
-    const sequenceNumber = __normalizePositiveInt(section && section.sequenceNumber);
-    if (sequenceNumber) meta.sequenceNumber = sequenceNumber;
-
-    const originPermanent = __normalizeOriginPermanentPayload(section && section.originPermanent);
-    if (originPermanent) meta.originPermanent = originPermanent;
 
     const descFontSize = Number(section && section.descFontSize);
     if (Number.isFinite(descFontSize) && descFontSize > 0) {
@@ -7309,14 +7277,12 @@ function __normalizeTempSectionProtocolObject(protocolInput) {
         label: rawMeta.label,
         title: rawMeta.title,
         source: rawMeta.source,
-        sequenceNumber: rawMeta.sequenceNumber,
         descriptionMd: rawMeta.descriptionMd,
         descFontSize: rawMeta.descFontSize,
         descDisplayMode: rawMeta.descDisplayMode,
         descDisplayRows: rawMeta.descDisplayRows,
         descEditMode: rawMeta.descEditMode,
         descEditRows: rawMeta.descEditRows,
-        originPermanent: rawMeta.originPermanent,
         isSnapshot: !!rawMeta.isSnapshot
     };
     if (Object.prototype.hasOwnProperty.call(rawMeta, 'suppressPlaceholder')) {
@@ -7421,11 +7387,12 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
         pinned: !!options.pinned
     };
 
-    if (sectionMeta.label) restored.label = sectionMeta.label;
+    const optionLabel = String(options && options.label || '').trim();
+    const optionTempKind = String(options && options.tempKind || '').trim().toLowerCase();
+    restored.label = sectionMeta.label || optionLabel || 'unknown';
     if (sectionMeta.source) restored.source = sectionMeta.source;
     if (sectionMeta.tempKind) restored.tempKind = sectionMeta.tempKind;
-    if (sectionMeta.sequenceNumber) restored.sequenceNumber = sectionMeta.sequenceNumber;
-    if (sectionMeta.originPermanent) restored.originPermanent = __normalizeOriginPermanentPayload(sectionMeta.originPermanent);
+    else if (optionTempKind === 'special' || optionTempKind === 'regular') restored.tempKind = optionTempKind;
     const restoredDescriptionMd = String(sectionMeta.descriptionMd == null ? '' : sectionMeta.descriptionMd);
     restored.descriptionMd = restoredDescriptionMd;
     restored.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(restoredDescriptionMd));
@@ -7442,8 +7409,6 @@ function __buildRuntimeTempSectionFromProtocol(protocolInput, options = {}) {
     if (options.isSnapshot || sectionMeta.isSnapshot) {
         restored.isSnapshot = true;
         restored.tempKind = restored.tempKind || 'special';
-        const { isEn } = __getLang();
-        restored.label = restored.label || (isEn ? 'Import' : '导入');
     }
 
     return restored;
