@@ -560,17 +560,6 @@
     return Math.max(0, parts.length - 2);
   }
 
-  function getTempParentLabel(label) {
-    const normalized = normalizeText(label);
-    if (!normalized) return '';
-    const dashIndex = normalized.lastIndexOf('-');
-    if (dashIndex > 0) return normalized.slice(0, dashIndex);
-
-    const legacy = normalized.match(/^([A-Za-z]+)\d+$/);
-    if (legacy) return String(legacy[1] || '').toUpperCase();
-    return '';
-  }
-
   function isSpecialTempSection(section) {
     if (!section) return false;
     if (section.isSnapshot) return true;
@@ -892,8 +881,8 @@
     const aSpecial = isSpecialTempSection(a);
     const bSpecial = isSpecialTempSection(b);
     if (aSpecial !== bSpecial) return aSpecial ? 1 : -1;
-    const nameA = getTempSectionLabel(a) || getTempSectionDisplayText(a);
-    const nameB = getTempSectionLabel(b) || getTempSectionDisplayText(b);
+    const nameA = getTempSectionDisplayText(a);
+    const nameB = getTempSectionDisplayText(b);
     const cmp = compareText(nameA, nameB);
     if (cmp !== 0) return cmp;
     return compareText(a && a.id, b && b.id);
@@ -992,7 +981,7 @@
     };
   }
 
-  function buildSplitChainNodes(splitTempSections, options = {}) {
+  function buildFlatTempSectionNodes(tempSections, options = {}) {
     const resolveColor = typeof options.resolveColor === 'function'
       ? options.resolveColor
       : (() => options.fallbackColor || '');
@@ -1000,60 +989,11 @@
     const keyPrefix = (typeof options.keyPrefix === 'string' && options.keyPrefix)
       ? options.keyPrefix
       : 'temp-split-';
-    const entries = (Array.isArray(splitTempSections) ? splitTempSections : []).map((section) => ({
-      section,
-      label: getTempSectionLabel(section),
-      children: []
-    }));
-
-    const entryByLabel = new Map();
-    entries.forEach((entry) => {
-      const key = normalizeText(entry.label);
-      if (!key || entryByLabel.has(key)) return;
-      entryByLabel.set(key, entry);
-    });
-
-    const roots = [];
-    entries.forEach((entry) => {
-      const parentLabel = getTempParentLabel(entry.label);
-      const parentEntry = parentLabel ? entryByLabel.get(parentLabel) : null;
-      if (parentEntry && parentEntry !== entry) {
-        parentEntry.children.push(entry);
-        return;
-      }
-      roots.push(entry);
-    });
-
-    const toNode = (entry) => {
-      const section = entry.section;
+    return (Array.isArray(tempSections) ? tempSections : []).map((section) => {
       const target = makeTempSectionTarget(section);
       const preview = getTempSectionDescription(section);
       const title = getTempSectionDisplayText(section);
       const key = `${keyPrefix}${section.id}`;
-
-      if (entry.children.length) {
-        return makeFolderNode({
-          key,
-          code: '',
-          title,
-          color: resolveColor(section),
-          defaultColor,
-          icon: 'fas fa-code-branch',
-          variant: 'chain',
-          showIcon: false,
-          showFoldControl: true,
-          showDeleteControl: true,
-          deleteAction: {
-            kind: 'temp-section',
-            sectionId: section.id,
-            scopeOptions: true
-          },
-          target,
-          preview,
-          children: foldExtraNodes(entry.children.map(toNode), `${key}-children`)
-        });
-      }
-
       return makeItemNode({
         key,
         code: '',
@@ -1072,10 +1012,51 @@
         target,
         preview
       });
-    };
+    });
+  }
 
-    const rootNodes = roots.map(toNode);
-    return foldExtraNodes(rootNodes, `${keyPrefix}root`);
+  function getRegularTempSectionLetterBucket(section) {
+    const label = normalizeText(getTempSectionLabel(section));
+    const match = label.match(/^([A-Za-z]+)(?:-\d+)+$/);
+    return match ? String(match[1] || '').toUpperCase() : '';
+  }
+
+  function buildRegularTempSectionBucketNodes(sections, options = {}) {
+    const keyPrefix = (typeof options.keyPrefix === 'string' && options.keyPrefix)
+      ? options.keyPrefix
+      : 'temp-split-';
+    const buckets = new Map();
+
+    (Array.isArray(sections) ? sections : []).forEach((section) => {
+      const bucket = getRegularTempSectionLetterBucket(section) || 'other';
+      if (!buckets.has(bucket)) buckets.set(bucket, []);
+      buckets.get(bucket).push(section);
+    });
+
+    return Array.from(buckets.entries())
+      .sort(([left], [right]) => {
+        if (left === 'other') return 1;
+        if (right === 'other') return -1;
+        return compareText(left, right);
+      })
+      .map(([bucket, bucketSections]) => makeFolderNode({
+        key: `${keyPrefix}bucket-${bucket}`,
+        code: '',
+        title: bucket === 'other' ? t('其他', 'Other') : bucket,
+        color: options.color || '',
+        defaultColor: options.defaultColor || options.color || '',
+        icon: 'fas fa-folder',
+        variant: 'temp-letter-bucket',
+        showFoldControl: true,
+        open: false,
+        count: bucketSections.length,
+        children: buildFlatTempSectionNodes(bucketSections, {
+          resolveColor: options.resolveColor,
+          fallbackColor: options.color || '',
+          defaultColor: options.defaultColor || options.color || '',
+          keyPrefix: `${keyPrefix}${bucket}-`
+        })
+      }));
   }
 
   function makePlaceholderItem(key, code, title, options = {}) {
@@ -1093,24 +1074,6 @@
       target: null,
       preview: ''
     });
-  }
-
-  function foldExtraNodes(nodes, parentKey) {
-    if (!Array.isArray(nodes) || nodes.length <= 5) return nodes;
-    const result = nodes.slice(0, 5);
-    const remaining = nodes.slice(5);
-    result.push(makeFolderNode({
-      key: `${parentKey}-more`,
-      code: '',
-      title: t('展开更多', 'Expand more'),
-      icon: 'fas fa-chevron-down',
-      showIcon: true,
-      showFoldControl: true,
-      open: false,
-      count: remaining.length,
-      children: remaining
-    }));
-    return result;
   }
 
   function getPinyinInitial(char) {
@@ -1367,43 +1330,15 @@
       const splitFolderIcon = config.splitFolderIcon || 'fas fa-sitemap';
       const specialFolderIcon = config.specialFolderIcon || 'fas fa-star';
 
-      const specialRootLabelSet = new Set();
-      const specialTempSections = [];
-      const splitTempSections = [];
-
-      const isSpecialLineageSection = (section) => {
-        const label = getTempSectionLabel(section);
-        if (!label) return false;
-        let parentLabel = getTempParentLabel(label);
-        while (parentLabel) {
-          if (specialRootLabelSet.has(parentLabel)) return true;
-          parentLabel = getTempParentLabel(parentLabel);
-        }
-        return false;
-      };
-
-      sections.forEach((section) => {
-        if (!section || !isSpecialTempSection(section)) return;
-        specialTempSections.push(section);
-        const label = normalizeText(getTempSectionLabel(section));
-        if (label) specialRootLabelSet.add(label);
-      });
-
-      sections.forEach((section) => {
-        if (!section || isSpecialTempSection(section)) return;
-        if (isSpecialLineageSection(section)) {
-          specialTempSections.push(section);
-        } else {
-          splitTempSections.push(section);
-        }
-      });
+      const specialTempSections = sections.filter((section) => section && isSpecialTempSection(section));
+      const splitTempSections = sections.filter((section) => section && !isSpecialTempSection(section));
 
       splitTempSections.sort(sortTempSections);
       specialTempSections.sort(sortTempSections);
 
-      const splitItems = buildSplitChainNodes(splitTempSections, {
+      const splitItems = buildRegularTempSectionBucketNodes(splitTempSections, {
         resolveColor: sectionColorResolver,
-        fallbackColor: splitColor,
+        color: splitColor,
         defaultColor: splitColor,
         keyPrefix: `${keyPrefix}temp-split-`
       });
@@ -1420,7 +1355,7 @@
         ));
       }
 
-      const specialItems = buildSplitChainNodes(specialTempSections, {
+      const specialItems = buildFlatTempSectionNodes(specialTempSections, {
         resolveColor: sectionColorResolver,
         fallbackColor: specialColor,
         defaultColor: specialColor,
@@ -3521,57 +3456,17 @@
     queueRefresh({ force: true });
   }
 
-  function collectTempSectionDeleteIds(sectionId, includeDescendants = false) {
+  function collectTempSectionDeleteIds(sectionId) {
     const normalizedId = normalizeText(sectionId);
-    if (!normalizedId) return [];
-
-    const state = getCanvasState();
-    const sections = Array.isArray(state && state.tempSections)
-      ? state.tempSections.filter(Boolean)
-      : [];
-
-    if (!sections.length) return [normalizedId];
-
-    const sectionById = new Map();
-    const labelById = new Map();
-    sections.forEach((section) => {
-      const id = normalizeText(section && section.id);
-      if (!id) return;
-      sectionById.set(id, section);
-      labelById.set(id, normalizeText(getTempSectionLabel(section)));
-    });
-
-    const target = sectionById.get(normalizedId);
-    if (!target) return [normalizedId];
-
-    const targetLabel = labelById.get(normalizedId) || '';
-    const ids = new Set([normalizedId]);
-
-    if (includeDescendants && targetLabel) {
-      const prefix = `${targetLabel}-`;
-      labelById.forEach((label, id) => {
-        if (!label) return;
-        if (label === targetLabel || label.startsWith(prefix)) {
-          ids.add(id);
-        }
-      });
-    }
-
-    return Array.from(ids).sort((a, b) => {
-      const la = labelById.get(a) || '';
-      const lb = labelById.get(b) || '';
-      if (la.length !== lb.length) return lb.length - la.length;
-      return compareText(a, b);
-    });
+    return normalizedId ? [normalizedId] : [];
   }
 
-  function runDeleteTempSectionAction(action, mode = 'confirm') {
+  function runDeleteTempSectionAction(action) {
     if (!action || action.kind !== 'temp-section') return false;
     const sectionId = normalizeText(action.sectionId);
     if (!sectionId || typeof global.removeTempNode !== 'function') return false;
 
-    const includeDescendants = !!(action.scopeOptions && mode === 'all');
-    const ids = collectTempSectionDeleteIds(sectionId, includeDescendants);
+    const ids = collectTempSectionDeleteIds(sectionId);
     let removed = false;
 
     ids.forEach((id) => {
