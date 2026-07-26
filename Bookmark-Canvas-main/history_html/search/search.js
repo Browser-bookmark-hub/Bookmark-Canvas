@@ -3940,20 +3940,6 @@ function stringifyCanvasSearchSignaturePayload(payload) {
     }
 }
 
-function parseCanvasSearchSignaturePayload(signature) {
-    const raw = normalizeCanvasSearchString(signature);
-    const sep = raw.indexOf(':');
-    if (sep <= 0) return null;
-    const version = raw.slice(0, sep);
-    if (!/^v\d+$/.test(version)) return null;
-    try {
-        const parsed = JSON.parse(raw.slice(sep + 1));
-        return parsed && typeof parsed === 'object' ? parsed : null;
-    } catch (_) {
-        return null;
-    }
-}
-
 function collectCanvasSearchContentSignature(activeCanvasState) {
     const canvasItems = [];
     if (!activeCanvasState || typeof activeCanvasState !== 'object') return canvasItems;
@@ -4097,118 +4083,6 @@ function buildCanvasSearchSignaturePayload(activeCanvasState) {
         sections: collectSectionSearchContentSignature(activeCanvasState),
         permanent: collectPermanentSearchContentSignature()
     };
-}
-
-function getCanvasSearchSignatureParts(signature) {
-    const raw = normalizeCanvasSearchString(signature);
-    const firstColon = raw.indexOf(':');
-    if (firstColon < 0) {
-        return {
-            raw,
-            version: raw,
-            tempStateTimestamp: '',
-            treeSnapshotToken: '',
-            permanentCopiesLen: ''
-        };
-    }
-
-    const version = raw.slice(0, firstColon);
-    const rest = raw.slice(firstColon + 1);
-    const secondColon = rest.indexOf(':');
-    if (secondColon < 0) {
-        return {
-            raw,
-            version,
-            tempStateTimestamp: rest,
-            treeSnapshotToken: '',
-            permanentCopiesLen: ''
-        };
-    }
-
-    const tempStateTimestamp = rest.slice(0, secondColon);
-    const afterTemp = rest.slice(secondColon + 1);
-    const lastColon = afterTemp.lastIndexOf(':');
-
-    return {
-        raw,
-        version,
-        tempStateTimestamp,
-        treeSnapshotToken: lastColon >= 0 ? afterTemp.slice(0, lastColon) : afterTemp,
-        permanentCopiesLen: lastColon >= 0 ? afterTemp.slice(lastColon + 1) : ''
-    };
-}
-
-function addDirtyKeysFromSearchSignatureDiff(detected, cachedSignature, liveSignature) {
-    if (!(detected instanceof Set)) return;
-    const cachedPayload = parseCanvasSearchSignaturePayload(cachedSignature);
-    const livePayload = parseCanvasSearchSignaturePayload(liveSignature);
-    if (cachedPayload && livePayload) {
-        if (stringifyCanvasSearchSignaturePayload(cachedPayload.canvas) !== stringifyCanvasSearchSignaturePayload(livePayload.canvas)) {
-            detected.add('bcs:canvas');
-        }
-
-        const cachedSections = new Map((Array.isArray(cachedPayload.sections) ? cachedPayload.sections : [])
-            .filter(sec => sec && sec.id)
-            .map(sec => [String(sec.id), sec]));
-        const liveSections = new Map((Array.isArray(livePayload.sections) ? livePayload.sections : [])
-            .filter(sec => sec && sec.id)
-            .map(sec => [String(sec.id), sec]));
-        for (const [sectionId, liveSection] of liveSections.entries()) {
-            if (stringifyCanvasSearchSignaturePayload(cachedSections.get(sectionId)) !== stringifyCanvasSearchSignaturePayload(liveSection)) {
-                detected.add(`bcs:section:${sectionId}`);
-            }
-        }
-        for (const sectionId of cachedSections.keys()) {
-            if (!liveSections.has(sectionId)) {
-                detected.add(`bcs:section:${sectionId}`);
-            }
-        }
-
-        const cachedPermanent = cachedPayload.permanent || {};
-        const livePermanent = livePayload.permanent || {};
-        if (normalizeCanvasSearchString(cachedPermanent.treeVersion) !== normalizeCanvasSearchString(livePermanent.treeVersion) ||
-            normalizeCanvasSearchString(cachedPermanent.treeFingerprint) !== normalizeCanvasSearchString(livePermanent.treeFingerprint)) {
-            detected.add('cachedCurrentTree');
-        }
-        if (normalizeCanvasSearchString(cachedPermanent.mainDescription) !== normalizeCanvasSearchString(livePermanent.mainDescription)) {
-            detected.add('bcs:perm:main');
-        }
-
-        const cachedCopies = new Map((Array.isArray(cachedPermanent.copies) ? cachedPermanent.copies : [])
-            .filter(copy => copy && copy.copyId)
-            .map(copy => [String(copy.copyId), copy]));
-        const liveCopies = new Map((Array.isArray(livePermanent.copies) ? livePermanent.copies : [])
-            .filter(copy => copy && copy.copyId)
-            .map(copy => [String(copy.copyId), copy]));
-        for (const [copyId, liveCopy] of liveCopies.entries()) {
-            if (stringifyCanvasSearchSignaturePayload(cachedCopies.get(copyId)) !== stringifyCanvasSearchSignaturePayload(liveCopy)) {
-                detected.add(`bcs:perm:copy-${copyId}`);
-            }
-        }
-        for (const copyId of cachedCopies.keys()) {
-            if (!liveCopies.has(copyId)) {
-                detected.add(`bcs:perm:copy-${copyId}`);
-            }
-        }
-        return;
-    }
-
-    const cached = getCanvasSearchSignatureParts(cachedSignature);
-    const live = getCanvasSearchSignatureParts(liveSignature);
-    if (!cached.raw || !live.raw || cached.raw === live.raw) return;
-
-    if (cached.version !== live.version) {
-        detected.add('bcs:canvas');
-        detected.add('bcs:perm:main');
-        return;
-    }
-
-    if (cached.treeSnapshotToken !== live.treeSnapshotToken) {
-        detected.add('cachedCurrentTree');
-    }
-    if (cached.permanentCopiesLen !== live.permanentCopiesLen) {
-        detected.add('bcs:perm:main');
-    }
 }
 
 function getCanvasSearchBoxMetrics(source, fallbackColor = '') {
@@ -5716,6 +5590,8 @@ function applyIncrementalUpdatesToMemory(dirtyKeys) {
             if (section) {
                 parseTempSectionSlice(section, sliceDb, sliceCoords, isMultiColumnMode, bookmarkOrderRef);
             }
+            // A missing section intentionally produces no replacement records:
+            // filtering the old owner records above completes the deletion.
         }
     });
 
@@ -5753,194 +5629,6 @@ function applyIncrementalUpdatesToMemory(dirtyKeys) {
     }
 }
 
-function detectDirtyKeysFromLiveState() {
-    const detected = new Set();
-    const activeCanvasState = getActiveCanvasState();
-    if (!activeCanvasState || !canvasSearchDb.itemById) return detected;
-    
-    // Calculate live standard MD cards and labeled card groups
-    let liveMdCount = 0;
-    if (Array.isArray(activeCanvasState.mdNodes)) {
-        for (const node of activeCanvasState.mdNodes) {
-            if (!node) continue;
-            if (node.subtype === 'card-group') {
-                if (String(node.label || '').trim()) {
-                    liveMdCount++; // Only count labeled card-groups as they are indexed
-                }
-            } else {
-                liveMdCount++;
-            }
-        }
-    }
-
-    // Calculate live labeled edges
-    let liveEdgeCount = 0;
-    if (Array.isArray(activeCanvasState.edges)) {
-        for (const edge of activeCanvasState.edges) {
-            if (edge && edge.label) {
-                liveEdgeCount++; // Only count labeled edges as unlabeled ones are skipped in index
-            }
-        }
-    }
-    
-    let cachedMdCount = 0;
-    let cachedEdgeCount = 0;
-    for (const item of canvasSearchDb.itemById.values()) {
-        if (item && (item.type === 'md-node' || item.type === 'group')) cachedMdCount++;
-        if (item && item.type === 'edge') cachedEdgeCount++;
-    }
-    
-    if (liveMdCount !== cachedMdCount || liveEdgeCount !== cachedEdgeCount) {
-        detected.add('bcs:canvas');
-    } else {
-        for (const node of (activeCanvasState.mdNodes || [])) {
-            if (!node || !node.id) continue;
-            if (node.subtype === 'card-group' && !String(node.label || '').trim()) continue;
-            
-            const cached = canvasSearchDb.itemById.get(node.id);
-            if (!cached) {
-                detected.add('bcs:canvas');
-                break;
-            }
-            if (node.subtype === 'card-group') {
-                const liveTitle = String(node.label || '').trim();
-                if (cached.title !== liveTitle ||
-                    cached.label !== liveTitle ||
-                    normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(getCanvasSearchNodeColor(node, '#475569'))) {
-                    detected.add('bcs:canvas');
-                    break;
-                }
-            } else {
-                const liveSubtype = node.subtype || '';
-                if (cached.title !== (node.title || '') ||
-                    cached.text !== (node.text || '') ||
-                    normalizeCanvasSearchString(cached.subtype) !== normalizeCanvasSearchString(liveSubtype) ||
-                    normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(getCanvasSearchNodeColor(node, '#2563eb'))) {
-                    detected.add('bcs:canvas');
-                    break;
-                }
-            }
-        }
-
-        if (!detected.has('bcs:canvas')) {
-            for (const edge of (activeCanvasState.edges || [])) {
-                if (!edge || !edge.id) continue;
-                if (!edge.label) continue;
-                const cached = canvasSearchDb.itemById.get(edge.id);
-                if (!cached) {
-                    detected.add('bcs:canvas');
-                    break;
-                }
-                const liveColor = edge.colorHex || canvasSearchPresetToHex(edge.color) || '#999';
-                const liveDirection = edge.direction || 'none';
-                if (cached.label !== edge.label ||
-                    normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(liveColor) ||
-                    normalizeCanvasSearchString(cached.direction || 'none') !== normalizeCanvasSearchString(liveDirection)) {
-                    detected.add('bcs:canvas');
-                    break;
-                }
-            }
-        }
-    }
-    
-    const liveSections = activeCanvasState.tempSections || [];
-    liveSections.forEach(sec => {
-        if (!sec || !sec.id) return;
-        const cached = canvasSearchDb.itemById.get(sec.id);
-        if (!cached) {
-            detected.add(`bcs:section:${sec.id}`);
-            return;
-        }
-        
-        const liveTitle = sec.title || sec.name || '';
-        const liveDesc = (sec.description || '').replace(/<[^>]+>/g, ' ').trim();
-        const liveLabel = getTempSectionSearchLabel(sec);
-        const liveOriginDisplayIndex = getTempSectionOriginDisplayIndex(sec, liveLabel);
-        const liveColor = getTempSectionSearchColor(sec);
-        if (cached.title !== liveTitle ||
-            cached.description !== liveDesc ||
-            normalizeCanvasSearchString(cached.label) !== normalizeCanvasSearchString(liveLabel) ||
-            normalizeCanvasSearchNumber(cached.originDisplayIndex, 0) !== normalizeCanvasSearchNumber(liveOriginDisplayIndex, 0) ||
-            normalizeCanvasSearchString(cached.color) !== normalizeCanvasSearchString(liveColor)) {
-            detected.add(`bcs:section:${sec.id}`);
-        }
-        
-        const cachedItems = Array.isArray(canvasSearchDb.bookmarkIndex)
-            ? canvasSearchDb.bookmarkIndex.filter(item => item && String(item.sectionId || '') === String(sec.id))
-            : [];
-        const liveItems = collectTempSectionSearchItemSnapshots(sec);
-        if (liveItems.length !== cachedItems.length) {
-            detected.add(`bcs:section:${sec.id}`);
-        } else {
-            for (let i = 0; i < liveItems.length; i += 1) {
-                const liveItem = liveItems[i];
-                const cachedItem = cachedItems[i];
-                if (!cachedItem ||
-                    normalizeCanvasSearchString(cachedItem.id) !== normalizeCanvasSearchString(liveItem.id) ||
-                    normalizeCanvasSearchString(cachedItem.nodeType) !== normalizeCanvasSearchString(liveItem.nodeType) ||
-                    normalizeCanvasSearchString(cachedItem.title) !== normalizeCanvasSearchString(liveItem.title) ||
-                    normalizeCanvasSearchString(cachedItem.url) !== normalizeCanvasSearchString(liveItem.url) ||
-                    normalizeCanvasSearchString(cachedItem.parentId) !== normalizeCanvasSearchString(liveItem.parentId) ||
-                    normalizeCanvasSearchString(cachedItem.namedPath) !== normalizeCanvasSearchString(liveItem.namedPath) ||
-                    getInlineTagSearchSignature(cachedItem.tags) !== normalizeCanvasSearchString(liveItem.tags) ||
-                    normalizeCanvasSearchString(cachedItem.note) !== normalizeCanvasSearchString(liveItem.note) ||
-                    normalizeCanvasSearchString(cachedItem.noteColor || NOTE_COLOR_DEFAULT) !== normalizeCanvasSearchString(liveItem.noteColor || NOTE_COLOR_DEFAULT)) {
-                    detected.add(`bcs:section:${sec.id}`);
-                    break;
-                }
-            }
-        }
-    });
-
-    // Detect deleted temp sections
-    for (const item of canvasSearchDb.itemById.values()) {
-        if (item && item.type === 'temp-section') {
-            const stillExists = liveSections.some(s => s && s.id === item.id);
-            if (!stillExists) {
-                detected.add(`bcs:section:${item.id}`);
-            }
-        }
-    }
-    
-    try {
-        const livePermDesc = getPermanentDescriptionTextForSearch(null);
-        const cachedPerm = canvasSearchDb.itemById.get('permanentSection');
-        if (!cachedPerm || (cachedPerm.description || '') !== livePermDesc) {
-            detected.add('bcs:perm:main');
-        }
-    } catch (_) {}
-    
-    try {
-        const liveCopies = getPermanentCopyShellsForSearch();
-        liveCopies.forEach(copy => {
-            if (!copy || !copy.copyId) return;
-            const cachedCopy = canvasSearchDb.itemById.get(copy.copyId);
-            if (!cachedCopy) {
-                detected.add(`bcs:perm:copy-${copy.copyId}`);
-                return;
-            }
-            const liveCopyDesc = getPermanentDescriptionTextForSearch(copy.copyId);
-            if ((cachedCopy.description || '') !== liveCopyDesc) {
-                detected.add(`bcs:perm:copy-${copy.copyId}`);
-            }
-        });
-
-        // Detect deleted permanent copies
-        for (const item of canvasSearchDb.itemById.values()) {
-            if (item && item.type === 'permanent-section' && item.copyId) {
-                const stillExists = liveCopies.some(c => c && String(c.copyId) === item.copyId);
-                if (!stillExists) {
-                    detected.add(`bcs:perm:copy-${item.copyId}`);
-                }
-            }
-        }
-    } catch (_) {}
-    
-    addDirtyKeysFromSearchSignatureDiff(detected, canvasSearchDb.signature, getCanvasSearchSignature());
-    
-    return detected;
-}
-
 async function buildCanvasSearchDbIncrementallyInMemory() {
     if (!isCanvasSearchStateReady()) {
         await waitForCanvasSearchStateReady();
@@ -5966,23 +5654,12 @@ async function buildCanvasSearchDbIncrementallyInMemory() {
     const keysToApply = new Set(SearchIndexManager.processingKeys
         ? Array.from(SearchIndexManager.processingKeys)
         : Array.from(SearchIndexManager.dirtyKeys));
-    const extraDirtyKeys = detectDirtyKeysFromLiveState();
-    const extraDirtyKeyList = Array.from(extraDirtyKeys);
-    if (extraDirtyKeyList.length > 0) {
-        try {
-            await SearchIndexManager.markDirty({ full: false, keys: extraDirtyKeyList });
-        } catch (err) {
-            console.warn('[Search] Failed to persist live-detected dirty keys. Keeping them in memory for this pass:', err);
-        }
-        extraDirtyKeyList.forEach(k => {
-            SearchIndexManager.dirtyKeys.add(k);
-            keysToApply.add(k);
-        });
-    }
-    
     if (keysToApply.size === 0 && canvasSearchDb.signature !== liveSig) {
-        ;
-        canvasSearchDb.signature = liveSig;
+        // No owner key means the change was outside the explicit BCS dirty-key
+        // path (for example a canvas manifest edit). Preserve correctness with
+        // one full fallback rebuild; normal section edits never enter this path.
+        SearchIndexManager.processingBaseSignature = null;
+        buildCanvasSearchDbSync();
         return;
     }
 
