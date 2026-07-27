@@ -1655,6 +1655,13 @@ async function showBackupDialog() {
                     return;
                 }
                 const sandbox = slot.sandbox;
+                // Keep the pre-restore state in memory so a failed destructive
+                // rebuild can be rolled back without overwriting the backup
+                // slot that is currently being restored.
+                let preRestoreSandbox = null;
+                try {
+                    preRestoreSandbox = await bridge.buildExportSandbox({ reason: 'backup-restore-pre' });
+                } catch (_) {}
                 const parsedStorage = {};
                 if (sandbox.permMain) parsedStorage['bcs:perm:main'] = sandbox.permMain;
                 if (sandbox.canvasState) parsedStorage['bcs:canvas'] = sandbox.canvasState;
@@ -1674,6 +1681,7 @@ async function showBackupDialog() {
                     importFileName: 'backup-slot',
                     threshold: 0, // force overwrite branch
                     skipBackupWrite: true, // doc §2.6 step 3: don't overwrite the slot we're restoring from
+                    rollbackSandbox: preRestoreSandbox,
                     deferRuntimeApply: true,
                     willReloadAfterImport: true
                 });

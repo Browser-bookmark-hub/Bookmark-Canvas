@@ -1079,7 +1079,7 @@ ${isEn()
                                     <span>${escapeHtml(t('2.2.2、默认数据包导入方式', '2.2.2 Default Data Package Import Mode'))}</span>
                                     <select id="githubConfigDefaultPullMode">
                                         <option value="snapshot"${config.defaultPullMode === 'snapshot' ? ' selected' : ''}>${escapeHtml(t('快照包导入', 'Snapshot import'))}</option>
-                                        <option value="overwrite"${config.defaultPullMode === 'overwrite' ? ' selected' : ''}>${escapeHtml(t('全量覆盖', 'Full Overwrite'))}</option>
+                                        <option value="overwrite"${config.defaultPullMode === 'overwrite' ? ' selected' : ''}>${escapeHtml(t('覆盖拉取', 'Overwrite Pull'))}</option>
                                         <option value="selective"${config.defaultPullMode === 'selective' ? ' selected' : ''}>${escapeHtml(t('选择拉取', 'Selective Pull'))}</option>
                                     </select>
                                 </label>
@@ -1087,7 +1087,7 @@ ${isEn()
                                     <span style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;">
                                         ${escapeHtml(t('差异阈值', 'Diff Threshold'))}
                                         <span class="github-config-info-trigger">?
-                                            <span class="github-config-info-tooltip ${isEn() ? 'is-en' : 'is-zh'}">${t('差异条目 ≥ 阈值时全量覆盖，<br>否则按增量更新。', 'If diff entries ≥ threshold, perform full overwrite; otherwise incremental.')}</span>
+                                            <span class="github-config-info-tooltip ${isEn() ? 'is-en' : 'is-zh'}">${t('差异条目达到或超过阈值时全量重建，<br>否则按增量更新。', 'At or above the threshold, rebuild all writable roots; otherwise update incrementally.')}</span>
                                         </span>
                                     </span>
                                     <input id="githubConfigOverwriteThreshold" type="number" min="1" max="100000" step="1" value="${escapeHtml(config.overwriteThreshold)}">
@@ -3002,6 +3002,21 @@ ${isEn()
         const dialog = document.createElement('div');
         dialog.className = 'import-dialog github-pull-mode-dialog';
         dialog.innerHTML = `
+            <style>
+                .github-pull-overwrite-threshold-input {
+                    width: 52px;
+                    height: 24px;
+                    padding: 0 4px;
+                    text-align: center;
+                    appearance: textfield;
+                    -moz-appearance: textfield;
+                }
+                .github-pull-overwrite-threshold-input::-webkit-inner-spin-button,
+                .github-pull-overwrite-threshold-input::-webkit-outer-spin-button {
+                    margin: 0;
+                    -webkit-appearance: none;
+                }
+            </style>
             <div class="import-dialog-content github-confirm-content">
                 <div class="import-dialog-header">
                     <h3>${escapeHtml(t('选择拉取方式', 'Choose Pull Mode'))}</h3>
@@ -3040,16 +3055,25 @@ ${isEn()
                                 <span class="import-mode-option-desc">${escapeHtml(t('相当于增量式导入：按快照包导入，并用分组框包裹（默认）。', 'Equivalent to incremental-style import: load as a snapshot package and wrap it in a group frame. (Default)'))}</span>
                             </span>
                         </button>
-                        <button id="githubPullOverwrite" type="button" class="import-mode-option github-pull-mode-option${defaultMode === 'overwrite' ? ' is-selected' : ''}">
+                        <div id="githubPullOverwrite" class="import-mode-option github-pull-mode-option${defaultMode === 'overwrite' ? ' is-selected' : ''}" role="button" tabindex="0">
                             <span class="import-mode-radio" aria-hidden="true"></span>
                             <span class="import-mode-option-main">
-                                <span class="import-mode-option-title">${escapeHtml(t('全量覆盖', 'Full Overwrite'))}</span>
-                                <span class="import-mode-option-desc">${t(
-                                    '清空本地目标，写入导入包内容。可通过<span id="githubPullBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">「备份」</span>撤销。',
-                                    'Clears current local target and writes the imported package in. Undo via <span id="githubPullBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">Backup</span>.'
-                                )}</span>
+                                <span class="import-mode-option-title">${escapeHtml(t('覆盖拉取', 'Overwrite Pull'))}</span>
+                                <span class="import-mode-option-desc">${escapeHtml(t('将远端永久书签应用到本地。', 'Apply remote permanent bookmarks locally.'))}</span>
+                                <span id="githubPullOverwriteThresholdConfig" style="display: none; margin-top: 4px;">
+                                    <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-primary);">
+                                        <span style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;">
+                                            ${escapeHtml(t('差异阈值', 'Diff Threshold'))}
+                                            <span class="github-config-info-trigger">
+                                                ?
+                                                <span class="github-config-info-tooltip ${isEn() ? 'is-en' : 'is-zh'}">${t('差异条目达到或超过阈值时全量重建，<br>否则按增量更新。', 'At or above the threshold, rebuild all writable roots; otherwise update incrementally.')}</span>
+                                            </span>
+                                        </span>
+                                        <input id="githubPullOverwriteThreshold" class="github-pull-overwrite-threshold-input" type="number" min="1" max="100000" step="1" value="${escapeHtml(config.overwriteThreshold)}">
+                                    </label>
+                                </span>
                             </span>
-                        </button>
+                        </div>
                         <button id="githubPullSelective" type="button" class="import-mode-option github-pull-mode-option${defaultMode === 'selective' ? ' is-selected' : ''}">
                             <span class="import-mode-radio" aria-hidden="true"></span>
                             <span class="import-mode-option-main">
@@ -3078,22 +3102,32 @@ ${isEn()
             const selectiveBtn = dialog.querySelector('#githubPullSelective');
             const cancelBtn = dialog.querySelector('#githubPullCancel');
             const confirmBtn = dialog.querySelector('#githubPullConfirm');
-            const backupJumpLink = dialog.querySelector('#githubPullBackupJump');
+            const overwriteThresholdConfig = dialog.querySelector('#githubPullOverwriteThresholdConfig');
+            const overwriteThresholdInput = dialog.querySelector('#githubPullOverwriteThreshold');
             const pullMethodHelpBtn = dialog.querySelector('#githubPullModeMethodHelp');
             const autoMethodRadio = dialog.querySelector('#githubPullModeMethodAuto');
             const zipballMethodRadio = dialog.querySelector('#githubPullModeMethodZipball');
             const targetedMethodRadio = dialog.querySelector('#githubPullModeMethodTargeted');
-            let pullMethodSavePromise = Promise.resolve();
+            let configSavePromise = Promise.resolve();
             const setSelectedMode = (mode) => {
                 selectedMode = mode === 'overwrite' || mode === 'selective' ? mode : 'snapshot';
                 if (snapshotBtn) snapshotBtn.classList.toggle('is-selected', selectedMode === 'snapshot');
                 if (overwriteBtn) overwriteBtn.classList.toggle('is-selected', selectedMode === 'overwrite');
                 if (selectiveBtn) selectiveBtn.classList.toggle('is-selected', selectedMode === 'selective');
+                if (overwriteThresholdConfig) overwriteThresholdConfig.style.display = selectedMode === 'overwrite' ? '' : 'none';
             };
             setSelectedMode(defaultMode);
             if (closeBtn) closeBtn.addEventListener('click', () => cleanup(null));
             if (snapshotBtn) snapshotBtn.addEventListener('click', () => setSelectedMode('snapshot'));
             if (overwriteBtn) overwriteBtn.addEventListener('click', () => setSelectedMode('overwrite'));
+            if (overwriteBtn) overwriteBtn.addEventListener('keydown', (event) => {
+                if (event.target !== overwriteBtn) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setSelectedMode('overwrite');
+                }
+            });
             if (selectiveBtn) selectiveBtn.addEventListener('click', () => setSelectedMode('selective'));
             if (pullMethodHelpBtn) {
                 pullMethodHelpBtn.addEventListener('click', async (event) => {
@@ -3105,38 +3139,48 @@ ${isEn()
             const saveSelectedPullMethod = (method) => {
                 const pullMethod = normalizePullMethod(method);
                 config.pullMethod = pullMethod;
-                pullMethodSavePromise = pullMethodSavePromise
+                configSavePromise = configSavePromise
                     .catch(() => {})
                     .then(() => saveConfig(Object.assign({}, config, { pullMethod })))
                     .catch((error) => {
                         console.warn('[Pull] Failed to save pull package method:', error);
                     });
             };
+            const saveSelectedOverwriteThreshold = (value) => {
+                const overwriteThreshold = normalizeThreshold(value);
+                config.overwriteThreshold = overwriteThreshold;
+                if (overwriteThresholdInput) overwriteThresholdInput.value = String(overwriteThreshold);
+                configSavePromise = configSavePromise
+                    .catch(() => {})
+                    .then(() => saveConfig(Object.assign({}, config, { overwriteThreshold })))
+                    .catch((error) => {
+                        console.warn('[Pull] Failed to save overwrite threshold:', error);
+                    });
+                return configSavePromise;
+            };
             if (autoMethodRadio) autoMethodRadio.addEventListener('change', () => saveSelectedPullMethod('auto'));
             if (zipballMethodRadio) zipballMethodRadio.addEventListener('change', () => saveSelectedPullMethod('zipball'));
             if (targetedMethodRadio) targetedMethodRadio.addEventListener('change', () => saveSelectedPullMethod('targeted'));
+            if (overwriteThresholdInput) overwriteThresholdInput.addEventListener('change', () => saveSelectedOverwriteThreshold(overwriteThresholdInput.value));
             if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
-            if (confirmBtn) confirmBtn.addEventListener('click', () => cleanup(selectedMode));
-            if (backupJumpLink) {
-                const openBackupDialog = (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    try { showBackupDialog(); } catch (err) { console.warn(err); }
-                };
-                backupJumpLink.addEventListener('click', openBackupDialog);
-                backupJumpLink.addEventListener('keydown', (event) => {
-                    if (event.key === 'Enter' || event.key === ' ') openBackupDialog(event);
-                });
-            }
+            if (confirmBtn) confirmBtn.addEventListener('click', async () => {
+                if (selectedMode === 'overwrite' && overwriteThresholdInput) {
+                    await saveSelectedOverwriteThreshold(overwriteThresholdInput.value);
+                }
+                cleanup(selectedMode);
+            });
             dialog.addEventListener('click', (event) => {
                 if (event.target === dialog) cleanup(null);
             });
-            dialog.addEventListener('keydown', (event) => {
+            dialog.addEventListener('keydown', async (event) => {
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     cleanup(null);
                 } else if (event.key === 'Enter') {
                     event.preventDefault();
+                    if (selectedMode === 'overwrite' && overwriteThresholdInput) {
+                        await saveSelectedOverwriteThreshold(overwriteThresholdInput.value);
+                    }
                     cleanup(selectedMode);
                 }
             });

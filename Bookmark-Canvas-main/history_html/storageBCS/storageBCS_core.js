@@ -1209,6 +1209,7 @@ function __buildPermanentIdentityMapPayload(identityMapInput, options = {}) {
         sectionType: 'permanent',
         slot: String(options && options.slot || 'A'),
         version: __normalizePermanentStorageVersion(options && options.version) || __makePermanentStorageVersion(),
+        generation: __normalizePermanentStorageVersion(options && options.generation) || null,
         updatedAt: Date.now(),
         identityMap
     };
@@ -1226,6 +1227,7 @@ function __buildPermanentMainStorageContentPayload(content, treeRoot, options = 
         version: __normalizePermanentStorageVersion(options && options.version)
             || __normalizePermanentStorageVersion(content && content.version)
             || __makePermanentStorageVersion(),
+        generation: __normalizePermanentStorageVersion(options && options.generation) || null,
         fileRole: 'primary',
         fileNote: String(content && content.fileNote ? content.fileNote : (__getLang().isEn
             ? 'Primary permanent file: canonical bookmark tree source.'
@@ -2256,10 +2258,27 @@ async function __readPermanentMainContentFromBcs(options = {}) {
         });
     }
     if (!treeOnly) {
-        const splitIdentityMap = __readPermanentIdentityMapPayload(storage ? storage[BCS_PERM_MAIN_IDENTITY_MAP_KEY] : null);
+        const splitIdentityMapPayload = storage ? storage[BCS_PERM_MAIN_IDENTITY_MAP_KEY] : null;
+        const splitIdentityMap = __readPermanentIdentityMapPayload(splitIdentityMapPayload);
+        const mainGeneration = __normalizePermanentStorageVersion(raw && raw.generation);
+        const identityMapGeneration = __normalizePermanentStorageVersion(splitIdentityMapPayload && splitIdentityMapPayload.generation);
+        // Legacy records have no generation and remain readable. Once either
+        // side writes one, both sides must agree before callers may trust the
+        // map as a basis for incremental Chrome mutations.
+        const identityMapCoherent = !(mainGeneration || identityMapGeneration)
+            || mainGeneration === identityMapGeneration;
         content.identityMap = Array.isArray(splitIdentityMap)
             ? splitIdentityMap
             : __bootstrapIdentityMapFromTree(content.tree);
+        try {
+            Object.defineProperty(content, '__identityMapGenerationCoherent__', {
+                configurable: true,
+                enumerable: false,
+                value: identityMapCoherent
+            });
+        } catch (_) {
+            content.__identityMapGenerationCoherent__ = identityMapCoherent;
+        }
         if (!(options && options.skipIdentityMapHeal === true)) {
             __verifyAndHealIdentityMap(content);
         }
@@ -2280,8 +2299,11 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
     if (!identityMap || !identityMap.length) {
         identityMap = __bootstrapIdentityMapFromTree(treeRoot);
     }
+    const generation = __normalizePermanentStorageVersion(options && options.generation)
+        || __makePermanentStorageVersion();
     const storageContent = __buildPermanentMainStorageContentPayload(content, treeRoot, {
-        version: options && options.version
+        version: options && options.version,
+        generation
     });
     const nextContent = {
         ...storageContent,
@@ -2297,7 +2319,8 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
     }
     const identityMapPayload = __buildPermanentIdentityMapPayload(identityMap, {
         slot: storageContent.slot,
-        version: __normalizePermanentStorageVersion(options && options.identityMapVersion)
+        version: __normalizePermanentStorageVersion(options && options.identityMapVersion),
+        generation
     });
     // Keep write paths deterministic for callers that immediately read-and-render
     // (e.g. overwrite import). Fire-and-forget can race the next render with stale BCS.
@@ -2309,7 +2332,8 @@ async function __writePermanentMainContentToBcs(contentInput, options = {}) {
     return {
         content: nextContent,
         version: storageContent.version,
-        identityMapVersion: identityMapPayload.version
+        identityMapVersion: identityMapPayload.version,
+        generation
     };
 }
 
@@ -8416,12 +8440,15 @@ async function __buildBcsDocumentsFromState(stateInput, options = {}) {
     if (permContent) {
         const permTree = __normalizePermanentTreeSnapshotForLocalStorage(permContent.tree);
         if (permTree) {
+            const permGeneration = __makePermanentStorageVersion();
             const permMainStorage = __buildPermanentMainStorageContentPayload(permContent, permTree[0], {
-                version: permContent.version
+                version: permContent.version,
+                generation: permGeneration
             });
             updates[BCS_PERM_MAIN_KEY] = permMainStorage;
             updates[BCS_PERM_MAIN_IDENTITY_MAP_KEY] = __buildPermanentIdentityMapPayload(permContent.identityMap, {
-                slot: permMainStorage.slot
+                slot: permMainStorage.slot,
+                generation: permGeneration
             });
         }
     }

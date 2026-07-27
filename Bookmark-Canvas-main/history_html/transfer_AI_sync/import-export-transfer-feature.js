@@ -570,18 +570,17 @@ function showImportModeConfirmDialog(options = {}) {
         const permanentDesc = isEn
             ? 'Equivalent to incremental-style import: load as a snapshot package and wrap it in a group frame. (Default)'
             : '相当于增量式导入：按快照包导入，并用分组框包裹（默认）。';
-        const overwriteTitle = isEn ? 'Full Overwrite' : '全量覆盖';
+        const overwriteTitle = isEn ? 'Overwrite Import' : '覆盖导入';
         const overwriteDesc = isEn
-            ? 'Clears current local target and writes the imported package in. Undo via <span id="importModeBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">Backup</span>.'
-            : '清空本地目标，写入导入包内容。可通过<span id="importModeBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">「备份」</span>撤销。';
+            ? 'Applies imported permanent bookmarks locally: incremental update below the threshold, full rebuild at or above it. Undo via <span id="importModeBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">Backup</span>.'
+            : '将导入包中的永久书签应用到本地：差异小于阈值时增量更新，达到阈值时全量重建。可通过<span id="importModeBackupJump" role="link" tabindex="0" style="color: #2563eb; text-decoration: underline; cursor: pointer;">「备份」</span>撤销。';
 
         const confirmText = isEn ? 'Import' : '导入';
         const cancelText = isEn ? 'Cancel' : '取消';
         const thresholdLabel = isEn ? 'Diff threshold (entries)' : '差异阈值（条目数）';
         const thresholdHint = isEn
-            ? 'If syncId diff entries ≥ threshold, full overwrite; otherwise incremental.'
-            : '差异条目 ≥ 阈值时全量覆盖，否则按增量更新。';
-
+            ? 'Below the threshold: incremental update. At or above it: full rebuild.'
+            : '小于阈值时增量更新；达到或超过阈值时全量重建。';
         dialog.innerHTML = `
             <div class="import-dialog-content import-mode-dialog-content">
                 <div class="import-dialog-header">
@@ -702,7 +701,6 @@ function showImportModeConfirmDialog(options = {}) {
         if (confirmBtn) {
             confirmBtn.addEventListener('click', async () => {
                 if (selectedMode === 'overwrite') {
-                    // Capture threshold from input (or fall back to default), persist, and confirm.
                     const inp = document.getElementById('importModeThresholdInput');
                     if (inp) {
                         const v = Math.max(1, Math.min(100000, parseInt(inp.value, 10) || 500));
@@ -712,16 +710,17 @@ function showImportModeConfirmDialog(options = {}) {
                         }
                     }
                     const confirmMsg = isEn
-                        ? `Full overwrite will clear your current local data and write the imported package in. You can undo via Backup. Threshold: ${currentThreshold}. Continue?`
-                        : `全量覆盖将清空当前本地数据并写入导入包内容。可通过「备份」撤销。阈值：${currentThreshold}。继续吗？`;
+                        ? `Overwrite import will use incremental update below ${currentThreshold} differences and full rebuild at or above it. You can undo via Backup. Continue?`
+                        : `覆盖导入会在差异少于 ${currentThreshold} 项时增量更新，达到或超过该值时全量重建。可通过「备份」撤销。继续吗？`;
                     if (!window.confirm(confirmMsg)) {
                         return;
                     }
                 }
+                const result = { mode: selectedMode, threshold: selectedMode === 'overwrite' ? currentThreshold : null };
                 if (onConfirm) {
-                    try { onConfirm(selectedMode, { threshold: currentThreshold }); } catch (_) { }
+                    try { onConfirm(selectedMode, { threshold: result.threshold }); } catch (_) { }
                 }
-                cleanup({ mode: selectedMode, threshold: currentThreshold });
+                cleanup(result);
             });
         }
 
@@ -921,6 +920,12 @@ function __countOverwriteDiff(localContent, importTreeRoot) {
 function __chromeBookmarksRemoveNodeByType(node) {
     if (!node || !node.id || !chrome || !chrome.bookmarks) return Promise.resolve(false);
     const childId = String(node.id);
+    // Chrome exposes several immutable system roots (including the synced
+    // root, commonly id 5). They are present in getTree() but cannot be
+    // removed with remove/removeTree. Ignore them before calling the API.
+    if (node.parentId == null || String(node.parentId) === '0' || ['0', '1', '2', '3', '5'].includes(childId)) {
+        return Promise.resolve(false);
+    }
     const isFolder = !node.url;
     const removeApi = isFolder ? chrome.bookmarks.removeTree : chrome.bookmarks.remove;
     if (typeof removeApi !== 'function') return Promise.resolve(false);
@@ -931,13 +936,21 @@ function __chromeBookmarksRemoveNodeByType(node) {
                     ? String(chrome.runtime.lastError.message || '')
                     : '';
                 if (err) {
+                    const normalizedError = err.toLowerCase();
+                    // Chrome may expose additional system roots (the numeric
+                    // id differs across profiles/versions). Their immutable
+                    // root-folder error is expected and should be silent.
+                    if (normalizedError.includes('root bookmark folder')) {
+                        resolve(false);
+                        return;
+                    }
+                    const expectedSkip = normalizedError.includes('managed')
+                        || normalizedError.includes('not found')
+                        || normalizedError.includes('does not exist')
+                        || normalizedError.includes('no bookmark');
+                    const message = `[Overwrite Import] bookmarks remove skipped (${isFolder ? 'removeTree' : 'remove'}, chromeId=${childId}): ${err}`;
                     try {
-                        console.warn('[Overwrite Import] bookmarks remove skipped:', {
-                            chromeId: childId,
-                            isFolder,
-                            api: isFolder ? 'removeTree' : 'remove',
-                            err
-                        });
+                        (expectedSkip ? console.debug : console.warn)(message);
                     } catch (_) {}
                     resolve(false);
                     return;
@@ -958,29 +971,6 @@ function __chromeBookmarksRemoveNodeByType(node) {
     });
 }
 
-async function __chromeBookmarksGetNodeById(chromeId) {
-    const id = String(chromeId || '').trim();
-    if (!id || !chrome || !chrome.bookmarks || typeof chrome.bookmarks.getSubTree !== 'function') return null;
-    try {
-        const roots = await new Promise((resolve) => {
-            try {
-                chrome.bookmarks.getSubTree(id, (nodes) => {
-                    const err = chrome.runtime && chrome.runtime.lastError;
-                    resolve(err ? null : nodes);
-                });
-            } catch (_) { resolve(null); }
-        });
-        return roots && roots[0] ? roots[0] : null;
-    } catch (_) {
-        return null;
-    }
-}
-
-async function __chromeBookmarksRemoveExistingNodeById(chromeId) {
-    const node = await __chromeBookmarksGetNodeById(chromeId);
-    return node ? __chromeBookmarksRemoveNodeByType(node) : false;
-}
-
 async function __chromeBookmarksRemoveAllInRoot(rootNode) {
     if (!rootNode || !Array.isArray(rootNode.children) || !chrome || !chrome.bookmarks) return;
     const childrenSnapshot = rootNode.children.slice();
@@ -990,35 +980,344 @@ async function __chromeBookmarksRemoveAllInRoot(rootNode) {
     }
 }
 
-async function __recreateChromeBookmarkTreeFromImport(importTreeRoot, syncIdToChromeId) {
+async function __getChromeBookmarkTreeSnapshot() {
+    if (!chrome || !chrome.bookmarks || typeof chrome.bookmarks.getTree !== 'function') {
+        throw new Error('[Overwrite Import] Chrome bookmarks API is unavailable.');
+    }
+    return await new Promise((resolve, reject) => {
+        try {
+            chrome.bookmarks.getTree((tree) => {
+                const err = chrome.runtime && chrome.runtime.lastError
+                    ? String(chrome.runtime.lastError.message || '')
+                    : '';
+                if (err) {
+                    reject(new Error('[Overwrite Import] bookmarks.getTree failed: ' + err));
+                    return;
+                }
+                if (!Array.isArray(tree) || !tree[0]) {
+                    reject(new Error('[Overwrite Import] Chrome bookmark tree is unavailable.'));
+                    return;
+                }
+                resolve(tree);
+            });
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+// One batch uses this mutable mirror between its initial and final getTree() calls.
+// Chrome create/move callbacks provide enough information to keep it current without
+// repeatedly downloading the full bookmark tree after every operation phase.
+function __buildChromeBookmarkLiveIndex(treeInput) {
+    const root = Array.isArray(treeInput) ? treeInput[0] : treeInput;
+    const nodeByChromeId = new Map();
+    const parentByChildId = new Map();
+    const childrenByParentId = new Map();
+    if (!root || typeof root !== 'object') {
+        return { root: null, nodeByChromeId, parentByChildId, childrenByParentId };
+    }
+
+    const stack = [{ node: root, parentId: '', index: -1 }];
+    while (stack.length) {
+        const entry = stack.pop();
+        const node = entry && entry.node;
+        if (!node || typeof node !== 'object') continue;
+        const id = String(node.id || '').trim();
+        if (!id) continue;
+        nodeByChromeId.set(id, node);
+        const children = Array.isArray(node.children) ? node.children : [];
+        const childIds = [];
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            const childId = String(child && child.id || '').trim();
+            if (!childId) continue;
+            childIds.push(childId);
+            parentByChildId.set(childId, { parentId: id, index: childIds.length - 1 });
+            stack.push({ node: child, parentId: id, index: childIds.length - 1 });
+        }
+        childrenByParentId.set(id, childIds);
+    }
+    return { root, nodeByChromeId, parentByChildId, childrenByParentId };
+}
+
+function __indexChromeBookmarkCreatedNode(index, createdNode) {
+    if (!index || !createdNode || !createdNode.id) return;
+    const id = String(createdNode.id);
+    const parentId = String(createdNode.parentId || '').trim();
+    if (!id || !parentId) return;
+    index.nodeByChromeId.set(id, createdNode);
+    if (!index.childrenByParentId.has(id)) index.childrenByParentId.set(id, []);
+    const siblings = index.childrenByParentId.get(parentId) || [];
+    const requestedIndex = Number(createdNode.index);
+    const insertAt = Number.isInteger(requestedIndex) && requestedIndex >= 0
+        ? Math.min(requestedIndex, siblings.length)
+        : siblings.length;
+    siblings.splice(insertAt, 0, id);
+    index.childrenByParentId.set(parentId, siblings);
+    index.parentByChildId.set(id, { parentId, index: insertAt });
+}
+
+function __indexChromeBookmarkMoveNode(index, chromeIdInput, parentIdInput, indexInput = null) {
+    if (!index) return;
+    const chromeId = String(chromeIdInput || '').trim();
+    const parentId = String(parentIdInput || '').trim();
+    if (!chromeId || !parentId) return;
+    const oldInfo = index.parentByChildId.get(chromeId);
+    if (oldInfo) {
+        const oldSiblings = index.childrenByParentId.get(oldInfo.parentId);
+        if (Array.isArray(oldSiblings)) {
+            const oldIndex = oldSiblings.indexOf(chromeId);
+            if (oldIndex >= 0) oldSiblings.splice(oldIndex, 1);
+        }
+    }
+    const siblings = index.childrenByParentId.get(parentId) || [];
+    const requestedIndex = Number(indexInput);
+    const insertAt = Number.isInteger(requestedIndex) && requestedIndex >= 0
+        ? Math.min(requestedIndex, siblings.length)
+        : siblings.length;
+    siblings.splice(insertAt, 0, chromeId);
+    index.childrenByParentId.set(parentId, siblings);
+    index.parentByChildId.set(chromeId, { parentId, index: insertAt });
+    const node = index.nodeByChromeId.get(chromeId);
+    if (node) {
+        node.parentId = parentId;
+        node.index = insertAt;
+    }
+}
+
+function __indexChromeBookmarkRemoveSubtree(index, chromeIdInput) {
+    if (!index) return;
+    const rootId = String(chromeIdInput || '').trim();
+    if (!rootId || !index.nodeByChromeId.has(rootId)) return;
+    const rootInfo = index.parentByChildId.get(rootId);
+    if (rootInfo) {
+        const siblings = index.childrenByParentId.get(rootInfo.parentId);
+        if (Array.isArray(siblings)) {
+            const pos = siblings.indexOf(rootId);
+            if (pos >= 0) siblings.splice(pos, 1);
+        }
+    }
+    const stack = [rootId];
+    while (stack.length) {
+        const id = stack.pop();
+        const children = index.childrenByParentId.get(id) || [];
+        for (const childId of children) stack.push(childId);
+        index.nodeByChromeId.delete(id);
+        index.parentByChildId.delete(id);
+        index.childrenByParentId.delete(id);
+    }
+}
+
+async function __chromeBookmarksMoveNode(chromeId, destination) {
+    return await new Promise((resolve) => {
+        try {
+            chrome.bookmarks.move(chromeId, destination, () => {
+                const err = chrome.runtime && chrome.runtime.lastError
+                    ? String(chrome.runtime.lastError.message || '')
+                    : '';
+                resolve({ ok: !err, error: err });
+            });
+        } catch (error) {
+            resolve({ ok: false, error: String(error && error.message || error || '') });
+        }
+    });
+}
+
+function __normalizeOverwriteRootType(rawType) {
+    const normalized = typeof __normalizeBookmarkFolderType === 'function'
+        ? __normalizeBookmarkFolderType(rawType)
+        : String(rawType || '').trim().toLowerCase();
+    if (normalized === 'bookmarks-bar' || normalized === 'other' || normalized === 'mobile' || normalized === 'managed') {
+        return normalized;
+    }
+    return '';
+}
+
+function __getOverwriteRootType(node) {
+    if (!node || typeof node !== 'object') return '';
+    const explicit = __normalizeOverwriteRootType(node.folderType || node.folder_type);
+    if (explicit) return explicit;
+    const title = String(node.title || node.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    try {
+        if (typeof __normalizePermanentRootTitleKey === 'function') {
+            const titleKey = String(__normalizePermanentRootTitleKey(node.title || node.name) || '').trim().toLowerCase();
+            if (titleKey === 'bookmark_bar') return 'bookmarks-bar';
+            if (titleKey === 'other') return 'other';
+            if (titleKey === 'mobile') return 'mobile';
+            if (titleKey === 'managed') return 'managed';
+        }
+    } catch (_) {}
+    if (title === 'bookmark bar' || title === 'bookmarks bar' || title === 'favorites bar') return 'bookmarks-bar';
+    if (title === 'other bookmarks' || title === 'other bookmark' || title === 'other favorites') return 'other';
+    if (title === 'mobile bookmarks' || title === 'mobile bookmark' || title === 'mobile favorites'
+        || title === 'synced bookmarks' || title === 'synced bookmark' || title === 'synced favorites') return 'mobile';
+    if (title === 'managed bookmarks' || title === 'managed bookmark') return 'managed';
+    try {
+        if (typeof __getPermanentRootMatchKey === 'function') {
+            const key = String(__getPermanentRootMatchKey(node) || '').trim().toLowerCase();
+            if (key === 'bookmark_bar') return 'bookmarks-bar';
+            if (key === 'other') return 'other';
+            if (key === 'mobile') return 'mobile';
+            if (key === 'managed') return 'managed';
+        }
+    } catch (_) {}
+    return '';
+}
+
+function __buildOverwriteRootResolution(importTreeRoot, treeInput) {
+    const liveRoot = Array.isArray(treeInput) ? treeInput[0] : treeInput;
+    if (!liveRoot || typeof liveRoot !== 'object' || !Array.isArray(liveRoot.children)) {
+        throw new Error('[Overwrite Import] Chrome bookmark root is unavailable.');
+    }
+
+    const liveRoots = liveRoot.children.filter((node) => node && node.id != null);
+    const rootIdByType = new Map();
+    const liveRootByType = new Map();
+    for (const node of liveRoots) {
+        const type = __getOverwriteRootType(node);
+        if (type && !liveRootByType.has(type)) {
+            liveRootByType.set(type, node);
+            rootIdByType.set(type, String(node.id));
+        }
+    }
+
+    // Use conventional IDs only as a compatibility fallback, and only when
+    // that ID is present in the live tree. The imported data never supplies a
+    // parent ID directly to Chrome.
+    const conventionalTypes = [
+        ['1', 'bookmarks-bar'],
+        ['2', 'other'],
+        ['3', 'mobile']
+    ];
+    for (const [id, type] of conventionalTypes) {
+        const node = liveRoots.find((candidate) => String(candidate.id) === id);
+        const detectedType = node ? __getOverwriteRootType(node) : '';
+        if (node && (!detectedType || detectedType === type) && !rootIdByType.has(type)) {
+            rootIdByType.set(type, id);
+            liveRootByType.set(type, node);
+        }
+    }
+
+    const topRootBySyncId = new Map();
+    const missing = [];
+    let writableImportRootCount = 0;
+    const importChildren = (importTreeRoot && Array.isArray(importTreeRoot.children)) ? importTreeRoot.children : [];
+    for (const topChild of importChildren) {
+        if (!topChild) continue;
+        const type = __getOverwriteRootType(topChild);
+        const syncId = String(topChild.id || '').trim();
+        if (!type || type === 'managed') continue;
+        writableImportRootCount += 1;
+        const liveNode = liveRootByType.get(type);
+        if (!liveNode) {
+            missing.push(`${type}${syncId ? ` (syncId=${syncId})` : ''}`);
+            continue;
+        }
+        if (syncId) topRootBySyncId.set(syncId, String(liveNode.id));
+    }
+    if (!writableImportRootCount) {
+        throw new Error('[Overwrite Import] import package contains no writable Chrome bookmark roots.');
+    }
+    if (missing.length) {
+        throw new Error('[Overwrite Import] required Chrome bookmark root missing: ' + missing.join(', '));
+    }
+
+    return {
+        liveRoot,
+        liveRoots,
+        rootIdByType,
+        topRootBySyncId
+    };
+}
+
+async function __resolveOverwriteRootResolution(importTreeRoot) {
+    const tree = await __getChromeBookmarkTreeSnapshot();
+    return __buildOverwriteRootResolution(importTreeRoot, tree);
+}
+
+function __validateImportedChromeTreeStructure(importTreeRoot, liveIndex, syncIdToChromeId) {
+    const errors = [];
+    const maxErrors = 8;
+    const pushError = (message) => {
+        if (errors.length < maxErrors) errors.push(message);
+    };
+    const mappedChromeId = (syncId) => syncIdToChromeId.get(String(syncId || '').trim()) || '';
+    const verifyChildren = (parentSyncId, children) => {
+        const parentChromeId = mappedChromeId(parentSyncId);
+        if (!parentChromeId) {
+            pushError(`missing parent mapping for syncId=${String(parentSyncId || '')}`);
+            return;
+        }
+        const actualChildren = liveIndex.childrenByParentId.get(parentChromeId) || [];
+        let previousPosition = -1;
+        for (const node of (Array.isArray(children) ? children : [])) {
+            if (!node || !node.id) continue;
+            const syncId = String(node.id);
+            const chromeId = mappedChromeId(syncId);
+            const actual = chromeId ? liveIndex.nodeByChromeId.get(chromeId) : null;
+            if (!actual) {
+                pushError(`missing node for syncId=${syncId}`);
+                continue;
+            }
+            const parent = liveIndex.parentByChildId.get(chromeId);
+            if (!parent || String(parent.parentId) !== String(parentChromeId)) {
+                pushError(`wrong parent for syncId=${syncId}`);
+            }
+            const actualPosition = actualChildren.indexOf(chromeId);
+            if (actualPosition < 0 || actualPosition < previousPosition) {
+                pushError(`wrong sibling order for syncId=${syncId}`);
+            } else {
+                previousPosition = actualPosition;
+            }
+            if (String(actual.title || '') !== String(node.title || '')) {
+                pushError(`wrong title for syncId=${syncId}`);
+            }
+            const expectedUrl = String(node.url || '');
+            const actualUrl = String(actual.url || '');
+            if (expectedUrl !== actualUrl) {
+                pushError(`wrong URL or node type for syncId=${syncId}`);
+            }
+            if (Array.isArray(node.children) && node.children.length) {
+                verifyChildren(syncId, node.children);
+            }
+        }
+    };
+    for (const topChild of (Array.isArray(importTreeRoot && importTreeRoot.children) ? importTreeRoot.children : [])) {
+        if (!topChild || !topChild.id || !mappedChromeId(topChild.id)) continue;
+        verifyChildren(String(topChild.id), topChild.children);
+    }
+    return { ok: errors.length === 0, errors };
+}
+
+async function __recreateChromeBookmarkTreeFromImport(importTreeRoot, syncIdToChromeId, rootResolution = null) {
     if (!importTreeRoot || !Array.isArray(importTreeRoot.children) || !chrome || !chrome.bookmarks) return;
     const createOne = (parentId, payload) => new Promise((resolve, reject) => {
         const createInfo = { parentId, title: String(payload.title || '') };
         if (payload.url) createInfo.url = payload.url;
         try {
             chrome.bookmarks.create(createInfo, (created) => {
-                if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError.message));
+                const runtimeError = chrome.runtime && chrome.runtime.lastError
+                    ? String(chrome.runtime.lastError.message || '')
+                    : '';
+                if (runtimeError) {
+                    reject(new Error(
+                        `[Overwrite Import] bookmarks.create failed (parentId=${String(parentId)}, syncId=${String(payload && payload.id || '')}): ${runtimeError}`
+                    ));
                 } else {
                     resolve(created);
                 }
             });
         } catch (e) { reject(e); }
     });
-    const folderTypeToChromeId = { 'bookmarks-bar': '1', 'other': '2', 'mobile': '3' };
-    // doc 第三轮修复 §2.2: 不再静默 fallback 到书签栏。folderType 缺失或未识别时返回 null,
-    // 调用方负责跳过该 top-child 并 console.warn, 避免把整棵子树堆到 '1' 导致重复。
+    const resolution = rootResolution || await __resolveOverwriteRootResolution(importTreeRoot);
     const rootChromeIdOf = (importRootChild) => {
-        const ft = String(importRootChild && importRootChild.folderType || '').trim();
-        if (folderTypeToChromeId[ft]) return folderTypeToChromeId[ft];
-        return null;
+        const syncId = String(importRootChild && importRootChild.id || '').trim();
+        return resolution.topRootBySyncId.get(syncId) || null;
     };
 
-    // Record root + top-level root syncId → fixed Chrome root id BEFORE walking children.
-    // These nodes are not created via chrome.bookmarks.create (they're permanent Chrome
-    // roots), so we map them by convention. Without this, the rebuilt identityMap would
-    // miss `root`, `bookmarks-bar`, `other`, `mobile` entries and __verifyAndHealIdentityMap
-    // would later mint fresh syncIds for them, violating doc §2.2.1.4.
+    // Record root + top-level root syncId → live Chrome root id BEFORE walking
+    // children. These nodes are not created via chrome.bookmarks.create.
     const importRootSyncId = String(importTreeRoot.id || '').trim();
     if (importRootSyncId) {
         syncIdToChromeId.set(importRootSyncId, '0');
@@ -1029,7 +1328,7 @@ async function __recreateChromeBookmarkTreeFromImport(importTreeRoot, syncIdToCh
         if (!topSyncId) continue;
         const chromeRootId = rootChromeIdOf(topChild);
         if (!chromeRootId) {
-            try { console.warn('[Overwrite Import] unknown top-root folderType, skipping:', topChild.folderType, 'syncId=', topSyncId); } catch (_) {}
+            try { console.warn('[Overwrite Import] unknown or unavailable top-root, skipping:', topChild.folderType, 'syncId=', topSyncId); } catch (_) {}
             continue;
         }
         syncIdToChromeId.set(topSyncId, chromeRootId);
@@ -1040,7 +1339,11 @@ async function __recreateChromeBookmarkTreeFromImport(importTreeRoot, syncIdToCh
         for (const node of importChildren) {
             if (!node || !node.id) continue;
             const created = await createOne(chromeParentId, node);
-            if (!created || !created.id) continue;
+            if (!created || !created.id) {
+                throw new Error(
+                    `[Overwrite Import] bookmarks.create returned no node (parentId=${String(chromeParentId)}, syncId=${String(node.id)})`
+                );
+            }
             syncIdToChromeId.set(String(node.id), String(created.id));
             if (Array.isArray(node.children) && node.children.length) {
                 await walk(created.id, node.children);
@@ -1195,7 +1498,9 @@ async function __performOverwriteImport(payload) {
     const parsedStorage = (payload && payload.parsedStorage && typeof payload.parsedStorage === 'object') ? payload.parsedStorage : {};
     const parsedPrimaryState = payload && payload.parsedPrimaryState;
     const importFileName = String(payload && payload.importFileName || '');
-    // doc 最终修复计划 §3.1: threshold:0 必须强制覆盖。
+    // Internal rollback and backup-restore callers pass threshold: 0 when they
+    // explicitly require a complete rebuild. User-facing overwrite imports use
+    // their configured threshold and retain the incremental branch below it.
     // 旧实现 `parseInt(...) || 300` 会把 0 重新映射成 300，导致 backup restore / auto-rollback 走增量分支。
     const __parsedThreshold = parseInt(payload && payload.threshold, 10);
     const threshold = Number.isFinite(__parsedThreshold) ? Math.max(0, __parsedThreshold) : 500;
@@ -1231,9 +1536,10 @@ async function __performOverwriteImport(payload) {
         importTree.children = importTree.children.filter(child => {
             if (!child) return false;
             const rawFt = child.folderType || child.folder_type || '';
-            const ft = typeof __normalizeBookmarkFolderType === 'function'
-                ? __normalizeBookmarkFolderType(rawFt)
-                : String(rawFt).trim().toLowerCase();
+            const ft = __getOverwriteRootType(child)
+                || (typeof __normalizeBookmarkFolderType === 'function'
+                    ? __normalizeBookmarkFolderType(rawFt)
+                    : String(rawFt).trim().toLowerCase());
             if (typeof __canPersistBookmarkRootSyncing === 'function') {
                 return __canPersistBookmarkRootSyncing(ft);
             }
@@ -1247,7 +1553,14 @@ async function __performOverwriteImport(payload) {
         skipIdentityMapHeal: true
     });
     const costEval = __countOverwriteDiff(localContent, importTree);
-    const goOverwrite = threshold <= 0 || costEval.costIncremental >= threshold;
+    const identityMapCoherent = !localContent || localContent.__identityMapGenerationCoherent__ !== false;
+    // A split tree/map generation mismatch means Chrome IDs may be associated
+    // with an older syncId table. Incremental matching is no longer safe, so
+    // rebuild from the import package instead of guessing.
+    const goOverwrite = !identityMapCoherent || threshold <= 0 || costEval.costIncremental >= threshold;
+    if (!identityMapCoherent) {
+        try { console.warn('[Overwrite Import] identityMap generation mismatch; forcing full rebuild.'); } catch (_) {}
+    }
     try {} catch (_) {}
 
     // 4. Open bulk-mute envelope.
@@ -1336,20 +1649,27 @@ async function __performOverwriteImport(payload) {
         } catch (_) {}
     };
     try {
+        // A batch has exactly one authoritative starting snapshot. Every
+        // incremental operation updates an in-memory index derived from it;
+        // only the final snapshot is fetched again for the commit audit.
+        const initialChromeTree = await __getChromeBookmarkTreeSnapshot();
+        const initialRootResolution = __buildOverwriteRootResolution(importTree, initialChromeTree);
+        const initialChromeIndex = __buildChromeBookmarkLiveIndex(initialChromeTree);
         const executeOverwriteBranch = async () => {
             // -- Overwrite branch ---------------------------------------------------------
-            // Clear Chrome bookmark roots (immediate children of the bookmarks tree root).
-            const tree = await new Promise((resolve) => chrome.bookmarks.getTree((t) => resolve(t)));
-            const rootNode = Array.isArray(tree) ? tree[0] : null;
-            if (rootNode && Array.isArray(rootNode.children)) {
-                for (const topRoot of rootNode.children) {
-                    if (!topRoot || !Array.isArray(topRoot.children)) continue;
-                    await __chromeBookmarksRemoveAllInRoot(topRoot);
-                }
+            const writableRootIds = new Set();
+            initialRootResolution.rootIdByType.forEach((id, type) => {
+                if (type !== 'managed') writableRootIds.add(String(id));
+            });
+            // Clear only roots that were positively identified as writable.
+            // Managed/unknown roots are intentionally preserved.
+            for (const topRoot of initialRootResolution.liveRoots) {
+                if (!writableRootIds.has(String(topRoot.id))) continue;
+                await __chromeBookmarksRemoveAllInRoot(topRoot);
             }
 
             const syncIdToChromeId = new Map();
-            await __recreateChromeBookmarkTreeFromImport(importTree, syncIdToChromeId);
+            await __recreateChromeBookmarkTreeFromImport(importTree, syncIdToChromeId, initialRootResolution);
 
             // doc 最终修复计划 §3.3: nextIdentityMap 必须只包含 expectedSyncIds 来源的项。
             const nextIdentityMap = [];
@@ -1361,8 +1681,9 @@ async function __performOverwriteImport(payload) {
                 nextIdentityMap.push(out);
             });
 
-            const freshTree = await new Promise((resolve) => chrome.bookmarks.getTree((t) => resolve(t)));
+            const freshTree = await __getChromeBookmarkTreeSnapshot();
             const freshRoot = Array.isArray(freshTree) ? freshTree[0] : null;
+            const freshIndex = __buildChromeBookmarkLiveIndex(freshTree);
 
             // doc 最终修复计划 §3.8 + 第三轮 §2.2/§2.3: 写入前校验通过 bridge 调用，
             // 并把 fresh tree 中 managed 等不可写根的 chromeId 列入 ignoredChromeIds，
@@ -1375,6 +1696,10 @@ async function __performOverwriteImport(payload) {
             );
             if (!validation.ok) {
                 throw new Error('[Overwrite Import] identityMap validation failed: ' + validation.errors.slice(0, 5).join('; '));
+            }
+            const structureValidation = __validateImportedChromeTreeStructure(importTree, freshIndex, syncIdToChromeId);
+            if (!structureValidation.ok) {
+                throw new Error('[Overwrite Import] final tree validation failed: ' + structureValidation.errors.join('; '));
             }
 
             await bridge.writePermanentTreeSnapshotAfterChromeApply([freshRoot], {
@@ -1404,25 +1729,28 @@ async function __performOverwriteImport(payload) {
                 localByChromeId.set(String(entry.id), entry);
             }
 
+            // identityMap can outlive a user-edited/deleted Chrome bookmark.
+            // Reuse it only when its Chrome ID is present in this batch's
+            // authoritative starting snapshot.
+            const lookups = initialChromeIndex;
+            const liveChromeIds = new Set(lookups.nodeByChromeId.keys());
+
             // Import tree shape:
             //   importTree (root, syncId = importRootSyncId)
             //     ├ topChild (folderType, syncId = topSyncId)
             //     │   └ ...children
             //     └ ...
-            const folderTypeToChromeId = { 'bookmarks-bar': '1', 'other': '2', 'mobile': '3' };
             const importRootSyncId = String(importTree.id || '').trim();
             const importTopSyncIdToChromeId = new Map();
-            // doc 第三轮修复 §2.2: 未识别的 folderType 直接跳过并 console.warn，
-            // 不再 fallback 到 '1'，避免把整棵子树堆到书签栏导致重复 / 错位。
             if (Array.isArray(importTree.children)) {
                 for (const topChild of importTree.children) {
                     if (!topChild) continue;
                     const topSyncId = String(topChild.id || '').trim();
                     if (!topSyncId) continue;
-                    const ft = String(topChild.folderType || '').trim();
-                    const mapped = folderTypeToChromeId[ft];
+                    const ft = __getOverwriteRootType(topChild);
+                    const mapped = initialRootResolution.rootIdByType.get(ft);
                     if (!mapped) {
-                        try { console.warn('[Incremental Import] unknown top-root folderType, skipping:', ft, 'syncId=', topSyncId); } catch (_) {}
+                        try { console.warn('[Incremental Import] unknown or unavailable top-root:', ft, 'syncId=', topSyncId); } catch (_) {}
                         continue;
                     }
                     importTopSyncIdToChromeId.set(topSyncId, mapped);
@@ -1471,7 +1799,9 @@ async function __performOverwriteImport(payload) {
             // Seed normal nodes with surviving local mappings.
             importNormalSyncIds.forEach((syncId) => {
                 const local = localBySyncId.get(syncId);
-                if (local) syncIdToChromeId.set(syncId, String(local.id));
+                if (local && liveChromeIds.has(String(local.id))) {
+                    syncIdToChromeId.set(syncId, String(local.id));
+                }
             });
 
             const createMissingWalk = async (chromeParentId, importChildren) => {
@@ -1487,7 +1817,10 @@ async function __performOverwriteImport(payload) {
                             try { chrome.bookmarks.create(createInfo, (c) => { if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message)); else resolve(c); }); } catch (e) { reject(e); }
                         });
                         chromeId = created && created.id;
-                        if (chromeId) syncIdToChromeId.set(syncId, chromeId);
+                        if (chromeId) {
+                            syncIdToChromeId.set(syncId, chromeId);
+                            __indexChromeBookmarkCreatedNode(lookups, created);
+                        }
                     }
                     if (chromeId && Array.isArray(node.children) && node.children.length) {
                         await createMissingWalk(chromeId, node.children);
@@ -1506,30 +1839,8 @@ async function __performOverwriteImport(payload) {
                 }
             }
 
-            // Update title/url. We need fresh local tree to compare correctly after creates.
-            const buildFreshLookups = async () => {
-                const t = await new Promise((resolve) => chrome.bookmarks.getTree((tree) => resolve(tree)));
-                const root = Array.isArray(t) ? t[0] : null;
-                const nodeByChromeId = new Map();
-                const parentByChildId = new Map();
-                if (root) {
-                    const stack = [{ node: root, parent: null, index: -1 }];
-                    while (stack.length) {
-                        const { node, parent, index } = stack.pop();
-                        if (!node || typeof node !== 'object') continue;
-                        const id = String(node.id || '').trim();
-                        if (id) {
-                            nodeByChromeId.set(id, node);
-                            if (parent) parentByChildId.set(id, { parentId: String(parent.id || '').trim(), index });
-                        }
-                        const children = Array.isArray(node.children) ? node.children : [];
-                        for (let i = 0; i < children.length; i++) stack.push({ node: children[i], parent: node, index: i });
-                    }
-                }
-                return { root, nodeByChromeId, parentByChildId };
-            };
-
-            let lookups = await buildFreshLookups();
+            // Created nodes have already been added to the batch index above.
+            // Updating title/URL does not change parent or ordering information.
             for (const imp of importNormalNodesBySyncId.values()) {
                 const chromeId = syncIdToChromeId.get(imp.syncId);
                 if (!chromeId) continue;
@@ -1542,15 +1853,24 @@ async function __performOverwriteImport(payload) {
                     if (needTitle) updateInfo.title = imp.title;
                     if (needUrl) updateInfo.url = imp.url;
                     try {
-                        await new Promise((resolve) => { try { chrome.bookmarks.update(chromeId, updateInfo, () => resolve()); } catch (_) { resolve(); } });
+                        const updated = await new Promise((resolve) => {
+                            try {
+                                chrome.bookmarks.update(chromeId, updateInfo, () => {
+                                    const err = chrome.runtime && chrome.runtime.lastError
+                                        ? String(chrome.runtime.lastError.message || '')
+                                        : '';
+                                    resolve(!err);
+                                });
+                            } catch (_) { resolve(false); }
+                        });
+                        if (updated) Object.assign(liveNode, updateInfo);
                     } catch (_) {}
                 }
             }
 
             // 2) Move/reorder.
             //    Phase 1: Resolve parent modifications (move nodes to their desired parents first, appended to the end).
-            //    Phase 2: Sort children within each modified folder in memory without rebuilding tree lookups.
-            lookups = await buildFreshLookups();
+            //    Phase 2: Sort children within each modified folder using the same batch index.
 
             const parentMoveQueue = [];
             const collectParentMoves = (importChildren) => {
@@ -1562,9 +1882,21 @@ async function __performOverwriteImport(payload) {
                     if (chromeId) {
                         const parentSyncId = String(node.parentId || '').trim();
                         const desiredParentChromeId = syncIdToChromeId.get(parentSyncId);
+                        const sourceNode = lookups.nodeByChromeId.get(String(chromeId));
+                        const desiredParentNode = desiredParentChromeId
+                            ? lookups.nodeByChromeId.get(String(desiredParentChromeId))
+                            : null;
                         const currentInfo = lookups.parentByChildId.get(chromeId);
                         const parentDiffers = !!(desiredParentChromeId && currentInfo && String(currentInfo.parentId) !== String(desiredParentChromeId));
-                        if (parentDiffers && desiredParentChromeId) {
+                        // Do not call bookmarks.move with stale IDs or a
+                        // non-folder/missing parent. The API reports these as
+                        // "Can't find parent bookmark for id." and the move
+                        // cannot succeed anyway.
+                        if (parentDiffers
+                            && desiredParentChromeId
+                            && sourceNode
+                            && desiredParentNode
+                            && !desiredParentNode.url) {
                             parentMoveQueue.push({ chromeId, desiredParentChromeId, syncId });
                         }
                     }
@@ -1581,23 +1913,15 @@ async function __performOverwriteImport(payload) {
             }
 
             for (const item of parentMoveQueue) {
-                try {
-                    await new Promise((resolve) => {
-                        try {
-                            chrome.bookmarks.move(
-                                item.chromeId,
-                                { parentId: item.desiredParentChromeId },
-                                () => {
-                                    const err = chrome.runtime && chrome.runtime.lastError ? String(chrome.runtime.lastError.message || '') : '';
-                                    if (err) {
-                                        try { console.warn('[Incremental Import] parent move failed:', item.syncId, err); } catch (_) {}
-                                    }
-                                    resolve();
-                                }
-                            );
-                        } catch (_) { resolve(); }
-                    });
-                } catch (_) {}
+                const moved = await __chromeBookmarksMoveNode(
+                    item.chromeId,
+                    { parentId: item.desiredParentChromeId }
+                );
+                if (!moved.ok) {
+                    try { console.warn('[Incremental Import] parent move failed:', item.syncId, moved.error); } catch (_) {}
+                    continue;
+                }
+                __indexChromeBookmarkMoveNode(lookups, item.chromeId, item.desiredParentChromeId);
             }
 
             // 3) Delete: local syncId not in expectedSyncIds. (Skip root/top-roots — they always exist.)
@@ -1613,9 +1937,10 @@ async function __performOverwriteImport(payload) {
                 toDeleteEntries.push(entry);
             }
             for (const entry of toDeleteEntries) {
-                try {
-                    await __chromeBookmarksRemoveExistingNodeById(entry.id);
-                } catch (_) {}
+                const node = lookups.nodeByChromeId.get(String(entry.id));
+                if (!node) continue;
+                const removed = await __chromeBookmarksRemoveNodeByType(node);
+                if (removed) __indexChromeBookmarkRemoveSubtree(lookups, entry.id);
             }
 
             const foldersToSort = [];
@@ -1648,14 +1973,15 @@ async function __performOverwriteImport(payload) {
                 chromeIdToSyncId.set(String(cid), String(sid));
             });
 
-            const finalPreSortLookups = await buildFreshLookups();
-
             for (const folder of foldersToSort) {
                 const parentId = folder.chromeId;
                 const expectedSyncIdsList = folder.expectedChildrenSyncIds;
 
-                const parentNode = finalPreSortLookups.nodeByChromeId.get(parentId);
-                const currentChromeChildren = (parentNode && Array.isArray(parentNode.children)) ? parentNode.children : [];
+                const parentNode = lookups.nodeByChromeId.get(parentId);
+                if (!parentNode || parentNode.url) continue;
+                const currentChromeChildren = (lookups.childrenByParentId.get(parentId) || [])
+                    .map((chromeId) => lookups.nodeByChromeId.get(chromeId))
+                    .filter(Boolean);
 
                 const simulatedList = currentChromeChildren.map(c => {
                     const cid = String(c.id);
@@ -1669,6 +1995,7 @@ async function __performOverwriteImport(payload) {
                     const targetSyncId = expectedSyncIdsList[i];
                     const targetChromeId = syncIdToChromeId.get(targetSyncId);
                     if (!targetChromeId) continue;
+                    if (!lookups.nodeByChromeId.has(String(targetChromeId))) continue;
 
                     const currentItem = simulatedList[i];
                     if (currentItem && currentItem.chromeId === targetChromeId) {
@@ -1683,20 +2010,12 @@ async function __performOverwriteImport(payload) {
                         simulatedList.splice(i, 0, movedItem);
                     }
 
-                    try {
-                        await new Promise((resolve) => {
-                            try {
-                                chrome.bookmarks.move(
-                                    targetChromeId,
-                                    { parentId, index: i },
-                                    () => {
-                                        const err = chrome.runtime && chrome.runtime.lastError ? String(chrome.runtime.lastError.message) : '';
-                                        resolve();
-                                    }
-                                );
-                            } catch (_) { resolve(); }
-                        });
-                    } catch (_) {}
+                    const moved = await __chromeBookmarksMoveNode(targetChromeId, { parentId, index: i });
+                    if (!moved.ok) {
+                        try { console.warn('[Incremental Import] reorder failed:', targetSyncId, moved.error); } catch (_) {}
+                        continue;
+                    }
+                    __indexChromeBookmarkMoveNode(lookups, targetChromeId, parentId, i);
                 }
             }
 
@@ -1720,7 +2039,8 @@ async function __performOverwriteImport(payload) {
                 if (chromeId) pushEntry(syncId, chromeId);
             });
 
-            const freshFinal = await buildFreshLookups();
+            const finalTree = await __getChromeBookmarkTreeSnapshot();
+            const freshFinal = __buildChromeBookmarkLiveIndex(finalTree);
 
             // doc 最终修复计划 §3.8 + 第三轮 §2.2/§2.3: validate before write via bridge,
             // 并把 fresh tree 中 managed 等不可写根的 chromeId 列入 ignoredChromeIds。
@@ -1732,6 +2052,10 @@ async function __performOverwriteImport(payload) {
             );
             if (!validation.ok) {
                 throw new Error('[Incremental Import] identityMap validation failed: ' + validation.errors.slice(0, 5).join('; '));
+            }
+            const structureValidation = __validateImportedChromeTreeStructure(importTree, freshFinal, syncIdToChromeId);
+            if (!structureValidation.ok) {
+                throw new Error('[Incremental Import] final tree validation failed: ' + structureValidation.errors.join('; '));
             }
 
             await bridge.writePermanentTreeSnapshotAfterChromeApply([freshFinal.root], {
@@ -1767,23 +2091,29 @@ async function __performOverwriteImport(payload) {
         success = true;
     } catch (mainErr) {
         console.error('[Overwrite Import] main flow failed:', mainErr);
-        // Attempt auto-rollback from the just-written backup slot (fix plan §2.6).
-        if (!skipBackupWrite) {
+        // Attempt auto-rollback from the just-written backup slot. Restore
+        // callers may provide an in-memory snapshot because they must not
+        // overwrite the backup slot being restored.
+        const suppliedRollbackSandbox = payload && payload.rollbackSandbox && typeof payload.rollbackSandbox === 'object'
+            ? payload.rollbackSandbox
+            : null;
+        if (!skipBackupWrite || suppliedRollbackSandbox) {
             try {
                 if (muteSession && muteSession.active && typeof window.endBookmarkBulkMute === 'function') {
                     await window.endBookmarkBulkMute('overwrite-import-failed', { refreshTree: false });
                     muteSession = null;
                 }
-                const slot = await bridge.readBackupSlot();
-                if (slot && slot.sandbox) {
+                const slot = suppliedRollbackSandbox ? null : await bridge.readBackupSlot();
+                const rollbackSandbox = suppliedRollbackSandbox || (slot && slot.sandbox);
+                if (rollbackSandbox) {
                     const rollbackStorage = {};
-                    if (slot.sandbox.permMain) rollbackStorage['bcs:perm:main'] = slot.sandbox.permMain;
-                    if (slot.sandbox.canvasState) rollbackStorage['bcs:canvas'] = slot.sandbox.canvasState;
-                    if (slot.sandbox.permCopies && typeof slot.sandbox.permCopies === 'object') {
-                        for (const k of Object.keys(slot.sandbox.permCopies)) rollbackStorage[k] = slot.sandbox.permCopies[k];
+                    if (rollbackSandbox.permMain) rollbackStorage['bcs:perm:main'] = rollbackSandbox.permMain;
+                    if (rollbackSandbox.canvasState) rollbackStorage['bcs:canvas'] = rollbackSandbox.canvasState;
+                    if (rollbackSandbox.permCopies && typeof rollbackSandbox.permCopies === 'object') {
+                        for (const k of Object.keys(rollbackSandbox.permCopies)) rollbackStorage[k] = rollbackSandbox.permCopies[k];
                     }
                     await __performOverwriteImport({
-                        parsedTempState: slot.sandbox.tempState,
+                        parsedTempState: rollbackSandbox.tempState,
                         parsedStorage: rollbackStorage,
                         parsedPrimaryState: null,
                         importFileName: 'rollback-from-backup',
@@ -1791,8 +2121,8 @@ async function __performOverwriteImport(payload) {
                         skipBackupWrite: true
                     });
                     const msg = isEn
-                        ? `Full overwrite failed; rolled back to backup. Error: ${mainErr.message}`
-                        : `全量覆盖失败，已回滚到备份。错误：${mainErr.message}`;
+                        ? `Overwrite import failed; rolled back to backup. Error: ${mainErr.message}`
+                        : `覆盖导入失败，已回滚到备份。错误：${mainErr.message}`;
                     try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'warning', 6000) : alert(msg); } catch (_) { alert(msg); }
                     return;
                 }
@@ -1813,7 +2143,7 @@ async function __performOverwriteImport(payload) {
         }
         if (!deferRuntimeApply) {
             await refreshTagUiAfterImport();
-            const msg = isEn ? 'Full overwrite complete. Undo via Backup.' : '全量覆盖完成。可通过「备份」撤销。';
+            const msg = isEn ? 'Overwrite import complete. Undo via Backup.' : '覆盖导入完成。可通过「备份」撤销。';
             try { (typeof showCanvasToast === 'function') ? showCanvasToast(msg, 'success', 4000) : alert(msg); } catch (_) { alert(msg); }
         }
     }
@@ -2026,7 +2356,7 @@ function showImportDialog(options = {}) {
         <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent-primary, #7c3aed); font-size: 13px;">Import Instructions</div>
         <div style="margin-bottom: 8px; line-height: 1.4;">
             <strong>Canvas Snapshot (ZIP / Folder)</strong><br>
-            Supports <span style="color: #f97316; font-weight: 600;">Full Overwrite Restore</span> (clearing current canvas and replacing all layout and bookmarks) or <span style="color: #f97316; font-weight: 600;">Import as Package</span> (incrementally loading as a grouped canvas section card).
+            Supports <span style="color: #f97316; font-weight: 600;">Overwrite Import</span> (apply permanent bookmarks incrementally below the selected threshold, or fully rebuild them at or above it, then restore the package layout) or <span style="color: #f97316; font-weight: 600;">Import as Package</span> (load as a grouped canvas section card).
         </div>
         <div style="margin-bottom: 8px; line-height: 1.4;">
             <strong>Bookmarks (HTML / JSON - can be dragged directly onto canvas)</strong><br>
@@ -2043,7 +2373,7 @@ function showImportDialog(options = {}) {
         <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent-primary, #7c3aed); font-size: 13px;">导入功能说明</div>
         <div style="margin-bottom: 8px; line-height: 1.4;">
             <strong>画布快照 (ZIP / 文件夹)</strong><br>
-            支持<span style="color: #f97316; font-weight: 600;">全量覆盖还原</span>（清空当前状态，重现快照的排版布局及所有书签数据）或<span style="color: #f97316; font-weight: 600;">快照包导入</span>（增量导入为当前画布下的一个分组卡片）。
+            支持<span style="color: #f97316; font-weight: 600;">覆盖导入</span>（永久书签按所选阈值处理：小于阈值时增量更新，达到或超过阈值时全量重建，并恢复包内排版）或<span style="color: #f97316; font-weight: 600;">快照包导入</span>（导入为当前画布下的一个分组卡片）。
         </div>
         <div style="margin-bottom: 8px; line-height: 1.4;">
             <strong>书签文件 (HTML / JSON - 可直接在画布中拖入)</strong><br>
@@ -2281,7 +2611,7 @@ async function handleFileImport(e) {
                 } catch (err) {
                     __hideImportReloadProgress();
                     console.error('[Overwrite Import] failed:', err);
-                    alert(isEn ? `Full overwrite failed: ${err.message}` : `全量覆盖失败：${err.message}`);
+                    alert(isEn ? `Overwrite import failed: ${err.message}` : `覆盖导入失败：${err.message}`);
                 }
                 return;
             }
@@ -2420,7 +2750,7 @@ async function handleFolderImport(e) {
             } catch (err) {
                 __hideImportReloadProgress();
                 console.error('[Overwrite Import] failed:', err);
-                alert(isEn ? `Full overwrite failed: ${err.message}` : `全量覆盖失败：${err.message}`);
+                alert(isEn ? `Overwrite import failed: ${err.message}` : `覆盖导入失败：${err.message}`);
             }
             return;
         }
