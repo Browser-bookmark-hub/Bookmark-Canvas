@@ -1134,6 +1134,17 @@ function __normalizeOverwriteRootType(rawType) {
     return '';
 }
 
+// managed is readable from the browser tree but is not a writable sync root.
+// Keep it out of the imported execution tree so both incremental and full
+// overwrite paths share the same boundary. Exporting the local snapshot is
+// intentionally unchanged here.
+function __isWritableOverwriteRootType(rawType) {
+    const normalized = __normalizeOverwriteRootType(rawType);
+    return normalized === 'bookmarks-bar'
+        || normalized === 'other'
+        || normalized === 'mobile';
+}
+
 function __getOverwriteRootType(node) {
     if (!node || typeof node !== 'object') return '';
     const explicit = __normalizeOverwriteRootType(node.folderType || node.folder_type);
@@ -1540,10 +1551,7 @@ async function __performOverwriteImport(payload) {
                 || (typeof __normalizeBookmarkFolderType === 'function'
                     ? __normalizeBookmarkFolderType(rawFt)
                     : String(rawFt).trim().toLowerCase());
-            if (typeof __canPersistBookmarkRootSyncing === 'function') {
-                return __canPersistBookmarkRootSyncing(ft);
-            }
-            return ft === 'bookmarks-bar' || ft === 'other' || ft === 'mobile' || ft === 'managed';
+            return __isWritableOverwriteRootType(ft);
         });
     }
     const importIdentityMap = Array.isArray(importPermMain.identityMap) ? importPermMain.identityMap : [];
