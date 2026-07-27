@@ -580,6 +580,10 @@ option {
     top: 0;
     z-index: 100;
     overflow: visible;
+    /* Keep both flex children ordered explicitly.  During the early layout
+       preload the dock class can briefly differ from body state; relying on
+       the default order in that window leaves a stale header-sized slot. */
+    order: 0;
     transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
@@ -2981,6 +2985,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 .main-container {
     display: flex;
     flex: 1 1 auto;
+    order: 1;
     /* 允许子级滚动容器正确收缩，避免撑开导致 body 出现滚动条 */
     min-height: 0;
 }

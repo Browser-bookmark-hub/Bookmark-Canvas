@@ -11373,6 +11373,27 @@ function initHeaderToggle() {
         return clamp(Math.round(value), COMPACT_LEFT_MIN, getCompactLeftMax());
     }
 
+    // The bootstrap stylesheet applies the persisted header position before
+    // this module is ready. Once the real state is known, release those
+    // one-shot classes and pin both flex children to a single authoritative
+    // order. This prevents a stale preload dock from leaving an empty
+    // header-sized slot after refresh/BFCache restore.
+    function reconcileHeaderFlexLayout() {
+        const root = document.documentElement;
+        const main = document.querySelector('.main-container');
+        const isBottomDock = currentHeaderDockSide === 'bottom';
+
+        if (root) {
+            root.classList.remove(
+                'layout-preload-header-compact',
+                'layout-preload-header-dock-bottom'
+            );
+        }
+
+        header.style.order = isBottomDock ? '2' : '0';
+        if (main) main.style.order = '1';
+    }
+
     function readStorage(key) {
         try {
             return localStorage.getItem(key);
@@ -11521,6 +11542,7 @@ function initHeaderToggle() {
         const changed = nextDock !== currentHeaderDockSide;
         currentHeaderDockSide = nextDock;
         document.body.classList.toggle('header-dock-bottom', nextDock === 'bottom');
+        reconcileHeaderFlexLayout();
         if (changed) {
             setCompactToggleLeft(compactLeft, { persist: false });
         }
@@ -11574,6 +11596,7 @@ function initHeaderToggle() {
 
         currentHeaderState = nextState;
         document.body.classList.toggle('header-compact', nextState === 'compact');
+        reconcileHeaderFlexLayout();
         if (nextState === 'compact') {
             if (prevState !== 'compact') {
                 if (shouldForceFirstCompactOrigin) {
@@ -11813,7 +11836,16 @@ function initHeaderToggle() {
     applyHeaderState(savedState, { persist: false, bootstrap: true });
     setCompactToggleLeft(compactLeft, { persist: false });
 
+    // A restored document can skip the normal bootstrap/DOMContentLoaded
+    // sequence. Re-assert the layout on pageshow and visibility restoration.
+    reconcileHeaderFlexLayout();
+    window.addEventListener('pageshow', reconcileHeaderFlexLayout);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reconcileHeaderFlexLayout();
+    });
+
     window.addEventListener('resize', () => {
+        reconcileHeaderFlexLayout();
         setCompactToggleLeft(compactLeft, { persist: false });
     });
 
