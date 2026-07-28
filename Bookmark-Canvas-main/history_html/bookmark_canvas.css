@@ -2851,6 +2851,17 @@ body.canvas-node-maximized-active .canvas-edge-label {
     /* Above anchors (11000) so toolbar remains clickable on top edge */
 }
 
+/*
+ * 连接线工具窗位于 canvas-content，而不是某个卡片内部。
+ * 选中连接线后必须越过临时栏目/空白栏目/卡片组的层叠上下文，
+ * 其二级色盘和方向面板也随父工具窗保持在最上层。
+ */
+.canvas-content > #edge-toolbar.edge-toolbar-selected,
+.canvas-content > #edge-toolbar.edge-toolbar-selected:has(.md-color-popover.open),
+.canvas-content > #edge-toolbar.edge-toolbar-selected:has(.md-direction-popover.open) {
+    z-index: 20000 !important;
+}
+
 /* When drawing a connection, hide toolbar completely to avoid conflict with top anchor zone */
 .canvas-workspace.connecting .md-node-toolbar {
     opacity: 0 !important;

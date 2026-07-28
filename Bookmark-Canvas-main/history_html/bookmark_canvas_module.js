@@ -31164,7 +31164,9 @@ function showEdgeToolbar(edgeId, x, y) {
         toolbar.id = 'edge-toolbar';
         toolbar.className = 'md-node-toolbar edge-toolbar'; // 添加专属类名
         toolbar.style.position = 'absolute'; // 使用 absolute 定位，吸附在 canvas-content 上
-        toolbar.style.zIndex = '100';
+        // 连接线工具窗不属于任何一个卡片，不能依赖卡片的临时提层逻辑。
+        // 放到画布内容的最高交互层，避免被相邻卡片/卡片组盖住。
+        toolbar.style.zIndex = '20000';
         toolbar.style.display = 'flex'; // 确保显示
         toolbar.style.opacity = '1'; // 确保可见
         toolbar.style.pointerEvents = 'auto'; // 确保可交互
@@ -31175,7 +31177,11 @@ function showEdgeToolbar(edgeId, x, y) {
         toolbar.style.display = 'flex';
         toolbar.style.opacity = '1';
         toolbar.style.pointerEvents = 'auto';
+        toolbar.style.zIndex = '20000';
     }
+
+    // 与空白栏目选中态保持一致：工具窗本身是当前连接线的交互层。
+    toolbar.classList.add('edge-toolbar-selected');
 
     // 保存当前选中的连接线 ID
     toolbar.dataset.edgeId = normalizeEdgeId(edge.id);
@@ -31356,6 +31362,7 @@ function updateEdgeToolbarPosition(options = null) {
 function hideEdgeToolbar() {
     const toolbar = document.getElementById('edge-toolbar');
     if (toolbar) {
+        toolbar.classList.remove('edge-toolbar-selected');
         toolbar.style.display = 'none';
         toolbar.style.opacity = '0';
         toolbar.style.pointerEvents = 'none';
