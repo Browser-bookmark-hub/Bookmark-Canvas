@@ -14244,16 +14244,27 @@ function __renderMdNodeImpl(node, options = {}) {
     const scrollKey = __buildCanvasPartitionedViewStateKey('scroll', scrollBaseKey);
     // 恢复滚动位置 (延迟到 editor 插入 DOM 后执行，否则 unattached 元素设置 scrollTop 无效)
     const scrollPersist = __readPartitionedViewJSON(scrollKey, null);
-    // 保存滚动位置
-    {
-        let rafS = 0;
-        editor.addEventListener('scroll', () => {
-            if (editor.__isFocusing) return;
-            if (rafS) cancelAnimationFrame(rafS);
-            rafS = requestAnimationFrame(() => {
-                if (editor.__isFocusing) return;
-                saveViewState('scroll', scrollBaseKey, { top: editor.scrollTop || 0, left: editor.scrollLeft || 0 });
-            });
+    // 使用与临时/永久栏目一致的防抖持久化。旧实现会在每个动画帧同步
+    // page/sidepanel 两份 localStorage，跨视图回写 scrollTop 时会造成长文本抖动。
+    __bindCanvasSectionScrollPerformance(editor);
+    editor.addEventListener('scroll', () => {
+        if (editor.__isFocusing) return;
+        __scheduleCanvasSectionScrollPersistence(editor, scrollBaseKey);
+    }, { passive: true });
+
+    // 用户拖动卡片内滚动条时，暂时不接收另一视图的同步回写，避免双方抢夺位置。
+    if (editor.dataset.scrollRestoreGuardAttached !== 'true') {
+        editor.dataset.scrollRestoreGuardAttached = 'true';
+        const blockScrollRestore = () => {
+            try {
+                editor.dataset.scrollRestoreBlockUntil = String(Date.now() + 1000);
+            } catch (_) { }
+        };
+        editor.addEventListener('wheel', blockScrollRestore, { passive: true });
+        editor.addEventListener('touchstart', blockScrollRestore, { passive: true });
+        editor.addEventListener('touchmove', blockScrollRestore, { passive: true });
+        editor.addEventListener('pointerdown', (event) => {
+            if (event && event.target === editor) blockScrollRestore();
         }, { passive: true });
     }
 
@@ -40163,6 +40174,15 @@ async function __waitForFullscreenBodyReveal(target, descriptor) {
 
 function __applyPersistedScrollPayloadToBody(body, payload, options = {}) {
     if (!body || !payload || typeof payload !== 'object') return false;
+    const nextTop = typeof payload.top === 'number' ? Math.max(0, payload.top || 0) : null;
+    const nextLeft = typeof payload.left === 'number' ? Math.max(0, payload.left || 0) : null;
+    const shouldSetTop = nextTop !== null && Math.abs((body.scrollTop || 0) - nextTop) > 0.5;
+    const shouldSetLeft = nextLeft !== null && Math.abs((body.scrollLeft || 0) - nextLeft) > 0.5;
+
+    // Follow-up restores run after layout settles. Do not generate another scroll
+    // event when the viewport has already reached the requested position.
+    if (!shouldSetTop && !shouldSetLeft) return false;
+
     // Set the guard before changing scrollTop: a programmatic assignment can
     // synchronously queue a scroll event, which must not win over the value we
     // are restoring.
@@ -40174,8 +40194,8 @@ function __applyPersistedScrollPayloadToBody(body, payload, options = {}) {
             body.dataset.scrollPersistBlockUntil = String(Date.now() + guardMs);
         } catch (_) { }
     }
-    if (typeof payload.top === 'number') body.scrollTop = payload.top || 0;
-    if (typeof payload.left === 'number') body.scrollLeft = payload.left || 0;
+    if (shouldSetTop) body.scrollTop = nextTop;
+    if (shouldSetLeft) body.scrollLeft = nextLeft;
     return true;
 }
 

@@ -4726,7 +4726,8 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     z-index: 1;
     /* scrollbar-width: thin; -- 移除，统一使用与永久栏目相同的滚动条大小 */
     overscroll-behavior: contain;
-    will-change: scroll-position;
+    /* Keep the text layout width stable while the vertical scrollbar appears. */
+    scrollbar-gutter: stable;
     contain: layout paint;
     margin: 0 2px 2px 0;
 }
