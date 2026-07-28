@@ -26541,61 +26541,8 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         e.clipboardData.setData('text/plain', finalSource);
     });
 
-    tipText.addEventListener('paste', (e) => {
-        if (!isEditingTip) return;
-        const getTransferData = (dt) => {
-            return {
-                html: dt.getData('text/html'),
-                text: dt.getData('text/plain'),
-                files: dt.files
-            };
-        };
-        const { html, text } = getTransferData(e.clipboardData || window.clipboardData);
-        let htmlSource = html || '';
-        let finalSource = text || '';
-
-        if (!htmlSource && finalSource) {
-            finalSource = __stripZwsp(finalSource);
-        }
-
-        const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0);
-            const commonAncestor = range.commonAncestorContainer;
-            const blockEl = (commonAncestor.nodeType === 1 ? commonAncestor : commonAncestor.parentNode).closest('li, h1, h2, h3, h4, h5, h6, blockquote');
-            if (blockEl && tipText.contains(blockEl)) {
-                // Simplified list logic (reuse robust global logic if needed, but this basic one is often enough)
-                const blockText = blockEl.textContent.trim();
-                const selectedText = selection.toString().trim();
-                if (blockText && selectedText && blockText === selectedText) {
-                    const tag = blockEl.tagName;
-                    if (tag === 'LI') {
-                        const parent = blockEl.parentElement;
-                        if (parent && parent.tagName === 'OL') {
-                            const index = Array.from(parent.children).indexOf(blockEl) + 1;
-                            finalSource = `${index}. ${finalSource}`;
-                        } else {
-                            finalSource = (blockEl.classList.contains('md-task-item'))
-                                ? `- ${blockEl.querySelector('input') && blockEl.querySelector('input').checked ? '[x]' : '[ ]'} ${finalSource}`
-                                : `- ${finalSource}`;
-                        }
-                    } else if (tag === 'H1') finalSource = `# ${finalSource}`;
-                    else if (tag === 'H2') finalSource = `## ${finalSource}`;
-                    else if (tag === 'H3') finalSource = `### ${finalSource}`;
-                    else if (tag === 'BLOCKQUOTE') finalSource = `> ${finalSource}`;
-                }
-            }
-        }
-
-        const safeHtml = __normalizeCanvasRichHtml(htmlSource);
-        if (safeHtml) {
-            try { e.clipboardData.setData('text/html', safeHtml); } catch (_) { }
-            try { e.clipboardData.setData('application/x-bookmark-canvas-html', safeHtml); } catch (_) { }
-        }
-
-        e.preventDefault();
-        e.clipboardData.setData('text/plain', finalSource);
-    });
+    // __mountMdCloneDescriptionEditor owns paste handling for every description editor.
+    // Do not intercept it here: an earlier preventDefault() blocks native plain-text paste.
 
     if (tipControls) {
         tipControls.addEventListener('mousedown', (e) => {
