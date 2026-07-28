@@ -37489,6 +37489,23 @@ function updateCanvasLowDetailMode(force = false) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
 
+    // A fullscreen card is the active surface. Low-detail mode and virtualization
+    // must not hide its content or leave an overlay behind while it is maximized.
+    if (__isCanvasNodeMaximizedActive()) {
+        const hasResidue = !!CanvasState.lowDetailActive
+            || __hasCanvasGlobalLowDetailResidue(workspace)
+            || !!workspace.querySelector('.low-detail-active, .card-group-low-detail-child-hidden, .card-group-low-detail-nested-visible, [data-low-detail-host-group-id]');
+        if (hasResidue) {
+            __forceCanvasLowDetailVisualExit(workspace, {
+                clearAllCards: true,
+                restoreDom: true,
+                scheduleVirtualization: false,
+                reason: 'fullscreen-node'
+            });
+        }
+        return;
+    }
+
     const container = getCachedContainer();
     const clearFreezeInv = () => {
         __clearCanvasLowDetailFreezeInv();
@@ -40905,6 +40922,9 @@ function maximizeCanvasNode(element, options = {}) {
     element.style.height = `${rect.height}px`;
     element.style.zIndex = '10000';
     __updateNodeMaximizedState();
+    // Fullscreen cards must never inherit the canvas low-detail/unload state.
+    // Clear it before the fullscreen geometry can be observed by other views.
+    try { updateCanvasLowDetailMode(true); } catch (_) { }
     __saveMaximizedNodeToStorage(element);
     __saveLastMaximizedNodeToStorage(element);
     __applyNodeLayoutZoom(element);
@@ -40934,6 +40954,8 @@ function restoreCanvasNodeLayout(element, options = {}) {
     delete element.dataset.maxPrevTransform;
     delete element.dataset.maxPrevZ;
     __updateNodeMaximizedState();
+    // Once fullscreen ends, resume normal low-detail evaluation for the canvas.
+    try { updateCanvasLowDetailMode(true); } catch (_) { }
     if (!CanvasState.nodeMaximizedActive) {
         try {
             const globalState = (typeof window !== 'undefined' && window.searchUiState) ? window.searchUiState : null;

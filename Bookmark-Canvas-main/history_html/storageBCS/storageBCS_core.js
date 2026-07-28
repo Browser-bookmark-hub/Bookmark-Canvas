@@ -6860,20 +6860,27 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
         : {};
 
     const permanentSectionEl = document.getElementById('permanentSection');
+    const isMainPermanentMaximized = !!(permanentSectionEl
+        && permanentSectionEl.classList
+        && permanentSectionEl.classList.contains('canvas-node-maximized'));
+    const readPermanentGeometryValue = (element, styleKey, maxPrevKey) => {
+        if (!element) return null;
+        const raw = (element.classList
+            && element.classList.contains('canvas-node-maximized'))
+            ? (element.dataset && element.dataset[maxPrevKey])
+            : element.style[styleKey];
+        return __parsePermanentViewCssPixelValue(raw);
+    };
     const toNumber = (value, fallback) => {
         const n = parseFloat(String(value == null ? '' : value));
         return Number.isFinite(n) ? n : fallback;
     };
-    const mainDomLeft = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.left) : null;
-    const mainDomTop = permanentSectionEl ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.top) : null;
-    const mainDomWidth = permanentSectionEl
-        ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.width)
-        : null;
-    const mainDomHeight = permanentSectionEl
-        ? __parsePermanentViewCssPixelValue(permanentSectionEl.style.height)
-        : null;
+    const mainDomLeft = readPermanentGeometryValue(permanentSectionEl, 'left', 'maxPrevLeft');
+    const mainDomTop = readPermanentGeometryValue(permanentSectionEl, 'top', 'maxPrevTop');
+    const mainDomWidth = readPermanentGeometryValue(permanentSectionEl, 'width', 'maxPrevWidth');
+    const mainDomHeight = readPermanentGeometryValue(permanentSectionEl, 'height', 'maxPrevHeight');
     const hasMainDomPixelAnchor = mainDomLeft !== null && mainDomTop !== null;
-    const permanentLeft = (permanentSectionEl && !preferStoragePermanentLayout)
+    const permanentLeft = (permanentSectionEl && !preferStoragePermanentLayout && !isMainPermanentMaximized)
         ? (hasMainDomPixelAnchor
             ? mainDomLeft
             : toNumber(
@@ -6888,7 +6895,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
                 : null,
             0
         );
-    const permanentTop = (permanentSectionEl && !preferStoragePermanentLayout)
+    const permanentTop = (permanentSectionEl && !preferStoragePermanentLayout && !isMainPermanentMaximized)
         ? (hasMainDomPixelAnchor
             ? mainDomTop
             : toNumber(
@@ -6903,7 +6910,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
                 : null,
             0
         );
-    const permanentW = (permanentSectionEl && !preferStoragePermanentLayout)
+    const permanentW = (permanentSectionEl && !preferStoragePermanentLayout && !isMainPermanentMaximized)
         ? (mainDomWidth !== null
             ? mainDomWidth
             : toNumber(
@@ -6918,7 +6925,7 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
                 : null,
             600
         );
-    const permanentH = (permanentSectionEl && !preferStoragePermanentLayout)
+    const permanentH = (permanentSectionEl && !preferStoragePermanentLayout && !isMainPermanentMaximized)
         ? (mainDomHeight !== null
             ? mainDomHeight
             : toNumber(
@@ -6972,11 +6979,14 @@ function __buildBcsCanvasDataFromState(stateInput, fileRefs, options = {}) {
                 if (!copyId) return;
                 const id = String(copyId);
                 copyIds.add(id);
+                const left = readPermanentGeometryValue(el, 'left', 'maxPrevLeft');
+                const top = readPermanentGeometryValue(el, 'top', 'maxPrevTop');
+                if (left === null || top === null) return;
                 domPositions.set(id, {
-                    left: parseFloat(el.style.left) || 0,
-                    top: parseFloat(el.style.top) || 0,
-                    width: __parsePermanentViewCssPixelValue(el.style.width) || permanentW,
-                    height: __parsePermanentViewCssPixelValue(el.style.height) || permanentH
+                    left,
+                    top,
+                    width: readPermanentGeometryValue(el, 'width', 'maxPrevWidth') || permanentW,
+                    height: readPermanentGeometryValue(el, 'height', 'maxPrevHeight') || permanentH
                 });
             });
         } catch (_) { }
