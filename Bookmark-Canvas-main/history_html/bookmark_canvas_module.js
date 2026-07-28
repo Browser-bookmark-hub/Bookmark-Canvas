@@ -12958,7 +12958,11 @@ function makeMdNodeDraggable(element, node) {
         if (element && element.classList && element.classList.contains('canvas-node-maximized')) return;
         if (e.__mdNodeSelectionDragHandled) return;
         if (node && node.locked) return; // 锁定不允许拖动
-        if (node && node.isEditing) return; // 编辑模式下不允许拖动
+        if ((node && node.isEditing) ||
+            (element && element.classList && element.classList.contains('editing')) ||
+            (element && element.dataset && element.dataset.editing === 'true')) {
+            return; // 编辑模式下不允许拖动
+        }
         const target = e.target;
         if (!target) return;
 
@@ -12970,9 +12974,14 @@ function makeMdNodeDraggable(element, node) {
             return;
         }
 
-        // 编辑器区域：如果编辑器已聚焦（正在编辑），不拖动；否则允许拖动
+        // 编辑器区域：编辑态以卡片状态为准，不能只依赖 focus。
+        // 这样 macOS 三指选字、长按选字和原生拖选文本都不会误触卡片拖动。
         const editorEl = element.querySelector('.md-canvas-editor');
-        if (target.closest('.md-canvas-editor') && document.activeElement === editorEl) {
+        if (target.closest('.md-canvas-editor') && (
+            document.activeElement === editorEl ||
+            element.classList.contains('editing') ||
+            (element.dataset && element.dataset.editing === 'true')
+        )) {
             return;
         }
 
@@ -17054,6 +17063,14 @@ function __renderMdNodeImpl(node, options = {}) {
             return;
         }
         if (e.button !== 0 && !isSectionCtrlModeEvent(e)) return;
+        // 编辑器内的原生选择必须优先于卡片拖动。这里不 preventDefault，
+        // 让鼠标拖选、长按选字和 macOS 三指选择都走浏览器默认行为。
+        if (target.closest('.md-canvas-editor') && (
+            isInEditMode ||
+            node.isEditing ||
+            el.classList.contains('editing') ||
+            el.dataset.editing === 'true'
+        )) return;
         // 忽略在resize、连接点/连接点显示区、小工具栏按钮、链接上的按下
         if (target.closest('.resize-handle') ||
             target.closest('.canvas-node-anchor') ||
