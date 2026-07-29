@@ -74,8 +74,13 @@
 **生态项目**
 
 - 书签画布（[Bookmark-Canvas](https://github.com/Browser-bookmark-hub/Bookmark-Canvas)）
-- 书签记录与推荐（[Bookmark-Record-Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)）
 - 书签备份（[Bookmark-Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup)）
+
+  ![书签备份导出示例](<../../Media and icons/v1.0.0/生态--书签备份--画布示例--当前变化 zh en.png>)
+
+- 书签记录与推荐（[Bookmark-Record-Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)）
+
+  ![书签记录与推荐关联记录示例](<../../Media and icons/v1.0.0/生态--书签记录与推荐--画布示例--关联记录zh en.png>)
 
 **外部参考**
 

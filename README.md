@@ -74,8 +74,13 @@ When an empty canvas first opens, three guide cards are visible: **Canvas Basics
 **Bookmark ecosystem**
 
 - [Bookmark-Canvas](https://github.com/Browser-bookmark-hub/Bookmark-Canvas)
-- [Bookmark-Record-Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
 - [Bookmark-Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup)
+
+  ![Bookmark Backup export example](<Media and icons/v1.0.0/生态--书签备份--画布示例--当前变化 zh en.png>)
+
+- [Bookmark-Record-Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
+
+  ![Bookmark Record and Recommend related-history example](<Media and icons/v1.0.0/生态--书签记录与推荐--画布示例--关联记录zh en.png>)
 
 **External projects**
 
