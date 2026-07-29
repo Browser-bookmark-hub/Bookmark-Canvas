@@ -117,7 +117,9 @@ This file helps AI agents and coding agents edit an exported Bookmark Canvas pac
 - `text` is the visible tag label and may be Chinese, English, or another custom short string. Do not confuse `text` with `color` / `noteColor`.
 - `note` is a plain-text string; it preserves line breaks and is trimmed as a whole. Empty notes should not be exported, and clearing a note also removes `noteColor`. Old data with `note` but no `noteColor` is treated as `orange`.
 - Multiple tags are allowed. Keep their order stable, remove exact duplicates by `color + text`, and preserve existing tags unless the task asks to change them. Add tags only when requested or when the item/folder is important to the task; avoid over-tagging large URL sets.
-- Add notes only when the user requests a note or when the item/folder needs explicit context. Notes are explanatory/context signals, not bulk taxonomy labels.
+- Before organizing or adding tags, inspect existing folders, card groups, tags, and notes. Reuse the text, color, and semantics of existing tags where possible. A new tag must express a stable, reusable theme, state, or relationship and make its connection to existing or newly organized items clear. Do not create synonymous, duplicate, or isolated tags with no future reuse value for one link alone.
+- Add a note only when the user explicitly asks, the bookmark/folder is important, or useful context cannot be clearly conveyed by its title, URL, folder, and tags. Do not add notes to every new or organized item, and do not repeat the title, URL, existing tags, or obvious classification in a note. Keep notes concise and relevant to user intent, such as rationale, source, limitation, trade-off, or next action.
+- Use tag and note colors sparingly and with consistent meaning: preserve the existing `text`-to-color mapping; use the same color for tags with the same theme or relationship; and reuse the package's small existing palette before introducing a new color. Do not assign a different color to every tag, bookmark, or note, and do not use color as the only taxonomy signal; avoid a rainbow-like marking system that is hard to scan.
 - Permanent metadata belongs on `identityMap` entries keyed by `syncId`: put `tags`, `note`, and `noteColor` on the same `syncId` metadata entry, not inside bookmark tree nodes. See [R2](#ref-r2).
 - Temporary metadata belongs inline on the affected item object: `tags`, `note`, and `noteColor` move/delete with that item. See [R4](#ref-r4).
 - During import, export, push, pull, backup, or restore, treat `tags` and `note`/`noteColor` as the same item metadata family; keep `identityMap` entries that have a note even when they have no tags, and do not prune them as tagless.
@@ -134,7 +136,7 @@ This file helps AI agents and coding agents edit an exported Bookmark Canvas pac
 - Permanent/temporary `descriptionMd` and `.canvas` text nodes are notes or prompts about the nearby bookmark tree. Use them as context, but do not treat them as bookmark items.
 - For first-pass analysis of a regular chain section, inspect its likely source family and parent chain first, such as `#A`, `#B`, `A-1`, `A-1-1`, or `B-1`. If lineage is ambiguous, match by `title` or `url` with local search/tools.
 - Edge direction can encode relationship semantics. Canonical export form: single arrow from `fromNode` to `toNode` omits both ends; no arrow sets `toEnd: "none"`; two-ended arrow sets `fromEnd: "arrow"` and relies on the default `toEnd` arrow. Preserve existing direction unless the task asks to change the relationship.
-- Tags should mark user-requested or especially important items. Notes should add context for individual bookmark/folder items. Avoid adding many tags or notes just because many URLs are present.
+- Tags should mark user-requested or especially important items and express a reusable theme, state, or relationship to existing or newly organized items. Notes should add only context that materially helps explain user intent for an individual bookmark/folder item. Do not add tags or notes in bulk merely because many URLs are present, and do not substitute a rainbow of colors for clear categorization and relationships.
 
 ### A9. Text Formatting Support
 - Blank cards (`.canvas` `text` nodes) and permanent/temporary `descriptionMd` support Obsidian-style Markdown and a safe HTML rendering subset.
@@ -201,6 +203,9 @@ Execution rules:
 - These section/canvas colors are not tag/note colors. Tag palette names and `noteColor` values are defined separately in [R7](#ref-r7).
 
 ### S6. Web Research Capability
+#### S6.0 Research Tool Routing and Priority
+- Before starting web research, AI must first identify Deep Research, web-search Agents, MCP services, or Skills that the user has provided or the current environment has configured and permitted. When a suitable capability exists for the task, use it preferentially, subject to the user's authorization, the service's permissions, privacy boundaries, and this section's scope controls; do not disregard it and rely only on basic search capability.
+
 #### S6.1 Rough Screening Before Research
 - First screen targets by task relevance, importance, privacy/authentication sensitivity, cost/time, and whether the actual page substance is needed. For bookmark analysis, organization, deduplication, recommendation, or classification, do not rely only on title, URL, canvas position, folder context, or package metadata when substance matters.
 - For account dashboards, mailboxes, consoles, or other private/authenticated pages, do not attempt login or sensitive access. Classify by metadata unless the user explicitly provides a safe access method and scope.
