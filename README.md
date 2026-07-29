@@ -12,15 +12,7 @@ Use the canvas to keep bookmark trees spatially organized without turning it int
 
 #### Screenshot Preview
 
-| Canvas workspace | Search, Tags & Notes |
-| :---: | :---: |
-| Screenshot slot reserved | Screenshot slot reserved |
-
-| Import / Export | GitHub Push / Pull |
-| :---: | :---: |
-| Screenshot slot reserved | Screenshot slot reserved |
-
-Screenshot assets will be added under [`Media and icons/`](Media%20and%20icons/). The naming and embedding slots are prepared there so media can be added without rewriting this README.
+![Bookmark Canvas workspace preview](Media%20and%20icons/v1.0.0/%E7%94%BB%E5%B8%83%E7%A4%BA%E4%BE%8B%E5%9B%BE%20en.png)
 
 #### Video Preview
 

@@ -2916,6 +2916,60 @@ body.canvas-node-maximized-active .canvas-edge-label {
     color: #2563eb;
 }
 
+/* 连接线方向：沿用一级工具按钮的方形结构，方向选项保持中性，不使用蓝色 chip。 */
+.md-direction-popover {
+    display: inline-flex;
+    height: 38px;
+    min-height: 38px;
+    align-items: center;
+    padding: 4px;
+    gap: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.md-direction-popover.open {
+    display: inline-flex;
+}
+
+.md-direction-popover .md-direction-option,
+.md-direction-popover .md-direction-option:hover,
+.md-direction-popover .md-direction-option:active {
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    flex: 0 0 28px;
+    box-sizing: border-box;
+    padding: 0;
+    line-height: 1;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    transform: none;
+}
+
+.md-direction-popover .md-direction-option:hover,
+.md-direction-popover .md-direction-option:focus-visible {
+    border-color: var(--border-hover);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.md-direction-popover .md-direction-option:focus-visible {
+    outline: 2px solid var(--text-primary);
+    outline-offset: 2px;
+}
+
+.md-direction-popover .md-direction-option.is-selected,
+.md-direction-popover .md-direction-option.is-selected:hover {
+    border-color: var(--success);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
 /* 删除全部内容按钮 - 危险操作样式 */
 .md-node-toolbar-btn.md-delete-danger-btn {
     color: #cf222e;

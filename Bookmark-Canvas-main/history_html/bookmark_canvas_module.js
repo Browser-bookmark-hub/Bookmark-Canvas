@@ -31511,10 +31511,11 @@ function ensureEdgeDirectionPopover(toolbar, edge) {
     const noneText = lang === 'en' ? 'None' : '无方向';
     const singleText = lang === 'en' ? 'Single' : '单向';
     const bothText = lang === 'en' ? 'Both' : '双向';
+    const currentDirection = edge && edge.direction ? edge.direction : 'none';
     pop.innerHTML = `
-        <span class="md-color-chip dir-chip" data-action="edge-direction-set" data-dir="none" title="${noneText}"><i class="fas fa-minus"></i></span>
-        <span class="md-color-chip dir-chip" data-action="edge-direction-set" data-dir="forward" title="${singleText}"><i class="fas fa-long-arrow-alt-right"></i></span>
-        <span class="md-color-chip dir-chip" data-action="edge-direction-set" data-dir="both" title="${bothText}"><i class="fas fa-arrows-alt-h"></i></span>
+        <button type="button" class="md-node-toolbar-btn md-direction-option${currentDirection === 'none' ? ' is-selected' : ''}" data-action="edge-direction-set" data-dir="none" title="${noneText}" data-tooltip="${noneText}" aria-label="${noneText}" aria-pressed="${currentDirection === 'none'}"><i class="fas fa-minus"></i></button>
+        <button type="button" class="md-node-toolbar-btn md-direction-option${currentDirection === 'forward' ? ' is-selected' : ''}" data-action="edge-direction-set" data-dir="forward" title="${singleText}" data-tooltip="${singleText}" aria-label="${singleText}" aria-pressed="${currentDirection === 'forward'}"><i class="fas fa-long-arrow-alt-right"></i></button>
+        <button type="button" class="md-node-toolbar-btn md-direction-option${currentDirection === 'both' ? ' is-selected' : ''}" data-action="edge-direction-set" data-dir="both" title="${bothText}" data-tooltip="${bothText}" aria-label="${bothText}" aria-pressed="${currentDirection === 'both'}"><i class="fas fa-arrows-alt-h"></i></button>
     `;
     toolbar.appendChild(pop);
     return pop;
