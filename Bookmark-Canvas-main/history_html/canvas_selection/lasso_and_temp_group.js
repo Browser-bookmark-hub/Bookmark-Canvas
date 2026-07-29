@@ -1219,8 +1219,8 @@ function showTempGroupContextMenu(event) {
         { action: 'temp-group-context-search', label: labels.search, icon: 'search' },
         { action: 'temp-group-context-locate', label: labels.locate, icon: 'crosshairs' },
         { action: 'temp-group-context-pin', label: labels.pin, icon: 'thumbtack' },
-        { action: 'temp-group-context-delete', label: labels.del, icon: 'trash-alt', className: 'color-red' },
-        { action: 'temp-group-context-export', label: labels.export, icon: 'file-export' }
+        { action: 'temp-group-context-export', label: labels.export, icon: 'file-export' },
+        { action: 'temp-group-context-delete', label: labels.del, icon: 'trash-alt', className: 'color-red' }
     ];
     menu.classList.remove('horizontal-layout', 'density-xs', 'density-md', 'density-lg', 'lang-zh', 'lang-en');
     menu.classList.add('density-sm');

@@ -43,6 +43,34 @@ function __githubReloadProgressText(zh, en) {
     return __githubReloadProgressIsEn() ? en : zh;
 }
 
+function __getGithubReloadProgressCopy(stage) {
+    if (stage === 'refreshing') {
+        return {
+            title: __githubReloadProgressText('正在刷新画布...', 'Refreshing canvas...'),
+            text: __githubReloadProgressText('内容已写入，正在刷新并准备定位...', 'Content is saved. Refreshing and preparing to locate...')
+        };
+    }
+    if (stage === 'complete') {
+        return {
+            title: __githubReloadProgressText('刷新完成', 'Refresh complete'),
+            text: __githubReloadProgressText('已完成刷新和定位。', 'Refresh and location complete.')
+        };
+    }
+    return {
+        title: __githubReloadProgressText('正在恢复画布...', 'Restoring canvas...'),
+        text: __githubReloadProgressText('刷新完成，正在定位导入内容...', 'Refresh complete. Locating imported content...')
+    };
+}
+
+function __refreshGithubReloadProgressDialogLanguage() {
+    if (!__githubReloadProgressDialog) return;
+    const copy = __getGithubReloadProgressCopy(__githubReloadProgressDialog.dataset.status || 'restoring');
+    const titleEl = __githubReloadProgressDialog.querySelector('.github-progress-title');
+    const textEl = __githubReloadProgressDialog.querySelector('.github-progress-text');
+    if (titleEl) titleEl.textContent = copy.title;
+    if (textEl) textEl.textContent = copy.text;
+}
+
 function __readGithubReloadProgressState() {
     try {
         const raw = localStorage.getItem(__GITHUB_RELOAD_PROGRESS_KEY);
@@ -112,15 +140,17 @@ function __getGithubReloadProgressOverlayContainer() {
 function __showGithubReloadProgressDialog() {
     if (__githubReloadProgressDialog) return;
     const dialog = document.createElement('div');
+    const copy = __getGithubReloadProgressCopy('restoring');
     dialog.className = 'github-progress-dialog';
+    dialog.dataset.status = 'restoring';
     dialog.innerHTML = `
         <div class="github-progress-content">
             <div class="github-progress-body">
                 <div class="github-progress-icon-container">
                     <span class="github-progress-spinner"></span>
                 </div>
-                <div class="github-progress-title">${__escapeHtml(__githubReloadProgressText('正在恢复画布...', 'Restoring canvas...'))}</div>
-                <div class="github-progress-text">${__escapeHtml(__githubReloadProgressText('刷新完成，正在定位导入内容...', 'Refresh complete. Locating imported content...'))}</div>
+                <div class="github-progress-title">${__escapeHtml(copy.title)}</div>
+                <div class="github-progress-text">${__escapeHtml(copy.text)}</div>
                 <div class="github-progress-bar-container">
                     <div class="github-progress-bar" style="width: 100%"></div>
                 </div>
@@ -135,6 +165,7 @@ function __showGithubReloadProgressDialog() {
 function __finishGithubReloadProgress(text) {
     __clearGithubReloadProgressState();
     if (!__githubReloadProgressDialog) return;
+    __githubReloadProgressDialog.dataset.status = 'complete';
     __setGithubReloadProgressStatus({
         title: __githubReloadProgressText('刷新完成', 'Refresh complete'),
         text: text || __githubReloadProgressText('已完成刷新和定位。', 'Refresh and location complete.'),
@@ -163,6 +194,7 @@ function __showCanvasReloadProgressBeforeNavigation(options = {}) {
         __persistGithubReloadProgressState({ operation });
     }
     __showGithubReloadProgressDialog();
+    if (__githubReloadProgressDialog) __githubReloadProgressDialog.dataset.status = 'refreshing';
     __setGithubReloadProgressStatus({
         title: String(options.title || __githubReloadProgressText('正在刷新画布...', 'Refreshing canvas...')),
         text: String(options.text || __githubReloadProgressText('内容已写入，正在刷新并准备定位...', 'Content is saved. Refreshing and preparing to locate...')),
@@ -219,6 +251,7 @@ function __scheduleGithubReloadProgressRestore() {
 
 __scheduleGithubReloadProgressRestore();
 if (typeof window !== 'undefined') {
+    window.addEventListener('bcs:language-changed', __refreshGithubReloadProgressDialogLanguage);
     window.__showCanvasReloadProgressBeforeNavigation = __showCanvasReloadProgressBeforeNavigation;
     window.__hideCanvasReloadProgressPanel = __hideCanvasReloadProgressPanel;
 }

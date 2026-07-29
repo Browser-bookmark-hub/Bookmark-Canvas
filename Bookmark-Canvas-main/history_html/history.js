@@ -5163,6 +5163,8 @@ function applyLanguage() {
         updateShortcutsDisplay();
     }
 
+    try { window.dispatchEvent(new CustomEvent('bcs:language-changed')); } catch (_) { }
+
 }
 // =============================================================================
 // 主题和语言切换

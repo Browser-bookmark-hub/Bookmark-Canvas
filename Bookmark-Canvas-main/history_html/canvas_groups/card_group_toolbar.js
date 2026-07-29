@@ -534,17 +534,16 @@ function showCardGroupContextMenu(event, node) {
         { action: 'card-group-context-search', label: labels.search, icon: 'search' },
         { action: 'card-group-context-locate', label: labels.locate, icon: 'crosshairs' },
         { action: 'card-group-context-pin', label: labels.pin, icon: 'thumbtack' },
+        { action: 'card-group-context-export', label: labels.export, icon: 'file-export' },
         { action: 'card-group-context-delete', label: labels.deleteFrame, icon: 'trash-alt', group: 'delete' },
-        { action: 'card-group-context-delete-all', label: labels.deleteAll, icon: 'trash-alt', group: 'delete' },
-        { action: 'card-group-context-export', label: labels.export, icon: 'file-export', group: 'export' }
+        { action: 'card-group-context-delete-all', label: labels.deleteAll, icon: 'trash-alt', group: 'delete' }
     ];
     menu.classList.remove('horizontal-layout', 'density-xs', 'density-md', 'density-lg', 'lang-zh', 'lang-en');
     menu.classList.add('density-sm');
     menu.classList.add(String(lang).toLowerCase().startsWith('en') ? 'lang-en' : 'lang-zh');
     menu.dataset.menuScope = 'card-group-object';
-    const normalItems = items.filter(item => item.group !== 'delete' && item.group !== 'export');
+    const normalItems = items.filter(item => item.group !== 'delete');
     const deleteItems = items.filter(item => item.group === 'delete');
-    const exportItems = items.filter(item => item.group === 'export');
     menu.innerHTML = [
         normalItems.map(item => `
             <div class="context-menu-item ${item.className || ''}" data-action="${item.action}">
@@ -559,13 +558,7 @@ function showCardGroupContextMenu(event, node) {
                     <span class="context-menu-item-label"><span>${item.label}</span></span>
                 </div>
             `).join('')}
-        </div>`,
-        exportItems.map(item => `
-            <div class="context-menu-item ${item.className || ''}" data-action="${item.action}">
-                <i class="fas fa-${item.icon}"></i>
-                <span class="context-menu-item-label"><span>${item.label}</span></span>
-            </div>
-        `).join('')
+        </div>`
     ].join('');
     const point = { x: event.clientX, y: event.clientY };
     menu.querySelectorAll('.context-menu-item').forEach(item => {
