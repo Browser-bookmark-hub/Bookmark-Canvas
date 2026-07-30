@@ -1,6 +1,6 @@
 ## Switch to [English](../../README.md)...
 
-[![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) [![GitHub Bookmark-Backup](https://img.shields.io/badge/GitHub-Bookmark--Backup-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Backup) [![GitHub Bookmark-Record-Recommend](https://img.shields.io/badge/GitHub-Bookmark--Record--Recommend-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
+[![Linux.do](https://img.shields.io/badge/Linux.do-Portfolio-FFD700?logo=discourse&logoColor=white)](https://linux.do/u/kk1/activity/portfolio)[![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) [![GitHub Bookmark-Backup](https://img.shields.io/badge/GitHub-Bookmark--Backup-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Backup) [![GitHub Bookmark-Record-Recommend](https://img.shields.io/badge/GitHub-Bookmark--Record--Recommend-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
 
 ### 简介
 
