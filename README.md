@@ -12,7 +12,13 @@ Use the canvas to keep bookmark trees spatially organized without turning it int
 
 #### Screenshot Preview
 
-![Bookmark Canvas workspace preview](Media%20and%20icons/v1.0.0/%E7%94%BB%E5%B8%83%E7%A4%BA%E4%BE%8B%E5%9B%BE%20en.png)
+<p align="center"><strong>Side Panel (Card Fullscreen) and Tab (Global State)</strong></p>
+
+![Side Panel (card fullscreen) and tab (global state)](Media%20and%20icons/v1.0.0/%E7%94%BB%E5%B8%83%E7%A4%BA%E4%BE%8B%E5%9B%BE%20en.png)
+
+<p align="center"><strong>GitHub Configuration</strong></p>
+
+![GitHub configuration](Media%20and%20icons/v1.0.0/GitHub%E9%85%8D%E7%BD%AE%20en.png)
 
 #### Bookmark Ecosystem
 

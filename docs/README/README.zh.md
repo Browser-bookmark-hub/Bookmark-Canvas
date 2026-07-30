@@ -12,7 +12,13 @@
 
 #### 截图预览
 
-![书签画布工作区预览](../../Media%20and%20icons/v1.0.0/%E7%94%BB%E5%B8%83%E7%A4%BA%E4%BE%8B%E5%9B%BE%20zh.png)
+<p align="center"><strong>侧边栏（卡片全屏）与标签页（全局状态）</strong></p>
+
+![侧边栏（卡片全屏）与标签页（全局状态）](../../Media%20and%20icons/v1.0.0/%E7%94%BB%E5%B8%83%E7%A4%BA%E4%BE%8B%E5%9B%BE%20zh.png)
+
+<p align="center"><strong>GitHub 配置</strong></p>
+
+![GitHub 配置](../../Media%20and%20icons/v1.0.0/GitHub%E9%85%8D%E7%BD%AE%20zh.png)
 
 #### 书签生态项目
 
