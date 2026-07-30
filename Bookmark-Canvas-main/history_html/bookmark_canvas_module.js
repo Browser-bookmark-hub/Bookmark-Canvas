@@ -30152,10 +30152,25 @@ function __isCardGroupLowDetailEdgeContextEndpoint(nodeId) {
     return !!(el.dataset && el.dataset.lowDetailHostGroupId);
 }
 
+function __isCardGroupLowDetailHiddenEndpoint(nodeId) {
+    const el = __getCardGroupLowDetailEdgeElement(nodeId);
+    if (!el || !el.classList) return false;
+    return el.classList.contains('card-group-low-detail-child-hidden')
+        || !!(el.dataset && el.dataset.lowDetailHostGroupId);
+}
+
 function __shouldSkipEdgeForCardGroupLowDetail(edge) {
     if (!edge) return false;
     const fromNode = String(edge.fromNode || '').trim();
     const toNode = String(edge.toNode || '').trim();
+
+    // A hidden child has no visible anchor, so an edge attached to it must not
+    // remain as a floating line. This includes nested card groups hidden by a
+    // larger low-detail group.
+    if (__isCardGroupLowDetailHiddenEndpoint(fromNode) || __isCardGroupLowDetailHiddenEndpoint(toNode)) {
+        return true;
+    }
+
     const fromInGroupLowDetail = __isCardGroupLowDetailEdgeContextEndpoint(fromNode);
     const toInGroupLowDetail = __isCardGroupLowDetailEdgeContextEndpoint(toNode);
     if (!fromInGroupLowDetail && !toInGroupLowDetail) return false;
