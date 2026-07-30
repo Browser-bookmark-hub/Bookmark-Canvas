@@ -14,6 +14,21 @@
 
 ![书签画布工作区预览](../../Media%20and%20icons/v1.0.0/%E7%94%BB%E5%B8%83%E7%A4%BA%E4%BE%8B%E5%9B%BE%20zh.png)
 
+#### 书签生态项目
+
+<table>
+  <tr>
+    <th width="33.33%"><a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas">书签画布</a></th>
+    <th width="33.33%"><a href="https://github.com/Browser-bookmark-hub/Bookmark-Backup">书签备份</a></th>
+    <th width="33.33%"><a href="https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend">书签记录与推荐</a></th>
+  </tr>
+  <tr>
+    <td><img width="100%" alt="书签画布经过 Codex 处理示例" src="../../Media%20and%20icons/v1.0.0/生态--书签画布--经过codex处理%20zh%20en.png"></td>
+    <td><img width="100%" alt="书签备份导出示例" src="../../Media%20and%20icons/v1.0.0/生态--书签备份--画布示例--当前变化%20zh%20en.png"></td>
+    <td><img width="100%" alt="书签记录与推荐关联记录示例" src="../../Media%20and%20icons/v1.0.0/生态--书签记录与推荐--画布示例--关联记录zh%20en.png"></td>
+  </tr>
+</table>
+
 #### 视频预览
 
 [`Media and icons/`](../../Media%20and%20icons/) 中已预留画布工作流、导入导出和 GitHub 同步演示的视频位置。
@@ -54,6 +69,7 @@
   - **生成 Skill**：生成结果集中在书签画布的数据模型中，支持单个 JSON，或包含 `.canvas` 的单个数据包。
   - **分析 Skill**：优先分析书签画布本项目与范围明确的画布数据；索引建立、RAG 与 Deep Research（外部或内部）均待实践后再扩展。
   - **综合 Skill**：开放基础格式与 Skill 方向，并邀请生态项目 [书签备份（Bookmark Backup）](https://github.com/Browser-bookmark-hub/Bookmark-Backup) 与 [书签记录与推荐（Bookmark Record and Recommend）](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend) 参与；生成结果仍以书签画布为主要承载。
+  - **R5 生态参考**：[R5 AI 特殊临时栏目示例](#ref-r5)提供了 AI 生成书签建议或书签树时可复用的参考形状。其他插件或工具向书签画布贡献生成、推荐或处理结果时也可参考；书签备份与书签记录与推荐是当前生态中的参考方向。
   - **其他能力探索（待完善）**：详见 [`../路线图前瞻-数据处理CLI-Skill-客户端-AI化.md`](../%E8%B7%AF%E7%BA%BF%E5%9B%BE%E5%89%8D%E7%9E%BB-%E6%95%B0%E6%8D%AE%E5%A4%84%E7%90%86CLI-Skill-%E5%AE%A2%E6%88%B7%E7%AB%AF-AI%E5%8C%96.md)。
 - [ ] **标签与备注管理探索**：目前搜索面板已经可以直接浏览和查看标签、备注。独立管理页暂不作为确定功能；它需要先解决批量管理和导出的问题，而不是重复现有查看器。
 
@@ -70,17 +86,6 @@
 - [归档索引](../Archived/00--%E5%BD%92%E6%A1%A3%E7%B4%A2%E5%BC%95-%E8%AF%B7%E5%85%88%E8%AF%BB.md)
 
 ### 参考
-
-**生态项目**
-
-- 书签画布（[Bookmark-Canvas](https://github.com/Browser-bookmark-hub/Bookmark-Canvas)）
-- 书签备份（[Bookmark-Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup)）
-
-  ![书签备份导出示例](<../../Media and icons/v1.0.0/生态--书签备份--画布示例--当前变化 zh en.png>)
-
-- 书签记录与推荐（[Bookmark-Record-Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)）
-
-  ![书签记录与推荐关联记录示例](<../../Media and icons/v1.0.0/生态--书签记录与推荐--画布示例--关联记录zh en.png>)
 
 **外部参考**
 
@@ -244,6 +249,9 @@
 <a id="ref-r5"></a>
 ### R5. AI 特殊临时栏目示例
 AI 新增书签建议或生成书签树且没有现成指定落点时，使用这种栏目；若用户或上下文已经指定已有落点，按 [S2](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/blob/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template/AGENTS_template_zh.md#s2-ai-%E7%94%9F%E6%88%90%E4%B9%A6%E7%AD%BE%E7%9A%84%E8%B7%AF%E7%94%B1%E4%BC%98%E5%85%88%E7%BA%A7) 路由。
+
+R5 同时也是生态共建参考：其他插件或工具向书签画布贡献生成、推荐或处理结果时，可参考这一结构。相关生态方向可见[书签备份（Bookmark-Backup）](https://github.com/Browser-bookmark-hub/Bookmark-Backup)与[书签记录与推荐（Bookmark-Record-Recommend）](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)。
+
 ```json
 {
   "format": "bookmark-canvas-section",

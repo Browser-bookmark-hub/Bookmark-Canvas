@@ -14,6 +14,21 @@ Use the canvas to keep bookmark trees spatially organized without turning it int
 
 ![Bookmark Canvas workspace preview](Media%20and%20icons/v1.0.0/%E7%94%BB%E5%B8%83%E7%A4%BA%E4%BE%8B%E5%9B%BE%20en.png)
 
+#### Bookmark Ecosystem
+
+<table>
+  <tr>
+    <th width="33.33%"><a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas">Bookmark-Canvas</a></th>
+    <th width="33.33%"><a href="https://github.com/Browser-bookmark-hub/Bookmark-Backup">Bookmark-Backup</a></th>
+    <th width="33.33%"><a href="https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend">Bookmark-Record-Recommend</a></th>
+  </tr>
+  <tr>
+    <td><img width="100%" alt="Bookmark Canvas Codex-processed workspace example" src="Media%20and%20icons/v1.0.0/生态--书签画布--经过codex处理%20zh%20en.png"></td>
+    <td><img width="100%" alt="Bookmark Backup export example" src="Media%20and%20icons/v1.0.0/生态--书签备份--画布示例--当前变化%20zh%20en.png"></td>
+    <td><img width="100%" alt="Bookmark Record and Recommend related-history example" src="Media%20and%20icons/v1.0.0/生态--书签记录与推荐--画布示例--关联记录zh%20en.png"></td>
+  </tr>
+</table>
+
 #### Video Preview
 
 Video slots are reserved in [`Media and icons/`](Media%20and%20icons/) for a canvas walkthrough and an import/export or GitHub sync walkthrough.
@@ -54,6 +69,7 @@ When an empty canvas first opens, three guide cards are visible: **Canvas Basics
   - **Generation Skill**: keep generated outputs centered on the Bookmark Canvas data model, as a single JSON file or a single data package that includes a `.canvas` file.
   - **Analysis Skill**: first analyze Bookmark Canvas itself and scoped canvas data; expand into index building, RAG, or Deep Research (external or internal) only after practice.
   - **Integrated Skill**: share the basic formats and Skill directions, and invite [Bookmark Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup) and [Bookmark Record and Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend) to participate; generated outputs remain primarily carried by Bookmark Canvas.
+  - **R5 ecosystem reference**: the [R5 AI Special Temporary Section Example](#ref-r5) is a reusable reference shape for AI-generated bookmark suggestions and trees. Other plugins and tools can use it when contributing generated, recommended, or processed results to Bookmark Canvas; Bookmark-Backup and Bookmark-Record-Recommend are current ecosystem references.
   - **Other capability explorations (to be completed)**: see [`docs/ROADMAP_OUTLOOK_DATA_PROCESSING_CLI_SKILL_CLIENT_AI.md`](docs/ROADMAP_OUTLOOK_DATA_PROCESSING_CLI_SKILL_CLIENT_AI.md).
 - [ ] **Tags and Notes exploration**: the Search Panel already provides browsing and viewing. A separate management page is not a committed feature yet: it needs a clear answer for bulk management and export, rather than duplicating the current viewer.
 
@@ -70,17 +86,6 @@ When an empty canvas first opens, three guide cards are visible: **Canvas Basics
 - [Archive index](docs/Archived/00--%E5%BD%92%E6%A1%A3%E7%B4%A2%E5%BC%95-%E8%AF%B7%E5%85%88%E8%AF%BB.md)
 
 ### References
-
-**Bookmark ecosystem**
-
-- [Bookmark-Canvas](https://github.com/Browser-bookmark-hub/Bookmark-Canvas)
-- [Bookmark-Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup)
-
-  ![Bookmark Backup export example](<Media and icons/v1.0.0/生态--书签备份--画布示例--当前变化 zh en.png>)
-
-- [Bookmark-Record-Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
-
-  ![Bookmark Record and Recommend related-history example](<Media and icons/v1.0.0/生态--书签记录与推荐--画布示例--关联记录zh en.png>)
 
 **External projects**
 
@@ -245,6 +250,9 @@ Derived chain section:
 <a id="ref-r5"></a>
 ### R5. AI Special Temporary Section Example
 Use this when AI adds suggested bookmarks or a generated bookmark tree and no existing target was specified. If the user or context names an existing target, follow [S2](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/blob/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template/AGENTS_template_en.md#s2-ai-generated-bookmark-routing).
+
+R5 is also an ecosystem co-building reference: other plugins or tools can use this structure when contributing generated, recommended, or processed results to Bookmark Canvas. See [Bookmark-Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup) and [Bookmark-Record-Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend) for related ecosystem directions.
+
 ```json
 {
   "format": "bookmark-canvas-section",

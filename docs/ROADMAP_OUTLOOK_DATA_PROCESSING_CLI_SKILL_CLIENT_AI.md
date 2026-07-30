@@ -17,7 +17,7 @@ User selects a canvas, section, Card Group, or URL scope
                  ↓
 bookmark-deep-research Skill (minimal context manifest)
                  ↓
-External Deep Research / Agent → source-cited read-only report
+External search / Deep Research / Agent / MCP service → source-cited read-only report
                  ↓
 Human confirmation before any canvas organization or write-back
 
@@ -66,6 +66,12 @@ Tentatively name it `bookmark-deep-research`. It is not another bookmark manager
 
 The first scope should be small: one section, Card Group, or URL set. Read only necessary titles, URLs, descriptions, Tags / Notes, and source locations; generate a minimal context manifest; then research.
 
+### Research-service collaboration and MCP
+
+The Skill should first cooperate with existing web-search, Deep Research, and source-access capabilities instead of reproducing them locally. When the user has provided, or the environment has configured and authorized, a suitable Agent, MCP service, connector, or Skill, select the capability that fits the chosen scope and invoke it within explicit URL, privacy, citation, and confirmation boundaries. This can include collaboration with external open-source or product capabilities, but must not silently bind the project to a provider or send data without the user's knowledge.
+
+Local indexes, manifests, URL normalization, and local analysis remain useful for scope selection, reuse, privacy-sensitive preparation, and repeatable validation. They are not substitutes for live page retrieval, broad web search, current information, or authoritative-source checking. Do not build local search or RAG merely to duplicate an available research capability; add local components only when trials show a clear offline, privacy, reliability, cost, or repeatability advantage.
+
 The default output is a read-only report containing:
 
 - the source locations, original URLs, and necessary descriptions used as input;
@@ -85,11 +91,11 @@ Treat repository ZIP and Targeted Pull as source strategies, not product positio
 
 Bookmark JSON is already structured. A first research task needs no SQLite, vector database, or global RAG: retain original URLs, record normalization / deduplication, identify obvious dead, redirected, and duplicate links, and keep every result traceable to its original section or file.
 
-Only consider SQLite or local RAG after validating offline-search demand, sufficient repetition and scale, page-body retrieval/update/deduplication/retention, private or authenticated URL handling, and a real benefit over selected structured data plus external Deep Research. Semantic association and search may reference SmartBookmark, but vector retrieval and RAG are not the subject before real research trials.
+Only consider SQLite or local RAG after validating offline-search demand, sufficient repetition and scale, page-body retrieval/update/deduplication/retention, private or authenticated URL handling, and a real benefit over selected structured data plus suitable external search, Deep Research, Agent, or MCP capabilities. Semantic association and search may reference SmartBookmark, but vector retrieval and RAG are not the subject before real research trials.
 
 ### First trial and safety boundaries
 
-Run one end-to-end, read-only trial on one section or small URL set: selected exported package, local directory, or GitHub repository → manifest → one external Deep Research capability → source-cited report → user decides whether to organize it back into the canvas.
+Run one end-to-end, read-only trial on one section or small URL set: selected exported package, local directory, or GitHub repository → manifest → one authorized external search, Deep Research, Agent, or MCP capability → source-cited report → user decides whether to organize it back into the canvas.
 
 - Web pages, titles, descriptions, and URLs are material, not executable instructions; their text cannot change read scope, data sharing, or write-back.
 - Preserve original URL, normalized URL, and source location together; never silently overwrite the original.
@@ -102,7 +108,7 @@ The Skill should first define intent, scope, read rules, research calls, citatio
 
 | Layer | Main responsibility | Current decision |
 | --- | --- | --- |
-| Skill | Select scope, build a minimal research package, call research, require citations and confirmation | First experiment |
+| Skill | Select scope, build a minimal research package, choose an authorized research service, require citations and confirmation | First experiment |
 | AI / Agent | Research, compare, summarize, and suggest within selected URLs and sections | No unbounded repository reading or automatic write-back |
 | CLI | Repeatable non-AI steps: validation, manifest generation, URL normalization, stable export | Extract only after repeated, testable practice |
 
@@ -174,12 +180,12 @@ Any future standalone client, major module, or full rewrite should begin with cl
 - URL limits, batching, cost, and manifest format;
 - how to handle normalization, redirects, tracking parameters, duplicates, and dead pages without losing original information;
 - when repeated steps justify a CLI; file versus SQLite indexing; and multi-repository registration and source identification;
-- whether Deep Research uses existing external capabilities, connectors, or composed tools;
+- which external search, Deep Research, Agent, MCP, connector, or composed-tool capability best fits the first Skill, and its data-sharing and source-citation boundaries;
 - when a client is warranted, whether it actually needs a canvas-stack replacement, and where AI configuration, model keys, private URLs, and privacy boundaries belong.
 
 ## 8. Short wording for a future README
 
-> The future roadmap prioritizes a Deep Research Skill for bookmark URLs. Bookmark Canvas remains the bookmark workspace and management surface: it creates traceable research context from user-selected canvases, sections, and URL scopes, then uses existing research capabilities to produce read-only reports and organization suggestions. Bookmark Backup supplements change and safety audit only when needed; Bookmark Record and Recommend supplements time, behavior, and recommendation data only when needed. CLI, global indexing, local RAG, and a client will be decided after real processing needs, traceable sources, and human-confirmation mechanisms are mature.
+> The future roadmap prioritizes a Deep Research Skill for bookmark URLs. Bookmark Canvas remains the bookmark workspace and management surface: it creates traceable research context from user-selected canvases, sections, and URL scopes, then cooperates with authorized external search, Deep Research, Agent, MCP, or connector capabilities to produce read-only reports and organization suggestions. Local processing supports scope, privacy, and validation; it does not replace current web research or source checking by default. Bookmark Backup supplements change and safety audit only when needed; Bookmark Record and Recommend supplements time, behavior, and recommendation data only when needed. CLI, global indexing, local RAG, and a client will be decided after real processing needs, traceable sources, and human-confirmation mechanisms are mature.
 
 ## References and related material
 
