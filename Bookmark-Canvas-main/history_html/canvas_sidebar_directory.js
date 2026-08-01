@@ -59,6 +59,7 @@
   let refreshRaf = null;
   let refreshDeferredTimer = null;
   let pendingForceRefresh = false;
+  let pendingPreferStoredFolderStates = false;
   let canvasObserver = null;
   let observedCanvasContent = null;
   let lastFingerprint = '';
@@ -3815,7 +3816,10 @@
 
     applyDirectoryColorVars(root);
     bindRootEvents(root);
-    const openFolderKeys = collectOpenFolderKeys(root);
+    // A remote folder-state write must win over this document's stale DOM snapshot.
+    const openFolderKeys = options.preferStoredFolderStates
+      ? new Set()
+      : collectOpenFolderKeys(root);
     const nodes = buildDirectoryData();
     const fingerprint = JSON.stringify({
       lang: getLang(),
@@ -3870,12 +3874,16 @@
     if (refreshDeferredTimer) return;
     refreshDeferredTimer = global.setTimeout(() => {
       refreshDeferredTimer = null;
-      queueRefresh({ force: pendingForceRefresh });
+      queueRefresh({
+        force: pendingForceRefresh,
+        preferStoredFolderStates: pendingPreferStoredFolderStates
+      });
     }, REFRESH_DEFER_MS);
   }
 
   function queueRefresh(options = {}) {
     if (options.force) pendingForceRefresh = true;
+    if (options.preferStoredFolderStates) pendingPreferStoredFolderStates = true;
     if (lastFingerprint && isCanvasInteractionActiveForDirectory()) {
       scheduleDeferredRefresh();
       return;
@@ -3884,13 +3892,16 @@
     refreshRaf = global.requestAnimationFrame(() => {
       refreshRaf = null;
       const force = pendingForceRefresh;
+      const preferStoredFolderStates = pendingPreferStoredFolderStates;
       pendingForceRefresh = false;
+      pendingPreferStoredFolderStates = false;
       if (lastFingerprint && isCanvasInteractionActiveForDirectory()) {
         if (force) pendingForceRefresh = true;
+        if (preferStoredFolderStates) pendingPreferStoredFolderStates = true;
         scheduleDeferredRefresh();
         return;
       }
-      refreshDirectory({ force });
+      refreshDirectory({ force, preferStoredFolderStates });
     });
   }
 
@@ -5087,8 +5098,12 @@
       queueRefresh();
     }, REFRESH_INTERVAL_MS);
 
-    global.addEventListener('storage', () => {
-      queueRefresh({ force: true });
+    global.addEventListener('storage', (event) => {
+      const isFolderStateChange = !event || event.key === FOLDER_OPEN_STATES_KEY;
+      queueRefresh({
+        force: true,
+        preferStoredFolderStates: isFolderStateChange
+      });
       try { renderHistoryPanel(); } catch (_) {}
     });
 
