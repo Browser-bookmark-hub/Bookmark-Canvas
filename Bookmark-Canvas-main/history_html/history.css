@@ -1175,6 +1175,7 @@ html:not(.side-panel-mode) .tool-buttons #langToggle,
 html:not(.side-panel-mode) .tool-buttons #helpToggle,
 html:not(.side-panel-mode) .tool-buttons #settingsToggle,
 html:not(.side-panel-mode) .tool-buttons #quickAddToggle,
+html:not(.side-panel-mode) .tool-buttons #orphanedFullscreenExitBtn,
 html:not(.side-panel-mode) .tool-buttons #sideAnchorBtn,
 html:not(.side-panel-mode) .tool-buttons #openCanvasPageBtn {
     display: none;
@@ -1767,6 +1768,28 @@ body.header-dock-bottom:not(.header-compact) .search-mode-menu {
 
 .quick-add-btn {
     display: none;
+}
+
+.orphaned-fullscreen-exit-btn {
+    width: auto !important;
+    min-width: 46px !important;
+    padding: 0 8px !important;
+    color: #d49a16;
+    border-color: #d49a16;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0;
+}
+
+.orphaned-fullscreen-exit-btn:hover,
+.orphaned-fullscreen-exit-btn:focus-visible {
+    color: #f0b429;
+    border-color: #f0b429;
+    background: var(--bg-tertiary);
+}
+
+.orphaned-fullscreen-exit-btn[hidden] {
+    display: none !important;
 }
 
 .anchor-btn {

@@ -3327,6 +3327,14 @@ const i18n = {
         'zh_CN': '添加',
         'en': 'Add'
     },
+    orphanedFullscreenExitTooltip: {
+        'zh_CN': '退出卡片全屏',
+        'en': 'Exit Card Fullscreen'
+    },
+    orphanedFullscreenExitLabel: {
+        'zh_CN': '退出',
+        'en': 'EXIT'
+    },
     titleLastFullscreenTooltip: {
         'zh_CN': '上次全屏卡片',
         'en': 'Last Fullscreen Card'
@@ -5046,6 +5054,14 @@ function applyLanguage() {
     if (titleQuickAddTooltip) titleQuickAddTooltip.textContent = i18n.quickAddTooltip[currentLang];
     const titleQuickAddToggleBtn = document.getElementById('titleQuickAddToggleBtn');
     if (titleQuickAddToggleBtn) titleQuickAddToggleBtn.setAttribute('aria-label', i18n.quickAddTooltip[currentLang]);
+    ['orphanedFullscreenExit', 'titleOrphanedFullscreenExit'].forEach((prefix) => {
+        const tooltip = document.getElementById(`${prefix}Tooltip`);
+        const button = document.getElementById(`${prefix}Btn`);
+        const label = document.getElementById(`${prefix}Label`);
+        if (tooltip) tooltip.textContent = i18n.orphanedFullscreenExitTooltip[currentLang];
+        if (button) button.setAttribute('aria-label', i18n.orphanedFullscreenExitTooltip[currentLang]);
+        if (label) label.textContent = i18n.orphanedFullscreenExitLabel[currentLang];
+    });
     const titleLastFullscreenTooltip = document.getElementById('titleLastFullscreenTooltip');
     if (titleLastFullscreenTooltip) titleLastFullscreenTooltip.textContent = i18n.titleLastFullscreenTooltip[currentLang];
     const titleLastFullscreenBtn = document.getElementById('titleLastFullscreenBtn');
@@ -7517,6 +7533,52 @@ function setupQuickAddMenu() {
     } catch (_) { }
 }
 
+function setupOrphanedFullscreenExitButton() {
+    const buttons = [
+        document.getElementById('orphanedFullscreenExitBtn'),
+        document.getElementById('titleOrphanedFullscreenExitBtn')
+    ].filter(Boolean);
+    if (!buttons.length) return;
+
+    let initialCanvasLayoutReady = false;
+    const refresh = () => {
+        // The bootstrap state precedes DOM restoration; do not mistake that short window for an orphan.
+        if (!initialCanvasLayoutReady) {
+            buttons.forEach((button) => {
+                button.hidden = true;
+            });
+            return;
+        }
+        const hasLiveMaximizedNode = !!document.querySelector('.canvas-node-maximized');
+        const bodyClaimsFullscreen = !!(document.body && document.body.classList.contains('canvas-node-maximized-active'));
+        const preloadClaimsFullscreen = !!(document.documentElement && document.documentElement.classList.contains('layout-preload-node-maximized-active'));
+        const visible = !hasLiveMaximizedNode && (bodyClaimsFullscreen || preloadClaimsFullscreen);
+        buttons.forEach((button) => {
+            button.hidden = !visible;
+        });
+    };
+
+    buttons.forEach((button) => {
+        if (button.dataset.bound === 'true') return;
+        button.dataset.bound = 'true';
+        button.addEventListener('click', () => {
+            const exit = window.CanvasModule && window.CanvasModule.exitOrphanedNodeFullscreenState;
+            if (typeof exit !== 'function' || exit() !== true) return;
+            refresh();
+            try {
+                showToast(currentLang === 'en' ? 'Exited card fullscreen.' : '已退出卡片全屏');
+            } catch (_) { }
+        });
+    });
+
+    window.addEventListener('canvas-maximized-state-change', refresh);
+    window.addEventListener('canvas-initial-layout-ready', () => {
+        initialCanvasLayoutReady = true;
+        refresh();
+    }, { once: true });
+    refresh();
+}
+
 function readQuickAddWindowAsFolderOption() {
     try {
         const raw = localStorage.getItem(QUICK_ADD_WINDOW_FOLDER_OPTION_STORAGE_KEY);
@@ -8822,6 +8884,7 @@ function initializeUI() {
     bindLastFullscreenButtonsVisibilitySync();
     refreshLastFullscreenButtonsVisibility();
     setupQuickAddMenu();
+    setupOrphanedFullscreenExitButton();
     setupOpenCanvasPageButton();
     setupSideLastFullscreenButton();
     setupTitleSidePanelToggleButton();

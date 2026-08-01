@@ -40982,6 +40982,28 @@ function restoreCanvasNodeLayout(element, options = {}) {
     } catch (_) { }
 }
 
+function exitOrphanedNodeFullscreenState() {
+    if (document.querySelector('.canvas-node-maximized')) return false;
+
+    CanvasState.pendingMaximizedDescriptor = null;
+    CanvasState.maximizedRestoreTaskKey = '';
+    __clearMaximizedNodeStorage();
+
+    try {
+        if (document.body) document.body.classList.remove('canvas-node-maximized-active');
+        if (document.documentElement) document.documentElement.classList.remove('layout-preload-node-maximized-active');
+    } catch (_) { }
+
+    __updateNodeMaximizedState();
+    try { updateCanvasLowDetailMode(true); } catch (_) { }
+    try { updateCanvasScrollBounds({ recomputeBounds: true, initial: false }); } catch (_) { }
+    try { scheduleScrollbarUpdate(); } catch (_) { }
+    try { scheduleEdgesRender(0); } catch (_) { }
+    updateNodeFullscreenButtons();
+    __notifyNodeFullscreenContextChange(null);
+    return true;
+}
+
 function toggleElementFullscreen(element) {
     if (!element) return;
     if (__isNodeMaximized(element)) {
@@ -42111,6 +42133,7 @@ window.CanvasModule = {
     locateElement: locateToElement,
     navigateToViewport: navigateToViewport,
     toggleElementFullscreen,
+    exitOrphanedNodeFullscreenState,
     togglePermanentSectionPin,
     toggleTempSectionPin,
     openTempSectionRename,
