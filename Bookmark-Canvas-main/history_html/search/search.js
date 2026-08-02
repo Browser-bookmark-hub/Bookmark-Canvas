@@ -1348,7 +1348,7 @@ function handleSearchResultsPanelClick(e) {
                 const inputEl = document.getElementById('searchInput');
                 if (inputEl) inputEl.value = '';
             } catch (_) { }
-            locateCanvasBookmarkItem(targetItem);
+            navigateToCanvasBookmarkSearchTarget(targetItem);
         }
         return;
     }
@@ -1514,11 +1514,24 @@ function handleSearchResultsPanelClick(e) {
 
         // Priority 1: Location Chip specific ID
         if (locId) {
-            if (locSource === 'temporary') {
-                locateBookmarkItemInTempTree(locSection, locId, opts);
-            } else {
-                locateBookmarkItemInPermanentTree(locId, opts);
-            }
+            const target = explicitLocation && explicitLocation.originalItem
+                ? Object.assign({}, explicitLocation.originalItem)
+                : {
+                    type: 'bookmark-item',
+                    id: locId,
+                    source: locSource || 'permanent',
+                    sectionId: locSection || '',
+                    copyId: null,
+                    color: opts.color
+                };
+            target.type = 'bookmark-item';
+            target.id = locId;
+            target.source = locSource || target.source || 'permanent';
+            if (locSection) target.sectionId = locSection;
+            if (copyId && copyId !== 'null') target.copyId = copyId;
+            else if (target.source === 'permanent') target.copyId = null;
+            target.color = opts.color;
+            navigateToCanvasBookmarkSearchTarget(target);
             return;
         }
 
@@ -12053,6 +12066,24 @@ async function locateCanvasBookmarkItem(item) {
         copyId: item.copyId || activePermanentCopyId || null,
         expandTargetFolder
     });
+}
+
+async function navigateToCanvasBookmarkSearchTarget(item) {
+    if (!item || item.type !== 'bookmark-item') return false;
+
+    // Location chips may point outside the current fullscreen card. Switch the
+    // fullscreen target first; otherwise CSS isolation keeps the destination hidden.
+    if (isCanvasFullscreenActive()) {
+        try {
+            await ensureBookmarkSearchTargetFullscreen(item);
+        } catch (_) { }
+    }
+
+    try {
+        return await locateCanvasBookmarkItem(item);
+    } catch (_) {
+        return false;
+    }
 }
 
 async function locateCanvasBookmarkTreeItem(target) {
