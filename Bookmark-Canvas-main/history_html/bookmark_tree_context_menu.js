@@ -6282,6 +6282,13 @@ function buildMenuItems(context) {
         items.push(
             // 选择组
             { action: 'select-item', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '选择' : '选择（批量操作）') : (contextMenuHorizontal ? 'Select' : 'Select (Batch)'), icon: 'check-square', group: 'actions' },
+            {
+                action: 'info-submenu-trigger',
+                label: lang === 'zh_CN' ? '信息与笔记' : 'Info & Notes',
+                icon: 'info-circle',
+                group: 'actions',
+                hasSubmenu: true
+            },
             { action: 'tag-submenu-trigger', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions', hasSubmenu: true },
 
             // 临时溯源放在重命名上方
@@ -6303,13 +6310,6 @@ function buildMenuItems(context) {
                 group: 'actions',
                 className: 'add-entry-option',
                 hidden: false
-            },
-            {
-                action: 'info-submenu-trigger',
-                label: lang === 'zh_CN' ? '信息' : 'Info',
-                icon: 'info-circle',
-                group: 'actions',
-                hasSubmenu: true
             },
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
@@ -6339,6 +6339,13 @@ function buildMenuItems(context) {
         items.push(
             // 选择组
             { action: 'select-item', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '选择' : '选择（批量操作）') : (contextMenuHorizontal ? 'Select' : 'Select (Batch)'), icon: 'check-square', group: 'actions' },
+            {
+                action: 'info-submenu-trigger',
+                label: lang === 'zh_CN' ? '信息与笔记' : 'Info & Notes',
+                icon: 'info-circle',
+                group: 'actions',
+                hasSubmenu: true
+            },
             { action: 'tag-submenu-trigger', label: lang === 'zh_CN' ? '标签' : 'Tags', icon: 'hashtag', group: 'actions', hasSubmenu: true },
 
             // 临时溯源放在编辑上方
@@ -6360,13 +6367,6 @@ function buildMenuItems(context) {
                 group: 'actions',
                 className: 'add-entry-option',
                 hidden: false
-            },
-            {
-                action: 'info-submenu-trigger',
-                label: lang === 'zh_CN' ? '信息' : 'Info',
-                icon: 'info-circle',
-                group: 'actions',
-                hasSubmenu: true
             },
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
