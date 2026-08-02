@@ -9656,6 +9656,35 @@ function __materializeMaximizedNodeFromDescriptor(descriptor) {
 
     const type = String(descriptor.type || '').toLowerCase();
 
+    if (type === 'permanent') {
+        const section = document.getElementById('permanentSection');
+        if (section) {
+            __wakeCanvasNodeFromLazyState(section);
+        }
+        return section;
+    }
+
+    if (type === 'permanent-copy') {
+        const copyId = String(descriptor.copyId || '').trim();
+        if (!copyId) return null;
+
+        try {
+            const shell = __buildPermanentViewShellProtocolFromStorage(copyId);
+            const section = __createPermanentSectionCopyFromStorage({
+                id: copyId,
+                displayIndex: shell && shell.displayIndex,
+                ...(shell && shell.cardState && typeof shell.cardState === 'object' ? shell.cardState : {})
+            });
+            if (section) {
+                __applyPermanentViewShellToSectionElement(section, shell);
+                __wakeCanvasNodeFromLazyState(section);
+            }
+            return section;
+        } catch (_) {
+            return null;
+        }
+    }
+
     if (type === 'temp-node') {
         const id = String(descriptor.id || '').trim();
         if (!id) return null;
@@ -29024,8 +29053,13 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
         try { saveSharedState(openedKey, 'true', { asJSON: false }); } catch (_) { }
     }
 
-    // Restore maximized node state after all nodes are rendered
-    __tryRestoreMaximizedNode({ clearIfMissing: false });
+    // Restore the shared fullscreen descriptor only after every card type can
+    // be materialized. A failed restore must release this surface back to the
+    // canvas instead of preserving a cardless fullscreen isolation shell.
+    const restoredMaximizedNode = __tryRestoreMaximizedNode({ clearIfMissing: false });
+    if (!restoredMaximizedNode && CanvasState.pendingMaximizedDescriptor) {
+        __releaseUnrestoredMaximizedNodeToCanvas();
+    }
 
     try {
         window.__bookmarkCanvasSearchStateReady = true;
@@ -40480,18 +40514,22 @@ function __runFullscreenPreloadRestore(target, descriptor) {
 }
 
 function __tryRestoreMaximizedNode({ clearIfMissing = false } = {}) {
-    if (!CanvasState.pendingMaximizedDescriptor) return;
+    if (!CanvasState.pendingMaximizedDescriptor) return false;
     const descriptor = CanvasState.pendingMaximizedDescriptor;
-    const target = __resolveMaximizedNode(descriptor);
+    let target = __resolveMaximizedNode(descriptor);
+    if (!target) {
+        target = __materializeMaximizedNodeFromDescriptor(descriptor);
+    }
     if (target) {
+        __wakeCanvasNodeFromLazyState(target);
         if (__isFullscreenPreloadRestoreActive()) {
             __runFullscreenPreloadRestore(target, descriptor);
-            return;
+            return true;
         }
         maximizeCanvasNode(target);
         CanvasState.pendingMaximizedDescriptor = null;
         CanvasState.maximizedRestoreTaskKey = '';
-        return;
+        return true;
     }
     if (clearIfMissing) {
         CanvasState.pendingMaximizedDescriptor = null;
@@ -40499,6 +40537,31 @@ function __tryRestoreMaximizedNode({ clearIfMissing = false } = {}) {
         __clearMaximizedNodeStorage();
         __updateNodeMaximizedState();
     }
+    return false;
+}
+
+// A shared fullscreen descriptor can outlive a frozen side-panel document.
+// After this surface has finished loading its data, never leave its preload
+// isolation active when that descriptor cannot be materialized here.
+function __releaseUnrestoredMaximizedNodeToCanvas() {
+    if (document.querySelector('.canvas-node-maximized')) return false;
+
+    CanvasState.pendingMaximizedDescriptor = null;
+    CanvasState.maximizedRestoreTaskKey = '';
+
+    try {
+        if (document.body) document.body.classList.remove('canvas-node-maximized-active');
+        if (document.documentElement) document.documentElement.classList.remove('layout-preload-node-maximized-active');
+    } catch (_) { }
+
+    __updateNodeMaximizedState();
+    try { updateCanvasLowDetailMode(true); } catch (_) { }
+    try { updateCanvasScrollBounds({ recomputeBounds: true, initial: false }); } catch (_) { }
+    try { scheduleScrollbarUpdate(); } catch (_) { }
+    try { scheduleEdgesRender(0); } catch (_) { }
+    updateNodeFullscreenButtons();
+    __notifyNodeFullscreenContextChange(null);
+    return true;
 }
 
 function __tryRestorePendingMaximizedNodeForElement(element) {
