@@ -11542,6 +11542,7 @@ function createPermanentSectionCopy(sourceSection, options = {}) {
     __applyPermanentViewShellToSectionElement(copySection, shell);
 
     canvasContent.appendChild(copySection);
+    refreshPermanentSectionActionLabels(copySection);
 
     // Bind behaviors
     try { makePermanentSectionDraggable(copySection); } catch (_) { }
@@ -11628,6 +11629,7 @@ function __createPermanentSectionCopyFromStorage(copyData) {
     __applyPermanentViewShellToSectionElement(copySection, shell);
 
     canvasContent.appendChild(copySection);
+    refreshPermanentSectionActionLabels(copySection);
 
     // Bind behaviors
     try { makePermanentSectionDraggable(copySection); } catch (_) { }
@@ -26661,14 +26663,82 @@ function updatePermanentSectionPinState(isPinned, pinBtn, permanentSection) {
     if (isPinned) {
         pinBtn.classList.add('pinned');
         pinBtn.title = unpinLabel;
+        pinBtn.setAttribute('aria-label', unpinLabel);
+        pinBtn.setAttribute('data-tooltip', unpinLabel);
         pinBtn.innerHTML = '<i class="fas fa-thumbtack"></i>';
         permanentSection.style.zIndex = '200';
     } else {
         pinBtn.classList.remove('pinned');
         pinBtn.title = pinLabel;
+        pinBtn.setAttribute('aria-label', pinLabel);
+        pinBtn.setAttribute('data-tooltip', pinLabel);
         pinBtn.innerHTML = '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
         permanentSection.style.zIndex = '100';
     }
+}
+
+function __getPermanentSectionI18nText(key, fallbackZh, fallbackEn, lang) {
+    const entry = window.i18n && window.i18n[key];
+    if (entry && entry[lang]) return entry[lang];
+    return lang === 'en' ? fallbackEn : fallbackZh;
+}
+
+function refreshPermanentSectionActionLabels(scope = null) {
+    const lang = getCanvasLanguage();
+    const sections = [];
+    if (scope && scope.matches && scope.matches('.permanent-bookmark-section')) {
+        sections.push(scope);
+    }
+    const root = scope && typeof scope.querySelectorAll === 'function' ? scope : document;
+    root.querySelectorAll('.permanent-bookmark-section').forEach((section) => {
+        if (!sections.includes(section)) sections.push(section);
+    });
+
+    sections.forEach((section) => {
+        const setLabel = (selector, label) => {
+            const element = section.querySelector(selector);
+            if (!element) return;
+            element.title = label;
+            element.setAttribute('aria-label', label);
+            element.setAttribute('data-tooltip', label);
+        };
+
+        setLabel('.canvas-layout-zoom-btn[data-action="layout-zoom-out"]', getLayoutZoomLabel('out', lang));
+        setLabel('.canvas-layout-zoom-btn[data-action="layout-zoom-in"]', getLayoutZoomLabel('in', lang));
+        setLabel('.canvas-layout-zoom-input, .canvas-layout-zoom-value', getLayoutZoomLabel('value', lang));
+        setLabel('.permanent-section-copy-btn', __getPermanentSectionI18nText(
+            'permanentSectionCopyTitle', '复制永久栏目', 'Copy permanent section', lang
+        ));
+
+        const pinBtn = section.querySelector('.permanent-section-pin-btn');
+        if (pinBtn) {
+            const pinned = pinBtn.classList.contains('pinned') || section.style.zIndex === '200';
+            setLabel('.permanent-section-pin-btn', __getPermanentSectionI18nText(
+                pinned ? 'permanentSectionUnpinTitle' : 'permanentSectionPinTitle',
+                pinned ? '取消置顶' : '置顶栏目',
+                pinned ? 'Unpin section' : 'Pin section',
+                lang
+            ));
+        }
+
+        setLabel('.permanent-section-search-btn', __getPermanentSectionI18nText(
+            'permanentSectionSearchTitle', '搜索当前的范围', 'Search current scope', lang
+        ));
+
+        const fullscreenLabel = __isNodeMaximized(section)
+            ? getFullscreenLabel('canvasFullscreenExit', lang)
+            : getFullscreenLabel('canvasFullscreenEnter', lang);
+        setLabel('.permanent-section-fullscreen-btn', fullscreenLabel);
+        setLabel('.permanent-section-remove-btn', __getPermanentSectionI18nText(
+            'permanentSectionRemoveCopyTitle', '删除该永久栏目副本', 'Delete permanent section copy', lang
+        ));
+        setLabel('.permanent-section-tip-edit-btn', __getPermanentSectionI18nText(
+            'permanentSectionEditDescriptionTitle', '编辑说明', 'Edit description', lang
+        ));
+        setLabel('.permanent-section-tip-close', __getPermanentSectionI18nText(
+            'permanentSectionCloseTipTitle', '关闭提示', 'Close tip', lang
+        ));
+    });
 }
 
 // =============================================================================
@@ -39079,13 +39149,18 @@ function updateScrollbarControls(axis) {
     const hideIcon = hideBtn ? hideBtn.querySelector('i') : null;
     const disableBtn = bar.querySelector('.scrollbar-btn.scroll-disable');
     const disableIcon = disableBtn ? disableBtn.querySelector('i') : null;
-    const axisLabel = axis === 'vertical' ? '纵向' : '横向';
+    const isEn = typeof currentLang !== 'undefined' && currentLang === 'en';
+    const axisLabel = axis === 'vertical'
+        ? (isEn ? 'vertical' : '纵向')
+        : (isEn ? 'horizontal' : '横向');
 
     bar.classList.toggle('is-hidden', CanvasState.scrollState[axis].hidden);
     bar.classList.toggle('is-disabled', CanvasState.scrollState[axis].disabled);
 
     if (hideBtn) {
-        const label = CanvasState.scrollState[axis].hidden ? `显示${axisLabel}滚动条` : `隐藏${axisLabel}滚动条`;
+        const label = CanvasState.scrollState[axis].hidden
+            ? (isEn ? `Show ${axisLabel} scrollbar` : `显示${axisLabel}滚动条`)
+            : (isEn ? `Hide ${axisLabel} scrollbar` : `隐藏${axisLabel}滚动条`);
         hideBtn.setAttribute('aria-label', label);
         hideBtn.removeAttribute('title');
     }
@@ -39093,7 +39168,9 @@ function updateScrollbarControls(axis) {
         hideIcon.className = CanvasState.scrollState[axis].hidden ? 'fas fa-eye' : 'fas fa-eye-slash';
     }
     if (disableBtn) {
-        const label = CanvasState.scrollState[axis].disabled ? `启用${axisLabel}滚动` : `禁用${axisLabel}滚动`;
+        const label = CanvasState.scrollState[axis].disabled
+            ? (isEn ? `Enable ${axisLabel} scrolling` : `启用${axisLabel}滚动`)
+            : (isEn ? `Disable ${axisLabel} scrolling` : `禁用${axisLabel}滚动`);
         disableBtn.setAttribute('aria-label', label);
         disableBtn.removeAttribute('title');
     }
@@ -42198,6 +42275,7 @@ window.CanvasModule = {
     toggleElementFullscreen,
     exitOrphanedNodeFullscreenState,
     togglePermanentSectionPin,
+    refreshPermanentSectionActionLabels,
     toggleTempSectionPin,
     openTempSectionRename,
     openTempSectionColorPicker,

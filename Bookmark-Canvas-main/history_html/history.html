@@ -94,17 +94,20 @@
                     <!-- Chip 将插入在这里 -->
                     <input type="text" id="searchInput" />
                     <div id="searchAreaIndicator" class="search-area-indicator" style="display: none;">
-                        <span class="search-area-indicator-label">区域</span>
-                        <button id="searchAreaExitBtn" class="search-area-exit-btn" aria-label="退出区域搜索" type="button">
+                        <span class="search-area-indicator-label" data-i18n-key="searchAreaLabel">区域</span>
+                        <button id="searchAreaExitBtn" class="search-area-exit-btn"
+                            data-i18n-title="searchAreaExitTitle" title="退出区域搜索" aria-label="退出区域搜索" type="button">
                             <i class="fas fa-times"></i>
                         </button>
                     </div>
-                    <button id="searchClearBtn" class="search-clear-btn" aria-label="清空输入" type="button" style="display: none;">
+                    <button id="searchClearBtn" class="search-clear-btn" data-i18n-title="searchClearTitle"
+                        title="清空输入" aria-label="清空输入" type="button" style="display: none;">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
                 <!-- 搜索结果面板 -->
-                <div id="searchResultsPanel" class="search-results-panel" role="listbox" aria-label="Search results">
+                <div id="searchResultsPanel" class="search-results-panel" role="listbox"
+                    data-i18n-aria-label="searchResultsLabel" aria-label="Search results">
                 </div>
             </div>
 
@@ -318,7 +321,8 @@
                 </button>
                 <div class="settings-menu-divider" aria-hidden="true" style="display: none;"></div>
                 <div class="settings-storage-block" id="settingsStorageSyncBlock" style="display: none;">
-                    <div class="settings-storage-split" role="group" aria-label="导入导出">
+                    <div class="settings-storage-split" role="group"
+                        data-i18n-aria-label="canvasManageImportExportGroupLabel" aria-label="导入导出">
                         <button id="importCanvasOtherBtn" class="settings-menu-item settings-storage-split-btn"
                             type="button">
                             <i class="fas fa-file-import"></i>
@@ -335,7 +339,8 @@
                             <span id="exportCanvasOtherText">导出</span>
                         </button>
                     </div>
-                    <div class="settings-storage-split settings-github-split" role="group" aria-label="GitHub 推送拉取">
+                    <div class="settings-storage-split settings-github-split" role="group"
+                        data-i18n-aria-label="canvasManageGithubGroupLabel" aria-label="GitHub 推送拉取">
                         <button id="githubPullOtherBtn" class="settings-menu-item settings-storage-split-btn"
                             type="button">
                             <i class="fas fa-arrow-down"></i>
@@ -970,7 +975,8 @@
                                     <div class="canvas-manage-section-title">
                                         <span id="canvasManageStorageSectionText">存储与同步</span>
                                     </div>
-                                    <div class="canvas-manage-split-group canvas-manage-horizontal-row" role="group" aria-label="存储与同步">
+                                    <div class="canvas-manage-split-group canvas-manage-horizontal-row" role="group"
+                                        data-i18n-aria-label="canvasManageSectionStorageText" aria-label="存储与同步">
                                         <button id="importCanvasBtn"
                                             class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-left">
                                             <i class="fas fa-file-import"></i>
@@ -987,7 +993,8 @@
                                             <span id="exportCanvasText">导出</span>
                                         </button>
                                     </div>
-                                    <div class="canvas-manage-split-group canvas-manage-horizontal-row canvas-manage-github-row" role="group" aria-label="GitHub 推送拉取">
+                                    <div class="canvas-manage-split-group canvas-manage-horizontal-row canvas-manage-github-row" role="group"
+                                        data-i18n-aria-label="canvasManageGithubGroupLabel" aria-label="GitHub 推送拉取">
                                         <button id="githubPullBtn"
                                             class="canvas-manage-btn canvas-manage-btn-split canvas-manage-btn-split-left">
                                             <i class="fas fa-arrow-down"></i>
@@ -1086,33 +1093,41 @@
                             <div class="permanent-section-actions">
                                 <div class="canvas-layout-zoom-controls" data-layout-zoom-controls="true">
                                     <button class="permanent-section-action-btn canvas-layout-zoom-btn" type="button"
-                                        data-action="layout-zoom-out" title="缩小排版" aria-label="缩小排版">
+                                        data-action="layout-zoom-out" data-i18n-title="permanentSectionLayoutZoomOutTitle"
+                                        title="缩小排版" aria-label="缩小排版">
                                         <i class="fas fa-minus"></i>
                                     </button>
                                     <input class="canvas-layout-zoom-value canvas-layout-zoom-input"
-                                        data-layout-zoom-value title="排版比例" aria-label="排版比例" value="125%" />
+                                        data-layout-zoom-value data-i18n-title="permanentSectionLayoutZoomValueTitle"
+                                        title="排版比例" aria-label="排版比例" value="125%" />
                                     <button class="permanent-section-action-btn canvas-layout-zoom-btn" type="button"
-                                        data-action="layout-zoom-in" title="放大排版" aria-label="放大排版">
+                                        data-action="layout-zoom-in" data-i18n-title="permanentSectionLayoutZoomInTitle"
+                                        title="放大排版" aria-label="放大排版">
                                         <i class="fas fa-plus"></i>
                                     </button>
                                 </div>
-                                <button class="permanent-section-action-btn permanent-section-copy-btn" title="复制永久栏目">
+                                <button class="permanent-section-action-btn permanent-section-copy-btn"
+                                    data-i18n-title="permanentSectionCopyTitle" title="复制永久栏目" aria-label="复制永久栏目">
                                     <i class="fas fa-copy"></i>
                                 </button>
                                 <button class="permanent-section-action-btn permanent-section-pin-btn pinned"
-                                    id="permanentSectionPinBtn" title="置顶栏目">
+                                    id="permanentSectionPinBtn" data-i18n-title="permanentSectionPinTitle"
+                                    title="置顶栏目" aria-label="置顶栏目">
                                     <i class="fas fa-thumbtack"></i>
                                 </button>
-                                <button class="permanent-section-action-btn permanent-section-search-btn" title="搜索当前的范围" aria-label="搜索当前的范围">
+                                <button class="permanent-section-action-btn permanent-section-search-btn"
+                                    data-i18n-title="permanentSectionSearchTitle" title="搜索当前的范围"
+                                    aria-label="搜索当前的范围">
                                     <i class="fas fa-search"></i>
                                 </button>
                                 <button
                                     class="permanent-section-action-btn permanent-section-fullscreen-btn canvas-node-fullscreen-btn"
-                                    title="全屏" aria-label="全屏">
+                                    data-i18n-title="permanentSectionFullscreenTitle" title="全屏" aria-label="全屏">
                                     <i class="fas fa-expand"></i>
                                 </button>
                                 <button class="permanent-section-action-btn permanent-section-remove-btn"
-                                    title="删除该永久栏目副本">
+                                    data-i18n-title="permanentSectionRemoveCopyTitle" title="删除该永久栏目副本"
+                                    aria-label="删除该永久栏目副本">
                                     <i class="fas fa-times"></i>
                                 </button>
                             </div>
@@ -1122,11 +1137,13 @@
                                 <div class="permanent-section-tip" id="permanentSectionTip"></div>
                                 <div class="permanent-section-tip-controls">
                                     <button class="permanent-section-tip-edit-btn" id="permanentSectionTipEditBtn"
-                                        title="编辑说明">
+                                        data-i18n-title="permanentSectionEditDescriptionTitle" title="编辑说明"
+                                        aria-label="编辑说明">
                                         <i class="fas fa-edit"></i>
                                     </button>
                                     <button class="permanent-section-tip-close" id="permanentSectionTipClose"
-                                        title="关闭提示">
+                                        data-i18n-title="permanentSectionCloseTipTitle" title="关闭提示"
+                                        aria-label="关闭提示">
                                         <svg class="canvas-broom-icon" viewBox="0 0 24 24" aria-hidden="true"
                                             focusable="false">
                                             <path fill="currentColor"

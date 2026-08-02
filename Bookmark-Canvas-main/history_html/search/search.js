@@ -2781,7 +2781,7 @@ function updateSearchAreaIndicatorUI() {
     if (!indicator || !inputWrap) return;
     
     if (searchUiState.areaSearchScope) {
-        const isEn = String(typeof currentLang !== 'undefined' ? currentLang : 'zh').toLowerCase().startsWith('en');
+        const isEn = getCurrentLangSafe() === 'en';
         const labelText = isEn ? 'Area' : '区域';
         const labelEl = indicator.querySelector('.search-area-indicator-label');
         if (labelEl) {
@@ -3304,14 +3304,18 @@ function renderSearchModeUI() {
     const label = getCurrentLangSafe() === 'zh_CN' ? mode.label : mode.labelEn;
     if (isSidePanelModeInSearch()) {
         trigger.innerHTML = `<i class="fas fa-search ${mode.color}"></i><span class="search-mode-label ${mode.color}">${label}</span>`;
-        trigger.title = getCurrentLangSafe() === 'zh_CN' ? `搜索（模式：${label}）` : `Search (Mode: ${label})`;
+        const title = getCurrentLangSafe() === 'zh_CN' ? `搜索（模式：${label}）` : `Search (Mode: ${label})`;
+        trigger.title = title;
+        trigger.setAttribute('aria-label', title);
         trigger.style.cursor = 'pointer';
         trigger.classList.add('active-mode-trigger');
         return;
     }
 
     trigger.innerHTML = `<i class="fas ${mode.icon} ${mode.color}"></i><span class="search-mode-label ${mode.color}">${label}</span>`;
-    trigger.title = getCurrentLangSafe() === 'zh_CN' ? `切换模式: ${label}` : `Mode: ${label}`;
+    const title = getCurrentLangSafe() === 'zh_CN' ? `切换模式: ${label}` : `Mode: ${label}`;
+    trigger.title = title;
+    trigger.setAttribute('aria-label', title);
     trigger.style.cursor = 'pointer';
     trigger.classList.add('active-mode-trigger');
 
@@ -13110,6 +13114,29 @@ function updateSearchUILanguage() {
         if (menu && !menu.hidden) {
             renderSearchModeMenu();
         }
+    }
+
+    if (typeof renderSearchModeUI === 'function') {
+        renderSearchModeUI();
+    }
+    updateSearchAreaIndicatorUI();
+
+    const isEn = getCurrentLangSafe() === 'en';
+    const exitAreaBtn = document.getElementById('searchAreaExitBtn');
+    if (exitAreaBtn) {
+        const label = isEn ? 'Exit area search' : '退出区域搜索';
+        exitAreaBtn.title = label;
+        exitAreaBtn.setAttribute('aria-label', label);
+    }
+    const clearBtn = document.getElementById('searchClearBtn');
+    if (clearBtn) {
+        const label = isEn ? 'Clear input' : '清空输入';
+        clearBtn.title = label;
+        clearBtn.setAttribute('aria-label', label);
+    }
+    const resultsPanel = document.getElementById('searchResultsPanel');
+    if (resultsPanel) {
+        resultsPanel.setAttribute('aria-label', isEn ? 'Search results' : '搜索结果');
     }
 }
 window.updateSearchUILanguage = updateSearchUILanguage;

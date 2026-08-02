@@ -3239,6 +3239,22 @@ const i18n = {
         'zh_CN': '搜索书签、文件夹...',
         'en': 'Search bookmarks, folders...'
     },
+    searchAreaLabel: {
+        'zh_CN': '区域',
+        'en': 'Area'
+    },
+    searchAreaExitTitle: {
+        'zh_CN': '退出区域搜索',
+        'en': 'Exit area search'
+    },
+    searchClearTitle: {
+        'zh_CN': '清空输入',
+        'en': 'Clear input'
+    },
+    searchResultsLabel: {
+        'zh_CN': '搜索结果',
+        'en': 'Search results'
+    },
     helpTooltip: {
         'zh_CN': '快捷键',
         'en': 'Shortcuts'
@@ -3574,6 +3590,14 @@ const i18n = {
     canvasManageSectionStorageText: {
         'zh_CN': '存储与同步',
         'en': 'Storage & Sync'
+    },
+    canvasManageImportExportGroupLabel: {
+        'zh_CN': '导入导出',
+        'en': 'Import/Export'
+    },
+    canvasManageGithubGroupLabel: {
+        'zh_CN': 'GitHub 推送拉取',
+        'en': 'GitHub Push/Pull'
     },
     canvasManageSectionSyncText: {
         'zh_CN': '视图同步',
@@ -4146,6 +4170,58 @@ const i18n = {
     permanentSectionTip: {
         'zh_CN': '点击添加说明...',
         'en': 'Click to add description...'
+    },
+    permanentSectionLayoutZoomOutTitle: {
+        'zh_CN': '缩小排版',
+        'en': 'Decrease layout zoom'
+    },
+    permanentSectionLayoutZoomValueTitle: {
+        'zh_CN': '排版比例',
+        'en': 'Layout zoom'
+    },
+    permanentSectionLayoutZoomInTitle: {
+        'zh_CN': '放大排版',
+        'en': 'Increase layout zoom'
+    },
+    permanentSectionCopyTitle: {
+        'zh_CN': '复制永久栏目',
+        'en': 'Copy permanent section'
+    },
+    permanentSectionPinTitle: {
+        'zh_CN': '置顶栏目',
+        'en': 'Pin section'
+    },
+    permanentSectionUnpinTitle: {
+        'zh_CN': '取消置顶',
+        'en': 'Unpin section'
+    },
+    permanentSectionSearchTitle: {
+        'zh_CN': '搜索当前的范围',
+        'en': 'Search current scope'
+    },
+    permanentSectionFullscreenTitle: {
+        'zh_CN': '全屏',
+        'en': 'Fullscreen'
+    },
+    permanentSectionRemoveCopyTitle: {
+        'zh_CN': '删除该永久栏目副本',
+        'en': 'Delete permanent section copy'
+    },
+    permanentSectionEditDescriptionTitle: {
+        'zh_CN': '编辑说明',
+        'en': 'Edit description'
+    },
+    permanentSectionCloseTipTitle: {
+        'zh_CN': '关闭提示',
+        'en': 'Close tip'
+    },
+    sidebarCollapseTitle: {
+        'zh_CN': '收起菜单栏',
+        'en': 'Collapse sidebar'
+    },
+    sidebarExpandTitle: {
+        'zh_CN': '展开菜单栏',
+        'en': 'Expand sidebar'
     },
     shortcutsModalTitle: {
         'zh_CN': '快捷键',
@@ -4895,6 +4971,15 @@ function applyLanguage() {
         const text = i18n[key][currentLang];
         el.title = text;
         el.setAttribute('aria-label', text);
+        if (el.hasAttribute('data-tooltip')) {
+            el.setAttribute('data-tooltip', text);
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+        const key = el.getAttribute('data-i18n-aria-label');
+        if (!key || !i18n[key] || !i18n[key][currentLang]) return;
+        el.setAttribute('aria-label', i18n[key][currentLang]);
     });
 
     document.querySelectorAll('[data-canvas-help-pointer-info]').forEach((btn) => {
@@ -5179,6 +5264,10 @@ function applyLanguage() {
         updateShortcutsDisplay();
     }
 
+    if (window.CanvasModule && typeof window.CanvasModule.refreshPermanentSectionActionLabels === 'function') {
+        window.CanvasModule.refreshPermanentSectionActionLabels();
+    }
+
     try { window.dispatchEvent(new CustomEvent('bcs:language-changed')); } catch (_) { }
 
 }
@@ -5280,6 +5369,27 @@ function updateLanguageDependentUI() {
             el.textContent = isEn ? 'No data' : '没有数据';
         }
     });
+
+    // Keep controls whose labels depend on their current state in sync with language changes.
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    if (sidebarToggle) {
+        const isExpanded = sidebarToggle.dataset.collapseState === 'expanded';
+        const key = isExpanded ? 'sidebarCollapseTitle' : 'sidebarExpandTitle';
+        const label = i18n[key] && i18n[key][currentLang]
+            ? i18n[key][currentLang]
+            : (isExpanded ? (isEn ? 'Collapse sidebar' : '收起菜单栏') : (isEn ? 'Expand sidebar' : '展开菜单栏'));
+        sidebarToggle.title = label;
+        sidebarToggle.setAttribute('aria-label', label);
+    }
+
+    if (typeof updateScrollbarControls === 'function') {
+        updateScrollbarControls('vertical');
+        updateScrollbarControls('horizontal');
+    }
+
+    if (window.CanvasModule && typeof window.CanvasModule.refreshPermanentSectionActionLabels === 'function') {
+        window.CanvasModule.refreshPermanentSectionActionLabels();
+    }
 
     // ===== 更新临时栏目相关的多语言元素 =====
 
