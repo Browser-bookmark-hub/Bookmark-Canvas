@@ -9302,11 +9302,16 @@ function resolveTagTargetsForContext(action, context) {
     return { targets, anchorEl };
 }
 
-async function openTagPopoverForContext(action, context) {
+async function openTagPopoverForContext(action, context, anchorOverride) {
     if (typeof window.openTagPopover !== 'function' || !window.TagSystem) return;
     const { targets, anchorEl } = resolveTagTargetsForContext(action, context);
     if (!targets.length) return;
-    window.openTagPopover({ targets, anchor: anchorEl });
+    // Batch actions originate in a floating panel.  Keep the Tag popover next to
+    // that command rather than jumping to the first selected canvas item.
+    const anchor = anchorOverride || (action === 'batch-add-tags'
+        ? document.getElementById('batch-action-panel')
+        : anchorEl);
+    window.openTagPopover({ targets, anchor });
 }
 
 async function clearTagsForContext(action, context) {
@@ -14026,7 +14031,7 @@ function showBatchContextMenu(e) {
             } else if (action === 'batch-merge-folder') {
                 await batchMergeFolder();
             } else if (action === 'batch-add-tags') {
-                await openTagPopoverForContext('batch-add-tags', null);
+                await openTagPopoverForContext('batch-add-tags', null, item);
             } else if (action === 'batch-clear-tags') {
                 await clearTagsForContext('batch-clear-tags', null);
             } else if (action === 'batch-edit-note') {
