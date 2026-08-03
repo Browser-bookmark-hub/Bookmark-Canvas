@@ -10,6 +10,10 @@ Use the canvas to keep bookmark trees spatially organized without turning it int
 
 ### Preview
 
+#### Video Preview
+
+[![Watch the Bookmark Canvas demo](https://img.youtube.com/vi/aOxFcbBQD98/maxresdefault.jpg)](https://www.youtube.com/watch?v=aOxFcbBQD98)
+
 #### Screenshot Preview
 
 <p align="center"><strong>Side Panel (Card Fullscreen) and Tab (Global State)</strong></p>
@@ -34,10 +38,6 @@ Use the canvas to keep bookmark trees spatially organized without turning it int
     <td><img width="100%" alt="Bookmark Record and Recommend related-history example" src="Media%20and%20icons/v1.0.0/生态--书签记录与推荐--画布示例--关联记录zh%20en.png"></td>
   </tr>
 </table>
-
-#### Video Preview
-
-Video slots are reserved in [`Media and icons/`](Media%20and%20icons/) for a canvas walkthrough and an import/export or GitHub sync walkthrough.
 
 ### Initial Guide
 

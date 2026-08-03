@@ -10,7 +10,9 @@ Canvas packages (sample data packages are available from selected [Releases](htt
 
 ### Preview
 
-Screenshot and video assets are intentionally kept at the repository root in [Media and icons](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Media%20and%20icons). Open that folder for current media when it is available.
+#### Video Preview
+
+[![Watch the Bookmark Canvas demo](https://img.youtube.com/vi/aOxFcbBQD98/maxresdefault.jpg)](https://www.youtube.com/watch?v=aOxFcbBQD98)
 
 ### Initial Guide
 

@@ -10,6 +10,10 @@
 
 ### 预览
 
+#### 视频预览
+
+[![观看 Bookmark Canvas 演示视频](https://img.youtube.com/vi/aOxFcbBQD98/maxresdefault.jpg)](https://www.youtube.com/watch?v=aOxFcbBQD98)
+
 #### 截图预览
 
 <p align="center"><strong>侧边栏（卡片全屏）与标签页（全局状态）</strong></p>
@@ -34,10 +38,6 @@
     <td><img width="100%" alt="书签记录与推荐关联记录示例" src="../../Media%20and%20icons/v1.0.0/生态--书签记录与推荐--画布示例--关联记录zh%20en.png"></td>
   </tr>
 </table>
-
-#### 视频预览
-
-[`Media and icons/`](../../Media%20and%20icons/) 中已预留画布工作流、导入导出和 GitHub 同步演示的视频位置。
 
 ### 初始引导
 
