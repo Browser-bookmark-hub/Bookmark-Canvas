@@ -8119,7 +8119,7 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 6px 10px 0;
+    padding: 6px 10px 10px;
     /* 将顶部内边距从 10px 缩小至 6px */
     overflow-y: auto;
     overflow-x: hidden;

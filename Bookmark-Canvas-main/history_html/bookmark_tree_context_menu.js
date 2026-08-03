@@ -4111,9 +4111,10 @@ const PERMANENT_SECTION_ANCHOR_ID = 'permanent-root';
 let currentBatchPanelAnchorInfo = null; // 当前批量面板定位信息
 let lastBatchSelectionInfo = null; // 最近一次选择所属栏目
 
-// 批量面板默认尺寸：固定，不跟随画布缩放
+// 批量面板默认尺寸：固定宽度，不跟随画布缩放。
+// 纵向高度按内容自适应；仅用户手动调整的高度才持久化。
 const BATCH_PANEL_VERTICAL_DEFAULT_WIDTH = 200;
-const BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT = 450; // 450px 静默高度
+const BATCH_PANEL_VERTICAL_LEGACY_DEFAULT_HEIGHT = 450;
 const BATCH_PANEL_HORIZONTAL_DEFAULT_WIDTH = 860;
 
 function getBatchPanelGlobalState() {
@@ -4122,9 +4123,14 @@ function getBatchPanelGlobalState() {
         if (raw) {
             const parsed = JSON.parse(raw);
             if (parsed && typeof parsed === 'object') {
-                // 如果是以前默认的 700px 高度或 null，重置为新的默认高度 450
-                if (parsed.vertical && (parsed.vertical.height === 700 || parsed.vertical.height === null)) {
-                    parsed.vertical.height = BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT;
+                // Older versions persisted their automatic vertical height as a
+                // fixed value, which can clip the final command group. Treat
+                // those known defaults as auto height instead.
+                if (parsed.vertical && (
+                    parsed.vertical.height === 700 ||
+                    parsed.vertical.height === BATCH_PANEL_VERTICAL_LEGACY_DEFAULT_HEIGHT
+                )) {
+                    parsed.vertical.height = null;
                 }
                 return parsed;
             }
@@ -4135,7 +4141,7 @@ function getBatchPanelGlobalState() {
     return {
         vertical: {
             width: BATCH_PANEL_VERTICAL_DEFAULT_WIDTH,
-            height: BATCH_PANEL_VERTICAL_DEFAULT_HEIGHT,
+            height: null,
             manualPosition: false,
             left: null,
             top: null
