@@ -7797,6 +7797,60 @@ function createCanvasFolderItem(folder, isDraggable) {
 // =================================================================================
 
 
+function bindCanvasFloatingToolbarControls() {
+    const zoomInBtn = document.getElementById('zoomInBtn');
+    const zoomOutBtn = document.getElementById('zoomOutBtn');
+    const zoomLocateBtn = document.getElementById('zoomLocateBtn');
+
+    // [OPT] 优化缩放手感：添加平滑动画，使用 1.2 倍指数缩放
+    const animateZoomStep = (factor) => {
+        // [Feature] 全屏模式（卡片最大化）下禁用 UI 缩放按钮
+        if (__isCanvasNodeMaximizedActive()) return;
+        const content = document.getElementById('canvasContent');
+        if (content) {
+            content.classList.add('animate-zoom');
+            setTimeout(() => content.classList.remove('animate-zoom'), 300);
+        }
+        __cancelCanvasWheelPanMotion();
+        setCanvasZoom(CanvasState.zoom * factor);
+    };
+
+    const bindZoomStepButton = (btn, factor) => {
+        if (!btn || btn.dataset.zoomStepBound === 'true') return;
+        btn.dataset.zoomStepBound = 'true';
+
+        let lastPointerHandledAt = 0;
+        btn.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            lastPointerHandledAt = Date.now();
+            animateZoomStep(factor);
+        });
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if ((Date.now() - lastPointerHandledAt) < 260) return;
+            animateZoomStep(factor);
+        });
+    };
+
+    bindZoomStepButton(zoomInBtn, 1.2);
+    bindZoomStepButton(zoomOutBtn, 1 / 1.2);
+
+    if (zoomLocateBtn && zoomLocateBtn.dataset.zoomLocateBound !== 'true') {
+        zoomLocateBtn.dataset.zoomLocateBound = 'true';
+        zoomLocateBtn.addEventListener('click', locateToPermanentSection);
+    }
+
+    try {
+        setupCanvasManageModal();
+    } catch (_) { }
+    try {
+        setupCanvasHelpModal();
+    } catch (_) { }
+}
+
 function setupCanvasZoomAndPan() {
     const workspace = document.getElementById('canvasWorkspace');
     const container = document.querySelector('.canvas-main-container');
@@ -7827,6 +7881,9 @@ function setupCanvasZoomAndPan() {
     // 加载保存的缩放级别
     loadCanvasZoom();
     setupCanvasFullscreenControls();
+    // Bind the floating toolbar before the remaining canvas setup work. If a
+    // later setup step fails, the toolbar must not be left half-initialized.
+    bindCanvasFloatingToolbarControls();
     setupCanvasPerfHud();
 
     // [Feature] 全屏模式（卡片最大化）下全局禁用浏览器原生及画布的 Ctrl 缩放（包括按键和滚轮）
@@ -8508,50 +8565,8 @@ function setupCanvasZoomAndPan() {
         }
     });
 
-    // 缩放按钮
-    const zoomInBtn = document.getElementById('zoomInBtn');
-    const zoomOutBtn = document.getElementById('zoomOutBtn');
-    const zoomLocateBtn = document.getElementById('zoomLocateBtn');
-    // [OPT] 优化缩放手感：添加平滑动画，使用 1.2 倍指数缩放
-    const animateZoomStep = (factor) => {
-        // [Feature] 全屏模式（卡片最大化）下禁用 UI 缩放按钮
-        if (__isCanvasNodeMaximizedActive()) {
-            return;
-        }
-        const content = document.getElementById('canvasContent');
-        if (content) {
-            content.classList.add('animate-zoom');
-            setTimeout(() => content.classList.remove('animate-zoom'), 300);
-        }
-        __cancelCanvasWheelPanMotion();
-        setCanvasZoom(CanvasState.zoom * factor);
-    };
-
-    const bindZoomStepButton = (btn, factor) => {
-        if (!btn || btn.dataset.zoomStepBound === 'true') return;
-        btn.dataset.zoomStepBound = 'true';
-
-        let lastPointerHandledAt = 0;
-
-        btn.addEventListener('pointerdown', (event) => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            event.stopPropagation();
-            lastPointerHandledAt = Date.now();
-            animateZoomStep(factor);
-        });
-
-        btn.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            if ((Date.now() - lastPointerHandledAt) < 260) return;
-            animateZoomStep(factor);
-        });
-    };
-
-    bindZoomStepButton(zoomInBtn, 1.2);
-    bindZoomStepButton(zoomOutBtn, 1 / 1.2);
-    if (zoomLocateBtn) zoomLocateBtn.addEventListener('click', locateToPermanentSection);
+    // Toolbar controls are bound near the beginning of this setup function so
+    // a later failure cannot silently disable only part of the toolbar.
     let resizeTimer = null;
 
     window.addEventListener('resize', () => {
@@ -8597,6 +8612,7 @@ function setupCanvasManageModal() {
     const shortcutsModal = document.getElementById('canvasShortcutsModal');
 
     if (!manageBtn || !manageModal) return;
+    if (manageBtn.dataset.canvasManageBound === 'true') return;
 
     // 加载保存的快捷键设置
     loadCanvasShortcuts();
@@ -8636,6 +8652,7 @@ function setupCanvasManageModal() {
         }
     };
 
+    manageBtn.dataset.canvasManageBound = 'true';
     manageBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         openManageModal({ anchorToSettings: false });
@@ -32643,6 +32660,7 @@ function setupCanvasHelpModal() {
     const manageModal = document.getElementById('canvasManageModal');
 
     if (!helpBtn || !helpModal) return;
+    if (helpBtn.dataset.canvasHelpBound === 'true') return;
 
     const tabs = Array.from(helpModal.querySelectorAll('.canvas-help-tab'));
     const panels = Array.from(helpModal.querySelectorAll('.canvas-help-panel'));
@@ -32658,6 +32676,7 @@ function setupCanvasHelpModal() {
         });
     };
 
+    helpBtn.dataset.canvasHelpBound = 'true';
     tabs.forEach(tab => {
         tab.addEventListener('click', (e) => {
             e.stopPropagation();
