@@ -6,7 +6,7 @@
 
 `书签画布（Bookmark-Canvas）` 是一款面向 Chrome / Edge 的 Manifest V3 书签管理器。它把浏览器书签与基于 JSON Canvas 的可视化工作区结合：浏览器书签对应的**永久栏目**、独立的**临时栏目**、**空白栏目**、**卡片组**和有方向的连接线，可以共同组织在同一张画布中。
 
-画布数据包（示例数据包可参考 [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) 的部分版本）可在本地导入导出，也可推送到或从个人 GitHub 仓库拉取。导出和推送的数据包会附带 [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)，供兼容的 AI 客户端在处理前理解数据边界。
+画布数据包（示例数据包可参考 [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases/download/v1.0.0/bookmark-canvas-selection-20260730-122655_example.zip) 的部分版本）可在本地导入导出，也可推送到或从个人 GitHub 仓库拉取。导出和推送的数据包会附带 [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)，供兼容的 AI 客户端在处理前理解数据边界。
 
 ### 预览
 

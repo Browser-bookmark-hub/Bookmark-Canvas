@@ -6,7 +6,7 @@
 
 `Bookmark-Canvas` is a Manifest V3 bookmark manager for Chrome / Edge. It combines browser bookmarks with a visual workspace built on JSON Canvas: browser-backed **Permanent Sections**, independent **Temporary Sections**, **Blank Sections**, **Card Groups**, and directional connections can live together on one canvas.
 
-Use the canvas to keep bookmark trees spatially organized without turning it into a second file manager. Canvas packages (sample data packages are available from selected [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases)) can be imported and exported locally, or **Push**ed to and **Pull**ed from a GitHub repository. The exported package includes [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template) so compatible AI clients can understand the data boundary before working with it.
+Use the canvas to keep bookmark trees spatially organized without turning it into a second file manager. Canvas packages (sample data packages are available from selected [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases/download/v1.0.0/bookmark-canvas-selection-20260730-122655_example.zip)) can be imported and exported locally, or **Push**ed to and **Pull**ed from a GitHub repository. The exported package includes [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template) so compatible AI clients can understand the data boundary before working with it.
 
 ### Preview
 
