@@ -134,3 +134,19 @@ Recommended migration order:
 ### Current conclusion
 
 No Push hash change is needed now: GitHub still documents SHA-1 blobs; Contents updates still require the replaced file's blob SHA; the project explicitly uses `X-GitHub-Api-Version: 2022-11-28`; and GitHub API versioning provides new versions and migration windows for breaking changes. Keep tracking, but do not change behavior pre-emptively.
+
+## 3. Future API Support and Touch Devices
+
+### Conditions for future touch support
+
+Do not add a separate Android touch interaction implementation yet. Bookmark Canvas currently targets the desktop browser-extension environment; its existing trackpad, pointer-event, and drag support is not equivalent to full mobile touch adaptation.
+
+Future touch requirements should be considered only after Android officially supports Chrome extensions and the relevant extension APIs. Once the official support scope, page lifecycle, Side Panel / tab capabilities, and pointer / gesture event model are stable enough, evaluate:
+
+- touch hit areas for the mobile canvas layout, floating tools, and secondary UI;
+- one-finger dragging, two-finger panning, pinch zoom, and conflicts with system gestures;
+- card editing, dragging, scrolling, fullscreen, and alternatives when no physical keyboard is available;
+- performance, sleep / resume behavior, and extension-page lifecycle on Android devices;
+- touch accessibility, orientation changes, and different screen sizes.
+
+Before that official support exists, do not introduce Android-specific extension APIs, a mobile-only branch, or a touch-first UI rewrite for a hypothetical Chrome extension environment. Continue maintaining the existing desktop Chrome / Edge extension behavior and track Chromium's official API changes.
