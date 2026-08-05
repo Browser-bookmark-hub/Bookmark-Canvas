@@ -49,8 +49,13 @@ function getDefaultCardGroupLabel() {
 function createCardGroupNode(payload) {
     const safe = (payload && typeof payload === 'object') ? payload : {};
     const pos = (safe.canvasPosition && typeof safe.canvasPosition === 'object') ? safe.canvasPosition : {};
-    const left = Number.isFinite(Number(pos.left)) ? Number(pos.left) : 0;
-    const top = Number.isFinite(Number(pos.top)) ? Number(pos.top) : 0;
+    const rawLeft = Number.isFinite(Number(pos.left)) ? Number(pos.left) : 0;
+    const rawTop = Number.isFinite(Number(pos.top)) ? Number(pos.top) : 0;
+    const snappedPosition = (window.CanvasModule && typeof window.CanvasModule.getGridSnappedCanvasPosition === 'function')
+        ? window.CanvasModule.getGridSnappedCanvasPosition(rawLeft, rawTop)
+        : { x: rawLeft, y: rawTop };
+    const left = snappedPosition.x;
+    const top = snappedPosition.y;
     const size = (safe.canvasSize && typeof safe.canvasSize === 'object') ? safe.canvasSize : {};
     const isEmptyGroup = safe.empty === true || safe.emptyGroup === true;
     const defaultWidth = isEmptyGroup ? CARD_GROUP_DEFAULT_WIDTH * CARD_GROUP_EMPTY_SCALE : CARD_GROUP_DEFAULT_WIDTH;

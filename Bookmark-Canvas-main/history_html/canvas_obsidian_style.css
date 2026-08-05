@@ -46,9 +46,10 @@
     /* 给平移留缓冲，避免 transform 位移露出空白边缘 */
     pointer-events: none;
     z-index: 0;
-    background-image: radial-gradient(#d0d7de 1px, transparent 1px);
-    background-size: calc(var(--canvas-scale) * 100px) calc(var(--canvas-scale) * 100px);
-    background-position: 0 0;
+    /* Keep the complete dot inside the tile while placing its center on the tile origin. */
+    background-image: radial-gradient(circle 1.25px at 1.25px 1.25px, #d0d7de 0 1.25px, transparent 1.25px);
+    background-size: calc(var(--canvas-scale) * var(--canvas-grid-point-spacing, 100px)) calc(var(--canvas-scale) * var(--canvas-grid-point-spacing, 100px));
+    background-position: -1.25px -1.25px;
     transform: translate3d(0px, 0px, 0);
     will-change: transform;
 }
@@ -61,7 +62,7 @@
 }
 
 [data-theme="dark"] .canvas-grid-layer {
-    background-image: radial-gradient(#3a3b3c 1px, transparent 1px);
+    background-image: radial-gradient(circle 1.25px at 1.25px 1.25px, #3a3b3c 0 1.25px, transparent 1.25px);
 }
 
 .canvas-content {
@@ -2092,6 +2093,10 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     max-width: calc(100vw - 48px);
 }
 
+#otherMenuLocatableColorSyncHelpPopover {
+    max-width: 280px;
+}
+
 [data-theme="dark"] .perf-help-popover {
     background: var(--bg-secondary);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
@@ -2238,6 +2243,11 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 .appearance-row + .appearance-row {
     margin-top: 12px;
+}
+
+.appearance-row.is-disabled {
+    opacity: 0.45;
+    pointer-events: none;
 }
 
 .appearance-row-label {

@@ -1453,13 +1453,13 @@ function updateCanvasGridLayerTransform(panX, panY, scale, force = false) {
     const pxY = (typeof panY === 'number' && isFinite(panY)) ? panY : 0;
     const z = (typeof scale === 'number' && isFinite(scale) && scale > 0) ? scale : 1;
 
-    // 与 CSS background-size 保持一致：gridSpacingPx = zoom * 100px
-    const gridSpacingPx = Math.max(0.25, z * 100);
+    // Keep this in sync with CSS background-size and compensate for the grid layer inset.
+    const gridSpacingPx = Math.max(0.25, z * getCanvasGridPointSpacing());
     // [Fix] 解决网格抖动问题：使用 round 避免浮点数精度导致的微小位移
     // 当 zoom 变化时，模运算的结果会发生跳变，这是导致网格“游走”的原因
     // 强制只在缩放结束时更新 (force=true)，缩放中 (force=false) 直接不计算，这里只负责最终定位
-    const x = __modWrapPx(pxX, gridSpacingPx);
-    const y = __modWrapPx(pxY, gridSpacingPx);
+    const x = __modWrapPx(pxX + CANVAS_GRID_LAYER_INSET_PX, gridSpacingPx);
+    const y = __modWrapPx(pxY + CANVAS_GRID_LAYER_INSET_PX, gridSpacingPx);
     const next = `translate3d(${x}px, ${y}px, 0)`;
 
     // if (!force && cachedCanvasGridTransform === next) return; // 移除 cache check 对 force 的限制
@@ -2373,8 +2373,17 @@ function __logCanvasWinInput(tag, payload = null, options = {}) {
 }
 const TEMP_COLOR_LOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a4 4 0 0 0-4 4v3H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1V6a4 4 0 0 0-4-4zm-2 7V6a2 2 0 1 1 4 0v3h-4z"/></svg>';
 const TEMP_COLOR_UNLOCKED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M17 9h-1V7a4 4 0 0 0-7.4-2.2 1 1 0 1 0 1.7 1A2 2 0 0 1 14 7v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2zm0 9H7v-7h10v7z"/></svg>';
+const CANVAS_GRID_POINT_SPACING_DEFAULT = 100;
+const CANVAS_GRID_POINT_SPACING_MIN = 20;
+const CANVAS_GRID_POINT_SPACING_MAX = 500;
+// Must match .canvas-grid-layer's negative inset in canvas_obsidian_style.css.
+const CANVAS_GRID_LAYER_INSET_PX = 200;
+
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
     autoLinkSplit: false, // 临时栏目分裂后自动连接
+    gridSnapEnabled: false, // 移动卡片时吸附到画布网格点
+    gridSnapContinuous: false, // 拖动过程中持续吸附到画布网格点
+    gridPointSpacing: CANVAS_GRID_POINT_SPACING_DEFAULT, // 画布网格点间距
     menuColorSync: true, // 兼容旧配置：目录栏颜色同步
     menuDefaultColorSync: true, // 目录栏默认颜色（基础样式）同步
     menuLocatableColorSync: true, // 目录栏可定位条目颜色同步
@@ -2791,6 +2800,14 @@ function normalizeCanvasOtherSettings(input) {
     out.magnetPoints = __syncMagnetPointPositionsFromPerf(out.magnetPoints);
     if (!input || typeof input !== 'object') return out;
     if (typeof input.autoLinkSplit === 'boolean') out.autoLinkSplit = input.autoLinkSplit;
+    if (typeof input.gridSnapEnabled === 'boolean') out.gridSnapEnabled = input.gridSnapEnabled;
+    if (typeof input.gridSnapContinuous === 'boolean') out.gridSnapContinuous = input.gridSnapContinuous;
+    out.gridPointSpacing = __clampNumber(
+        input.gridPointSpacing,
+        CANVAS_GRID_POINT_SPACING_MIN,
+        CANVAS_GRID_POINT_SPACING_MAX,
+        out.gridPointSpacing
+    );
     if (typeof input.autoRecordAnchor === 'boolean') out.autoRecordAnchor = input.autoRecordAnchor;
     out.autoRecordAnchorInterval = __clampNumber(input.autoRecordAnchorInterval, 1, 60, out.autoRecordAnchorInterval);
     out.autoRecordAnchorLimit = __clampNumber(input.autoRecordAnchorLimit, 1, 50, out.autoRecordAnchorLimit);
@@ -2892,6 +2909,37 @@ function getCanvasOtherSettings() {
     return CanvasState.otherSettings;
 }
 
+function getCanvasGridPointSpacing(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return __clampNumber(
+        settings && settings.gridPointSpacing,
+        CANVAS_GRID_POINT_SPACING_MIN,
+        CANVAS_GRID_POINT_SPACING_MAX,
+        CANVAS_GRID_POINT_SPACING_DEFAULT
+    );
+}
+
+function shouldUseContinuousGridSnap(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return !!(settings && settings.gridSnapEnabled && settings.gridSnapContinuous);
+}
+
+function applyCanvasGridPointSpacing(settingsOverride = null) {
+    if (typeof document === 'undefined' || !document.documentElement) return;
+    document.documentElement.style.setProperty(
+        '--canvas-grid-point-spacing',
+        `${getCanvasGridPointSpacing(settingsOverride)}px`
+    );
+    try {
+        updateCanvasGridLayerTransform(
+            CanvasState.panOffsetX,
+            CanvasState.panOffsetY,
+            CanvasState.zoom,
+            true
+        );
+    } catch (_) { }
+}
+
 function __isCanvasInSidePanelMode() {
     return window.__SIDE_PANEL_MODE__ === true;
 }
@@ -2991,6 +3039,7 @@ function loadCanvasOtherSettings() {
         }
     } catch (_) { }
     CanvasState.otherSettings = normalizeCanvasOtherSettings(saved);
+    applyCanvasGridPointSpacing(CanvasState.otherSettings);
 }
 
 function shouldAutoLinkTempSplit() {
@@ -7176,6 +7225,7 @@ async function createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, folder
     const { isEn } = __getLang();
 
     if (!urls || urls.length === 0) return;
+    const initialPosition = getGridSnappedCanvasPosition(dropX, dropY);
 
     // 收集所有书签信息，并记录第一个书签的路径
     const bookmarks = [];
@@ -7251,8 +7301,8 @@ async function createTempNodeFromMultipleUrlsAsFolder(urls, dropX, dropY, folder
         tempKind: 'special',
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
-        x: dropX,
-        y: dropY,
+        x: initialPosition.x,
+        y: initialPosition.y,
         width: 0,
         height: 0,
         source: 'browser-drop',
@@ -7294,6 +7344,7 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
     const { isEn } = __getLang();
 
     if (!urls || urls.length === 0) return;
+    const initialPosition = getGridSnappedCanvasPosition(dropX, dropY);
 
     // 收集所有书签信息，并记录第一个书签的路径
     const bookmarks = [];
@@ -7350,8 +7401,8 @@ async function createTempNodeFromMultipleUrlsFlat(urls, dropX, dropY) {
         tempKind: 'special',
         color: getSpecialTempSectionDefaultColor(),
         colorLocked: __getDefaultTempColorLockedState(),
-        x: dropX,
-        y: dropY,
+        x: initialPosition.x,
+        y: initialPosition.y,
         width: 0,
         height: 0,
         source: 'browser-drop',  // 标记来源
@@ -11532,6 +11583,9 @@ function createPermanentSectionCopy(sourceSection, options = {}) {
         if (Number.isFinite(requestedLeft)) targetLeft = requestedLeft;
         if (Number.isFinite(requestedTop)) targetTop = requestedTop;
     }
+    const snappedPosition = getGridSnappedCanvasPosition(targetLeft, targetTop);
+    targetLeft = snappedPosition.x;
+    targetTop = snappedPosition.y;
 
     try { __flushPermanentSectionViewState(origin); } catch (_) { }
     const originCopyId = __isPermanentSectionCopy(origin) ? __getPermanentSectionCopyId(origin) : null;
@@ -12721,6 +12775,10 @@ async function createTempNode(data, x, y) {
         source: undefined // 见上方 §2.6 注释
     });
 
+    const initialPosition = getGridSnappedCanvasPosition(
+        (typeof x === 'number' && isFinite(x)) ? x : 0,
+        (typeof y === 'number' && isFinite(y)) ? y : 0
+    );
     const section = {
         id: sectionId,
         title: resolvedTitle,
@@ -12728,8 +12786,8 @@ async function createTempNode(data, x, y) {
         tempKind,
         color: inheritedColor || pickTempSectionColor(),
         colorLocked: (typeof explicitLock === 'boolean') ? explicitLock : __getDefaultTempColorLockedState(),
-        x,
-        y,
+        x: initialPosition.x,
+        y: initialPosition.y,
         width: 0,
         height: 0,
         pinned: !!(data && data.pinned),
@@ -12857,6 +12915,10 @@ function createEmptyTempSection(x, y, options = {}) {
         });
     }
 
+    const initialPosition = getGridSnappedCanvasPosition(
+        (typeof x === 'number' && isFinite(x)) ? x : 0,
+        (typeof y === 'number' && isFinite(y)) ? y : 0
+    );
     const section = {
         id: sectionId,
         title,
@@ -12864,8 +12926,8 @@ function createEmptyTempSection(x, y, options = {}) {
         tempKind: 'special',
         color,
         colorLocked: colorLocked,
-        x: (typeof x === 'number' && isFinite(x)) ? x : 0,
-        y: (typeof y === 'number' && isFinite(y)) ? y : 0,
+        x: initialPosition.x,
+        y: initialPosition.y,
         width: 0,
         height: 0,
         pinned: !!(options && options.pinned),
@@ -17970,10 +18032,14 @@ async function createMdNode(x, y, text = '') {
     const defaultColor = getBlankNodeDefaultColor();
     const id = `md-node-${++CanvasState.mdNodeCounter}`;
     const nativeText = __repairLegacyCanvasMarkdownSource(String(text == null ? '' : text));
+    const initialPosition = getGridSnappedCanvasPosition(
+        (typeof x === 'number' && isFinite(x)) ? x : 0,
+        (typeof y === 'number' && isFinite(y)) ? y : 0
+    );
     const node = {
         id,
-        x,
-        y,
+        x: initialPosition.x,
+        y: initialPosition.y,
         width: baseSize.width,
         height: baseSize.height,
         text: nativeText,
@@ -28355,6 +28421,7 @@ function __applyCanvasOtherSettingsRealtimeSync(rawValue) {
     const prevSettings = normalizeCanvasOtherSettings(getCanvasOtherSettings());
     const normalized = normalizeCanvasOtherSettings(parsed);
     CanvasState.otherSettings = normalized;
+    applyCanvasGridPointSpacing(normalized);
 
     const prevFollow = isTempColorFollowEnabled(prevSettings);
     const nextFollow = isTempColorFollowEnabled(normalized);
@@ -41644,6 +41711,16 @@ function getActiveDraggedCanvasNodeData(nodeId) {
         (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.find(n => n && n.id === id) : null);
 }
 
+function getGridSnappedCanvasPosition(x, y) {
+    const settings = getCanvasOtherSettings();
+    if (settings.gridSnapEnabled === false) return { x, y };
+    const gridPointSpacing = getCanvasGridPointSpacing(settings);
+    return {
+        x: Math.round(x / gridPointSpacing) * gridPointSpacing,
+        y: Math.round(y / gridPointSpacing) * gridPointSpacing
+    };
+}
+
 // Import/export transfer logic moved to transfer_AI_sync/import-export-transfer-ui-support.js
 
 function applyTempNodeDragPosition(clientX, clientY) {
@@ -41662,8 +41739,15 @@ function applyTempNodeDragPosition(clientX, clientY) {
         }
     }
 
-    const newX = CanvasState.dragState.nodeStartX + scaledDeltaX;
-    const newY = CanvasState.dragState.nodeStartY + scaledDeltaY;
+    let newX = CanvasState.dragState.nodeStartX + scaledDeltaX;
+    let newY = CanvasState.dragState.nodeStartY + scaledDeltaY;
+    if (shouldUseContinuousGridSnap()) {
+        const snappedPosition = getGridSnappedCanvasPosition(newX, newY);
+        newX = snappedPosition.x;
+        newY = snappedPosition.y;
+    }
+    const displayDeltaX = newX - CanvasState.dragState.nodeStartX;
+    const displayDeltaY = newY - CanvasState.dragState.nodeStartY;
 
     const nodeId = element.id;
     const section = getActiveDraggedCanvasNodeData(nodeId);
@@ -41692,20 +41776,20 @@ function applyTempNodeDragPosition(clientX, clientY) {
             });
         }
 
-        meta.cardGroupDx = scaledDeltaX;
-        meta.cardGroupDy = scaledDeltaY;
+        meta.cardGroupDx = displayDeltaX;
+        meta.cardGroupDy = displayDeltaY;
 
         const content = getCachedContent();
         if (content) {
-            try { content.style.setProperty('--card-group-dx', `${scaledDeltaX}px`); } catch (_) { }
-            try { content.style.setProperty('--card-group-dy', `${scaledDeltaY}px`); } catch (_) { }
+            try { content.style.setProperty('--card-group-dx', `${displayDeltaX}px`); } catch (_) { }
+            try { content.style.setProperty('--card-group-dy', `${displayDeltaY}px`); } catch (_) { }
         }
         try { __scheduleCardGroupMembershipRefreshForNodeIds(section.id, { renderFrames: false, renderEdges: false }); } catch (_) { }
         try { __scheduleCardGroupDragEdgeUpdate(meta); } catch (_) { }
         return true;
     }
 
-    element.style.transform = `translate(${scaledDeltaX}px, ${scaledDeltaY}px)`;
+    element.style.transform = `translate(${displayDeltaX}px, ${displayDeltaY}px)`;
 
     if (section) {
         section.x = newX;
@@ -41726,14 +41810,23 @@ function applyPermanentSectionDragPosition(clientX, clientY) {
     const deltaY = clientY - CanvasState.dragState.dragStartY;
     const scaledDeltaX = deltaX / (CanvasState.zoom || 1);
     const scaledDeltaY = deltaY / (CanvasState.zoom || 1);
-
+    let displayDeltaX = scaledDeltaX;
+    let displayDeltaY = scaledDeltaY;
+    if (shouldUseContinuousGridSnap()) {
+        const snappedPosition = getGridSnappedCanvasPosition(
+            CanvasState.dragState.nodeStartX + scaledDeltaX,
+            CanvasState.dragState.nodeStartY + scaledDeltaY
+        );
+        displayDeltaX = snappedPosition.x - CanvasState.dragState.nodeStartX;
+        displayDeltaY = snappedPosition.y - CanvasState.dragState.nodeStartY;
+    }
     if (!CanvasState.dragState.hasMoved) {
         if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
             CanvasState.dragState.hasMoved = true;
         }
     }
 
-    element.style.transform = `translate(${scaledDeltaX}px, ${scaledDeltaY}px)`;
+    element.style.transform = `translate(${displayDeltaX}px, ${displayDeltaY}px)`;
 
     try { __scheduleCanvasDragEdgeFollowForNodeIds(__getPermanentSectionCanvasNodeId(element)); } catch (_) { }
 
@@ -41759,6 +41852,12 @@ function finalizeTempNodeDrag() {
         const zoom = (CanvasState.zoom || 1);
         const scaledDeltaX = deltaX / zoom;
         const scaledDeltaY = deltaY / zoom;
+        const snappedPosition = getGridSnappedCanvasPosition(
+            (CanvasState.dragState.nodeStartX || 0) + scaledDeltaX,
+            (CanvasState.dragState.nodeStartY || 0) + scaledDeltaY
+        );
+        const snappedDeltaX = snappedPosition.x - (CanvasState.dragState.nodeStartX || 0);
+        const snappedDeltaY = snappedPosition.y - (CanvasState.dragState.nodeStartY || 0);
 
         if (meta && meta.cardGroupEdgeRaf) {
             try { cancelAnimationFrame(meta.cardGroupEdgeRaf); } catch (_) { }
@@ -41773,8 +41872,8 @@ function finalizeTempNodeDrag() {
 
         const restoreTransitionEls = [];
 
-        section.x = (CanvasState.dragState.nodeStartX || 0) + scaledDeltaX;
-        section.y = (CanvasState.dragState.nodeStartY || 0) + scaledDeltaY;
+        section.x = snappedPosition.x;
+        section.y = snappedPosition.y;
         restoreTransitionEls.push(element);
         element.style.transition = 'none';
         element.style.transform = 'none';
@@ -41785,8 +41884,8 @@ function finalizeTempNodeDrag() {
         if (Array.isArray(CanvasState.dragState.childElements) && CanvasState.dragState.childElements.length > 0) {
             CanvasState.dragState.childElements.forEach((child) => {
                 if (!child || !child.data) return;
-                const cx = (child.startX || 0) + scaledDeltaX;
-                const cy = (child.startY || 0) + scaledDeltaY;
+                const cx = (child.startX || 0) + snappedDeltaX;
+                const cy = (child.startY || 0) + snappedDeltaY;
                 child.data.x = cx;
                 child.data.y = cy;
 
@@ -41825,6 +41924,12 @@ function finalizeTempNodeDrag() {
                 try { el.style.transition = ''; } catch (_) { }
             });
         });
+    }
+
+    if (section && !isCardGroupDrag && CanvasState.dragState.hasMoved) {
+        const snappedPosition = getGridSnappedCanvasPosition(section.x, section.y);
+        section.x = snappedPosition.x;
+        section.y = snappedPosition.y;
     }
 
     if (section) {
@@ -41874,8 +41979,12 @@ function finalizePermanentSectionDrag() {
         const deltaY = CanvasState.dragState.lastClientY - CanvasState.dragState.dragStartY;
         const scaledDeltaX = deltaX / (CanvasState.zoom || 1);
         const scaledDeltaY = deltaY / (CanvasState.zoom || 1);
-        const finalX = CanvasState.dragState.nodeStartX + scaledDeltaX;
-        const finalY = CanvasState.dragState.nodeStartY + scaledDeltaY;
+        const snappedPosition = getGridSnappedCanvasPosition(
+            CanvasState.dragState.nodeStartX + scaledDeltaX,
+            CanvasState.dragState.nodeStartY + scaledDeltaY
+        );
+        const finalX = snappedPosition.x;
+        const finalY = snappedPosition.y;
         // 关闭过渡，避免落下时“果冻”弹动
         element.style.transition = 'none';
         element.style.transform = 'none';
@@ -42286,6 +42395,7 @@ window.CanvasModule = {
     createTempNode: createTempNode, // 导出创建临时节点函数
     createEmptyTempSection: createEmptyTempSection,
     createMdNode: createMdNode,
+    getGridSnappedCanvasPosition: getGridSnappedCanvasPosition,
     // 定位 API：供外部（history.js / 标记页）调用
     locatePermanent: locateToPermanentSection,
     locateSection: locateToTempSection,
@@ -42402,6 +42512,18 @@ function __updateAppearanceSizeMode(modal, groupName, inputsId) {
     inputs.classList.toggle('is-hidden', mode === 'auto');
 }
 
+function __updateOtherGridSnapContinuousState(modal) {
+    if (!modal) return;
+    const enabled = !!(modal.querySelector('#otherGridSnapEnabled') || {}).checked;
+    const row = modal.querySelector('#otherGridSnapContinuousRow');
+    const input = modal.querySelector('#otherGridSnapContinuous');
+    if (row) {
+        row.classList.toggle('is-disabled', !enabled);
+        row.setAttribute('aria-disabled', String(!enabled));
+    }
+    if (input) input.disabled = !enabled;
+}
+
 function __syncAppearanceColorRow(rowEl, color) {
     if (!rowEl) return;
     const input = rowEl.querySelector('.appearance-color-input');
@@ -42465,6 +42587,9 @@ function openCanvasAppearanceSettingsModal() {
 
     const otherSettings = getCanvasOtherSettings();
     const otherAutoLink = modal.querySelector('#otherAutoLinkSplit');
+    const otherGridSnap = modal.querySelector('#otherGridSnapEnabled');
+    const otherGridSnapContinuous = modal.querySelector('#otherGridSnapContinuous');
+    const otherGridPointSpacing = modal.querySelector('#otherGridPointSpacing');
     const otherMenuDefaultColorSync = modal.querySelector('#otherMenuDefaultColorSync');
     const otherMenuLocatableColorSync = modal.querySelector('#otherMenuLocatableColorSync');
     const otherColorFollow = modal.querySelector('#otherTempColorFollow');
@@ -42476,6 +42601,10 @@ function openCanvasAppearanceSettingsModal() {
         forSidePanel: __isCanvasInSidePanelMode()
     });
     if (otherAutoLink) otherAutoLink.checked = !!otherSettings.autoLinkSplit;
+    if (otherGridSnap) otherGridSnap.checked = otherSettings.gridSnapEnabled !== false;
+    if (otherGridSnapContinuous) otherGridSnapContinuous.checked = !!otherSettings.gridSnapContinuous;
+    if (otherGridPointSpacing) otherGridPointSpacing.value = String(getCanvasGridPointSpacing(otherSettings));
+    __updateOtherGridSnapContinuousState(modal);
 
 
     if (otherMenuDefaultColorSync) {
@@ -42787,6 +42916,42 @@ function createCanvasAppearanceSettingsModal() {
                     <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
                     <div class="appearance-row">
                         <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Align to grid points' : '以网格点辅助对齐'}</span>
+                            <button class="perf-help-btn" id="otherGridSnapHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherGridSnapEnabled">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row" id="otherGridSnapContinuousRow">
+                        <div class="appearance-row-label">${isEn ? 'Continuous snapping' : '持续吸附'}</div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherGridSnapContinuous">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label">${isEn ? 'Grid point spacing' : '网格点间距'}</div>
+                        <div class="appearance-row-content appearance-row-content-inline">
+                            <div class="appearance-size-inputs">
+                                <button type="button" class="other-default-jump-btn" id="otherGridPointSpacingReset" title="${isEn ? 'Restore default (100px)' : '还原默认值（100px）'}" aria-label="${isEn ? 'Restore default grid point spacing' : '还原默认网格点间距'}">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                                <input type="number" id="otherGridPointSpacing" min="${CANVAS_GRID_POINT_SPACING_MIN}" max="${CANVAS_GRID_POINT_SPACING_MAX}" step="10">
+                                <span>px</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
+                    <div class="appearance-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
                             <span>${isEn ? 'Directory locatable item color sync' : '目录栏可定位条目颜色同步'}</span>
                             <button class="perf-help-btn" id="otherMenuLocatableColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
@@ -42955,6 +43120,13 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                     </div>
         </div>
+        <div class="perf-help-popover" id="otherGridSnapHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? 'The top-left corner of the card or group is used as the alignment point.'
+            : '卡片(组)的左上角当作对齐点。'}
+            </div>
+        </div>
         <div class="perf-help-popover" id="appearanceSpecialTempHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
@@ -43040,6 +43212,8 @@ function createCanvasAppearanceSettingsModal() {
 
     const specialTempHelpBtn = modal.querySelector('#appearanceSpecialTempHelpBtn');
     const specialTempHelpPopover = modal.querySelector('#appearanceSpecialTempHelpPopover');
+    const otherGridSnapHelpBtn = modal.querySelector('#otherGridSnapHelpBtn');
+    const otherGridSnapHelpPopover = modal.querySelector('#otherGridSnapHelpPopover');
     const tempColorHelpBtn = modal.querySelector('#appearanceTempColorHelpBtn');
     const tempColorHelpPopover = modal.querySelector('#appearanceTempColorHelpPopover');
     const showPopover = (btn, popover) => {
@@ -43065,6 +43239,7 @@ function createCanvasAppearanceSettingsModal() {
         });
     };
     bindClickHelpPopover(specialTempHelpBtn, specialTempHelpPopover);
+    bindClickHelpPopover(otherGridSnapHelpBtn, otherGridSnapHelpPopover);
     bindClickHelpPopover(tempColorHelpBtn, tempColorHelpPopover);
 
     const scheduleOtherSave = (() => {
@@ -43075,6 +43250,10 @@ function createCanvasAppearanceSettingsModal() {
         };
     })();
     const otherAutoLinkToggle = modal.querySelector('#otherAutoLinkSplit');
+    const otherGridSnapToggle = modal.querySelector('#otherGridSnapEnabled');
+    const otherGridSnapContinuousToggle = modal.querySelector('#otherGridSnapContinuous');
+    const otherGridPointSpacingInput = modal.querySelector('#otherGridPointSpacing');
+    const otherGridPointSpacingResetBtn = modal.querySelector('#otherGridPointSpacingReset');
     const otherMenuDefaultColorSyncToggle = modal.querySelector('#otherMenuDefaultColorSync');
     const otherMenuLocatableColorSyncToggle = modal.querySelector('#otherMenuLocatableColorSync');
     const otherSidebarModeRadios = modal.querySelectorAll('input[name="other-sidebar-collapse-mode"]');
@@ -43103,6 +43282,39 @@ function createCanvasAppearanceSettingsModal() {
     if (otherAutoLinkToggle) {
         otherAutoLinkToggle.addEventListener('change', () => {
             scheduleOtherSave();
+        });
+    }
+
+    if (otherGridSnapToggle) {
+        otherGridSnapToggle.addEventListener('change', () => {
+            __updateOtherGridSnapContinuousState(modal);
+            scheduleOtherSave();
+        });
+    }
+
+    if (otherGridSnapContinuousToggle) {
+        otherGridSnapContinuousToggle.addEventListener('change', () => {
+            scheduleOtherSave();
+        });
+    }
+
+    if (otherGridPointSpacingInput) {
+        otherGridPointSpacingInput.addEventListener('input', scheduleOtherSave);
+        otherGridPointSpacingInput.addEventListener('change', () => {
+            otherGridPointSpacingInput.value = String(__clampNumber(
+                parseInt(otherGridPointSpacingInput.value, 10),
+                CANVAS_GRID_POINT_SPACING_MIN,
+                CANVAS_GRID_POINT_SPACING_MAX,
+                CANVAS_GRID_POINT_SPACING_DEFAULT
+            ));
+            scheduleOtherSave();
+        });
+    }
+
+    if (otherGridPointSpacingResetBtn && otherGridPointSpacingInput) {
+        otherGridPointSpacingResetBtn.addEventListener('click', () => {
+            otherGridPointSpacingInput.value = String(CANVAS_GRID_POINT_SPACING_DEFAULT);
+            saveCanvasOtherSettings({ close: false, modal });
         });
     }
 
@@ -43687,6 +43899,9 @@ function saveCanvasOtherSettings(options = {}) {
     });
     const prevFollow = isTempColorFollowEnabled(prevSettings);
     const autoLink = modal.querySelector('#otherAutoLinkSplit');
+    const gridSnapEnabled = modal.querySelector('#otherGridSnapEnabled');
+    const gridSnapContinuous = modal.querySelector('#otherGridSnapContinuous');
+    const gridPointSpacingInput = modal.querySelector('#otherGridPointSpacing');
     const menuDefaultColorSync = modal.querySelector('#otherMenuDefaultColorSync');
     const menuLocatableColorSync = modal.querySelector('#otherMenuLocatableColorSync');
     const sidebarCollapseMode = __getAppearanceRadioValue(modal, 'other-sidebar-collapse-mode', prevCollapsePrefs.mode || 'auto');
@@ -43796,8 +44011,24 @@ function saveCanvasOtherSettings(options = {}) {
         bookmarkNoteThresholdInput.value = String(bookmarkNoteThreshold);
     }
 
+    const gridPointSpacingRaw = gridPointSpacingInput
+        ? parseInt(gridPointSpacingInput.value, 10)
+        : prevSettings.gridPointSpacing;
+    const gridPointSpacing = __clampNumber(
+        gridPointSpacingRaw,
+        CANVAS_GRID_POINT_SPACING_MIN,
+        CANVAS_GRID_POINT_SPACING_MAX,
+        getCanvasGridPointSpacing(prevSettings)
+    );
+    if (gridPointSpacingInput && document.activeElement !== gridPointSpacingInput) {
+        gridPointSpacingInput.value = String(gridPointSpacing);
+    }
+
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
+        gridSnapEnabled: gridSnapEnabled ? !!gridSnapEnabled.checked : prevSettings.gridSnapEnabled !== false,
+        gridSnapContinuous: gridSnapContinuous ? !!gridSnapContinuous.checked : !!prevSettings.gridSnapContinuous,
+        gridPointSpacing: gridPointSpacing,
         autoRecordAnchor: !!prevSettings.autoRecordAnchor,
         autoRecordAnchorInterval: prevSettings.autoRecordAnchorInterval || 15,
         autoRecordAnchorLimit: prevSettings.autoRecordAnchorLimit || 5,
@@ -43863,6 +44094,7 @@ function saveCanvasOtherSettings(options = {}) {
 
     const normalized = normalizeCanvasOtherSettings(settingsInput);
     CanvasState.otherSettings = normalized;
+    applyCanvasGridPointSpacing(normalized);
     const minZoomInput = modal.querySelector('#otherInputMinZoom');
     if (minZoomInput) {
         const val = parseInt(minZoomInput.value, 10);
