@@ -33,6 +33,8 @@ const getTreeExportDownloadFolder = () => [getTreeExportRootFolder(), getTreeExp
 // 全局变量
 let contextMenu = null;
 let contextSubmenu = null;
+let tabPlacementSubmenu = null;
+let lastTabPlacementTriggerItem = null;
 let tagSubmenuCtx = null;
 let currentContextNode = null;
 let bookmarkClipboard = null; // 剪贴板 { action: 'cut'|'copy', nodeId, nodeData }
@@ -529,6 +531,9 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
             defaultOpenMode = changes.bookmarkDefaultOpenMode.newValue || 'specific-window';
             try { window.defaultOpenMode = defaultOpenMode; } catch (_) {}
         }
+        if (changes.newTabPlacement) {
+            newTabPlacement = normalizeNewTabPlacement(changes.newTabPlacement.newValue);
+        }
         if (changes.hyperlinkDefaultOpenMode) {
             hyperlinkDefaultOpenMode = changes.hyperlinkDefaultOpenMode.newValue || 'new-tab';
             try { window.hyperlinkDefaultOpenMode = hyperlinkDefaultOpenMode; } catch (_) {}
@@ -573,6 +578,9 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
 
 // 全局：默认打开方式与特定窗口/分组ID
 let defaultOpenMode = 'specific-window'; // 默认：'specific-window'（同一窗口）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
+const NEW_TAB_PLACEMENT_STORAGE_KEY = 'newTabPlacement';
+const NEW_TAB_PLACEMENTS = new Set(['root', 'before-current', 'after-current']);
+let newTabPlacement = 'root'; // 单链接新标签页的插入位置；默认标签栏末尾
 let specificWindowId = null; // chrome.windows Window ID
 let specificTabGroupId = null; // chrome.tabGroups Group ID（在“特定标签组”模式下复用）
 let specificGroupWindowId = null; // 保存分组所在窗口，确保新开的标签在同一窗口
@@ -627,6 +635,7 @@ try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
             const data = await chrome.storage.local.get([
                 'bookmarkDefaultOpenMode',
+                NEW_TAB_PLACEMENT_STORAGE_KEY,
                 'bookmarkSpecificWindowId',
                 'bookmarkSpecificGroupId',
                 'bookmarkSpecificGroupWindowId',
@@ -638,6 +647,9 @@ try {
             ]);
             if (data && typeof data.bookmarkDefaultOpenMode === 'string') {
                 defaultOpenMode = data.bookmarkDefaultOpenMode;
+            }
+            if (data) {
+                newTabPlacement = normalizeNewTabPlacement(data[NEW_TAB_PLACEMENT_STORAGE_KEY]);
             }
             if (data && Number.isInteger(data.bookmarkSpecificWindowId)) {
                 specificWindowId = data.bookmarkSpecificWindowId;
@@ -669,6 +681,7 @@ try {
             const mode = localStorage.getItem('bookmarkDefaultOpenMode');
             const winId = parseInt(localStorage.getItem('bookmarkSpecificWindowId') || '', 10);
             if (mode) defaultOpenMode = mode;
+            newTabPlacement = normalizeNewTabPlacement(localStorage.getItem(NEW_TAB_PLACEMENT_STORAGE_KEY));
             if (Number.isInteger(winId)) specificWindowId = winId;
             try {
                 specificTabGroups = JSON.parse(localStorage.getItem('bookmarkSpecificTabGroups') || '{}');
@@ -770,6 +783,21 @@ async function setDefaultOpenMode(mode) {
             await chrome.storage.local.set({ bookmarkDefaultOpenMode: mode });
         } else {
             localStorage.setItem('bookmarkDefaultOpenMode', mode);
+        }
+    } catch (_) { }
+}
+
+function normalizeNewTabPlacement(value) {
+    return NEW_TAB_PLACEMENTS.has(value) ? value : 'root';
+}
+
+async function setNewTabPlacement(placement) {
+    newTabPlacement = normalizeNewTabPlacement(placement);
+    try {
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            await chrome.storage.local.set({ [NEW_TAB_PLACEMENT_STORAGE_KEY]: newTabPlacement });
+        } else {
+            localStorage.setItem(NEW_TAB_PLACEMENT_STORAGE_KEY, newTabPlacement);
         }
     } catch (_) { }
 }
@@ -3275,7 +3303,12 @@ async function openHyperlinkNewTab(url) {
     if (!url) return;
     try {
         if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
-            await chrome.tabs.create({ url, active: false });
+            const placement = await getNewTabPlacementProperties();
+            await chrome.tabs.create({
+                url,
+                active: false,
+                ...placement
+            });
         } else {
             window.open(url, '_blank');
         }
@@ -4910,6 +4943,12 @@ function initContextMenu() {
     contextSubmenu.style.display = 'none';
     getOverlayContainer().appendChild(contextSubmenu);
 
+    tabPlacementSubmenu = document.createElement('div');
+    tabPlacementSubmenu.id = 'bookmark-tab-placement-submenu';
+    tabPlacementSubmenu.className = 'bookmark-context-menu bookmark-context-submenu is-tab-placement-submenu';
+    tabPlacementSubmenu.style.display = 'none';
+    getOverlayContainer().appendChild(tabPlacementSubmenu);
+
     // 绑定超链接的右键菜单
     attachHyperlinkContextMenu();
 
@@ -4958,8 +4997,9 @@ function initContextMenu() {
         // 如果点击的不是菜单和子菜单内部，并且不是快捷图标本身，关闭菜单
         const clickInMenu = contextMenu && contextMenu.contains(e.target);
         const clickInSubmenu = contextSubmenu && contextSubmenu.contains(e.target);
+        const clickInTabPlacementSubmenu = tabPlacementSubmenu && tabPlacementSubmenu.contains(e.target);
         const clickInShortcut = (e.target && typeof e.target.closest === 'function') ? e.target.closest('.tree-trace-icon, .tree-info-icon, .tree-delete-icon, .tree-confirm-icon, .tree-cancel-icon') : null;
-        if (!clickInMenu && !clickInSubmenu && !clickInShortcut) {
+        if (!clickInMenu && !clickInSubmenu && !clickInTabPlacementSubmenu && !clickInShortcut) {
             hideContextMenu();
         }
     }, true);  // 使用捕获阶段
@@ -4974,7 +5014,12 @@ function initContextMenu() {
                 hideSubmenu();
             } else {
                 // 如果是其他不相干的容器或者全局窗口滚动，则关闭整个菜单
-                if (e.target !== contextMenu && !contextMenu.contains(e.target) && e.target !== contextSubmenu && (!contextSubmenu || !contextSubmenu.contains(e.target))) {
+                if (e.target !== contextMenu
+                    && !contextMenu.contains(e.target)
+                    && e.target !== contextSubmenu
+                    && (!contextSubmenu || !contextSubmenu.contains(e.target))
+                    && e.target !== tabPlacementSubmenu
+                    && (!tabPlacementSubmenu || !tabPlacementSubmenu.contains(e.target))) {
                     hideContextMenu();
                 }
             }
@@ -5162,6 +5207,11 @@ async function showHyperlinkContextMenu(e, linkElement) {
                     case 'hyperlink-open-manual-select-template-run':
                         await openBookmarkWithManualSelection(context.url);
                         break;
+                    case 'tab-placement-submenu-trigger': {
+                        const triggerItem = badge.closest('.context-menu-item');
+                        if (triggerItem) toggleTabPlacementSubmenu(triggerItem);
+                        return;
+                    }
                     default:
                         console.warn('[超链接菜单] 未知的 sub-action:', subAction);
                 }
@@ -5181,7 +5231,6 @@ async function showHyperlinkContextMenu(e, linkElement) {
             if (action === 'hyperlink-open-label') {
                 return;
             }
-
             handleHyperlinkMenuAction(action, context);
             hideContextMenu();
         });
@@ -5272,6 +5321,7 @@ function buildHyperlinkMenuItems(context) {
     // 1. in New Tab（新标签页）
     items.push({
         action: 'hyperlink-open-new-tab',
+        labelHTML: `<span>${lang === 'zh_CN' ? '新标签页' : 'in New Tab'} <span class="sub-badge" data-sub-action="tab-placement-submenu-trigger">${lang === 'zh_CN' ? '位置' : 'Position'}</span></span>`,
         label: lang === 'zh_CN' ? '新标签页' : 'in New Tab',
         icon: 'window-maximize',
         selected: hyperlinkDefaultOpenMode === 'new-tab'
@@ -5632,6 +5682,11 @@ async function showContextMenu(e, node) {
             event.stopPropagation();
             try {
                 switch (subAction) {
+                    case 'tab-placement-submenu-trigger': {
+                        const triggerItem = badge.closest('.context-menu-item');
+                        if (triggerItem) toggleTabPlacementSubmenu(triggerItem);
+                        return;
+                    }
                     case 'add-template-run':
                         hideContextMenu();
                         await openBookmarkAddByTemplateAction(context);
@@ -5720,7 +5775,7 @@ function renderSubmenu(context) {
         flushInfoSubmenuNoteEditor();
     }
     contextSubmenu.__flushInfoNoteEditor = null;
-    contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu', 'is-info-submenu');
+    contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu', 'is-info-submenu', 'is-tab-placement-submenu');
 
     if (contextSubmenu.dataset.triggerAction === 'trace-submenu-trigger') {
         renderTraceSubmenu(context);
@@ -5788,6 +5843,11 @@ function renderSubmenu(context) {
             event.stopPropagation();
             try {
                 switch (subAction) {
+                    case 'tab-placement-submenu-trigger': {
+                        const triggerItem = badge.closest('.context-menu-item');
+                        if (triggerItem) toggleTabPlacementSubmenu(triggerItem);
+                        return;
+                    }
                     case 'add-template-run':
                         hideContextMenu();
                         await openBookmarkAddByTemplateAction(context);
@@ -5839,7 +5899,6 @@ function renderSubmenu(context) {
             e.stopPropagation();
             const action = item.dataset.action;
             if (action === 'open-label') return;
-
             handleMenuAction(action, context);
             hideContextMenu();
         });
@@ -5860,6 +5919,7 @@ function flushInfoSubmenuNoteEditor() {
 }
 
 function hideSubmenu() {
+    hideTabPlacementSubmenu();
     if (contextSubmenu) {
         flushInfoSubmenuNoteEditor();
         contextSubmenu.__flushInfoNoteEditor = null;
@@ -5873,6 +5933,14 @@ function hideSubmenu() {
             delete contextMenu.dataset.originalLeft;
         }
     }
+}
+
+function hideTabPlacementSubmenu() {
+    if (!tabPlacementSubmenu) return;
+    tabPlacementSubmenu.style.display = 'none';
+    tabPlacementSubmenu.style.transform = '';
+    tabPlacementSubmenu.style.transformOrigin = '';
+    lastTabPlacementTriggerItem = null;
 }
 
 function getQuickActionPopoverScale(anchor) {
@@ -5916,6 +5984,8 @@ function getContextSubmenuScale(triggerItem, triggerAction) {
 // 展开/收起二级菜单
 function toggleSubmenu(triggerItem, context) {
     if (!contextSubmenu) return;
+
+    hideTabPlacementSubmenu();
 
     const currentTriggerAction = contextSubmenu.dataset.triggerAction;
     const newTriggerAction = triggerItem.dataset.action;
@@ -6162,7 +6232,13 @@ function buildSubmenuItems(context) {
             selected: defaultOpenMode === 'manual-select'
         },
         { separatorShort: true },
-        { action: 'open-new-tab', label: lang === 'zh_CN' ? '新标签页' : 'in New Tab', icon: 'window-maximize', selected: defaultOpenMode === 'new-tab' },
+        {
+            action: 'open-new-tab',
+            labelHTML: `<span>${lang === 'zh_CN' ? '新标签页' : 'in New Tab'} <span class="sub-badge" data-sub-action="tab-placement-submenu-trigger">${lang === 'zh_CN' ? '位置' : 'Position'}</span></span>`,
+            label: lang === 'zh_CN' ? '新标签页' : 'in New Tab',
+            icon: 'window-maximize',
+            selected: defaultOpenMode === 'new-tab'
+        },
         // 改名：原“特定标签组”改为“同一标签组”/“In Same Group”（带提示徽标）
         (() => {
             const showBadge = !!specificTabGroupId;
@@ -6240,6 +6316,104 @@ function buildSubmenuItems(context) {
     );
 
     return items;
+}
+
+function toggleTabPlacementSubmenu(triggerItem) {
+    if (!tabPlacementSubmenu || !triggerItem) return;
+    if (tabPlacementSubmenu.style.display === 'block' && lastTabPlacementTriggerItem === triggerItem) {
+        hideTabPlacementSubmenu();
+        return;
+    }
+    lastTabPlacementTriggerItem = triggerItem;
+    renderTabPlacementSubmenu();
+    if (tabPlacementSubmenu.parentElement !== getOverlayContainer()) {
+        getOverlayContainer().appendChild(tabPlacementSubmenu);
+    }
+    tabPlacementSubmenu.style.transform = 'none';
+    tabPlacementSubmenu.style.position = 'fixed';
+    tabPlacementSubmenu.style.display = 'block';
+    updateTabPlacementSubmenuPosition();
+}
+
+function updateTabPlacementSubmenuPosition() {
+    if (!tabPlacementSubmenu || tabPlacementSubmenu.style.display !== 'block' || !lastTabPlacementTriggerItem) return;
+
+    const triggerRect = lastTabPlacementTriggerItem.getBoundingClientRect();
+    const submenuWidth = tabPlacementSubmenu.offsetWidth || 230;
+    const submenuHeight = tabPlacementSubmenu.offsetHeight || 160;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const scale = getContextSubmenuScale(lastTabPlacementTriggerItem, 'tab-placement-submenu-trigger');
+    const visualWidth = submenuWidth * scale;
+    const visualHeight = submenuHeight * scale;
+    let left;
+    let top;
+    let transformOriginX;
+    let transformOriginY;
+    const isHorizontalLayout = contextMenuHorizontal && contextMenu && contextMenu.classList.contains('horizontal-layout');
+
+    if (isHorizontalLayout) {
+        top = triggerRect.bottom + 4;
+        transformOriginY = 'top';
+        if (top + visualHeight > viewportHeight - 8) {
+            top = triggerRect.top - submenuHeight - 4;
+            transformOriginY = 'bottom';
+        }
+        if (triggerRect.left + visualWidth <= viewportWidth - 8) {
+            left = triggerRect.left;
+            transformOriginX = 'left';
+        } else {
+            left = Math.max(8, triggerRect.right - submenuWidth);
+            transformOriginX = 'right';
+        }
+    } else {
+        const showOnRight = triggerRect.right + 4 + visualWidth <= viewportWidth - 8
+            || triggerRect.left - 4 - visualWidth < 8;
+        left = showOnRight ? triggerRect.right + 4 : triggerRect.left - submenuWidth - 4;
+        transformOriginX = showOnRight ? 'left' : 'right';
+
+        let visualCenterY = triggerRect.top + triggerRect.height / 2;
+        const visualHalfHeight = visualHeight / 2;
+        visualCenterY = Math.max(8 + visualHalfHeight, Math.min(viewportHeight - 8 - visualHalfHeight, visualCenterY));
+        top = visualCenterY - submenuHeight / 2;
+        transformOriginY = 'center';
+    }
+
+    tabPlacementSubmenu.style.cssText = `
+        position: fixed !important;
+        display: block !important;
+        left: ${left}px !important;
+        top: ${top}px !important;
+        z-index: 10002 !important;
+        margin: 0 !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
+        transform: scale(${scale}) !important;
+        transform-origin: ${transformOriginX} ${transformOriginY} !important;
+    `;
+}
+
+function renderTabPlacementSubmenu() {
+    if (!tabPlacementSubmenu) return;
+    const lang = currentLang || 'zh_CN';
+    tabPlacementSubmenu.classList.remove('lang-zh', 'lang-en');
+    tabPlacementSubmenu.classList.add(lang === 'zh_CN' ? 'lang-zh' : 'lang-en');
+    tabPlacementSubmenu.innerHTML = [
+        { value: 'root', zh: '所有标签页末尾', en: 'End of tab strip', icon: 'align-justify' },
+        { value: 'before-current', zh: '当前标签页上方', en: 'Above current tab', icon: 'arrow-up' },
+        { value: 'after-current', zh: '当前标签页下方', en: 'Below current tab', icon: 'arrow-down' }
+    ].map(option => `
+        <div class="context-menu-item ${newTabPlacement === option.value ? 'selected-open' : ''}" data-action="set-tab-placement" data-placement="${option.value}">
+            <i class="fas fa-${option.icon}"></i>
+            <span class="context-menu-item-label"><span>${lang === 'zh_CN' ? option.zh : option.en}</span></span>
+        </div>
+    `).join('');
+    tabPlacementSubmenu.querySelectorAll('[data-action="set-tab-placement"]').forEach(item => {
+        item.addEventListener('click', async event => {
+            event.stopPropagation();
+            await setNewTabPlacement(item.dataset.placement);
+            hideTabPlacementSubmenu();
+        });
+    });
 }
 
 // 构建菜单项
@@ -6546,6 +6720,10 @@ function hideContextMenu() {
         if (contextSubmenu.parentElement !== getOverlayContainer()) {
             getOverlayContainer().appendChild(contextSubmenu);
         }
+    }
+
+    if (tabPlacementSubmenu && tabPlacementSubmenu.parentElement !== getOverlayContainer()) {
+        getOverlayContainer().appendChild(tabPlacementSubmenu);
     }
 
     // 移除右键选中标识
@@ -11755,11 +11933,45 @@ async function saveTabSourceLabel(tabId, label) {
 }
 
 // 在新标签页中打开
+async function getNewTabPlacementProperties() {
+    try {
+        if (typeof chrome === 'undefined'
+            || !chrome.tabs
+            || typeof chrome.tabs.query !== 'function') return {};
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        const currentTab = Array.isArray(tabs) ? tabs[0] : null;
+        if (!currentTab
+            || !Number.isInteger(currentTab.windowId)
+            || !Number.isInteger(currentTab.index)
+            || currentTab.index < 0) {
+            return {};
+        }
+        if (newTabPlacement === 'before-current') {
+            return { windowId: currentTab.windowId, index: currentTab.index };
+        }
+        if (newTabPlacement === 'after-current') {
+            return { windowId: currentTab.windowId, index: currentTab.index + 1 };
+        }
+        const windowTabs = await chrome.tabs.query({ windowId: currentTab.windowId });
+        const lastIndex = Array.isArray(windowTabs) && windowTabs.length
+            ? Math.max(...windowTabs.map(tab => Number.isInteger(tab.index) ? tab.index : -1))
+            : currentTab.index;
+        return { windowId: currentTab.windowId, index: lastIndex + 1 };
+    } catch (_) {
+        return {};
+    }
+}
+
 async function openBookmarkNewTab(url, meta = {}) {
     if (!url) return;
     if (chrome && chrome.tabs) {
         try {
-            const tab = await chrome.tabs.create({ url: url, active: false });
+            const placement = await getNewTabPlacementProperties();
+            const tab = await chrome.tabs.create({
+                url: url,
+                active: false,
+                ...placement
+            });
             if (tab && tab.id != null) {
                 await reportExtensionBookmarkOpen({
                     tabId: tab.id,

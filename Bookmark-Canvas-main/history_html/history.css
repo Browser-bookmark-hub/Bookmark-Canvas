@@ -5964,6 +5964,10 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     padding: 10px 12px !important;
 }
 
+.bookmark-context-submenu.is-tab-placement-submenu {
+    min-width: 230px !important;
+}
+
 .info-card-container {
     display: flex;
     flex-direction: column;
