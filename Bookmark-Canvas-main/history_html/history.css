@@ -1247,6 +1247,16 @@ html.side-panel-mode .search-container .search-input-wrapper {
     transition: max-width 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease, transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* 收缩状态下，悬浮高亮覆盖整个搜索按钮外壳，而不是只覆盖内部图标按钮。 */
+html.side-panel-mode .search-container:not(.side-panel-search-expanded):hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-hover);
+}
+
+html.side-panel-mode .search-container:not(.side-panel-search-expanded) .search-mode-trigger:hover {
+    background: transparent;
+}
+
 html.side-panel-mode .search-container.side-panel-search-expanded,
 html.side-panel-mode .search-container.side-panel-search-collapsing {
     position: absolute;
