@@ -2395,11 +2395,16 @@ body.canvas-node-maximized-active #canvasContent>.canvas-node-maximized {
     margin-right: 6px;
 }
 
-.permanent-section-actions .canvas-layout-zoom-value,
+.permanent-section-actions .canvas-layout-zoom-value {
+    color: var(--permanent-action-icon, white);
+    background: var(--permanent-action-bg, rgba(255, 255, 255, 0.2));
+    border: 1px solid var(--permanent-action-border, rgba(255, 255, 255, 0.3));
+}
+
 .temp-node-actions .canvas-layout-zoom-value {
-    color: rgba(255, 255, 255, 0.92);
-    background: rgba(255, 255, 255, 0.16);
-    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: var(--temp-action-icon, #ffffff);
+    background: var(--temp-action-bg, rgba(255, 255, 255, 0.2));
+    border: 1px solid var(--temp-action-border, rgba(255, 255, 255, 0.4));
 }
 
 .md-node-toolbar .canvas-layout-zoom-value {
