@@ -75,9 +75,10 @@ When an empty canvas first opens, three guide cards are visible: **Canvas Basics
   - **Generation Skill**: keep generated outputs centered on the Bookmark Canvas data model, as a single JSON file or a single data package that includes a `.canvas` file.
   - **Analysis Skill**: first analyze Bookmark Canvas itself and scoped canvas data; expand into index building, RAG, or Deep Research (external or internal) only after practice.
   - **Integrated Skill**: share the basic formats and Skill directions, and invite [Bookmark Backup](https://github.com/Browser-bookmark-hub/Bookmark-Backup) and [Bookmark Record and Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend) to participate; generated outputs remain primarily carried by Bookmark Canvas.
+  - **Agent Plugin**: a follow-up priority is the [Agent Plugin specification](https://agent-plugins.org/specification), because it can package and integrate multiple Skills and MCP servers. See the [Claude Code plugin docs](https://code.claude.com/docs/en/plugins) and Anthropic's [official plugin directory](https://github.com/anthropics/claude-code/tree/main/plugins) for a concrete reference.
   - **R5 ecosystem reference**: the [R5 AI Special Temporary Section Example](#ref-r5) is a reusable reference shape for AI-generated bookmark suggestions and trees. Other plugins and tools can use it when contributing generated, recommended, or processed results to Bookmark Canvas; Bookmark-Backup and Bookmark-Record-Recommend are current ecosystem references.
   - **Other capability explorations (to be completed)**: see [`docs/ROADMAP_OUTLOOK_DATA_PROCESSING_CLI_SKILL_CLIENT_AI.md`](docs/ROADMAP_OUTLOOK_DATA_PROCESSING_CLI_SKILL_CLIENT_AI.md).
-- [ ] **Tags and Notes exploration**: the Search Panel already provides browsing and viewing. A separate management page is not a committed feature yet: it needs a clear answer for bulk management and export, rather than duplicating the current viewer.
+- [ ] ~~**Tags and Notes exploration**: the Search Panel already provides browsing and viewing. A separate management page is not a committed feature yet: it needs a clear answer for bulk management and export, rather than duplicating the current viewer.~~
 
 #### Long-term
 

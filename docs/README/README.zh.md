@@ -75,9 +75,10 @@
   - **生成 Skill**：生成结果集中在书签画布的数据模型中，支持单个 JSON，或包含 `.canvas` 的单个数据包。
   - **分析 Skill**：优先分析书签画布本项目与范围明确的画布数据；索引建立、RAG 与 Deep Research（外部或内部）均待实践后再扩展。
   - **综合 Skill**：开放基础格式与 Skill 方向，并邀请生态项目 [书签备份（Bookmark Backup）](https://github.com/Browser-bookmark-hub/Bookmark-Backup) 与 [书签记录与推荐（Bookmark Record and Recommend）](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend) 参与；生成结果仍以书签画布为主要承载。
+  - **Agent Plugin**：后续优先考虑采用 [Agent Plugin specification](https://agent-plugins.org/specification)，用于封装并集成多个 Skill 与 MCP 服务。具体可参考 [Claude Code Plugin 文档](https://code.claude.com/docs/en/plugins) 与 Anthropic 的[官方 Plugin 目录](https://github.com/anthropics/claude-code/tree/main/plugins)。
   - **R5 生态参考**：[R5 AI 特殊临时栏目示例](#ref-r5)提供了 AI 生成书签建议或书签树时可复用的参考形状。其他插件或工具向书签画布贡献生成、推荐或处理结果时也可参考；书签备份与书签记录与推荐是当前生态中的参考方向。
   - **其他能力探索（待完善）**：详见 [`../路线图前瞻-数据处理CLI-Skill-客户端-AI化.md`](../%E8%B7%AF%E7%BA%BF%E5%9B%BE%E5%89%8D%E7%9E%BB-%E6%95%B0%E6%8D%AE%E5%A4%84%E7%90%86CLI-Skill-%E5%AE%A2%E6%88%B7%E7%AB%AF-AI%E5%8C%96.md)。
-- [ ] **标签与备注管理探索**：目前搜索面板已经可以直接浏览和查看标签、备注。独立管理页暂不作为确定功能；它需要先解决批量管理和导出的问题，而不是重复现有查看器。
+- [ ] ~~**标签与备注管理探索**：目前搜索面板已经可以直接浏览和查看标签、备注。独立管理页暂不作为确定功能；它需要先解决批量管理和导出的问题，而不是重复现有查看器。~~
 
 #### 长期路线
 
