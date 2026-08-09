@@ -2703,6 +2703,92 @@ body.canvas-popover-active .md-align-popover {
     border-color: #dc2626;
 }
 
+/* 全屏卡片删除按钮的防误触确认面板 */
+.fullscreen-delete-confirm-popover {
+    position: fixed;
+    box-sizing: border-box;
+    width: 190px;
+    padding: 14px;
+    background: var(--bg-primary, #ffffff);
+    border: 1px solid var(--border-color, #d0d7de);
+    border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.22);
+    z-index: 100002;
+    transform: none;
+    animation: fullscreenDeleteConfirmSlideDown 0.18s ease-out;
+}
+
+@keyframes fullscreenDeleteConfirmSlideDown {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.fullscreen-delete-confirm-title {
+    color: var(--text-primary, #24292f);
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: 0;
+}
+
+.fullscreen-delete-confirm-message {
+    margin-top: 7px;
+    color: var(--text-secondary, #57606a);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.fullscreen-delete-confirm-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 13px;
+}
+
+.fullscreen-delete-confirm-btn {
+    min-width: 58px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.fullscreen-delete-confirm-btn.cancel {
+    background: var(--bg-secondary, #f6f8fa);
+    border-color: var(--border-color, #d0d7de);
+    color: var(--text-secondary, #57606a);
+}
+
+.fullscreen-delete-confirm-btn.cancel:hover {
+    background: var(--bg-tertiary, #eaeef2);
+    color: var(--text-primary, #24292f);
+}
+
+.fullscreen-delete-confirm-btn.confirm {
+    background: var(--error, #cf222e);
+    border-color: var(--error, #cf222e);
+    color: #ffffff;
+}
+
+.fullscreen-delete-confirm-btn.confirm:hover {
+    background: #a40e26;
+    border-color: #a40e26;
+}
+
+[data-theme="dark"] .fullscreen-delete-confirm-popover {
+    background: rgba(36, 37, 38, 0.98);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.52);
+}
+
 [data-theme="dark"] .desc-clear-confirm-popover {
     background: rgba(36, 37, 38, 0.98);
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);

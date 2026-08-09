@@ -375,7 +375,7 @@ function updateCanvasPopoverState(isActive) {
     } else {
         // 延时一帧检查，确保 DOM 状态已更新
         requestAnimationFrame(() => {
-            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .desc-clear-confirm-popover, .desc-height-settings-popover, .canvas-sidepanel-popover');
+            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .desc-clear-confirm-popover, .fullscreen-delete-confirm-popover, .desc-height-settings-popover, .canvas-sidepanel-popover');
             if (!hasOpen) {
                 document.body.classList.remove('canvas-popover-active');
             }
@@ -386,6 +386,94 @@ function updateCanvasPopoverState(isActive) {
 const DESC_CLEAR_CONFIRM_POPOVER_ID = 'descClearConfirmPopover';
 const DESC_HEIGHT_SETTINGS_POPOVER_ID = 'descHeightSettingsPopover';
 const CANVAS_SIDE_PANEL_POPOVER_ID = 'canvasSidePanelPopover';
+const FULLSCREEN_DELETE_CONFIRM_POPOVER_ID = 'fullscreenDeleteConfirmPopover';
+
+function __closeFullscreenDeleteConfirmPopover() {
+    const existing = document.getElementById(FULLSCREEN_DELETE_CONFIRM_POPOVER_ID);
+    if (!existing) return;
+    if (typeof existing.__cleanup === 'function') existing.__cleanup();
+    else existing.remove();
+}
+
+/**
+ * Show the small deletion guard used by fullscreen cards. The popover is
+ * viewport-positioned so it remains visible regardless of card type or zoom.
+ */
+function __showFullscreenDeleteConfirmPopover(anchorEl, options = {}) {
+    if (!anchorEl) return false;
+    __closeFullscreenDeleteConfirmPopover();
+
+    const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh';
+    const isEn = lang === 'en' || String(lang).toLowerCase().startsWith('en');
+    const pop = document.createElement('div');
+    pop.id = FULLSCREEN_DELETE_CONFIRM_POPOVER_ID;
+    pop.className = 'fullscreen-delete-confirm-popover';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', isEn ? 'Prevent accidental deletion' : '防误触');
+    pop.innerHTML = `
+        <div class="fullscreen-delete-confirm-title">${isEn ? 'Prevent accidental touch' : '防误触'}</div>
+        <div class="fullscreen-delete-confirm-message">${isEn ? 'Delete this card?' : '是否确认删除'}</div>
+        <div class="fullscreen-delete-confirm-actions">
+            <button class="fullscreen-delete-confirm-btn cancel" type="button">${isEn ? 'Cancel' : '取消'}</button>
+            <button class="fullscreen-delete-confirm-btn confirm" type="button">${isEn ? 'Delete' : '确认删除'}</button>
+        </div>
+    `;
+    getOverlayContainer().appendChild(pop);
+
+    const position = () => {
+        if (!pop.isConnected) return;
+        const rect = anchorEl.getBoundingClientRect();
+        const popRect = pop.getBoundingClientRect();
+        const margin = 8;
+        let left = rect.right - popRect.width;
+        let top = rect.bottom + margin;
+        if (top + popRect.height > window.innerHeight - margin) {
+            top = rect.top - popRect.height - margin;
+        }
+        left = Math.min(window.innerWidth - popRect.width - margin, Math.max(margin, left));
+        top = Math.min(window.innerHeight - popRect.height - margin, Math.max(margin, top));
+        pop.style.left = `${Math.round(left)}px`;
+        pop.style.top = `${Math.round(top)}px`;
+    };
+    position();
+    updateCanvasPopoverState(true);
+
+    let closed = false;
+    const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        try { pop.remove(); } catch (_) { }
+        window.removeEventListener('resize', position);
+        document.removeEventListener('scroll', position, true);
+        document.removeEventListener('mousedown', onDocDown, true);
+        document.removeEventListener('keydown', onKeyDown, true);
+        updateCanvasPopoverState(false);
+    };
+    const onConfirm = () => {
+        cleanup();
+        if (typeof options.onConfirm === 'function') options.onConfirm();
+    };
+    const onDocDown = (event) => {
+        if (!pop.contains(event.target) && event.target !== anchorEl && !anchorEl.contains(event.target)) cleanup();
+    };
+    const onKeyDown = (event) => {
+        if (event.key === 'Escape') cleanup();
+    };
+    const cancelBtn = pop.querySelector('.fullscreen-delete-confirm-btn.cancel');
+    const confirmBtn = pop.querySelector('.fullscreen-delete-confirm-btn.confirm');
+    if (cancelBtn) cancelBtn.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); cleanup(); });
+    if (confirmBtn) confirmBtn.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); onConfirm(); });
+    preventCanvasEventsPropagation(pop);
+    window.addEventListener('resize', position);
+    document.addEventListener('scroll', position, true);
+    setTimeout(() => {
+        if (closed) return;
+        document.addEventListener('mousedown', onDocDown, true);
+        document.addEventListener('keydown', onKeyDown, true);
+    }, 0);
+    pop.__cleanup = cleanup;
+    return true;
+}
 
 function __showDescClearConfirmPopover(anchorEl, options = {}) {
     if (!anchorEl) return;
@@ -11433,7 +11521,12 @@ function __ensurePermanentSectionCopyControlsBound() {
             const sectionEl = removeBtn.closest('.permanent-bookmark-section');
             if (!sectionEl || !__isPermanentSectionCopy(sectionEl)) return;
             try {
-                removePermanentSectionCopy(sectionEl);
+                const remove = () => removePermanentSectionCopy(sectionEl);
+                if (__isNodeMaximized(sectionEl)) {
+                    __showFullscreenDeleteConfirmPopover(removeBtn, { onConfirm: remove });
+                } else {
+                    remove();
+                }
             } catch (err) {
                 console.error('[Canvas] 删除永久栏目副本失败:', err);
             }
@@ -17405,8 +17498,15 @@ function __renderMdNodeImpl(node, options = {}) {
             enterEditMode();
         } else if (action === 'md-delete') {
             // 普通节点的删除
-            removeMdNode(node.id);
-            clearMdSelection();
+            const remove = () => {
+                removeMdNode(node.id);
+                clearMdSelection();
+            };
+            if (__isNodeMaximized(el)) {
+                __showFullscreenDeleteConfirmPopover(btn, { onConfirm: remove });
+            } else {
+                remove();
+            }
         } else if (action === 'md-delete-frame-only') {
             removeMdNode(node.id, false);
             clearMdSelection();
@@ -22227,7 +22327,16 @@ function __renderTempNodeImpl(section, options = {}) {
     const closeLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Remove section' : '删除临时栏目';
     closeBtn.title = closeLabel;
     closeBtn.setAttribute('aria-label', closeLabel);
-    closeBtn.addEventListener('click', () => removeTempNode(section.id));
+    closeBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const remove = () => removeTempNode(section.id);
+        if (__isNodeMaximized(nodeElement)) {
+            __showFullscreenDeleteConfirmPopover(closeBtn, { onConfirm: remove });
+        } else {
+            remove();
+        }
+    });
 
     let tempColorInputRaf = null;
     let pendingTempColor = null;
@@ -41144,6 +41253,7 @@ function maximizeCanvasNode(element, options = {}) {
 function restoreCanvasNodeLayout(element, options = {}) {
     if (!element || !element.dataset) return;
     if (!__isNodeMaximized(element)) return;
+    __closeFullscreenDeleteConfirmPopover();
     __setFullscreenPreloadReady(element, false);
     __setFullscreenBodyReady(element, false);
     element.classList.remove('canvas-node-maximized');
