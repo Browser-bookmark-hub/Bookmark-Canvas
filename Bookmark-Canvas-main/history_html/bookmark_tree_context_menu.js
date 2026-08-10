@@ -528,7 +528,7 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
 
         // 同步默认打开模式与特定窗口/分组配置
         if (changes.bookmarkDefaultOpenMode) {
-            defaultOpenMode = changes.bookmarkDefaultOpenMode.newValue || 'specific-window';
+            defaultOpenMode = changes.bookmarkDefaultOpenMode.newValue || 'new-tab';
             try { window.defaultOpenMode = defaultOpenMode; } catch (_) {}
         }
         if (changes.newTabPlacement) {
@@ -577,10 +577,10 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
 }
 
 // 全局：默认打开方式与特定窗口/分组ID
-let defaultOpenMode = 'specific-window'; // 默认：'specific-window'（同一窗口）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
+let defaultOpenMode = 'new-tab'; // 默认：'new-tab'（新标签页）。可选：'new-tab' | 'new-window' | 'incognito' | 'specific-window' | 'specific-group' | 'scoped-window' | 'scoped-group' | 'same-window-specific-group'
 const NEW_TAB_PLACEMENT_STORAGE_KEY = 'newTabPlacement';
 const NEW_TAB_PLACEMENTS = new Set(['root', 'before-current', 'after-current']);
-let newTabPlacement = 'root'; // 单链接新标签页的插入位置；默认标签栏末尾
+let newTabPlacement = 'after-current'; // 单链接新标签页的插入位置；默认当前标签页下方
 let specificWindowId = null; // chrome.windows Window ID
 let specificTabGroupId = null; // chrome.tabGroups Group ID（在“特定标签组”模式下复用）
 let specificGroupWindowId = null; // 保存分组所在窗口，确保新开的标签在同一窗口
@@ -788,7 +788,7 @@ async function setDefaultOpenMode(mode) {
 }
 
 function normalizeNewTabPlacement(value) {
-    return NEW_TAB_PLACEMENTS.has(value) ? value : 'root';
+    return NEW_TAB_PLACEMENTS.has(value) ? value : 'after-current';
 }
 
 async function setNewTabPlacement(placement) {
