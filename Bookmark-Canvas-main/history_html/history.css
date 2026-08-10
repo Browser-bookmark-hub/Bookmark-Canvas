@@ -7798,7 +7798,12 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 
 .batch-panel-content .context-menu-item i {
     width: 13px;
+    flex: 0 0 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-size: 12px;
+    line-height: 1;
     color: var(--text-secondary);
 }
 

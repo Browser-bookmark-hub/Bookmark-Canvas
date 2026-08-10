@@ -4272,6 +4272,7 @@ function getBatchHelpHtml(lang) {
   <div class="batch-help-card-title"><span class="batch-help-badge">2</span>临时栏目 / 合并</div>
   <div class="batch-help-line">临时栏目：把当前选择汇总成一个新的临时栏目，方便临时整理。</div>
   <div class="batch-help-line">合并：会在根目录下生成一个新文件夹并合并（临时栏目则在当前栏目内），名称默认为当前时间戳（例如：${formatTimestampForTitle()}）。</div>
+  <div class="batch-help-line">合并仅支持单张卡片，或永久栏目与其副本的组合。</div>
 </div>
 
 <div class="batch-help-card" id="batch-help-card-copy-cut">
@@ -4316,6 +4317,7 @@ function getBatchHelpHtml(lang) {
   <div class="batch-help-card-title"><span class="batch-help-badge">2</span>Temp Section / Merge</div>
   <div class="batch-help-line">Temp Section: collects current selection into a new temporary section for quick organization.</div>
   <div class="batch-help-line">Merge: creates a new folder in the root directory (or within the current section for temp items), named by current timestamp by default (e.g. ${formatTimestampForTitle()}).</div>
+  <div class="batch-help-line">Merge supports one card only, or a permanent section together with its copies.</div>
 </div>
 
 <div class="batch-help-card" id="batch-help-card-copy-cut">
@@ -8649,6 +8651,16 @@ function getBatchSelectionCapabilities() {
     };
 }
 
+function isBatchMergeDisabled(caps) {
+    return caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
+}
+
+function getBatchMergeUnsupportedMessage(lang) {
+    return lang === 'zh_CN'
+        ? '合并仅支持单张卡片，或永久栏目与其副本的组合'
+        : 'Merge supports one card only, or a permanent section together with its copies';
+}
+
 function formatTimestampForTitle(date = new Date()) {
     const yyyy = date.getFullYear();
     const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -9498,46 +9510,82 @@ async function openTagPopoverForContext(action, context, anchorOverride) {
     window.openTagPopover({ targets, anchor });
 }
 
+async function __ctxFilterTargetsWithTags(targets) {
+    const list = Array.isArray(targets) ? targets.filter(Boolean) : [];
+    const tagSystem = (typeof window !== 'undefined') ? window.TagSystem : null;
+    if (!tagSystem || typeof tagSystem.getTagsForTarget !== 'function') return list;
+
+    const tagsByTarget = await Promise.all(list.map(async (target) => {
+        try {
+            const tags = await tagSystem.getTagsForTarget(target);
+            return Array.isArray(tags) ? tags : [];
+        } catch (_) {
+            return null;
+        }
+    }));
+    // Keep unreadable targets as a fallback; normally every target is readable.
+    return list.filter((_, index) => tagsByTarget[index] === null || tagsByTarget[index].length > 0);
+}
+
 async function clearTagsForContext(action, context) {
     const { targets } = resolveTagTargetsForContext(action, context);
     if (!targets.length) return;
-
     const lang = currentLang || 'zh_CN';
     const message = lang === 'zh_CN'
-        ? `确定清除选中 ${targets.length} 项的所有标签吗？`
+        ? `确定清除选中 ${targets.length} 项里的所有标签吗？`
         : `Clear all tags from ${targets.length} selected item(s)?`;
     if (!confirm(message)) return;
+
+    const targetsToClear = await __ctxFilterTargetsWithTags(targets);
 
     const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
     const permanentUpdates = [];
     const permanentTargets = [];
     const changedTargets = [];
+    let clearedCount = 0;
 
-    for (const target of targets) {
+    for (const target of targetsToClear) {
         if (!target) continue;
         if (target.kind === 'permanent') {
             permanentUpdates.push({ chromeId: target.chromeId, tags: [] });
             permanentTargets.push(target);
         } else if (target.kind === 'temporary' && typeof setTempItemTags === 'function') {
             const ok = setTempItemTags(target.sectionId, target.itemId, []);
-            if (ok) changedTargets.push(Object.assign({}, target, { tags: [] }));
+            if (ok) {
+                changedTargets.push(Object.assign({}, target, { tags: [] }));
+                clearedCount += 1;
+            }
         }
     }
 
     if (permanentUpdates.length && bridge) {
         if (typeof bridge.writePermanentNodeTagsBulk === 'function') {
-            await bridge.writePermanentNodeTagsBulk(permanentUpdates);
-            permanentTargets.forEach((target) => changedTargets.push(Object.assign({}, target, { tags: [] })));
+            const result = await bridge.writePermanentNodeTagsBulk(permanentUpdates);
+            const changed = result && Number.isFinite(result.changed) ? result.changed : 0;
+            clearedCount += changed;
+            if (changed) {
+                permanentTargets.forEach((target) => changedTargets.push(Object.assign({}, target, { tags: [] })));
+            }
         } else if (typeof bridge.writePermanentNodeTags === 'function') {
             for (let i = 0; i < permanentUpdates.length; i++) {
                 const update = permanentUpdates[i];
-                await bridge.writePermanentNodeTags(update.chromeId, update.tags);
-                changedTargets.push(Object.assign({}, permanentTargets[i], { tags: [] }));
+                const result = await bridge.writePermanentNodeTags(update.chromeId, update.tags);
+                if (result) {
+                    changedTargets.push(Object.assign({}, permanentTargets[i], { tags: [] }));
+                    clearedCount += 1;
+                }
             }
         }
     }
 
-    if (!changedTargets.length) return;
+    if (!changedTargets.length) {
+        if (typeof showToast === 'function') {
+            showToast(lang === 'zh_CN'
+                ? `已清除 ${clearedCount} 项的标签`
+                : `Cleared tags from ${clearedCount} item(s)`);
+        }
+        return;
+    }
     if (typeof window.closeTagPopover === 'function') {
         try { window.closeTagPopover(); } catch (_) {}
     }
@@ -9557,6 +9605,11 @@ async function clearTagsForContext(action, context) {
             window.searchCanvasAndRender(q);
         }
     } catch (_) {}
+    if (typeof showToast === 'function') {
+        showToast(lang === 'zh_CN'
+            ? `已清除 ${clearedCount} 项的标签`
+            : `Cleared tags from ${clearedCount} item(s)`);
+    }
 }
 
 function __ctxReadNoteMetaForTarget(target) {
@@ -9856,10 +9909,22 @@ async function clearNotesForContext(action, context) {
     if (!targets.length) return;
     const lang = currentLang || 'zh_CN';
     const message = lang === 'zh_CN'
-        ? `确定清除选中 ${targets.length} 项的笔记吗？`
+        ? `确定清除选中 ${targets.length} 项里的笔记吗？`
         : `Clear notes from ${targets.length} selected item(s)?`;
     if (!confirm(message)) return;
-    await writeNotesForContextTargets(targets, '', 'orange', 'batch-clear-note');
+    let targetsToClear = targets;
+    try {
+        if (window.NoteSystem && typeof window.NoteSystem.ensurePermNotesLoaded === 'function') {
+            await window.NoteSystem.ensurePermNotesLoaded();
+            targetsToClear = targets.filter((target) => __ctxReadNoteMetaForTarget(target).note.length > 0);
+        }
+    } catch (_) { }
+    const changedTargets = await writeNotesForContextTargets(targetsToClear, '', 'orange', 'batch-clear-note');
+    if (typeof showToast === 'function') {
+        showToast(lang === 'zh_CN'
+            ? `已清除 ${changedTargets.length} 项的笔记`
+            : `Cleared notes from ${changedTargets.length} item(s)`);
+    }
 }
 
 async function batchOpenTemp(options = {}) {
@@ -10527,7 +10592,11 @@ async function __resolveBookmarkAddPermanentRootId(context = null) {
     const root = Array.isArray(tree) ? tree[0] : null;
     const children = root && Array.isArray(root.children) ? root.children : [];
 
-    const bookmarkBar = children.find((child) => child && (child.id === '1' || child.title === '书签栏' || child.title === 'Bookmarks bar'));
+    const bookmarkBar = children.find((child) => {
+        if (!child) return false;
+        if (String(child.id || '') === '1' || child.folderType === 'bookmarks-bar') return true;
+        return /^(书签栏|收藏夹栏|bookmarks?\s+bar|favorites?\s+bar)$/i.test(String(child.title || '').trim());
+    });
     const firstWritableFolder = children.find((child) => {
         if (!child) return false;
         if (child.url) return false;
@@ -14108,7 +14177,7 @@ function showBatchContextMenu(e) {
 
     const caps = getBatchSelectionCapabilities();
     const cutDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
-    const mergeDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
+    const mergeDisabled = isBatchMergeDisabled(caps);
 
     // 构建批量菜单 - 分组显示（简化版本）
         const itemGroups = [
@@ -16283,15 +16352,19 @@ async function batchMergeFolder() {
     const lang = currentLang || 'zh_CN';
 
     const caps = getBatchSelectionCapabilities();
-    if (caps.mixed || (caps.hasTemp && !caps.tempAllSameSection)) {
-        alert(lang === 'zh_CN'
-            ? '合并不支持永久与临时混选，或同时选择多个不同的临时卡片'
-            : 'Merge does not support mixed permanent + temporary selection or items from multiple different cards');
+    if (isBatchMergeDisabled(caps)) {
+        alert(getBatchMergeUnsupportedMessage(lang));
         return;
     }
 
     // 临时栏目：将选中项合并为“一个新文件夹（包含原选中项）”
     if (caps.hasTemp) {
+        const folderName = prompt(
+            lang === 'zh_CN' ? '请输入新文件夹名称（将在当前临时栏目内合并）:' : 'Enter new folder name (will be merged in the current temporary section):',
+            formatTimestampForTitle()
+        );
+        if (!folderName) return;
+
         try {
             const manager = ensureTempManager();
             const sectionGroups = new Map();
@@ -16304,12 +16377,10 @@ async function batchMergeFolder() {
             sectionGroups.forEach((ids, sectionId) => {
                 if (!ids.length) return;
                 const payload = manager.extractPayload(sectionId, ids) || [];
-                // 名称：不使用中文/英文，只用数量 + 时间戳
-                const folderTitle = `${formatTimestampForTitle()}`;
                 // 先移除原项，再插入一个文件夹（子项=原payload），相当于“合并到文件夹”
                 manager.removeItems(sectionId, ids);
                 manager.insertFromPayload(sectionId, null, [{
-                    title: folderTitle,
+                    title: folderName,
                     type: 'folder',
                     children: payload
                 }], null, { defaultCollapseFolders: true });
@@ -16327,9 +16398,13 @@ async function batchMergeFolder() {
     // 永久书签：新建文件夹并把选中项 move 进去
     const permanentIds = caps.permanentIds;
     if (!permanentIds.length) return;
-    const bookmarkBar = (await chrome.bookmarks.getTree())[0].children.find(n => n.id === '1');
-    if (!bookmarkBar) {
-        throw new Error('未找到书签栏');
+    let permanentRootId;
+    try {
+        permanentRootId = await __resolveBookmarkAddPermanentRootId();
+    } catch (error) {
+        console.error('[批量] 解析永久书签根目录失败:', error);
+        alert(lang === 'zh_CN' ? `合并失败: ${error.message}` : `Merge failed: ${error.message}`);
+        return;
     }
 
     const folderName = prompt(
@@ -16360,10 +16435,10 @@ async function batchMergeFolder() {
             loadingToast = window.showLoadingToast(lang === 'zh_CN' ? `正在合并 ${permanentIds.length} 项...` : `Merging ${permanentIds.length} items...`);
         }
 
-        // 在书签栏下创建新文件夹
+        // 在当前浏览器提供的永久书签根目录下创建新文件夹。
         progressTracker.current++;
         const newFolder = await createPermanentBookmarkNode({
-            parentId: bookmarkBar.id,
+            parentId: permanentRootId,
             title: folderName
         }, createOptions);
 
@@ -16511,7 +16586,7 @@ function updateBatchToolbar() {
     try {
         const caps = getBatchSelectionCapabilities();
         const cutDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
-        const mergeDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
+        const mergeDisabled = isBatchMergeDisabled(caps);
 
         const cutBtn = toolbar.querySelector('[data-action="batch-cut"]');
         if (cutBtn) {
@@ -16772,7 +16847,7 @@ function updateBatchPanelCount() {
     try {
         const caps = getBatchSelectionCapabilities();
         const cutDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
-        const mergeDisabled = caps.mixed || (caps.hasTemp && !caps.tempAllSameSection);
+        const mergeDisabled = isBatchMergeDisabled(caps);
         batchPanel.querySelectorAll('.context-menu-item[data-action="batch-cut"]').forEach((el) => {
             el.classList.toggle('disabled', !!cutDisabled);
         });
