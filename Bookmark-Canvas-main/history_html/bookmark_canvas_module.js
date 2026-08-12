@@ -1875,6 +1875,10 @@ function __resolveLowDetailSurfaceHostFromEvent(event) {
 
 function __isLowDetailSurfaceBlockedTarget(target, host) {
     if (!target || !target.closest) return false;
+    // 临时框选组的蒙版需要优先收到鼠标事件，以便拖动整个选择范围。
+    // 低细节色块处理器会通过 elementsFromPoint 找到其下方的单张卡片，
+    // 若不在这里拦截，就会先启动单卡拖动。
+    if (target.closest('.temp-group-mask, .temp-group-toolbar, .temp-group-color-popover')) return true;
     if (target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return true;
     if (target.closest('.context-menu, .modal, .popover')) return true;
     if (target.closest('.temp-node-action-btn, .permanent-section-actions, .permanent-section-tip-close, .permanent-section-tip-container')) return true;
@@ -8101,90 +8105,17 @@ function setupCanvasZoomAndPan() {
         // - 鼠标滚轮：纵向滚动
         // - Shift + 鼠标滚轮：横向滚动
         // 拖动的元素会悬停在更高层级，滚轮滚动画布，松开后元素落下归位
-        if (CanvasState.dragState.wheelScrollEnabled) {
-            e.preventDefault();
-            CanvasState.lastCanvasScrollTime = Date.now();
-
-            // 标记正在滚动
-            markScrolling();
-
-            const normalizedWheel = __normalizeCanvasWheelEventDeltas(e);
-            let isTouchpad = __isCanvasTouchpadLikeScrollInput(e, normalizedWheel);
-            if (isTouchpad && !__shouldTreatMacWheelAsTouchpad(e, normalizedWheel)) {
-                isTouchpad = false;
-            }
-            const wheelDeltaX = normalizedWheel.deltaX;
-            const wheelDeltaY = normalizedWheel.deltaY;
-
-            const zoomForScroll = getCanvasZoomForScrollFactor();
-            let scrollFactor = 1.0 / zoomForScroll;
-            const zoomAdjustment = Math.pow(zoomForScroll, 0.3);
-            scrollFactor *= zoomAdjustment;
-
-            const trackpadPanRate = getCanvasTrackpadPanRate();
-            const wheelVerticalPanRate = getCanvasWheelVerticalPanRate();
-            const wheelHorizontalPanRate = getCanvasWheelHorizontalPanRate();
-            const preferSnappyPan = __shouldPreferSnappyCanvasPan(
-                isTouchpad,
-                wheelVerticalPanRate,
-                wheelHorizontalPanRate,
-                trackpadPanRate
-            );
-
-            if (isTouchpad) {
-                if (preferSnappyPan) {
-                    scrollFactor = 0.8 * trackpadPanRate;
-                } else {
-                    scrollFactor *= 0.7 * trackpadPanRate;
-                }
-            } else {
-                scrollFactor *= 0.8;
-            }
-
-            const prevPanX = CanvasState.panOffsetX;
-            const prevPanY = CanvasState.panOffsetY;
-            let hasUpdate = false;
-
-            // 触控板：同时支持横向和纵向，实现四向自由滚动
-            if (isTouchpad) {
-                if (wheelDeltaX !== 0) {
-                    CanvasState.panOffsetX -= wheelDeltaX * scrollFactor;
-                    hasUpdate = true;
-                }
-                if (wheelDeltaY !== 0) {
-                    CanvasState.panOffsetY -= wheelDeltaY * scrollFactor;
-                    hasUpdate = true;
-                }
-            } else {
-                // 鼠标滚轮
-                if (e.shiftKey) {
-                    // Shift + 滚轮：横向滚动
-                    const horizontalDelta = wheelDeltaX !== 0 ? wheelDeltaX : wheelDeltaY;
-                    if (horizontalDelta !== 0) {
-                        CanvasState.panOffsetX -= horizontalDelta * scrollFactor * wheelHorizontalPanRate;
-                        hasUpdate = true;
-                    }
-                } else {
-                    // 普通滚轮：纵向滚动
-                    if (wheelDeltaY !== 0) {
-                        CanvasState.panOffsetY -= wheelDeltaY * scrollFactor * wheelVerticalPanRate;
-                        hasUpdate = true;
-                    }
-                }
-            }
-
-            if (hasUpdate) {
-                const panDeltaX = CanvasState.panOffsetX - prevPanX;
-                const panDeltaY = CanvasState.panOffsetY - prevPanY;
-                if ((panDeltaX || panDeltaY) && (CanvasState.dragState.dragSource === 'temp-node' || CanvasState.dragState.dragSource === 'permanent-section')) {
-                    adjustDragReferenceForPan(panDeltaX, panDeltaY, e.clientX, e.clientY);
-                }
-                applyPanOffsetFast();
-
-                // 拖动时也实时更新滚动条
-                updateScrollbarThumbsLightweight();
-            }
-
+        // Ctrl/Command + 滚轮（以及触控板捏合）必须继续走下面的缩放分支；
+        // 否则拖拽状态会提前截断缩放，导致卡片/卡片组无法在拖动中缩放。
+        const isDragZoomInput = isCustomCtrlKeyPressed(e)
+            || (e.metaKey && (!isModifierInertiaReleased || CanvasState.physicalModifiers.Meta))
+            || __isCanvasTouchpadPinch(e);
+        if (CanvasState.dragState.wheelScrollEnabled && !isDragZoomInput) {
+            // Keep drag scrolling on the same wheel pipeline as normal canvas
+            // scrolling. The previous inline path applied deltas directly and
+            // bypassed the trackpad tail, which made horizontal momentum stop
+            // as soon as the last wheel event arrived.
+            handleCanvasCustomScroll(e);
             return;
         }
 
@@ -33253,8 +33184,9 @@ function formatCanvasDisplayZoomPercent(zoom) {
 }
 
 function getCanvasZoomForScrollFactor() {
-    // [UX] 缩到极小时，滚动速度会因为 1/zoom 急剧变快；
-    // 用户反馈：显示缩放 < 25% 时速度不要再继续变快（保持曲率/速度一致）。
+    // Wheel panning follows canvas-coordinate speed, with a floor at very low zoom.
+    // Edge auto-scroll intentionally does not use this factor because it moves
+    // the screen-pixel pan offset directly.
     const base = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
     const minDisplayZoom = 0.25;
     const minZoom = base * minDisplayZoom;
@@ -38361,6 +38293,8 @@ function runInertiaScroll() {
     }
     const damping = params.damping;
     const stopThreshold = params.stopThreshold;
+    const prevPanX = CanvasState.panOffsetX;
+    const prevPanY = CanvasState.panOffsetY;
 
     // 应用速度
     if (Math.abs(CanvasState.inertiaState.velocityX) > stopThreshold) {
@@ -38368,6 +38302,20 @@ function runInertiaScroll() {
     }
     if (Math.abs(CanvasState.inertiaState.velocityY) > stopThreshold) {
         CanvasState.panOffsetY += CanvasState.inertiaState.velocityY;
+    }
+
+    if (CanvasState.dragState && CanvasState.dragState.wheelScrollEnabled) {
+        const panDeltaX = CanvasState.panOffsetX - prevPanX;
+        const panDeltaY = CanvasState.panOffsetY - prevPanY;
+        if ((panDeltaX || panDeltaY) &&
+            (CanvasState.dragState.dragSource === 'temp-node' || CanvasState.dragState.dragSource === 'permanent-section')) {
+            adjustDragReferenceForPan(
+                panDeltaX,
+                panDeltaY,
+                CanvasState.dragState.lastClientX,
+                CanvasState.dragState.lastClientY
+            );
+        }
     }
 
     // 应用阻尼
@@ -38481,6 +38429,16 @@ function __startWinWheelPanPump() {
         CanvasState.scrollAnimation.targetX = CanvasState.panOffsetX;
         CanvasState.scrollAnimation.targetY = CanvasState.panOffsetY;
 
+        if (CanvasState.dragState && CanvasState.dragState.wheelScrollEnabled &&
+            (CanvasState.dragState.dragSource === 'temp-node' || CanvasState.dragState.dragSource === 'permanent-section')) {
+            adjustDragReferenceForPan(
+                stepX,
+                stepY,
+                CanvasState.dragState.lastClientX,
+                CanvasState.dragState.lastClientY
+            );
+        }
+
         applyPanOffsetFast();
         updateScrollbarThumbsLightweight();
 
@@ -38577,7 +38535,6 @@ function runEdgeAutoScroll() {
     }
 
     const state = CanvasState.autoScrollState;
-    const scrollFactor = 1.0 / getCanvasZoomForScrollFactor();
 
     // 使用线性插值（lerp）平滑地过渡到目标速度，避免抖动
     // velocityX = velocityX + (targetVelocityX - velocityX) * smoothing
@@ -38586,8 +38543,10 @@ function runEdgeAutoScroll() {
     state.velocityY += (state.targetVelocityY - state.velocityY) * smoothing;
 
     // 应用滚动
-    CanvasState.panOffsetX += state.velocityX * scrollFactor;
-    CanvasState.panOffsetY += state.velocityY * scrollFactor;
+    // panOffset is already expressed in screen pixels. Applying 1 / zoom here
+    // made edge auto-scroll visibly faster when the canvas was zoomed out.
+    CanvasState.panOffsetX += state.velocityX;
+    CanvasState.panOffsetY += state.velocityY;
 
     // 更新显示
     applyPanOffsetFast();
@@ -38595,8 +38554,8 @@ function runEdgeAutoScroll() {
 
     // 同步更新拖动元素的位置
     if (CanvasState.dragState.isDragging && CanvasState.dragState.draggedElement) {
-        const panDeltaX = state.velocityX * scrollFactor;
-        const panDeltaY = state.velocityY * scrollFactor;
+        const panDeltaX = state.velocityX;
+        const panDeltaY = state.velocityY;
         adjustDragReferenceForPan(panDeltaX, panDeltaY, CanvasState.dragState.lastClientX, CanvasState.dragState.lastClientY);
     }
 
@@ -41522,6 +41481,7 @@ function shouldHandleCustomScroll(event) {
 function handleCanvasCustomScroll(event) {
     const horizontalEnabled = !CanvasState.scrollState.horizontal.disabled;
     const verticalEnabled = !CanvasState.scrollState.vertical.disabled;
+    const isDraggingCanvasNode = !!(CanvasState.dragState && CanvasState.dragState.wheelScrollEnabled);
 
     if (!horizontalEnabled && !verticalEnabled) {
         return;
@@ -41532,8 +41492,28 @@ function handleCanvasCustomScroll(event) {
     // 标记正在滚动
     markScrolling();
 
+    const preserveDragHorizontalInertia = !!(
+        CanvasState.dragState &&
+        CanvasState.dragState.wheelScrollEnabled &&
+        CanvasState.inertiaState &&
+        CanvasState.inertiaState.inputType === PAN_INERTIA_INPUT_WHEEL &&
+        Math.abs(Number(CanvasState.inertiaState.lastDeltaX) || 0) > 0
+    );
+    const preservedDragHorizontalSample = preserveDragHorizontalInertia
+        ? {
+            lastDeltaX: CanvasState.inertiaState.lastDeltaX,
+            lastTime: CanvasState.inertiaState.lastTime
+        }
+        : null;
+
     // 取消之前的惯性滚动
     cancelInertiaScroll();
+    if (preservedDragHorizontalSample) {
+        CanvasState.inertiaState.lastDeltaX = preservedDragHorizontalSample.lastDeltaX;
+        CanvasState.inertiaState.lastDeltaY = 0;
+        CanvasState.inertiaState.lastTime = Date.now();
+        CanvasState.inertiaState.inputType = PAN_INERTIA_INPUT_WHEEL;
+    }
 
     const normalizedWheel = __normalizeCanvasWheelEventDeltas(event);
     let horizontalDelta = normalizedWheel.deltaX;
@@ -41550,7 +41530,14 @@ function handleCanvasCustomScroll(event) {
         isTouchpad = false;
     }
     const isDiscretePanWheel = __isCanvasDiscretePanWheelEvent(event);
-    const panInertiaInputType = __resolveCanvasPanInertiaInputType(isTouchpad, isDiscretePanWheel);
+    // While dragging a card, preserve horizontal trackpad momentum through
+    // the drag surface. Vertical momentum remains on the native stream.
+    const dragTrackpadHorizontalInertia = isDraggingCanvasNode && isTouchpad && (
+        Math.abs(horizontalDelta) > 0.5 || preserveDragHorizontalInertia
+    );
+    const panInertiaInputType = dragTrackpadHorizontalInertia
+        ? PAN_INERTIA_INPUT_WHEEL
+        : __resolveCanvasPanInertiaInputType(isTouchpad, isDiscretePanWheel);
     __logCanvasWinInput('wheel-pan-input', {
         event: __snapshotCanvasWheelEvent(event),
         normalizedDeltaX: __roundCanvasDebugNumber(normalizedWheel.deltaX, 3),
@@ -41613,6 +41600,20 @@ function handleCanvasCustomScroll(event) {
         }
     } else {
         scrollFactor *= 0.8;
+        if (isDraggingCanvasNode) {
+            // Preserve the drag-specific mouse-wheel response at low display
+            // zoom while sharing the normal wheel/inertia pipeline.
+            const lowZoomFloor = 0.15;
+            const lowZoomRestore = 0.30;
+            if (zoomForScroll < lowZoomRestore) {
+                const reducedStep = 1.06;
+                const restoredStep = 0.8 * Math.pow(lowZoomRestore, -0.7);
+                const progress = Math.max(0, Math.min(1,
+                    (zoomForScroll - lowZoomFloor) / (lowZoomRestore - lowZoomFloor)
+                ));
+                scrollFactor = reducedStep + (restoredStep - reducedStep) * progress;
+            }
+        }
         if (CANVAS_RUNTIME_WINDOWS_LIKE && isDiscretePanWheel) {
             scrollFactor *= WINDOWS_LINUX_WHEEL_PAN_SPEED_FACTOR;
         }
@@ -41637,7 +41638,16 @@ function handleCanvasCustomScroll(event) {
 
     if (hasUpdate) {
         if (panInertiaInputType !== PAN_INERTIA_INPUT_NONE) {
-            __updateCanvasPanInertiaSample(panInertiaInputType, panDeltaX, panDeltaY);
+            if (dragTrackpadHorizontalInertia && Math.abs(panDeltaX) <= 0.01 && preserveDragHorizontalInertia) {
+                // A vertical-only tail event must not erase the previous
+                // horizontal sample before the drag scroll stop starts inertia.
+            } else {
+                __updateCanvasPanInertiaSample(
+                    panInertiaInputType,
+                    panDeltaX,
+                    dragTrackpadHorizontalInertia ? 0 : panDeltaY
+                );
+            }
         } else {
             __resetCanvasPanInertiaSample();
         }
@@ -41672,6 +41682,18 @@ function handleCanvasCustomScroll(event) {
             } else {
                 CanvasState.panOffsetX += panDeltaX;
                 CanvasState.panOffsetY += panDeltaY;
+                if (isDraggingCanvasNode &&
+                    (CanvasState.dragState.dragSource === 'temp-node' || CanvasState.dragState.dragSource === 'permanent-section')) {
+                    // A wheel event is not a pointer-position update. Some mouse-wheel
+                    // implementations report a stale client position here, which makes a
+                    // dragged card briefly lose its cursor attachment during pan.
+                    adjustDragReferenceForPan(
+                        panDeltaX,
+                        panDeltaY,
+                        CanvasState.dragState.lastClientX,
+                        CanvasState.dragState.lastClientY
+                    );
+                }
                 if (preferSnappyPan) {
                     __syncCanvasPanVisualImmediate();
                 } else {
@@ -42171,6 +42193,8 @@ function runScrollAnimation() {
     const source = (CanvasState.scrollAnimation && CanvasState.scrollAnimation.source) || 'unknown';
     const isWindowsWheelMicroSmooth = CANVAS_RUNTIME_WINDOWS_LIKE && source === 'wheel';
     const stopThreshold = isWindowsWheelMicroSmooth ? 1.0 : 0.5;
+    const prevPanX = CanvasState.panOffsetX;
+    const prevPanY = CanvasState.panOffsetY;
 
     if (typeof CanvasState.scrollAnimation.targetX === 'number') {
         const diffX = CanvasState.scrollAnimation.targetX - CanvasState.panOffsetX;
@@ -42189,6 +42213,20 @@ function runScrollAnimation() {
             continueAnimation = true;
         } else {
             CanvasState.panOffsetY = CanvasState.scrollAnimation.targetY;
+        }
+    }
+
+    if (CanvasState.dragState && CanvasState.dragState.wheelScrollEnabled) {
+        const panDeltaX = CanvasState.panOffsetX - prevPanX;
+        const panDeltaY = CanvasState.panOffsetY - prevPanY;
+        if ((panDeltaX || panDeltaY) &&
+            (CanvasState.dragState.dragSource === 'temp-node' || CanvasState.dragState.dragSource === 'permanent-section')) {
+            adjustDragReferenceForPan(
+                panDeltaX,
+                panDeltaY,
+                CanvasState.dragState.lastClientX,
+                CanvasState.dragState.lastClientY
+            );
         }
     }
 
