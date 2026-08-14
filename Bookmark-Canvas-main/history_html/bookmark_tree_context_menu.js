@@ -11453,7 +11453,7 @@ async function executeBookmarkAddAction(context, config, options = {}) {
 
         const addableTabs = tabs.filter((tab) => tab && __isTabUrlAddable(tab.url));
         if (!addableTabs.length) {
-            const message = lang === 'zh_CN' ? '没有可添加的页面。' : 'No valid pages to add.';
+            const message = lang === 'zh_CN' ? '没有可添加页面 或 此页面不可添加' : 'No pages can be added, or this page cannot be added';
             try { alert(message); } catch (_) { }
             return false;
         }

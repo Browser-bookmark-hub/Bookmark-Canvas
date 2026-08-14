@@ -263,6 +263,7 @@ const FULLSCREEN_HISTORY_LAZY_LOAD_STEP = 5;
 const QUICK_ADD_WINDOW_FOLDER_OPTION_STORAGE_KEY = 'quickAddWindowAsFolderV1';
 const QUICK_ADD_BLANK_HEADING_OPTION_STORAGE_KEY = 'quickAddBlankHeadingV1';
 const QUICK_ADD_INLINE_OPTION_STATES_STORAGE_KEY = 'quickAddInlineOptionStatesV1';
+const QUICK_ADD_LAST_TARGET_STORAGE_KEY = 'quickAddLastTargetV1';
 const CANVAS_LAST_MAXIMIZED_UPDATED_EVENT = 'canvas-last-maximized-node-updated';
 
 // =================================================================================
@@ -3451,6 +3452,10 @@ const i18n = {
         'zh_CN': '添加到空白栏目',
         'en': 'Add to Blank'
     },
+    quickAddLastText: {
+        'zh_CN': '上次',
+        'en': 'Last'
+    },
     quickAddCurrentViewText: {
         'zh_CN': '添加到当前栏目',
         'en': 'Add to Current Column'
@@ -5221,6 +5226,10 @@ function applyLanguage() {
     if (quickAddCurrentPermanentText) quickAddCurrentPermanentText.textContent = i18n.quickAddCurrentPermanentText[currentLang];
     const quickAddCurrentBlankText = document.getElementById('quickAddCurrentBlankText');
     if (quickAddCurrentBlankText) quickAddCurrentBlankText.textContent = i18n.quickAddCurrentBlankText[currentLang];
+    const quickAddTempLastText = document.getElementById('quickAddTempLastText');
+    if (quickAddTempLastText) quickAddTempLastText.textContent = i18n.quickAddLastText[currentLang];
+    const quickAddBlankLastText = document.getElementById('quickAddBlankLastText');
+    if (quickAddBlankLastText) quickAddBlankLastText.textContent = i18n.quickAddLastText[currentLang];
     const quickAddCurrentViewText = document.getElementById('quickAddCurrentViewText');
     if (quickAddCurrentViewText) quickAddCurrentViewText.textContent = i18n.quickAddCurrentViewText[currentLang];
     const quickAddWindowViewText = document.getElementById('quickAddWindowViewText');
@@ -7347,7 +7356,7 @@ function setupQuickAddMenu() {
     const quickAddAllWindowsTitle = document.getElementById('quickAddAllWindowsTitle');
     const quickAddCurrentViewItem = document.getElementById('quickAddCurrentViewItem');
     const quickAddWindowViewItem = document.getElementById('quickAddWindowViewItem');
-    const quickAddCurrentItems = menu.querySelectorAll('.quick-add-menu-item[data-action^="add-current-"]');
+    const quickAddCurrentItems = menu.querySelectorAll('[data-action^="add-current-"]');
     const quickAddAllItems = menu.querySelectorAll('.quick-add-menu-item');
     const quickAddDivider = menu.querySelector('.quick-add-menu-divider');
 
@@ -7485,6 +7494,9 @@ function setupQuickAddMenu() {
                 const visible = allowCurrentViewAction || action === 'add-window-view';
                 item.style.display = visible ? '' : 'none';
             });
+            menu.querySelectorAll('[data-quick-add-current-row]').forEach((row) => {
+                row.style.display = 'none';
+            });
             return;
         }
 
@@ -7501,6 +7513,9 @@ function setupQuickAddMenu() {
             if (action === 'add-current-view') return;
             item.style.display = hideCurrentGroup ? 'none' : '';
         });
+        menu.querySelectorAll('[data-quick-add-current-row]').forEach((row) => {
+            row.style.display = hideCurrentGroup ? 'none' : '';
+        });
         quickAddAllItems.forEach((item) => {
             const action = item && item.dataset ? item.dataset.action || '' : '';
             if (action === 'add-current-view' || action === 'add-window-view') return;
@@ -7513,30 +7528,11 @@ function setupQuickAddMenu() {
         if (quickAddDivider) quickAddDivider.style.display = hideCurrentGroup ? 'none' : '';
     };
 
-    const positionQuickAddMenu = (options = {}) => {
-        if (!isSidePanelMode || menu.hasAttribute('hidden')) return;
-
-        const fromTitle = options && options.fromTitle === true;
-        const anchor = (fromTitle && titleToggle) ? titleToggle : toggle;
-        if (!anchor || typeof anchor.getBoundingClientRect !== 'function') return;
-
-        const host = menu.offsetParent || anchor.closest('.header-right') || menu.parentElement;
-        if (!host || typeof host.getBoundingClientRect !== 'function') return;
-
-        const hostRect = host.getBoundingClientRect();
-        const anchorRect = anchor.getBoundingClientRect();
-        const menuRect = menu.getBoundingClientRect();
-        const menuWidth = menuRect.width || menu.offsetWidth || 280;
-        const edgePadding = 8;
-        const sidePanelNudgeRight = 14;
-
-        const centeredLeft = anchorRect.left + (anchorRect.width / 2) - hostRect.left - (menuWidth / 2) + sidePanelNudgeRight;
-        const maxLeft = Math.max(edgePadding, hostRect.width - menuWidth - edgePadding);
-        const nextLeft = Math.min(Math.max(centeredLeft, edgePadding), maxLeft);
-
-        menu.style.left = `${Math.round(nextLeft)}px`;
-        menu.style.right = 'auto';
-        menu.style.transform = 'none';
+    const positionQuickAddMenu = () => {
+        // Match the settings panel: CSS anchors both panels to the header's right edge.
+        menu.style.left = '';
+        menu.style.right = '';
+        menu.style.transform = '';
     };
 
     const closeMenu = () => {
@@ -7547,6 +7543,7 @@ function setupQuickAddMenu() {
         setQuickAddMenuColorVars();
         menu.dataset.openFromTitle = options && options.fromTitle === true ? 'true' : 'false';
         syncQuickAddMenuSections(options);
+        refreshQuickAddLastTargetButtons();
         refreshQuickAddWindowFolderControls();
         if (typeof currentHeaderDockSide === 'string') {
             menu.dataset.dock = currentHeaderDockSide;
@@ -7593,7 +7590,7 @@ function setupQuickAddMenu() {
         if (e.target && e.target.closest && e.target.closest('.quick-add-window-folder-checkbox')) {
             return;
         }
-        const item = e.target && e.target.closest ? e.target.closest('.quick-add-menu-item') : null;
+        const item = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
         if (!item) return;
         const action = item.dataset.action || '';
         closeMenu();
@@ -7744,6 +7741,47 @@ function writeQuickAddInlineOptionStateMap(map) {
     } catch (_) { }
 }
 
+function readQuickAddLastTargets() {
+    try {
+        const raw = localStorage.getItem(QUICK_ADD_LAST_TARGET_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function getQuickAddLastTargetId(kind) {
+    const key = kind === 'blank' ? 'blankNodeId' : 'specialTempSectionId';
+    const value = readQuickAddLastTargets()[key];
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function refreshQuickAddLastTargetButtons() {
+    const buttons = [
+        { selector: '[data-action="add-current-temp-last"]', kind: 'temp' },
+        { selector: '[data-action="add-current-blank-last"]', kind: 'blank' }
+    ];
+    buttons.forEach(({ selector, kind }) => {
+        const button = document.querySelector(selector);
+        if (button) button.hidden = !getQuickAddLastTargetId(kind);
+    });
+}
+
+function saveQuickAddLastTargetId(kind, id) {
+    const safeId = typeof id === 'string' ? id.trim() : '';
+    if (!safeId) return;
+    const key = kind === 'blank' ? 'blankNodeId' : 'specialTempSectionId';
+    const targets = readQuickAddLastTargets();
+    targets[key] = safeId;
+    try {
+        // Keep exactly one latest target per kind; this record intentionally does not expire.
+        localStorage.setItem(QUICK_ADD_LAST_TARGET_STORAGE_KEY, JSON.stringify(targets));
+    } catch (_) { }
+    refreshQuickAddLastTargetButtons();
+}
+
 function getQuickAddInlineOptionStateKey(action, mode) {
     const actionKey = String(action || '').trim();
     const modeKey = String(mode || '').trim() || 'folder';
@@ -7788,16 +7826,18 @@ async function handleQuickAddAction(action) {
         return;
     }
 
-    const isWindowScopeAction = action.includes('window');
-    const isWindowViewAction = action === 'add-window-view';
+    const useLastTarget = action === 'add-current-temp-last' || action === 'add-current-blank-last';
+    const normalizedAction = useLastTarget ? action.replace(/-last$/, '') : action;
+    const isWindowScopeAction = normalizedAction.includes('window');
+    const isWindowViewAction = normalizedAction === 'add-window-view';
     const isBlankViewTarget = isWindowViewAction && !!getMaximizedMdNodeId();
-    const isBlankTargetAction = action.includes('blank') || isBlankViewTarget;
-    const blankUseHeading = isBlankTargetAction && readQuickAddInlineActionOptionState(action, 'heading');
+    const isBlankTargetAction = normalizedAction.includes('blank') || isBlankViewTarget;
+    const blankUseHeading = isBlankTargetAction && readQuickAddInlineActionOptionState(normalizedAction, 'heading');
     const canUseWindowAsFolder = isWindowScopeAction && !isBlankTargetAction;
     const windowAsFolder = canUseWindowAsFolder && readQuickAddInlineActionOptionState(action, 'folder');
 
-    if (action === 'add-current-view' || action === 'add-window-view') {
-        const viewScope = action === 'add-window-view' ? 'window' : 'current';
+    if (normalizedAction === 'add-current-view' || normalizedAction === 'add-window-view') {
+        const viewScope = normalizedAction === 'add-window-view' ? 'window' : 'current';
         const tabsForCurrentView = viewScope === 'window'
             ? await getCurrentWindowTabs()
             : await getActiveTabList();
@@ -7808,7 +7848,7 @@ async function handleQuickAddAction(action) {
         const structuredForCurrentView = Array.isArray(normalizedForCurrentView.structuredItems) ? normalizedForCurrentView.structuredItems : [];
 
         if (!flatForCurrentView.length) {
-            const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
+            const msg = currentLang === 'en' ? 'No pages can be added, or this page cannot be added' : '没有可添加页面 或 此页面不可添加';
             try { showToast(msg); } catch (_) { }
             return;
         }
@@ -7830,8 +7870,8 @@ async function handleQuickAddAction(action) {
     }
 
     const scope = isWindowScopeAction ? 'window' : 'current';
-    const target = action.includes('permanent') ? 'permanent'
-        : (action.includes('blank') ? 'blank' : 'temp');
+    const target = normalizedAction.includes('permanent') ? 'permanent'
+        : (normalizedAction.includes('blank') ? 'blank' : 'temp');
 
     const tabs = scope === 'window'
         ? await getCurrentWindowTabs()
@@ -7844,7 +7884,7 @@ async function handleQuickAddAction(action) {
     const structuredItems = Array.isArray(normalized.structuredItems) ? normalized.structuredItems : [];
 
     if (!flatItems.length) {
-        const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
+        const msg = currentLang === 'en' ? 'No pages can be added, or this page cannot be added' : '没有可添加页面 或 此页面不可添加';
         try { showToast(msg); } catch (_) { }
         return;
     }
@@ -7859,10 +7899,10 @@ async function handleQuickAddAction(action) {
         return;
     }
     if (target === 'blank') {
-        await addTabsToBlankNode(itemsForTarget, scope, { useHeading: blankUseHeading });
+        await addTabsToBlankNode(itemsForTarget, scope, { useHeading: blankUseHeading, useLastTarget });
         return;
     }
-    await addTabsToTempSection(itemsForTarget, scope);
+    await addTabsToTempSection(itemsForTarget, scope, { useLastTarget });
 }
 
 function getAllWindowsWithTabs() {
@@ -8407,17 +8447,17 @@ function findFirstQuickAddBookmark(items) {
     return null;
 }
 
-function buildSectionTitle(tabs, scope) {
+function buildSectionTitle(tabs, scope, options = {}) {
     const bookmarkCount = countQuickAddBookmarks(tabs);
-    if (bookmarkCount <= 1) {
+    if (options.alwaysTimestamp !== true && bookmarkCount <= 1) {
         const firstItem = findFirstQuickAddBookmark(tabs);
         if (firstItem) return firstItem.title || firstItem.url;
     }
     const dt = formatDateTimeShort();
     if (currentLang === 'en') {
-        return scope === 'window' ? `Window Tabs ${dt}` : `Pages ${dt}`;
+        return scope === 'window' ? `Window tabs started at ${dt}` : `Pages started at ${dt}`;
     }
-    return scope === 'window' ? `窗口标签 ${dt}` : `页面 ${dt}`;
+    return scope === 'window' ? `窗口标签 ${dt} 开始` : `页面 ${dt} 开始`;
 }
 
 function resolveQuickAddGroupHeading(title, index = 1) {
@@ -8597,7 +8637,7 @@ function stripHtmlToText(html) {
 async function addTabsToCurrentViewSection(tabs, scope, options = {}) {
     const bookmarkCount = countQuickAddBookmarks(tabs);
     if (!bookmarkCount) {
-        const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
+        const msg = currentLang === 'en' ? 'No pages can be added, or this page cannot be added' : '没有可添加页面 或 此页面不可添加';
         try { showToast(msg); } catch (_) { }
         return;
     }
@@ -8642,7 +8682,7 @@ async function addTabsToCurrentViewSection(tabs, scope, options = {}) {
     await addTabsToTempSection(tabs, scope);
 }
 
-async function addTabsToTempSection(tabs, scope) {
+async function addTabsToTempSection(tabs, scope, options = {}) {
     if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) {
         const msg = currentLang === 'en' ? 'Temp section is unavailable' : '临时栏目不可用';
         try { showToast(msg); } catch (_) { }
@@ -8665,16 +8705,25 @@ async function addTabsToTempSection(tabs, scope) {
         return label === '添加' || label === 'add';
     };
 
-    const targetId = getMaximizedTempSectionId();
+    const useLastTarget = !!(options && options.useLastTarget);
+    const targetId = useLastTarget ? getQuickAddLastTargetId('temp') : getMaximizedTempSectionId();
     let sectionId = null;
     if (targetId) {
         try {
             const sections = window.CanvasModule && window.CanvasModule.CanvasState && Array.isArray(window.CanvasModule.CanvasState.tempSections)
                 ? window.CanvasModule.CanvasState.tempSections
                 : [];
-            const targetSection = sections.find((section) => section && section.id === targetId);
-            if (isMatchingSpecialSection(targetSection)) {
-                sectionId = targetId;
+            const matchingSections = sections.filter((section) => section && section.id === targetId);
+            if (useLastTarget) {
+                const targetSection = matchingSections.length === 1 ? matchingSections[0] : null;
+                if (targetSection && String(targetSection.tempKind || '').toLowerCase() === 'special') {
+                    sectionId = targetId;
+                }
+            } else {
+                const targetSection = matchingSections[0] || null;
+                if (isMatchingSpecialSection(targetSection)) {
+                    sectionId = targetId;
+                }
             }
         } catch (_) { }
     }
@@ -8702,6 +8751,7 @@ async function addTabsToTempSection(tabs, scope) {
     if (window.CanvasModule.temp.ensureRendered) {
         window.CanvasModule.temp.ensureRendered(sectionId);
     }
+    saveQuickAddLastTargetId('temp', sectionId);
     const msg = currentLang === 'en'
         ? `Added ${bookmarkCount} item${bookmarkCount > 1 ? 's' : ''} to temp section`
         : `已加入临时栏目：${bookmarkCount} 项`;
@@ -8715,47 +8765,26 @@ async function addTabsToBlankNode(tabs, scope, options = {}) {
         return;
     }
     const bookmarkCount = countQuickAddBookmarks(tabs);
-    const useHeading = !!(options && options.useHeading);
-    const heading = useHeading ? buildSectionTitle(tabs, scope) : '';
+    const useLastTarget = !!(options && options.useLastTarget);
+    const useHeading = !useLastTarget && !!(options && options.useHeading);
+    const heading = useHeading ? buildSectionTitle(tabs, scope, { alwaysTimestamp: true }) : '';
     const markdown = buildMarkdownFromTabs(tabs, heading, { groupAsSecondLevel: true });
-    const html = buildHtmlFromTabs(tabs, heading, { groupAsSecondLevel: true });
-
-    const targetId = getMaximizedMdNodeId();
+    const targetId = useLastTarget ? getQuickAddLastTargetId('blank') : getMaximizedMdNodeId();
     if (targetId) {
-        const node = window.CanvasModule.CanvasState.mdNodes.find(n => n && n.id === targetId);
-        if (node) {
-            if (typeof __ensureMdNodeMarkdownProtocol === 'function') {
-                const existingMarkdown =
-                    typeof __resolveCanvasNativeTextNodeBody === 'function'
-                        ? __resolveCanvasNativeTextNodeBody(node)
-                        : String(node.text || '');
-                const normalizedExisting = String(existingMarkdown || '').replace(/\s+$/, '');
-                const normalizedAppend = String(markdown || '').replace(/^\s+/, '').replace(/\s+$/, '');
-                const mergedMarkdown = normalizedExisting
-                    ? `${normalizedExisting}\n\n---\n\n${normalizedAppend}`
-                    : normalizedAppend;
-                node.text = mergedMarkdown;
-                node.subtype = 'canvas-native-text';
-                node.source = 'obsidian-canvas-text';
-                __ensureMdNodeMarkdownProtocol(node, { refreshCachesFromMarkdown: true });
-            } else {
-                if (node.html && node.html.trim()) {
-                    const existingText = (typeof node.text === 'string' && node.text.trim())
-                        ? node.text
-                        : stripHtmlToText(node.html);
-                    node.html = `${node.html}${node.html.trim() ? '<hr>' : ''}${html}`;
-                    node.text = `${existingText}${existingText ? '\n\n' : ''}${markdown}`;
-                } else {
-                    const base = (typeof node.text === 'string') ? node.text.trim() : '';
-                    node.text = base ? `${base}\n\n${markdown}` : markdown;
-                    node.html = '';
-                }
+        try {
+            const appendedNodeId = await window.CanvasModule.appendToBlankNode(targetId, markdown);
+            if (appendedNodeId) {
+                saveQuickAddLastTargetId('blank', appendedNodeId);
+                try {
+                    const msg = currentLang === 'en' ? 'Added to current blank node' : '已添加到空白栏目';
+                    showToast(msg);
+                } catch (_) { }
+                return;
             }
-            if (typeof renderMdNode === 'function') renderMdNode(node);
-            if (typeof saveCanvasManifestOnly === 'function') saveCanvasManifestOnly();
-            else if (typeof saveTempNodes === 'function') saveTempNodes();
+        } catch (error) {
+            console.error('[Quick Add] Failed to append to blank node:', error);
             try {
-                const msg = currentLang === 'en' ? 'Added to current blank node' : '已添加到当前空白栏目';
+                const msg = currentLang === 'en' ? 'Could not save to blank node' : '写入空白栏目失败';
                 showToast(msg);
             } catch (_) { }
             return;
@@ -8763,7 +8792,8 @@ async function addTabsToBlankNode(tabs, scope, options = {}) {
     }
 
     const pos = getCanvasCenterPoint();
-    await window.CanvasModule.createMdNode(pos.x, pos.y, markdown);
+    const createdNodeId = await window.CanvasModule.createMdNode(pos.x, pos.y, markdown);
+    saveQuickAddLastTargetId('blank', createdNodeId);
     const msg = currentLang === 'en'
         ? `Created blank node with ${bookmarkCount} item${bookmarkCount > 1 ? 's' : ''}`
         : `已创建空白栏目，包含 ${bookmarkCount} 项`;
@@ -8898,7 +8928,7 @@ async function addTabsToPermanent(tabs, scope, options = {}) {
     const items = Array.isArray(tabs) ? tabs : [];
     const bookmarkCount = countQuickAddBookmarks(items);
     if (!bookmarkCount) {
-        const msg = currentLang === 'en' ? 'No valid pages to add' : '没有可添加的页面';
+        const msg = currentLang === 'en' ? 'No pages can be added, or this page cannot be added' : '没有可添加页面 或 此页面不可添加';
         try { showToast(msg); } catch (_) { }
         return;
     }

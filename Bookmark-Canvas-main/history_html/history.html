@@ -52,7 +52,7 @@
     <script src="storageBCS/storageBCS_core.js?v=1.0" defer></script>
     <script src="transfer_AI_sync/import-export-transfer-feature.js?v=1.4" defer></script>
     <script src="transfer_AI_sync/import-export-transfer-ui-support.js?v=1.0" defer></script>
-    <script src="bookmark_canvas_module.js?v=4.8" defer></script>
+    <script src="bookmark_canvas_module.js?v=4.9" defer></script>
     <script src="canvas_groups/card_group_membership.js?v=1.0" defer></script>
     <script src="canvas_groups/card_group_render.js?v=1.0" defer></script>
     <script src="canvas_groups/card_group_toolbar.js?v=1.0" defer></script>
@@ -213,18 +213,28 @@
             <!-- 侧边栏模式：快捷添加菜单 -->
             <div id="quickAddMenu" class="quick-add-menu" hidden>
                 <div class="quick-add-menu-title" id="quickAddCurrentTitle"></div>
-                <button class="quick-add-menu-item" data-action="add-current-temp" type="button">
-                    <span class="quick-add-menu-icon quick-add-menu-icon-special" aria-hidden="true">✦</span>
-                    <span id="quickAddCurrentTempText"></span>
-                </button>
+                <div class="quick-add-menu-action-row" data-quick-add-current-row>
+                    <button class="quick-add-menu-item" data-action="add-current-temp" type="button">
+                        <span class="quick-add-menu-icon quick-add-menu-icon-special" aria-hidden="true">✦</span>
+                        <span id="quickAddCurrentTempText"></span>
+                    </button>
+                    <button class="quick-add-last-button" data-action="add-current-temp-last" data-kind="temp" type="button" hidden>
+                        <span id="quickAddTempLastText"></span>
+                    </button>
+                </div>
                 <button class="quick-add-menu-item" data-action="add-current-permanent" type="button">
                     <span class="quick-add-menu-icon quick-add-menu-icon-hash" aria-hidden="true">#</span>
                     <span id="quickAddCurrentPermanentText"></span>
                 </button>
-                <button class="quick-add-menu-item" data-action="add-current-blank" type="button">
-                    <span class="quick-add-menu-icon quick-add-menu-icon-md" aria-hidden="true">md</span>
-                    <span id="quickAddCurrentBlankText"></span>
-                </button>
+                <div class="quick-add-menu-action-row" data-quick-add-current-row>
+                    <button class="quick-add-menu-item" data-action="add-current-blank" type="button">
+                        <span class="quick-add-menu-icon quick-add-menu-icon-md" aria-hidden="true">md</span>
+                        <span id="quickAddCurrentBlankText"></span>
+                    </button>
+                    <button class="quick-add-last-button" data-action="add-current-blank-last" data-kind="blank" type="button" hidden>
+                        <span id="quickAddBlankLastText"></span>
+                    </button>
+                </div>
                 <button class="quick-add-menu-item" id="quickAddCurrentViewItem" data-action="add-current-view"
                     type="button" style="display: none;">
                     <span class="quick-add-menu-icon" aria-hidden="true"><i class="fas fa-crosshairs"></i></span>

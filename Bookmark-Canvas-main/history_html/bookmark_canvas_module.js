@@ -18090,6 +18090,40 @@ async function createMdNode(x, y, text = '') {
     return id;
 }
 
+// Public mutation API for external UI surfaces. Keeping this here prevents callers
+// from racing CanvasState rendering and manifest persistence.
+async function appendToBlankNode(nodeId, markdown) {
+    const id = String(nodeId || '').trim();
+    const appendMarkdown = String(markdown == null ? '' : markdown)
+        .replace(/^\s+/, '')
+        .replace(/\s+$/, '');
+    if (!id || !appendMarkdown) return null;
+
+    const matchingNodes = (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [])
+        .filter((node) => node && node.id === id);
+    // A stored "last" id is only safe when it identifies one unambiguous card.
+    if (matchingNodes.length !== 1) return null;
+    const node = matchingNodes[0];
+    if (node.subtype === 'card-group') return null;
+
+    const existingMarkdown = String(__deriveMdNodeMarkdownSource(node) || '').replace(/\s+$/, '');
+    const mergedMarkdown = existingMarkdown
+        ? `${existingMarkdown}\n\n${appendMarkdown}`
+        : appendMarkdown;
+
+    // A blank node must remain a plugin markdown node after an external append.
+    node.text = mergedMarkdown;
+    node.markdownSource = mergedMarkdown;
+    node.subtype = CANVAS_PLUGIN_MARKDOWN_SUBTYPE;
+    node.source = CANVAS_PLUGIN_MARKDOWN_SOURCE;
+    node.canvasTextKind = 'blank';
+    __ensureMdNodeMarkdownProtocol(node, { refreshCachesFromMarkdown: true });
+    renderMdNode(node);
+    scheduleBoundsUpdate();
+    await Promise.resolve(saveCanvasManifestOnly({ immediate: true }));
+    return id;
+}
+
 function removeMdNode(id, deleteChildren = false, options = {}) {
     if (deleteChildren && typeof deleteChildren === 'object') {
         options = deleteChildren;
@@ -42543,6 +42577,7 @@ window.CanvasModule = {
     createTempNode: createTempNode, // 导出创建临时节点函数
     createEmptyTempSection: createEmptyTempSection,
     createMdNode: createMdNode,
+    appendToBlankNode,
     getGridSnappedCanvasPosition: getGridSnappedCanvasPosition,
     // 定位 API：供外部（history.js / 标记页）调用
     locatePermanent: locateToPermanentSection,
