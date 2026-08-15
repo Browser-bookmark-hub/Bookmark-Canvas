@@ -9790,7 +9790,7 @@ function __materializeMaximizedNodeFromDescriptor(descriptor) {
         if (!id) return null;
         const node = (CanvasState.mdNodes || []).find((n) => n && n.id === id);
         if (!node) return null;
-        try { renderMdNode(node, { shellOnly: true }); } catch (_) { }
+        try { renderMdNode(node, { shellOnly: false }); } catch (_) { }
         const el = document.getElementById(id);
         if (el) {
             __wakeCanvasNodeFromLazyState(el);
@@ -13284,11 +13284,10 @@ function __cleanupMdNodeElementLifecycle(el) {
 }
 
 function __resetMdNodeElementForRender(el) {
-    if (!el || !el.parentNode) return el;
+    if (!el) return el;
     __cleanupMdNodeElementLifecycle(el);
-    const fresh = el.cloneNode(false);
-    try { el.parentNode.replaceChild(fresh, el); } catch (_) { return el; }
-    return fresh;
+    try { el.innerHTML = ''; } catch (_) { }
+    return el;
 }
 
 function __prepareMdNodeShellElement(el, node, options = {}) {
@@ -13506,6 +13505,14 @@ function __renderMdNodeImpl(node, options = {}) {
 
     const isMax = el.classList && el.classList.contains('canvas-node-maximized');
     if (isMax) {
+        const rect = __getCanvasViewportRect({ viewportCoordinates: true });
+        if (rect) {
+            el.style.transform = 'none';
+            el.style.left = `${rect.x}px`;
+            el.style.top = `${rect.y}px`;
+            el.style.width = `${rect.width}px`;
+            el.style.height = `${rect.height}px`;
+        }
         el.dataset.maxPrevLeft = node.x + 'px';
         el.dataset.maxPrevTop = node.y + 'px';
         el.dataset.maxPrevWidth = mdWidth + 'px';
@@ -13522,8 +13529,10 @@ function __renderMdNodeImpl(node, options = {}) {
         el.style.cssText += node.style;
     }
 
-    // 强制层级管理：Container(5) < TempSection(10) < MdNode(15)
-    if (node.subtype === 'card-group') {
+    // 强制层级管理：Container(5) < TempSection(10) < MdNode(15) < Maximized(10000)
+    if (isMax) {
+        el.style.zIndex = '10000';
+    } else if (node.subtype === 'card-group') {
         el.style.zIndex = node.pinned ? '200' : '5';
     } else {
         // 普通 Markdown 卡片默认在书签栏目之上
@@ -40347,7 +40356,7 @@ async function __waitForFullscreenPreloadRelease(maxMs = 900) {
 
 function __getFullscreenScrollableBody(target) {
     if (!target || !target.querySelector) return null;
-    return target.querySelector('.permanent-section-body, .temp-node-body') || null;
+    return target.querySelector('.permanent-section-body, .temp-node-body, .md-canvas-editor, .md-canvas-text') || null;
 }
 
 function __shouldWaitForPermanentFullscreenQuiet() {
@@ -40384,6 +40393,19 @@ async function __applyFullscreenScrollOnly(target, descriptor) {
         try {
             const sectionId = String(descriptor.id || target.id || '').trim();
             const key = __getTempSectionScrollKey(sectionId);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 1600 });
+            }
+        } catch (_) { }
+        return;
+    }
+
+    if (type === 'md-node') {
+        try {
+            const nodeId = String(descriptor.id || target.id || '').trim();
+            const scrollBaseKey = `md-node-scroll:${nodeId}`;
+            const key = __buildCanvasPartitionedViewStateKey('scroll', scrollBaseKey);
             const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
             if (persisted) {
                 await __settleFullscreenBodyScroll(body, persisted, { guardMs: 1600 });
@@ -40717,6 +40739,35 @@ async function __prepareTempNodeForFullscreenRestore(nodeEl, descriptor, options
     return refreshedNode || nodeEl;
 }
 
+async function __prepareMdNodeForFullscreenRestore(nodeEl, descriptor, options = {}) {
+    if (!nodeEl || !descriptor) return nodeEl;
+    const nodeId = String(descriptor.id || nodeEl.id || '').trim();
+    if (!nodeId) return nodeEl;
+    const includeScroll = options.includeScroll !== false;
+
+    try {
+        const node = (CanvasState.mdNodes || []).find((n) => n && n.id === nodeId);
+        if (node) {
+            try { __ensureMdNodeContentLoadedInPlace(node, { force: true }); } catch (_) { }
+        }
+    } catch (_) { }
+
+    const refreshedNode = document.getElementById(nodeId) || nodeEl;
+    if (includeScroll) {
+        try {
+            const body = refreshedNode ? refreshedNode.querySelector('.md-canvas-editor, .md-canvas-text') : null;
+            const scrollBaseKey = `md-node-scroll:${nodeId}`;
+            const key = __buildCanvasPartitionedViewStateKey('scroll', scrollBaseKey);
+            const persisted = key ? __readPartitionedViewJSON(key, null, 'scroll') : null;
+            if (body && persisted) {
+                await __settleFullscreenBodyScroll(body, persisted, { guardMs: 1600 });
+            }
+        } catch (_) { }
+    }
+
+    return refreshedNode || nodeEl;
+}
+
 async function __prepareNodeForFullscreenRestore(target, descriptor, options = {}) {
     if (!target || !descriptor) return target;
     const type = String(descriptor.type || '').toLowerCase();
@@ -40727,6 +40778,10 @@ async function __prepareNodeForFullscreenRestore(target, descriptor, options = {
 
     if (type === 'temp-node') {
         return __prepareTempNodeForFullscreenRestore(target, descriptor, options);
+    }
+
+    if (type === 'md-node') {
+        return __prepareMdNodeForFullscreenRestore(target, descriptor, options);
     }
 
     return target;

@@ -3404,7 +3404,12 @@
       case 'md-node': {
         const nodeId = normalizeText(target.nodeId);
         if (!nodeId) return null;
-        return document.getElementById(nodeId);
+        let el = document.getElementById(nodeId);
+        if (!el && window.CanvasModule && typeof window.CanvasModule.locateElement === 'function') {
+          try { window.CanvasModule.locateElement(nodeId); } catch (_) { }
+          el = document.getElementById(nodeId);
+        }
+        return el;
       }
       default:
         return null;
@@ -3413,17 +3418,27 @@
 
   function switchFullscreenNodeByDirectoryTarget(target) {
     const currentMaximized = document.querySelector('.canvas-node-maximized');
-    if (!currentMaximized) return false;
+    const isFullscreenActive = !!currentMaximized
+      || !!(document.body && document.body.classList.contains('canvas-node-maximized-active'))
+      || !!(document.documentElement && document.documentElement.classList.contains('layout-preload-node-maximized-active'));
+    if (!isFullscreenActive) return false;
 
     const nextTarget = resolveTargetElementForFullscreenSwitch(target);
     if (!nextTarget) return false;
-    if (nextTarget === currentMaximized) return true;
+    if (currentMaximized && nextTarget === currentMaximized) return true;
 
     const isCanvasNode = nextTarget.classList
       && (nextTarget.classList.contains('permanent-bookmark-section')
         || nextTarget.classList.contains('temp-canvas-node')
         || nextTarget.classList.contains('md-canvas-node'));
     if (!isCanvasNode) return false;
+
+    if (window.CanvasModule && typeof window.CanvasModule.toggleElementFullscreen === 'function') {
+      try {
+        window.CanvasModule.toggleElementFullscreen(nextTarget);
+        return true;
+      } catch (_) { }
+    }
 
     const fullscreenBtn = nextTarget.querySelector('.canvas-node-fullscreen-btn');
     if (!fullscreenBtn) return false;

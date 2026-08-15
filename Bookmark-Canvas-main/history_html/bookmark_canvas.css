@@ -2473,6 +2473,10 @@ body.canvas-node-maximized-active #canvasContent>.canvas-node-maximized {
     top: auto;
     bottom: 16px;
     transform: translateX(-50%) scale(1) !important;
+    display: inline-flex !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
 }
 
 /* Hide canvas scrollbars + floating zoom tools while a node is maximized */
