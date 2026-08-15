@@ -1251,7 +1251,7 @@ function __shouldPreferSectionBodyWheel(body, event) {
     if (!body || !event) return false;
 
     try {
-        const ownerNode = body.closest('.permanent-bookmark-section, .temp-canvas-node');
+        const ownerNode = body.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
         if (ownerNode && __isNodeMaximized(ownerNode)) {
             const horizontalDelta = event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX;
             if (__canCanvasSectionBodyConsumeScroll(body, horizontalDelta, 'horizontal')) return true;
@@ -16867,11 +16867,6 @@ function __renderMdNodeImpl(node, options = {}) {
         }
     });
 
-    // 降低滚动链和事件冒泡带来的卡顿
-    editor.addEventListener('wheel', (e) => {
-        if (isCustomCtrlKeyPressed(e) || e.metaKey) return;
-        e.stopPropagation();
-    }, { passive: true });
 
     // 复制时转换为 Markdown 源码格式（而非渲染后的富文本）
     editor.addEventListener('copy', (e) => {
@@ -41456,13 +41451,6 @@ function shouldHandleCustomScroll(event) {
         return false;
     }
 
-    // 在 Markdown 空白栏目内（查看/编辑区）时，不拦截滚轮，让其自身垂直滚动
-    // - .md-canvas-text: 查看态的滚动容器
-    // - .md-canvas-editor: 编辑态的文本域
-    if (event.target.closest('.md-canvas-text') || event.target.closest('.md-canvas-editor')) {
-        return false;
-    }
-
     // 在临时/永久栏目说明区域内：默认让说明自身滚动
     // 但如果触控板正在进行画布级滚动（快速滚动），则交给画布处理，避免被打断
     const descTarget = event.target.closest('.temp-node-description');
@@ -41493,8 +41481,8 @@ function shouldHandleCustomScroll(event) {
         }
     }
 
-    // 在栏目内部：如果正在画布级滚动，或者按下了 Shift 键进行横向滚动，则拦截处理并交给画布
-    const sectionBody = event.target.closest('.permanent-section-body') || event.target.closest('.temp-node-body');
+    // 在栏目内部（永久/临时/空白卡片编辑与浏览区）：如果正在画布级滚动，或者按下了 Shift 键进行横向滚动，则拦截处理并交给画布
+    const sectionBody = event.target.closest('.permanent-section-body, .temp-node-body, .md-canvas-editor, .md-canvas-text');
     if (sectionBody) {
         // Shift + 滚轮进行横向滚动的时候，无视栏目内部的滚动，拦截并交给画布处理
         if (event.shiftKey) {

@@ -2756,19 +2756,7 @@ body.canvas-node-maximized-active .canvas-edge-label {
 }
 
 
-/* 选中但未编辑时：允许文本区域接收滚轮事件（可直接滚动），仍保留抓手光标 */
-.md-canvas-node.selected:not([data-editing="true"]) .md-canvas-editor {
-    pointer-events: auto;
-    cursor: grab;
-}
-
-.md-canvas-node.dragging,
-.md-canvas-node.dragging .md-canvas-text {
-    cursor: grabbing;
-    /* 拖动中显示抓手 */
-}
-
-/* 编辑器和视图共享基础样式，避免切换时抖动 */
+/* 编辑器和视图共享基础样式，允许直接接收滚轮事件（直接滚动），非编辑时保留抓手光标 */
 .md-canvas-editor,
 .md-canvas-text {
     width: 100%;
@@ -2786,31 +2774,32 @@ body.canvas-node-maximized-active .canvas-edge-label {
     word-wrap: break-word;
     overflow-wrap: break-word;
     white-space: pre-wrap;
+    pointer-events: auto;
+    cursor: grab;
 }
 
-/* 空白栏目未选中且非编辑时，文本区域不拦截鼠标事件（允许画布滚动穿透） */
-.md-canvas-node:not(.editing):not(.selected) .md-canvas-text {
-    pointer-events: none;
+.md-canvas-node.dragging,
+.md-canvas-node.dragging .md-canvas-text,
+.md-canvas-node.dragging .md-canvas-editor {
+    cursor: grabbing;
+    /* 拖动中显示抓手 */
 }
 
-/* 空白栏目选中后（未编辑）即可直接滚动 */
-.md-canvas-node.selected:not(.editing) .md-canvas-text {
+/* 链接接收鼠标事件（右键菜单、点击跳转） */
+.md-canvas-node .md-canvas-text a {
     pointer-events: auto;
 }
 
-/* 非编辑模式下，仍允许链接接收鼠标事件（右键菜单、点击跳转），模仿Obsidian行为 */
-.md-canvas-node:not(.editing) .md-canvas-text a {
-    pointer-events: auto;
-}
-
-/* 编辑模式下恢复文本区域的鼠标事件 */
-.md-canvas-node.editing .md-canvas-text {
-    pointer-events: auto;
+/* 编辑模式下恢复文本输入光标 */
+.md-canvas-node.editing .md-canvas-editor,
+.md-canvas-node.editing .md-canvas-text,
+.md-canvas-node[data-editing="true"] .md-canvas-editor {
+    cursor: text;
+    user-select: text;
 }
 
 .md-canvas-editor {
     resize: none;
-    cursor: text;
     user-select: text;
 }
 
