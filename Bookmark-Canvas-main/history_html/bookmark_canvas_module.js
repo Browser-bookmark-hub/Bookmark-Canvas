@@ -1250,6 +1250,11 @@ function __canCanvasSectionBodyConsumeScroll(body, delta, axis) {
 function __shouldPreferSectionBodyWheel(body, event) {
     if (!body || !event) return false;
 
+    // 拖动卡片期间，滚轮必须用于画布平移/缩放，绝不截断冒泡
+    if (CanvasState.dragState && CanvasState.dragState.wheelScrollEnabled) {
+        return false;
+    }
+
     try {
         const ownerNode = body.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node');
         if (ownerNode && __isNodeMaximized(ownerNode)) {
@@ -41443,6 +41448,11 @@ function shouldHandleCustomScroll(event) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace || !workspace.contains(event.target)) {
         return false;
+    }
+
+    // 处于卡片拖拽中时，直接交给画布滚轮管线处理（平移/缩放）
+    if (CanvasState.dragState && CanvasState.dragState.wheelScrollEnabled) {
+        return true;
     }
 
     // 说明/管理弹窗内滚动：不拦截，让弹窗自身滚动
