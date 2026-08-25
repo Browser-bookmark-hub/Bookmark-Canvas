@@ -3304,11 +3304,13 @@ async function openHyperlinkNewTab(url) {
     try {
         if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
             const placement = await getNewTabPlacementProperties();
-            await chrome.tabs.create({
+            const { groupId, currentTabId, placement: placementMode, ...createPlacement } = placement;
+            const tab = await chrome.tabs.create({
                 url,
                 active: false,
-                ...placement
+                ...createPlacement
             });
+            await groupCreatedTabIfNeeded(tab, groupId, placementMode, currentTabId);
         } else {
             window.open(url, '_blank');
         }
@@ -12015,19 +12017,67 @@ async function getNewTabPlacementProperties() {
             || currentTab.index < 0) {
             return {};
         }
+        // tabs.create 的 index 是整个窗口的索引；分组标签需要在创建后显式加入当前组。
+        const groupId = Number.isInteger(currentTab.groupId) && currentTab.groupId >= 0
+            ? currentTab.groupId
+            : null;
+        const placementMeta = {
+            groupId,
+            currentTabId: Number.isInteger(currentTab.id) ? currentTab.id : null,
+            placement: newTabPlacement
+        };
         if (newTabPlacement === 'before-current') {
-            return { windowId: currentTab.windowId, index: currentTab.index };
+            return { windowId: currentTab.windowId, index: currentTab.index, ...placementMeta };
         }
         if (newTabPlacement === 'after-current') {
-            return { windowId: currentTab.windowId, index: currentTab.index + 1 };
+            return { windowId: currentTab.windowId, index: currentTab.index + 1, ...placementMeta };
         }
         const windowTabs = await chrome.tabs.query({ windowId: currentTab.windowId });
         const lastIndex = Array.isArray(windowTabs) && windowTabs.length
             ? Math.max(...windowTabs.map(tab => Number.isInteger(tab.index) ? tab.index : -1))
             : currentTab.index;
-        return { windowId: currentTab.windowId, index: lastIndex + 1 };
+        return { windowId: currentTab.windowId, index: lastIndex + 1, groupId: null, currentTabId: null, placement: 'root' };
     } catch (_) {
         return {};
+    }
+}
+
+async function groupCreatedTabIfNeeded(tab, groupId, placement = 'root', currentTabId = null) {
+    if (!tab || tab.id == null || !Number.isInteger(groupId) || groupId < 0) return;
+    try {
+        if (chrome.tabs && typeof chrome.tabs.group === 'function') {
+            await chrome.tabs.group({ groupId, tabIds: [tab.id] });
+            if (typeof chrome.tabs.get === 'function' && typeof chrome.tabs.move === 'function'
+                && Number.isInteger(currentTabId)
+                && (placement === 'before-current' || placement === 'after-current')) {
+                const [currentTab, createdTab] = await Promise.all([
+                    chrome.tabs.get(currentTabId),
+                    chrome.tabs.get(tab.id)
+                ]);
+                if (currentTab && createdTab
+                    && Number.isInteger(currentTab.index)
+                    && Number.isInteger(createdTab.index)
+                    && Number.isInteger(currentTab.windowId)) {
+                    const windowTabs = typeof chrome.tabs.query === 'function'
+                        ? await chrome.tabs.query({ windowId: currentTab.windowId })
+                        : [];
+                    const groupTabs = (Array.isArray(windowTabs) ? windowTabs : [])
+                        .filter(item => Number.isInteger(item.index) && item.groupId === groupId)
+                        .sort((a, b) => a.index - b.index);
+                    const groupMin = groupTabs.length ? groupTabs[0].index : currentTab.index;
+                    const groupMax = groupTabs.length ? groupTabs[groupTabs.length - 1].index : currentTab.index;
+                    const createdWasAboveCurrent = createdTab.index < currentTab.index;
+                    let targetIndex = placement === 'before-current'
+                        ? currentTab.index - (createdWasAboveCurrent ? 1 : 0)
+                        : currentTab.index + (createdWasAboveCurrent ? 0 : 1);
+                    targetIndex = Math.max(groupMin, Math.min(groupMax, targetIndex));
+                    await chrome.tabs.move(tab.id, { index: targetIndex });
+                }
+            }
+        }
+    } catch (error) {
+        // 分组可能在创建期间被关闭；标签本身仍应正常打开。
+        console.warn('[新标签页] 加入当前标签组失败:', error);
     }
 }
 
@@ -12036,11 +12086,13 @@ async function openBookmarkNewTab(url, meta = {}) {
     if (chrome && chrome.tabs) {
         try {
             const placement = await getNewTabPlacementProperties();
+            const { groupId, currentTabId, placement: placementMode, ...createPlacement } = placement;
             const tab = await chrome.tabs.create({
                 url: url,
                 active: false,
-                ...placement
+                ...createPlacement
             });
+            await groupCreatedTabIfNeeded(tab, groupId, placementMode, currentTabId);
             if (tab && tab.id != null) {
                 await reportExtensionBookmarkOpen({
                     tabId: tab.id,
