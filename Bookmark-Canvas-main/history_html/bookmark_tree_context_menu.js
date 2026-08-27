@@ -8550,7 +8550,10 @@ function ensureTempManager() {
 function getSelectedTempNodes() {
     const nodes = [];
     const manager = getTempManager();
-    selectedNodes.forEach(nodeId => {
+    const selectionIds = (typeof window !== 'undefined' && typeof window.getEffectiveBookmarkDragSelectionIds === 'function')
+        ? window.getEffectiveBookmarkDragSelectionIds()
+        : Array.from(selectedNodes);
+    selectionIds.forEach(nodeId => {
         const meta = selectedNodeMeta.get(nodeId);
         if (!meta || meta.treeType !== 'temporary') return;
         const element = document.querySelector(`.tree-item[data-node-id="${nodeId}"]`);
@@ -8598,7 +8601,10 @@ function getSelectedTempNodes() {
 
 function getSelectedPermanentNodeIds() {
     const ids = [];
-    selectedNodes.forEach(nodeId => {
+    const selectionIds = (typeof window !== 'undefined' && typeof window.getEffectiveBookmarkDragSelectionIds === 'function')
+        ? window.getEffectiveBookmarkDragSelectionIds()
+        : Array.from(selectedNodes);
+    selectionIds.forEach(nodeId => {
         const meta = selectedNodeMeta.get(nodeId);
         const treeType = meta ? meta.treeType : 'permanent';
         if (treeType === 'permanent') {
@@ -13655,10 +13661,13 @@ function selectRange(startNodeId, endNodeId, endNodeElement = null) {
 
         if (rangeNodeIds.has(nodeId)) {
             selectedNodes.add(nodeId);
+            const existingMeta = selectedNodeMeta.get(nodeId);
             selectedNodeMeta.set(nodeId, {
                 treeType: node.dataset.treeType || 'permanent',
                 sectionId: node.dataset.sectionId || null,
-                nodeType: node.dataset.nodeType || 'bookmark'
+                nodeType: node.dataset.nodeType || 'bookmark',
+                cardKey: (node.closest('.permanent-bookmark-section, .temp-canvas-node') || {}).id || node.dataset.sectionId || null,
+                selectionSource: existingMeta && existingMeta.selectionSource === 'manual' ? 'manual' : 'range'
             });
             document.querySelectorAll(`.tree-item[data-node-id="${nodeId}"]`).forEach(el => {
                 el.classList.add('selected');
@@ -13694,7 +13703,9 @@ function selectAll() {
         selectedNodeMeta.set(node.dataset.nodeId, {
             treeType: node.dataset.treeType || 'permanent',
             sectionId: node.dataset.sectionId || null,
-            nodeType: node.dataset.nodeType || 'bookmark'
+            nodeType: node.dataset.nodeType || 'bookmark',
+            cardKey: (node.closest('.permanent-bookmark-section, .temp-canvas-node') || {}).id || node.dataset.sectionId || null,
+            selectionSource: 'select-all'
         });
         node.classList.add('selected');
     });
@@ -14504,7 +14515,9 @@ function toggleSelectItem(nodeId, nodeElement) {
         const meta = {
             treeType,
             sectionId: referenceEl.dataset.sectionId || null,
-            nodeType: referenceEl.dataset.nodeType || 'bookmark'
+            nodeType: referenceEl.dataset.nodeType || 'bookmark',
+            cardKey: (referenceEl.closest('.permanent-bookmark-section, .temp-canvas-node') || {}).id || referenceEl.dataset.sectionId || null,
+            selectionSource: 'manual'
         };
         if (treeType === 'permanent') {
             meta.sectionId = PERMANENT_SECTION_ANCHOR_ID;
@@ -16632,7 +16645,9 @@ function updateBatchToolbar() {
     }
 
     const lang = currentLang || 'zh_CN';
-    const count = selectedNodes.size;
+    const count = (typeof window !== 'undefined' && typeof window.getEffectiveBookmarkDragSelectionIds === 'function')
+        ? window.getEffectiveBookmarkDragSelectionIds().length
+        : selectedNodes.size;
 
     // 根据选择能力灰度不可用操作（目前只处理剪切/合并）
     try {
@@ -16733,7 +16748,9 @@ function selectAllInKeyboardCanvasCard(context) {
             sectionId: treeType === 'temporary'
                 ? (node.dataset.sectionId || context.sectionId || null)
                 : PERMANENT_SECTION_ANCHOR_ID,
-            nodeType: node.dataset.nodeType || 'bookmark'
+            nodeType: node.dataset.nodeType || 'bookmark',
+            cardKey: (node.closest('.permanent-bookmark-section, .temp-canvas-node') || {}).id || node.dataset.sectionId || context.sectionId || null,
+            selectionSource: 'select-all'
         });
         node.classList.add('selected');
         lastClickedNode = nodeId;
@@ -16891,7 +16908,9 @@ function updateBatchPanelCount() {
     if (!countElement) return;
 
     const lang = currentLang || 'zh_CN';
-    const count = selectedNodes.size;
+    const count = (typeof window !== 'undefined' && typeof window.getEffectiveBookmarkDragSelectionIds === 'function')
+        ? window.getEffectiveBookmarkDragSelectionIds().length
+        : selectedNodes.size;
     countElement.textContent = `${count}${lang === 'zh_CN' ? ' 项' : ' items'}`;
 
     ;

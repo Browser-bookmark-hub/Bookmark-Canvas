@@ -6333,6 +6333,16 @@ function moveTempItemsWithinSection(sectionId, itemIds, targetParentId, index = 
     const targetEntry = targetParentId ? findTempItemEntry(sectionId, targetParentId) : null;
     const targetArray = targetEntry ? targetEntry.item.children : section.items;
 
+    // `index` is calculated against the pre-removal sibling array. Moving
+    // selected siblings from before the target shrinks that array first, so
+    // compensate before removing the items.
+    if (typeof index === 'number' && index >= 0) {
+        const removedBeforeTarget = movingItems.filter((entry) => (
+            entry.items === targetArray && entry.index < index
+        )).length;
+        index -= removedBeforeTarget;
+    }
+
     // Remove items from original positions (from bottom to top to keep indexes)
     for (let i = movingItems.length - 1; i >= 0; i--) {
         const entry = movingItems[i];
@@ -24775,7 +24785,10 @@ function setupTempSectionDropTargets(section, sectionElement, treeContainer, hea
                 // Collect selected temporary nodes grouped by sectionId
                 const tempBySection = new Map();
 
-                selectedNodes.forEach(id => {
+                const effectiveSelectionIds = (typeof window !== 'undefined' && typeof window.getEffectiveBookmarkDragSelectionIds === 'function')
+                    ? window.getEffectiveBookmarkDragSelectionIds()
+                    : Array.from(selectedNodes);
+                effectiveSelectionIds.forEach(id => {
                     const meta = getSelectionMeta(id);
                     const treeType = meta ? meta.treeType : 'permanent';
                     if (treeType === 'temporary') {
@@ -24924,8 +24937,11 @@ function getTempDragSourceSectionId() {
 function collectPermanentSelectionIds(fallbackId) {
     const ids = [];
     const selection = (typeof selectedNodes !== 'undefined') ? selectedNodes : null;
-    if (selection && typeof selection.forEach === 'function' && selection.size) {
-        selection.forEach(id => {
+    const selectionIds = (typeof window !== 'undefined' && typeof window.getEffectiveBookmarkDragSelectionIds === 'function')
+        ? window.getEffectiveBookmarkDragSelectionIds()
+        : (selection && typeof selection.forEach === 'function' ? Array.from(selection) : []);
+    if (selectionIds.length) {
+        selectionIds.forEach(id => {
             const meta = getSelectionMeta(id);
             const treeType = meta ? meta.treeType : 'permanent';
             if (treeType !== 'temporary') {
@@ -24945,8 +24961,11 @@ function collectPermanentSelectionIds(fallbackId) {
 function collectTemporarySelectionIds(sectionId, fallbackId) {
     const ids = [];
     const selection = (typeof selectedNodes !== 'undefined') ? selectedNodes : null;
-    if (selection && typeof selection.forEach === 'function' && selection.size) {
-        selection.forEach(id => {
+    const selectionIds = (typeof window !== 'undefined' && typeof window.getEffectiveBookmarkDragSelectionIds === 'function')
+        ? window.getEffectiveBookmarkDragSelectionIds()
+        : (selection && typeof selection.forEach === 'function' ? Array.from(selection) : []);
+    if (selectionIds.length) {
+        selectionIds.forEach(id => {
             const meta = getSelectionMeta(id);
             if (meta && meta.treeType === 'temporary' && meta.sectionId === sectionId) {
                 ids.push(id);
@@ -25000,6 +25019,10 @@ function setupTempTreeNodeDropHandlers(treeItem, section, item) {
     };
 
     treeItem.addEventListener('dragover', (event) => {
+        // The shared tree DnD handler owns before/inside/after placement once
+        // it has been attached. Keep this legacy folder fallback dormant so a
+        // temporary folder does not process the same event twice.
+        if (treeItem.dataset.dragEventsBound === 'true') return;
         if (!allowDrop()) return;
         if (getCurrentDragSourceType() === 'temporary' && item.type !== 'folder') return;
         event.preventDefault();
@@ -25014,6 +25037,7 @@ function setupTempTreeNodeDropHandlers(treeItem, section, item) {
     });
 
     treeItem.addEventListener('drop', async (event) => {
+        if (treeItem.dataset.dragEventsBound === 'true') return;
         window.__bookmarkDragDropHandled = true;
         if (!allowDrop()) return;
         if (item.type !== 'folder') return;

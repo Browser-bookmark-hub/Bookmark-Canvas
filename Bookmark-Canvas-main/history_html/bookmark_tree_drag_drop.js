@@ -332,6 +332,95 @@ function isBookmarkTreeBatchDragSelection(nodeId) {
         && selectedNodes.has(nodeId);
 }
 
+// 组装批量操作的有效节点：手动明确点选的父子项保持独立；Shift/全选
+// 产生的后代由父文件夹 payload 覆盖，避免再次作为根节点处理。
+// 卡片之间保持首次选中顺序，卡片内部按当前树的 DOM 顺序排列。
+function getEffectiveBookmarkDragSelectionIds() {
+    if (typeof selectedNodes === 'undefined' || !selectedNodes || typeof selectedNodes.forEach !== 'function') return [];
+
+    const selected = Array.from(selectedNodes);
+    const selectedSet = new Set(selected);
+    const elementCache = new Map();
+    const metaFor = (id) => {
+        try { return selectedNodeMeta && selectedNodeMeta.get(id); } catch (_) { return null; }
+    };
+    const cardFor = (element) => element && element.closest
+        ? element.closest('.permanent-bookmark-section, .temp-canvas-node')
+        : null;
+    const cardKeyFor = (card) => card
+        ? String(card.id || card.dataset.sectionId || '')
+        : '';
+    const elementsFor = (id) => {
+        if (elementCache.has(id)) return elementCache.get(id);
+        const elements = [];
+        try {
+            document.querySelectorAll('.tree-item[data-node-id]').forEach((el) => {
+                if (String(el.dataset.nodeId) === String(id)) elements.push(el);
+            });
+        } catch (_) { }
+        elementCache.set(id, elements);
+        return elements;
+    };
+    const elementForGroup = (id, groupKey) => {
+        const meta = metaFor(id) || {};
+        return elementsFor(id).find((el) => {
+            const card = cardFor(el);
+            const cardKey = meta.cardKey || cardKeyFor(card) || meta.sectionId || 'permanent-root';
+            return `${meta.treeType || 'permanent'}:${cardKey}` === groupKey;
+        }) || elementsFor(id)[0] || null;
+    };
+
+    const effective = selected.filter((id) => {
+        const meta = metaFor(id);
+        if (!meta || meta.selectionSource === 'manual') return true;
+        return !elementsFor(id).some((element) => {
+            const card = cardFor(element);
+            let treeNode = element.closest ? element.closest('.tree-node') : null;
+            while (treeNode) {
+                const parentTreeNode = treeNode.parentElement && treeNode.parentElement.closest
+                    ? treeNode.parentElement.closest('.tree-node')
+                    : null;
+                const parentItem = parentTreeNode
+                    ? parentTreeNode.querySelector(':scope > .tree-item[data-node-id]')
+                    : null;
+                if (parentItem
+                    && selectedSet.has(parentItem.dataset.nodeId)
+                    && cardFor(parentItem) === card) {
+                    return true;
+                }
+                treeNode = parentTreeNode;
+            }
+            return false;
+        });
+    });
+
+    const groups = new Map();
+    effective.forEach((id) => {
+        const meta = metaFor(id) || {};
+        const element = elementsFor(id)[0];
+        const card = element && cardFor(element);
+        const cardKey = meta.cardKey || cardKeyFor(card) || meta.sectionId || 'permanent-root';
+        const groupKey = `${meta.treeType || 'permanent'}:${cardKey}`;
+        if (!groups.has(groupKey)) groups.set(groupKey, []);
+        groups.get(groupKey).push(id);
+    });
+
+    groups.forEach((ids, groupKey) => {
+        ids.sort((a, b) => {
+            const aEl = elementForGroup(a, groupKey);
+            const bEl = elementForGroup(b, groupKey);
+            if (!aEl || !bEl || aEl === bEl || typeof aEl.compareDocumentPosition !== 'function') return 0;
+            const relation = aEl.compareDocumentPosition(bEl);
+            return (relation & 4) ? -1 : 1; // Node.DOCUMENT_POSITION_FOLLOWING
+        });
+    });
+    return Array.from(groups.values()).flat();
+}
+
+if (typeof window !== 'undefined') {
+    window.getEffectiveBookmarkDragSelectionIds = getEffectiveBookmarkDragSelectionIds;
+}
+
 function applyPermanentMoveDomFastPath(nodeId, moveInfo, reason = 'drag-single-permanent', options = {}) {
     if (!nodeId || !moveInfo) return false;
     const applyDom = (typeof window !== 'undefined' && typeof window.__applyPermanentBookmarkEventsToDomIncremental === 'function')
@@ -1040,40 +1129,23 @@ function showDropIndicator(targetNode, e) {
     const rect = targetNode.getBoundingClientRect();
     const mouseY = e.clientY;
     const targetIsFolder = targetNode?.dataset?.nodeType === 'folder';
-
-    // 检查是否是当前层级的第一个节点
     const treeNode = targetNode.closest('.tree-node');
     const isFirstInLevel = treeNode && !treeNode.previousElementSibling;
-
-    // 检查文件夹是否展开 (空文件夹由于视觉上没有展开内容，从落位角度应视为非展开，以便支持在其下方/上方放置)
-    let isFolderExpanded = false;
-    if (targetIsFolder && treeNode) {
-        const hasChildren = targetNode.dataset.hasChildren === 'true' || targetNode.getAttribute('data-has-children') === 'true';
-        if (hasChildren) {
-            const childrenContainer = treeNode.querySelector(':scope > .tree-children');
-            isFolderExpanded = childrenContainer && childrenContainer.classList.contains('expanded');
-        }
-    }
 
     let position;
 
     if (targetIsFolder) {
-        if (isFolderExpanded) {
-            // 展开的文件夹：上半部分 = before（如果是首位）或 inside，下半部分也是 inside（没有 after）
-            if (isFirstInLevel && mouseY < rect.top + rect.height / 3) {
-                position = 'before';
-            } else {
-                position = 'inside';
-            }
+        // 文件夹始终使用三个稳定命中区：上方同级、放入文件夹、下方同级。
+        // 展开状态不能吞掉 after 区，否则用户无法从视觉上把节点放到
+        // 整个展开子树之后。
+        const upperBoundary = rect.top + rect.height / 3;
+        const lowerBoundary = rect.bottom - rect.height / 3;
+        if (mouseY < upperBoundary) {
+            position = 'before';
+        } else if (mouseY >= lowerBoundary) {
+            position = 'after';
         } else {
-            // 未展开的文件夹：首位有 before，上半部分 = inside，下半部分 = after
-            if (isFirstInLevel && mouseY < rect.top + rect.height / 4) {
-                position = 'before';
-            } else if (mouseY < rect.top + rect.height / 2) {
-                position = 'inside';
-            } else {
-                position = 'after';
-            }
+            position = 'inside';
         }
     } else {
         // 书签：首位有 before，否则只有 after
@@ -1092,6 +1164,17 @@ function showDropIndicator(targetNode, e) {
 
     const parentRect = dropIndicator.parentElement.getBoundingClientRect();
 
+    // 展开文件夹的 after 边界位于整个已渲染子树底部，而不是文件夹标题底部。
+    // 这样蓝线与“同级下方”的实际 parentId/index 语义一致。
+    let boundaryRect = rect;
+    if (targetIsFolder && position === 'after') {
+        const childrenContainer = treeNode && treeNode.querySelector(':scope > .tree-children.expanded');
+        if (childrenContainer) {
+            const childrenRect = childrenContainer.getBoundingClientRect();
+            if (childrenRect.height > 0) boundaryRect = childrenRect;
+        }
+    }
+
     if (position === 'before') {
         dropIndicator.style.top = (rect.top - parentRect.top) + 'px';
         dropIndicator.style.left = (rect.left - parentRect.left) + 'px';
@@ -1099,7 +1182,7 @@ function showDropIndicator(targetNode, e) {
         dropIndicator.style.height = '2px';
         dropIndicator.style.display = 'block';
     } else if (position === 'after') {
-        dropIndicator.style.top = (rect.bottom - parentRect.top) + 'px';
+        dropIndicator.style.top = (boundaryRect.bottom - parentRect.top) + 'px';
         dropIndicator.style.left = (rect.left - parentRect.left) + 'px';
         dropIndicator.style.width = rect.width + 'px';
         dropIndicator.style.height = '2px';
@@ -1309,7 +1392,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
             const permanentIds = [];
             const tempNodes = [];
 
-            selectedNodes.forEach(id => {
+            getEffectiveBookmarkDragSelectionIds().forEach(id => {
                 const meta = selectedNodeMeta.get(id);
                 const treeType = meta ? meta.treeType : 'permanent';
                 if (treeType === 'temporary') {
@@ -1461,6 +1544,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                 const createdEvents = [];
                 const noteUpdates = [];
                 const createOptions = { createdEvents, progressTracker, loadingToast, noteUpdates };
+                let effectiveBatchInsertIndex = insertInfo.index;
 
                 try {
                     // 1. Move permanent nodes instead of cloning them (using simulation to prevent index drift)
@@ -1494,6 +1578,7 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                         
                         // Clamp targetIndex
                         let actualInsertIndex = typeof targetIndex === 'number' ? Math.max(0, Math.min(targetIndex, desired.length)) : desired.length;
+                        effectiveBatchInsertIndex = actualInsertIndex;
                         
                         // Insert selected IDs at actualInsertIndex
                         desired.splice(actualInsertIndex, 0, ...permanentIds);
@@ -1549,7 +1634,9 @@ async function moveBookmark(dragNodeId, targetId, targetIsFolder, context) {
                     }
 
                     // 2. Create permanent bookmarks from temporary payloads
-                    let currIndex = typeof insertInfo.index === 'number' ? insertInfo.index + permanentIds.length : null;
+                    let currIndex = typeof effectiveBatchInsertIndex === 'number'
+                        ? effectiveBatchInsertIndex + permanentIds.length
+                        : null;
                     const tagUpdates = [];
                     if (tempPayload.length > 0) {
                         for (const item of tempPayload) {
