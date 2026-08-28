@@ -40,6 +40,29 @@ let currentContextNode = null;
 let bookmarkClipboard = null; // 剪贴板 { action: 'cut'|'copy', nodeId, nodeData }
 let infoNoteTextareaExternalCloseGuardUntil = 0;
 
+// tempId carries the item's creation calendar date, but not a time of day.
+// Return null for legacy IDs or impossible dates so the info panel never shows
+// a fabricated creation date.
+function parseTempItemIdCreationDate(id) {
+    const match = String(id || '').trim().match(/^tempId_(\d{4})(\d{2})(\d{2})_hash_[a-z0-9]{5,}$/i);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+        return null;
+    }
+
+    return {
+        year,
+        month,
+        day,
+        timestamp: date.getTime()
+    };
+}
+
 function setBookmarkClipboardState(nextClipboard, options = {}) {
     bookmarkClipboard = nextClipboard || null;
     clipboardOperation = bookmarkClipboard ? bookmarkClipboard.action : null;
@@ -7641,7 +7664,19 @@ function renderInfoSubmenu(context) {
         }
 
         let timesHtml = '';
-        if (!isTemporary) {
+        if (isTemporary) {
+            const tempCreationDate = parseTempItemIdCreationDate(data.id);
+            if (tempCreationDate) {
+                const dateLabel = lang === 'zh_CN' ? '创建时间（ID 日期）' : 'CREATED AT (ID DATE)';
+                const dateText = `${tempCreationDate.year}/${String(tempCreationDate.month).padStart(2, '0')}/${String(tempCreationDate.day).padStart(2, '0')}`;
+                timesHtml = `
+                    <div class="info-card-row" title="${escapeHtml(lang === 'zh_CN' ? '临时 ID 只包含创建日期，不包含具体时间' : 'The temporary ID contains the creation date, but not the time of day')}">
+                        <span class="info-card-label">${dateLabel}</span>
+                        <span class="info-card-value">${escapeHtml(dateText)}</span>
+                    </div>
+                `;
+            }
+        } else {
             const addedTime = formatInfoTime(data.dateAdded);
             const modifiedTime = data.type === 'folder' ? formatInfoTime(data.dateGroupModified) : '';
 
