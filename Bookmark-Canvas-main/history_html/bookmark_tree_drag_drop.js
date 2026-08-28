@@ -857,6 +857,7 @@ function handleDragLeave(e) {
     const targetNode = e.currentTarget;
     targetNode.classList.remove('drag-over');
     targetNode.classList.remove('temp-tree-drop-highlight');
+    targetNode.classList.remove('tree-drop-inside');
     try { clearTimeout(hoverExpandTimer); } catch (_) { }
     if (targetNode && targetNode.dataset && targetNode.dataset.nodeId) {
         const t = __hoverExpandState.timers.get(targetNode.dataset.nodeId);
@@ -1129,17 +1130,13 @@ function showDropIndicator(targetNode, e) {
     const rect = targetNode.getBoundingClientRect();
     const mouseY = e.clientY;
     const targetIsFolder = targetNode?.dataset?.nodeType === 'folder';
-    const treeNode = targetNode.closest('.tree-node');
-    const isFirstInLevel = treeNode && !treeNode.previousElementSibling;
 
     let position;
 
     if (targetIsFolder) {
-        // 文件夹始终使用三个稳定命中区：上方同级、放入文件夹、下方同级。
-        // 展开状态不能吞掉 after 区，否则用户无法从视觉上把节点放到
-        // 整个展开子树之后。
-        const upperBoundary = rect.top + rect.height / 3;
+        // 文件夹分为上方同级、内部放入、下方同级三个命中区。
         const lowerBoundary = rect.bottom - rect.height / 3;
+        const upperBoundary = rect.top + rect.height / 3;
         if (mouseY < upperBoundary) {
             position = 'before';
         } else if (mouseY >= lowerBoundary) {
@@ -1148,8 +1145,8 @@ function showDropIndicator(targetNode, e) {
             position = 'inside';
         }
     } else {
-        // 书签：首位有 before，否则只有 after
-        if (isFirstInLevel && mouseY < rect.top + rect.height / 2) {
+        // 书签同样提供上方/下方两个同级落位区。
+        if (mouseY < rect.top + rect.height / 2) {
             position = 'before';
         } else {
             position = 'after';
@@ -1163,32 +1160,55 @@ function showDropIndicator(targetNode, e) {
     }
 
     const parentRect = dropIndicator.parentElement.getBoundingClientRect();
+    const treeNode = targetNode.closest('.tree-node');
+    const previousNode = treeNode?.previousElementSibling?.classList.contains('tree-node')
+        ? treeNode.previousElementSibling
+        : null;
+    const nextNode = treeNode?.nextElementSibling?.classList.contains('tree-node')
+        ? treeNode.nextElementSibling
+        : null;
 
-    // 展开文件夹的 after 边界位于整个已渲染子树底部，而不是文件夹标题底部。
-    // 这样蓝线与“同级下方”的实际 parentId/index 语义一致。
-    let boundaryRect = rect;
-    if (targetIsFolder && position === 'after') {
-        const childrenContainer = treeNode && treeNode.querySelector(':scope > .tree-children.expanded');
-        if (childrenContainer) {
-            const childrenRect = childrenContainer.getBoundingClientRect();
-            if (childrenRect.height > 0) boundaryRect = childrenRect;
-        }
-    }
+    const directTreeItem = (node) => node?.querySelector(':scope > .tree-item[data-node-id]');
+    const previousItem = directTreeItem(previousNode);
+    const nextItem = directTreeItem(nextNode);
+    const isExpandedFolder = (node, item) => !!(
+        item
+        && item.dataset.nodeType === 'folder'
+        && node?.querySelector(':scope > .tree-children.expanded')
+    );
+    const targetIsExpandedFolder = isExpandedFolder(treeNode, targetNode);
+
+    // 每个节点独立计算 before/after；普通相邻节点共享同一接缝。
+    // previousNode 使用完整容器边界，因此展开文件夹后的 before 会落在子树末尾。
+    const beforeSeamY = previousItem
+        ? (previousNode.getBoundingClientRect().bottom + rect.top) / 2
+        : rect.top;
+    const afterSeamY = targetIsExpandedFolder
+        ? rect.bottom
+        : nextItem
+        ? (rect.bottom + nextItem.getBoundingClientRect().top) / 2
+        : rect.bottom;
+
+    // 文件夹内部放置时显示四边高亮；该类不参与布局，避免拖拽抖动。
+    document.querySelectorAll('.tree-item.tree-drop-inside').forEach(node => {
+        if (node !== targetNode) node.classList.remove('tree-drop-inside');
+    });
+    targetNode.classList.toggle('tree-drop-inside', targetIsFolder && position === 'inside');
 
     if (position === 'before') {
-        dropIndicator.style.top = (rect.top - parentRect.top) + 'px';
+        dropIndicator.style.top = (beforeSeamY - parentRect.top) + 'px';
         dropIndicator.style.left = (rect.left - parentRect.left) + 'px';
         dropIndicator.style.width = rect.width + 'px';
         dropIndicator.style.height = '2px';
         dropIndicator.style.display = 'block';
     } else if (position === 'after') {
-        dropIndicator.style.top = (boundaryRect.bottom - parentRect.top) + 'px';
+        dropIndicator.style.top = (afterSeamY - parentRect.top) + 'px';
         dropIndicator.style.left = (rect.left - parentRect.left) + 'px';
         dropIndicator.style.width = rect.width + 'px';
         dropIndicator.style.height = '2px';
         dropIndicator.style.display = 'block';
     } else {
-        // inside - 隐藏线条（文件夹高亮显示）
+        // inside - 保持原有文件夹候选高亮。
         dropIndicator.style.display = 'none';
     }
 
@@ -1200,6 +1220,9 @@ function hideDropIndicator() {
     if (dropIndicator) {
         dropIndicator.style.display = 'none';
     }
+    document.querySelectorAll('.tree-item.tree-drop-inside').forEach(node => {
+        node.classList.remove('tree-drop-inside');
+    });
 }
 
 // 检查是否是后代节点

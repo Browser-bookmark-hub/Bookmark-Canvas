@@ -6562,6 +6562,16 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
     background: rgba(24, 119, 242, 0.2);
 }
 
+/* 文件夹内部放置时的四边高亮；使用 inset 阴影不改变树行尺寸。 */
+.tree-item.tree-drop-inside {
+    box-shadow: inset 0 0 0 2px var(--accent-primary);
+    border-radius: 6px;
+}
+
+[data-theme="dark"] .tree-item.tree-drop-inside {
+    box-shadow: inset 0 0 0 2px var(--accent-primary);
+}
+
 .drop-indicator {
     position: absolute;
     background: var(--accent-primary);
