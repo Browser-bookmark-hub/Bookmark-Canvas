@@ -61,9 +61,9 @@ function getHoverDelayForFolder(folderId) {
         __hoverExpandState.lastDragEndTime = 0;
     }
 
-    // 延迟逻辑：首次 2000ms，后续统一 1200ms
+    // 延迟逻辑：首次 2000ms，后续统一 800ms
     const count = __hoverExpandState.counts.get(folderId) || 0;
-    if (count >= 1) return 1200;
+    if (count >= 1) return 800;
     return 2000;
 }
 
@@ -327,15 +327,22 @@ function handlePointerMove(e) {
             targetTreeItem.classList.add('drag-over');
         }
 
-        // 悬停自动展开文件夹（带二次与后续加速），并显示蓝色候选高亮
-        if (targetTreeItem.dataset.nodeType === 'folder') {
-            scheduleFolderExpand(targetTreeItem);
-            targetTreeItem.classList.add('temp-tree-drop-highlight');
+        // 显示放置指示器（调用共享接口）
+        let dropPosition = null;
+        if (typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.showIndicator === 'function') {
+            dropPosition = window.__treeDnd.showIndicator(targetTreeItem, e);
+        } else if (typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.getDropPosition === 'function') {
+            dropPosition = window.__treeDnd.getDropPosition(targetTreeItem, e);
         }
 
-        // 显示放置指示器（调用共享接口）
-        if (typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.showIndicator === 'function') {
-            window.__treeDnd.showIndicator(targetTreeItem, e);
+        // 只有文件夹中间的 inside 区域才触发展开计时。
+        if (targetTreeItem.dataset.nodeType === 'folder') {
+            if (dropPosition === 'inside') {
+                scheduleFolderExpand(targetTreeItem);
+            } else if (typeof window.__treeDnd !== 'undefined' && typeof window.__treeDnd.cancelFolderExpand === 'function') {
+                window.__treeDnd.cancelFolderExpand(targetTreeItem);
+            }
+            targetTreeItem.classList.add('temp-tree-drop-highlight');
         }
     } else if (!targetTreeItem) {
         // 鼠标不在任何tree-item上
@@ -597,6 +604,8 @@ function startPointerDrag(e) {
             __hoverExpandState.timers.clear();
             __hoverExpandState.counts.clear();
             __hoverExpandState.lastAt.clear();
+            // 新拖拽会话不应继承上一次拖拽结束时间，避免5秒阈值在本次拖拽中重置计数。
+            __hoverExpandState.lastDragEndTime = 0;
         }
     } catch (_) { }
 

@@ -60,9 +60,9 @@ function getHoverDelayForFolder(folderId) {
         __hoverExpandState.lastDragEndTime = 0;
     }
 
-    // 延迟逻辑：首次 2000ms，后续统一 1200ms
+    // 延迟逻辑：首次 2000ms，后续统一 800ms
     const count = __hoverExpandState.counts.get(folderId) || 0;
-    if (count >= 1) return 1200;
+    if (count >= 1) return 800;
     return 2000;
 }
 
@@ -169,6 +169,39 @@ function scheduleFolderExpand(targetNode) {
         } catch (_) { }
     }, delay);
     __hoverExpandState.timers.set(folderId, timer);
+}
+
+function cancelFolderExpand(targetNode) {
+    if (!targetNode) return;
+    try { clearTimeout(hoverExpandTimer); } catch (_) { }
+    const folderId = targetNode.dataset && targetNode.dataset.nodeId;
+    if (!folderId) return;
+    const timer = __hoverExpandState.timers.get(folderId);
+    if (timer) {
+        clearTimeout(timer);
+        __hoverExpandState.timers.delete(folderId);
+    }
+}
+
+function getTreeDropPosition(targetNode, e) {
+    if (!targetNode || !e) return 'inside';
+    const rect = targetNode.getBoundingClientRect();
+    const mouseY = e.clientY;
+    if (targetNode.dataset.nodeType === 'folder') {
+        const upperBoundary = rect.top + rect.height / 3;
+        const lowerBoundary = rect.bottom - rect.height / 3;
+        if (mouseY < upperBoundary) return 'before';
+        if (mouseY >= lowerBoundary) return 'after';
+        return 'inside';
+    }
+    return mouseY < rect.top + rect.height / 2 ? 'before' : 'after';
+}
+
+function canScheduleFolderExpand(targetNode, position) {
+    if (!targetNode || targetNode.dataset.nodeType !== 'folder' || position !== 'inside') return false;
+    if (targetNode.dataset.hasChildren === 'true') return true;
+    const treeNode = targetNode.closest('.tree-node');
+    return !!treeNode?.querySelector(':scope > .tree-children > .tree-node');
 }
 let draggedNodeTreeType = 'permanent';
 let draggedNodeSectionId = null;
@@ -790,6 +823,8 @@ function handleDragStart(e) {
             __hoverExpandState.timers.clear();
             __hoverExpandState.counts.clear();
             __hoverExpandState.lastAt.clear();
+            // 新拖拽会话不应继承上一次拖拽结束时间，避免5秒阈值在本次拖拽中重置计数。
+            __hoverExpandState.lastDragEndTime = 0;
         }
     } catch (_) { }
 }
@@ -808,11 +843,13 @@ function handleDragOver(e) {
     e.dataTransfer.dropEffect = 'move';
 
     // 显示拖拽指示器（包含屏蔽逻辑）
-    showDropIndicator(targetNode, e);
+    const position = showDropIndicator(targetNode, e);
 
-    // 持续悬停也触发展开（不依赖仅一次的 dragenter）
-    if (targetNode.dataset.nodeType === 'folder') {
+    // 只有文件夹中间的 inside 区域才触发展开计时。
+    if (canScheduleFolderExpand(targetNode, position)) {
         scheduleFolderExpand(targetNode);
+    } else {
+        cancelFolderExpand(targetNode);
     }
 
     // 当来源为临时栏目时，对永久栏目的文件夹增加蓝色候选高亮
@@ -844,9 +881,13 @@ function handleDragEnter(e) {
         }
     } catch (_) { }
 
-    // 悬停自动展开文件夹（带二次与后续加速）
-    try { clearTimeout(hoverExpandTimer); } catch (_) { }
-    scheduleFolderExpand(targetNode);
+    // 只有文件夹中间的 inside 区域才触发展开计时。
+    const position = getTreeDropPosition(targetNode, e);
+    if (canScheduleFolderExpand(targetNode, position)) {
+        scheduleFolderExpand(targetNode);
+    } else {
+        cancelFolderExpand(targetNode);
+    }
 }
 
 // 拖拽离开
@@ -1128,30 +1169,8 @@ function showDropIndicator(targetNode, e) {
     if (!dropIndicator) return;
 
     const rect = targetNode.getBoundingClientRect();
-    const mouseY = e.clientY;
     const targetIsFolder = targetNode?.dataset?.nodeType === 'folder';
-
-    let position;
-
-    if (targetIsFolder) {
-        // 文件夹分为上方同级、内部放入、下方同级三个命中区。
-        const lowerBoundary = rect.bottom - rect.height / 3;
-        const upperBoundary = rect.top + rect.height / 3;
-        if (mouseY < upperBoundary) {
-            position = 'before';
-        } else if (mouseY >= lowerBoundary) {
-            position = 'after';
-        } else {
-            position = 'inside';
-        }
-    } else {
-        // 书签同样提供上方/下方两个同级落位区。
-        if (mouseY < rect.top + rect.height / 2) {
-            position = 'before';
-        } else {
-            position = 'after';
-        }
-    }
+    const position = getTreeDropPosition(targetNode, e);
 
     // 设置指示器位置
     const targetParent = getOverlayContainer();
@@ -1213,6 +1232,7 @@ function showDropIndicator(targetNode, e) {
     }
 
     dropIndicator.dataset.position = position;
+    return position;
 }
 
 // 隐藏拖拽指示器
@@ -2185,6 +2205,12 @@ if (typeof window !== 'undefined') {
     window.__treeDnd = {
         // 显示放置指示器
         showIndicator: showDropIndicator,
+
+        // 获取指定事件位置对应的落位区域
+        getDropPosition: getTreeDropPosition,
+
+        // 取消文件夹悬停展开计时
+        cancelFolderExpand,
 
         // 隐藏放置指示器
         hideIndicator: hideDropIndicator,
