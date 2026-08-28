@@ -1403,6 +1403,17 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     color: #1d4ed8;
 }
 
+.search-helper-tag-link,
+.search-helper-note-link {
+    display: inline-block;
+    pointer-events: auto !important;
+    cursor: pointer !important;
+}
+
+.search-mode-menu-item {
+    cursor: default !important;
+}
+
 [data-theme="dark"] .search-result-external-link {
     color: #60a5fa;
 }

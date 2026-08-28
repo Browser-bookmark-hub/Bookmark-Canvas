@@ -1293,6 +1293,10 @@ html.side-panel-mode .search-container.side-panel-search-expanded .search-input-
     min-width: 0;
 }
 
+html.side-panel-mode .search-empty-suggestions-hint {
+    left: 14px !important;
+}
+
 html.side-panel-mode .search-container:not(.side-panel-search-expanded) .search-results-panel,
 html.side-panel-mode .search-container:not(.side-panel-search-expanded) .search-mode-menu {
     display: none !important;
@@ -1594,21 +1598,63 @@ html.side-panel-mode .search-mode-trigger.mode-color-green {
     border-radius: 4px 4px 0 0;
 }
 
-/* Menu width increased */
+.search-mode-menu-close-btn {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transform: translateY(-50%);
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.search-mode-menu-close-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.search-mode-menu-close-btn:focus-visible {
+    outline: 2px solid var(--accent-primary, #2563eb);
+    outline-offset: 1px;
+}
+
+/* Keep the mode panel aligned with the responsive search results panel. */
 .search-mode-menu {
     position: absolute;
     top: calc(100% + 8px);
     left: 0;
-    width: 420px;
-    /* Widened from 220px/380px to match container 420px */
+    right: 0;
+    width: auto;
+    min-width: 0;
     background: var(--bg-elevated);
     border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: var(--shadow-lg);
     z-index: 210;
     padding: 3px;
-    animation: bounce-in 0.2s ease-out;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: none;
+    will-change: opacity;
+    transition: opacity 0.16s ease, visibility 0s linear 0.16s;
     transform-origin: top left;
+}
+
+.search-mode-menu.visible {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    transition-delay: 0s;
 }
 
 body.header-dock-bottom:not(.header-compact) .search-mode-menu {

@@ -2386,8 +2386,8 @@ const SEARCH_MODES = [
         labelEn: 'Bookmark',
         icon: 'fa-bookmark',
         color: 'mode-color-blue',
-        desc: '标题、URL、文件夹、<span class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</span>、<span class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*笔记</span>',
-        descEn: 'Title, URL, Folders, <span class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</span>, <span class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*Notes</span>'
+        desc: '标题、URL、文件夹、<a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</a>、<a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*笔记</a>',
+        descEn: 'Title, URL, Folders, <a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</a>, <a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*Notes</a>'
     },
     {
         key: 'structure',
@@ -2939,6 +2939,7 @@ function getPreferredSearchResultIndexByScope(results, scope) {
 
 searchUiState.activeMode = 'bookmark';
 searchUiState.isMenuOpen = false;
+let modeMenuHideTimer = null;
 let autoHideMenuTimer = null;
 
 // Search help guide (markdown) cache
@@ -3092,9 +3093,13 @@ function toggleSearchModeMenu(show) {
     const menu = document.getElementById('searchModeMenu');
     if (!menu) return;
 
-    const shouldShow = (typeof show === 'boolean') ? show : menu.hasAttribute('hidden');
+    const shouldShow = (typeof show === 'boolean') ? show : !searchUiState.isMenuOpen;
 
     if (shouldShow) {
+        if (modeMenuHideTimer) {
+            clearTimeout(modeMenuHideTimer);
+            modeMenuHideTimer = null;
+        }
         try {
             const dock = document.body && document.body.classList.contains('header-dock-bottom')
                 ? 'bottom'
@@ -3104,9 +3109,26 @@ function toggleSearchModeMenu(show) {
         menu.removeAttribute('hidden');
         menu.dataset.menuType = 'mode';
         renderSearchModeMenu();
+        requestAnimationFrame(() => {
+            if (menu.dataset.menuType === 'mode' && searchUiState.isMenuOpen) {
+                menu.classList.add('visible');
+            }
+        });
     } else {
-        menu.setAttribute('hidden', '');
-        menu.dataset.menuType = '';
+        menu.classList.remove('visible');
+        if (menu.dataset.menuType === 'mode') {
+            if (modeMenuHideTimer) clearTimeout(modeMenuHideTimer);
+            modeMenuHideTimer = setTimeout(() => {
+                modeMenuHideTimer = null;
+                if (!searchUiState.isMenuOpen && menu.dataset.menuType === 'mode') {
+                    menu.setAttribute('hidden', '');
+                    menu.dataset.menuType = '';
+                }
+            }, 160);
+        } else {
+            menu.setAttribute('hidden', '');
+            menu.dataset.menuType = '';
+        }
     }
     searchUiState.isMenuOpen = shouldShow;
 }
@@ -3114,6 +3136,12 @@ function toggleSearchModeMenu(show) {
 function toggleSearchHelpMenu(show) {
     const menu = document.getElementById('searchModeMenu');
     if (!menu) return;
+
+    if (modeMenuHideTimer) {
+        clearTimeout(modeMenuHideTimer);
+        modeMenuHideTimer = null;
+    }
+    menu.classList.remove('visible');
 
     const shouldShow = (typeof show === 'boolean') ? show : menu.hasAttribute('hidden');
 
@@ -3127,6 +3155,11 @@ function toggleSearchHelpMenu(show) {
         menu.removeAttribute('hidden');
         menu.dataset.menuType = 'help';
         renderSearchHelpMenu();
+        requestAnimationFrame(() => {
+            if (menu.dataset.menuType === 'help' && searchUiState.isHelpOpen) {
+                menu.classList.add('visible');
+            }
+        });
     } else {
         menu.setAttribute('hidden', '');
         menu.dataset.menuType = '';
@@ -3451,11 +3484,15 @@ function renderSearchModeMenu() {
         ? '↑/↓ 切换模式，Enter 选择，→ 返回输入'
         : '↑/↓ switch mode, Enter select, → back to input';
     const hintHelp = getSearchHintHelpContent();
+    const closeLabel = currentLang === 'zh_CN' ? '关闭模式面板' : 'Close mode panel';
 
-    let html = `<div class="search-mode-hint" style="text-align:left; display:flex; align-items:center; gap:6px;">
+    let html = `<div class="search-mode-hint" style="position:relative; text-align:left; display:flex; align-items:center; gap:6px; padding-right:36px;">
         <span>${escapeHtml(hintText)}</span>
         <button type="button" class="search-hint-help-btn search-mode-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}">
             <i class="fas fa-question-circle"></i>
+        </button>
+        <button type="button" class="search-mode-menu-close-btn" aria-label="${escapeHtml(closeLabel)}" title="${escapeHtml(closeLabel)}">
+            <i class="fas fa-times" aria-hidden="true"></i>
         </button>
     </div>`;
 
@@ -3497,12 +3534,41 @@ function initSearchModeUI() {
     const trigger = document.getElementById('searchModeTrigger');
     if (trigger && !trigger.hasAttribute('data-mode-ui-bound')) {
         trigger.setAttribute('data-mode-ui-bound', 'true');
+        let pointerInteraction = false;
+        let pointerInteractionResetTimer = null;
+        const markPointerInteraction = () => {
+            pointerInteraction = true;
+            if (pointerInteractionResetTimer) clearTimeout(pointerInteractionResetTimer);
+            pointerInteractionResetTimer = setTimeout(() => {
+                pointerInteraction = false;
+                pointerInteractionResetTimer = null;
+            }, 1000);
+        };
+        const clearPointerInteractionSoon = () => {
+            if (pointerInteractionResetTimer) clearTimeout(pointerInteractionResetTimer);
+            pointerInteractionResetTimer = setTimeout(() => {
+                pointerInteraction = false;
+                pointerInteractionResetTimer = null;
+            }, 0);
+        };
+
+        // A pointer click focuses the button before its click handler runs. Keep
+        // that focus transition from opening the menu before click toggles it.
+        trigger.addEventListener('pointerdown', markPointerInteraction);
+        trigger.addEventListener('mousedown', markPointerInteraction);
+        trigger.addEventListener('pointercancel', () => { pointerInteraction = false; });
 
         // When users move focus to the left mode trigger (ArrowLeft),
         // show the dedicated mode menu (NOT the empty-query suggestions panel).
         trigger.addEventListener('focus', () => {
             try {
                 if (getCurrentViewSafe() !== 'canvas') return;
+                if (pointerInteraction) {
+                    // Consume the pointer-origin marker here so a missed
+                    // pointerup cannot affect a later keyboard focus.
+                    pointerInteraction = false;
+                    return;
+                }
                 const input = document.getElementById('searchInput');
                 const hasQuery = !!(input && String(input.value || '').trim());
                 toggleSearchHelpMenu(false);
@@ -3528,6 +3594,7 @@ function initSearchModeUI() {
         trigger.addEventListener('click', (e) => {
             if (getCurrentViewSafe() !== 'canvas') return;
             e.stopPropagation();
+            clearPointerInteractionSoon();
 
             if (isSidePanelModeInSearch()) {
                 const input = document.getElementById('searchInput');
@@ -3540,8 +3607,16 @@ function initSearchModeUI() {
                 }
             }
 
-            toggleSearchHelpMenu(false);
-            toggleSearchModeMenu();
+            const modeMenu = document.getElementById('searchModeMenu');
+            const modeMenuIsOpen = !!(modeMenu
+                && !modeMenu.hasAttribute('hidden')
+                && modeMenu.dataset.menuType === 'mode');
+            if (modeMenuIsOpen) {
+                toggleSearchModeMenu(false);
+            } else {
+                toggleSearchHelpMenu(false);
+                toggleSearchModeMenu(true);
+            }
 
             // Keep typing flow: return focus to input
             try {
@@ -3605,6 +3680,15 @@ function initSearchModeUI() {
         menu.addEventListener('mousedown', (e) => {
             // Only handle mode selection in Canvas/mode menu
             if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
+
+            const closeButton = e.target.closest('.search-mode-menu-close-btn');
+            if (closeButton) {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleSearchModeMenu(false);
+                return;
+            }
+
             const item = e.target.closest('.search-mode-menu-item');
             if (item) {
                 e.preventDefault();
