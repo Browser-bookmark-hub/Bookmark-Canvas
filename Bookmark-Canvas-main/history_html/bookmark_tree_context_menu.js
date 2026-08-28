@@ -5511,12 +5511,6 @@ try {
 
 // 显示右键菜单
 async function showContextMenu(e, node) {
-    if (typeof selectMode !== 'undefined' && selectMode) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-    }
-
     e.preventDefault();
     e.stopPropagation();
 
@@ -5529,8 +5523,10 @@ async function showContextMenu(e, node) {
         item.classList.remove('context-selected');
     });
 
-    // 添加右键选中标识
-    node.classList.add('context-selected');
+    // 普通模式显示右键目标高亮；批量模式右键只定位粘贴，不改变选中视觉。
+    if (!selectMode) {
+        node.classList.add('context-selected');
+    }
 
     // 获取节点信息
     const context = getNodeContext(node);
@@ -5571,6 +5567,11 @@ async function showContextMenu(e, node) {
         else contextMenuHorizontal = availableWidth >= baseBreak;
     } catch (_) {
         contextMenuHorizontal = availableWidth >= baseBreak;
+    }
+
+    // 批量模式的节点粘贴菜单是专用定位菜单，始终采用纵向布局，避免与普通菜单布局混用。
+    if (selectMode) {
+        contextMenuHorizontal = false;
     }
 
     // 更新容器类名，并写入作用域，供切换按钮使用
@@ -6436,6 +6437,17 @@ function buildMenuItems(context) {
     // 检查当前右键的项是否已被选中
     const isNodeSelected = selectedNodes.has(nodeId);
 
+    // 批量模式下，节点右键菜单只提供剪贴板定位粘贴；其它批量操作统一由批量面板处理。
+    if (selectMode) {
+        const pasteDisabled = !hasClipboard();
+        const pasteItems = [
+            { action: 'paste-above', label: lang === 'zh_CN' ? '粘贴到上方' : 'Paste Above', icon: 'paste', disabled: pasteDisabled },
+            ...(isFolder ? [{ action: 'paste', label: lang === 'zh_CN' ? '粘贴到文件夹内' : 'Paste into Folder', icon: 'paste', disabled: pasteDisabled }] : []),
+            { action: 'paste-below', label: lang === 'zh_CN' ? '粘贴到下方' : 'Paste Below', icon: 'paste', disabled: pasteDisabled }
+        ];
+        return pasteItems;
+    }
+
     // 如果右键的是已选中的项，且有多个选中项，显示批量操作菜单
     if (isNodeSelected && selectedNodes.size > 0) {
         items.push(
@@ -6497,7 +6509,6 @@ function buildMenuItems(context) {
             },
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
-            { action: 'paste', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴' : '粘贴到文件夹内') : (contextMenuHorizontal ? 'Paste' : 'Paste into Folder'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
             { action: 'paste-below', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴到下方' : '粘贴到该文件夹下方') : (contextMenuHorizontal ? 'Paste Below' : 'Paste Below Folder'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
             { separator: true },
 
@@ -6554,7 +6565,7 @@ function buildMenuItems(context) {
             },
             { action: 'cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', group: 'actions' },
             { action: 'copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy', group: 'actions' },
-            { action: 'paste', label: lang === 'zh_CN' ? (contextMenuHorizontal ? '粘贴' : '粘贴到下方') : (contextMenuHorizontal ? 'Paste' : 'Paste Below'), icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
+            { action: 'paste', label: lang === 'zh_CN' ? '粘贴到下方' : 'Paste Below', icon: 'paste', disabled: !hasClipboard(), hidden: !hasClipboard(), group: 'actions' },
             { separator: true },
 
             // 打开组（二级菜单）
@@ -8836,7 +8847,15 @@ async function openTempUrls(sectionId, nodeId, options = {}) {
     await openUrlList(urls, options);
 }
 
-function getTempPasteTarget(context, pasteBelow = false) {
+function normalizePastePlacement(isFolder, requestedPlacement) {
+    if (requestedPlacement === 'before' || requestedPlacement === 'inside' || requestedPlacement === 'after') {
+        return requestedPlacement;
+    }
+    if (requestedPlacement === true) return 'after';
+    return isFolder ? 'inside' : 'after';
+}
+
+function getTempPasteTarget(context, requestedPlacement = false) {
     const manager = ensureTempManager();
     const sectionId = context.sectionId;
     if (!sectionId) throw new Error('未找到临时栏目');
@@ -8846,19 +8865,20 @@ function getTempPasteTarget(context, pasteBelow = false) {
         return { sectionId, parentId: null, index: null };
     }
 
+    const placement = normalizePastePlacement(!!context.isFolder, requestedPlacement);
     let parentId = context.nodeId;
     let index = null;
 
-    // 如果是文件夹，且不是粘贴到下方，粘贴到文件夹内部
-    if (context.isFolder && !pasteBelow) {
+    // 文件夹的 inside 位置追加到其子项末尾。
+    if (context.isFolder && placement === 'inside') {
         parentId = context.nodeId;
         index = null; // 添加到文件夹末尾
     } else {
-        // 如果是书签，或者是选择粘贴到文件夹下方，粘贴到该节点的下面
+        // before/after 均插入到目标节点的同级位置。
         const entry = manager.findItem(sectionId, context.nodeId);
         if (entry) {
             parentId = entry.parent ? (entry.parent.id || null) : null;
-            index = entry.index + 1; // 插入到当前节点的下一个位置
+            index = entry.index + (placement === 'after' ? 1 : 0);
         } else {
             // 如果找不到节点，粘贴到根目录
             parentId = null;
@@ -9113,13 +9133,13 @@ async function cutTempNodes(sectionId, nodeIds) {
     ;
 }
 
-async function pasteIntoTemp(context, pasteBelow = false) {
+async function pasteIntoTemp(context, requestedPlacement = false) {
     const clipboard = await getLatestBookmarkClipboardForPaste();
     if (!clipboard) return;
     const manager = ensureTempManager();
 
     try {
-        const target = getTempPasteTarget(context, pasteBelow);
+        const target = getTempPasteTarget(context, requestedPlacement);
         if (clipboard.source === 'temporary') {
             if (clipboard.action === 'copy') {
                 manager.insertFromPayload(target.sectionId, target.parentId, clipboard.payload, target.index);
@@ -9371,6 +9391,9 @@ async function handleTempMenuAction(action, context) {
             break;
         case 'paste':
             await pasteIntoTemp(context, false);
+            break;
+        case 'paste-above':
+            await pasteIntoTemp(context, 'before');
             break;
         case 'paste-below':
             await pasteIntoTemp(context, true);
@@ -11924,6 +11947,10 @@ async function handleMenuAction(action, context) {
                 await pasteBookmark(nodeId, isFolder, false);
                 break;
 
+            case 'paste-above':
+                await pasteBookmark(nodeId, isFolder, 'before');
+                break;
+
             case 'paste-below':
                 await pasteBookmark(nodeId, isFolder, true);
                 break;
@@ -13154,7 +13181,7 @@ async function copyBookmark(nodeId, nodeTitle, isFolder) {
 }
 
 // 粘贴书签
-async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
+async function pasteBookmark(targetNodeId, isFolder, requestedPlacement = false) {
     if (!chrome || !chrome.bookmarks) {
         alert('此功能需要Chrome扩展环境');
         return;
@@ -13166,20 +13193,24 @@ async function pasteBookmark(targetNodeId, isFolder, pasteBelow = false) {
     }
 
     try {
+        const placement = normalizePastePlacement(isFolder, requestedPlacement);
+
         // 确定目标文件夹ID和起始位置
         let targetFolderId;
         let insertIndex = undefined;
 
-        if (isFolder && !pasteBelow) {
-            // 如果目标是文件夹，且不是粘贴到下方，粘贴到文件夹内
+        if (isFolder && placement === 'inside') {
+            // 粘贴到目标文件夹末尾
             targetFolderId = targetNodeId;
         } else {
-            // 如果目标是书签，或者粘贴到该文件夹下方，获取其父文件夹ID及索引
+            // before/after：获取目标节点父文件夹及同级插入位置
             const nodes = await chrome.bookmarks.get(targetNodeId);
             if (nodes && nodes[0]) {
                 if (nodes[0].parentId && nodes[0].parentId !== '0') {
                     targetFolderId = nodes[0].parentId;
-                    insertIndex = typeof nodes[0].index === 'number' ? nodes[0].index + 1 : undefined;
+                    insertIndex = typeof nodes[0].index === 'number'
+                        ? nodes[0].index + (placement === 'after' ? 1 : 0)
+                        : undefined;
                 } else {
                     // 如果父文件夹为 '0'，表示目标是根文件夹（如书签栏本身），无法在其下方粘贴，降级为粘贴到其内部
                     targetFolderId = targetNodeId;
