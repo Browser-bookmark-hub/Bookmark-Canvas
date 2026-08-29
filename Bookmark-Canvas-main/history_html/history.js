@@ -5701,6 +5701,8 @@ function setupCanvasFloatingToolsMenu() {
     if (toggleBtn.dataset.bound === 'true') return;
     toggleBtn.dataset.bound = 'true';
 
+    bindCanvasFloatingToolsLifecycleRecovery();
+
     bindCanvasFloatingToolsGlobalDragEvents();
     bindCanvasFloatingToolsResizeHandler();
 
@@ -5724,6 +5726,8 @@ function setupCanvasFloatingMiniToggle() {
     const btn = document.getElementById('canvasFloatingToggleMini');
     if (!btn || btn.dataset.bound === 'true') return;
     btn.dataset.bound = 'true';
+
+    bindCanvasFloatingToolsLifecycleRecovery();
 
     bindCanvasFloatingToolsGlobalDragEvents();
     bindCanvasFloatingToolsResizeHandler();
@@ -10204,6 +10208,42 @@ function clearCanvasFloatingToolsDragSession() {
 
     canvasFloatingToolsDragSession = null;
     clearCanvasFloatingDragVisualState();
+}
+
+// 页面被冻结/从 BFCache 恢复时，浏览器不一定会补发 pointerup。
+// 残留的 pointer capture 会让同一工具窗只有部分 click 控件失去命中。
+function resetCanvasFloatingToolsInteractionState() {
+    try { clearCanvasFloatingHintHoldTimer(); } catch (_) { }
+    try { clearCanvasFloatingToolsDragSession(); } catch (_) {
+        canvasFloatingToolsDragSession = null;
+        clearCanvasFloatingDragVisualState();
+    }
+    suppressCanvasFloatingToolsToggleClick = false;
+}
+
+function bindCanvasFloatingToolsLifecycleRecovery() {
+    if (document.documentElement.hasAttribute('data-canvas-floating-lifecycle-bound')) return;
+    document.documentElement.setAttribute('data-canvas-floating-lifecycle-bound', 'true');
+
+    const recover = () => {
+        if (currentView !== 'canvas') return;
+        resetCanvasFloatingToolsInteractionState();
+        updateSidePanelFloatingToolsDisplay();
+    };
+
+    window.addEventListener('pageshow', recover, true);
+    window.addEventListener('canvas-maximized-state-change', (event) => {
+        // Card fullscreen hides the canvas floating tools. Reconcile the
+        // interaction layer immediately when that state is removed.
+        if (event && event.detail && event.detail.active === true) return;
+        recover();
+    }, true);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') recover();
+        else resetCanvasFloatingToolsInteractionState();
+    }, true);
+    document.addEventListener('resume', recover, true);
+    document.addEventListener('freeze', resetCanvasFloatingToolsInteractionState, true);
 }
 
 function beginCanvasFloatingToolsDrag(event, sourceBtn, mode) {
