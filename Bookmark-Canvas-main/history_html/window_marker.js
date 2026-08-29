@@ -281,6 +281,39 @@
   let lang = 'zh_CN';
   let t_str = i18n.zh_CN;
   let currentActiveTheme = 'dark';
+  let currentThemePreference = 'dark';
+  let themeMediaQuery = null;
+
+  function normalizeThemePreference(value) {
+    return value === 'light' || value === 'system' ? value : 'dark';
+  }
+
+  function getSystemThemePreference() {
+    try {
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
+    } catch (_) {
+      return 'dark';
+    }
+  }
+
+  function resolveThemePreference(preference) {
+    const normalized = normalizeThemePreference(preference);
+    return normalized === 'system' ? getSystemThemePreference() : normalized;
+  }
+
+  function watchSystemThemeChanges() {
+    if (themeMediaQuery || !window.matchMedia) return;
+    try {
+      themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const onChange = () => {
+        if (currentThemePreference === 'system') applyTheme('system');
+      };
+      if (themeMediaQuery.addEventListener) themeMediaQuery.addEventListener('change', onChange);
+      else if (themeMediaQuery.addListener) themeMediaQuery.addListener(onChange);
+    } catch (_) { }
+  }
 
   // 2. 自动检测并应用语言和主题
   async function initLanguageAndTheme() {
@@ -289,7 +322,7 @@
 
     try {
       if (chrome && chrome.storage && chrome.storage.local) {
-        const data = await chrome.storage.local.get(['preferredLang', 'currentTheme']);
+        const data = await chrome.storage.local.get(['preferredLang', 'currentTheme', 'themePreference']);
         if (data.preferredLang === 'zh_CN' || data.preferredLang === 'en') {
           lang = data.preferredLang;
         } else {
@@ -301,11 +334,13 @@
             return 'en';
           })();
         }
-        if (localOverride) {
-          currentActiveTheme = localOverride;
-        } else {
-          currentActiveTheme = data.currentTheme || 'dark';
-        }
+        const localPreference = localStorage.getItem('themePreference');
+        const storedPreference = localPreference === 'dark' || localPreference === 'light' || localPreference === 'system'
+          ? localPreference
+          : (data.themePreference === 'dark' || data.themePreference === 'light' || data.themePreference === 'system'
+            ? data.themePreference
+            : normalizeThemePreference(data.currentTheme));
+        currentThemePreference = localOverride ? normalizeThemePreference(localOverride) : storedPreference;
       } else {
         const localLang = localStorage.getItem('preferredLang');
         if (localLang === 'zh_CN' || localLang === 'en') {
@@ -320,12 +355,10 @@
           })();
         }
 
-        if (localOverride) {
-          currentActiveTheme = localOverride;
-        } else {
-          const localTheme = localStorage.getItem('themePreference') || 'dark';
-          currentActiveTheme = localTheme === 'system' ? 'dark' : localTheme;
-        }
+        const localTheme = localStorage.getItem('themePreference');
+        currentThemePreference = localOverride
+          ? normalizeThemePreference(localOverride)
+          : normalizeThemePreference(localTheme);
       }
     } catch (_) {
       lang = (function () {
@@ -335,10 +368,11 @@
         } catch (_) { }
         return 'en';
       })();
-      currentActiveTheme = localOverride || 'dark';
+      currentThemePreference = normalizeThemePreference(localOverride || 'dark');
     }
 
-    applyTheme(currentActiveTheme);
+    watchSystemThemeChanges();
+    applyTheme(currentThemePreference);
     t_str = i18n[lang] || i18n.zh_CN;
     updateStaticLabels();
     updateTabTitle(lang);
@@ -346,7 +380,8 @@
   }
 
   function applyTheme(theme) {
-    let targetTheme = (theme === 'dark' || theme === 'light') ? theme : 'dark';
+    const targetTheme = resolveThemePreference(theme);
+    currentThemePreference = normalizeThemePreference(theme);
     currentActiveTheme = targetTheme;
     if (targetTheme === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');
@@ -1039,11 +1074,18 @@
     if (chrome && chrome.storage && chrome.storage.onChanged) {
       chrome.storage.onChanged.addListener(async (changes, area) => {
         if (area === 'local') {
-          if (changes.currentTheme) {
+          if (changes.currentTheme || changes.themePreference) {
             // 只有在用户没有手动更改过本页面主题（无本地 override 记忆）时，才同步主应用的主题更新
             const localOverride = localStorage.getItem('marker_theme_override');
             if (!localOverride) {
-              applyTheme(changes.currentTheme.newValue);
+              const localPreference = localStorage.getItem('themePreference');
+              const changedPreference = changes.themePreference && changes.themePreference.newValue;
+              const nextPreference = (changedPreference === 'dark' || changedPreference === 'light' || changedPreference === 'system')
+                ? changedPreference
+                : ((localPreference === 'dark' || localPreference === 'light' || localPreference === 'system')
+                  ? localPreference
+                  : (changes.currentTheme ? changes.currentTheme.newValue : 'dark'));
+              applyTheme(nextPreference);
             }
           }
           if (changes.preferredLang) {

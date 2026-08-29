@@ -43,7 +43,14 @@ const DEFAULT_VIEW = (typeof window.__DEFAULT_VIEW === 'string' && ALLOWED_VIEWS
     ? window.__DEFAULT_VIEW
     : ALLOWED_VIEWS[0];
 const isViewAllowed = (view) => ALLOWED_VIEWS.includes(view);
-let currentTheme = 'light';
+const THEME_MODES = Object.freeze({
+    DARK: 'dark',
+    LIGHT: 'light',
+    SYSTEM: 'system'
+});
+let currentTheme = THEME_MODES.DARK;
+let currentThemePreference = THEME_MODES.DARK;
+let themeSystemMediaQuery = null;
 // 从 localStorage 立即恢复视图，避免页面闪烁
 // 从 URL 参数或 localStorage 恢复视图
 let currentView = (() => {
@@ -3265,8 +3272,8 @@ const i18n = {
         'en': 'Settings'
     },
     settingsThemeText: {
-        'zh_CN': '主题切换',
-        'en': 'Toggle Theme'
+        'zh_CN': '主题',
+        'en': 'Theme'
     },
     settingsLanguageText: {
         'zh_CN': '中文 / English',
@@ -3281,8 +3288,8 @@ const i18n = {
         'en': 'Open Source & Issues Feedback'
     },
     settingsFloatText: {
-        'zh_CN': '悬浮工具窗状态',
-        'en': 'Floating Tools Status'
+        'zh_CN': '悬浮工具窗',
+        'en': 'Floating Tools'
     },
     floatingToolsModeNoneText: {
         'zh_CN': '不显示',
@@ -4289,8 +4296,8 @@ const i18n = {
         'en': 'Loading...'
     },
     themeTooltip: {
-        'zh_CN': '切换主题',
-        'en': 'Toggle Theme'
+        'zh_CN': '主题',
+        'en': 'Theme'
     },
     langTooltip: {
         'zh_CN': '中文 / English',
@@ -4594,6 +4601,136 @@ function getThemeOverride() {
     }
 }
 
+function normalizeThemeMode(value) {
+    const mode = String(value || '').toLowerCase();
+    return mode === THEME_MODES.LIGHT || mode === THEME_MODES.SYSTEM
+        ? mode
+        : THEME_MODES.DARK;
+}
+
+function readThemePreference() {
+    try {
+        const raw = localStorage.getItem('themePreference');
+        return raw ? normalizeThemeMode(raw) : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function resolveThemeMode(mode) {
+    if (normalizeThemeMode(mode) !== THEME_MODES.SYSTEM) {
+        return normalizeThemeMode(mode);
+    }
+    try {
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? THEME_MODES.DARK
+            : THEME_MODES.LIGHT;
+    } catch (_) {
+        return THEME_MODES.DARK;
+    }
+}
+
+function getThemeModeLabel(mode) {
+    const isEn = currentLang === 'en';
+    const labels = {
+        [THEME_MODES.DARK]: isEn ? 'Dark' : '深色',
+        [THEME_MODES.LIGHT]: isEn ? 'Light' : '浅色',
+        [THEME_MODES.SYSTEM]: isEn ? 'System' : '系统'
+    };
+    return labels[normalizeThemeMode(mode)] || labels[THEME_MODES.DARK];
+}
+
+function updateThemeControls() {
+    const mode = normalizeThemeMode(currentThemePreference);
+    const iconClass = mode === THEME_MODES.DARK
+        ? 'fas fa-sun'
+        : (mode === THEME_MODES.LIGHT ? 'fas fa-moon' : 'fas fa-adjust');
+    const settingsIcon = document.getElementById('settingsThemeIcon');
+    if (settingsIcon) settingsIcon.className = iconClass;
+
+    const label = getThemeModeLabel(mode);
+    const settingsText = document.getElementById('settingsThemeText');
+    const settingsThemeToggle = document.getElementById('settingsThemeToggle');
+    document.querySelectorAll('.theme-segmented-control').forEach((control) => {
+        control.setAttribute('aria-label', currentLang === 'en' ? 'Theme' : '主题');
+        control.dataset.themeMode = mode;
+        control.querySelectorAll('.theme-segment-btn').forEach((button) => {
+            const buttonMode = normalizeThemeMode(button.dataset.themeMode);
+            const buttonLabel = getThemeModeLabel(buttonMode);
+            button.textContent = buttonLabel;
+            button.title = buttonLabel;
+            button.setAttribute('aria-label', buttonLabel);
+            button.setAttribute('aria-pressed', buttonMode === mode ? 'true' : 'false');
+            button.classList.toggle('active', buttonMode === mode);
+        });
+    });
+    if (settingsText) settingsText.textContent = `${currentLang === 'en' ? 'Theme: ' : '主题：'}${label}`;
+    if (settingsThemeToggle) {
+        settingsThemeToggle.setAttribute('aria-label', `${currentLang === 'en' ? 'Theme: ' : '主题：'}${label}`);
+    }
+    const tooltip = document.getElementById('themeTooltip');
+    if (tooltip) tooltip.textContent = label;
+}
+
+function applyResolvedTheme(theme) {
+    const nextTheme = resolveThemeMode(theme);
+    const root = document.documentElement;
+    const nextIsDark = nextTheme === THEME_MODES.DARK;
+    const domIsDark = root.getAttribute('data-theme') === 'dark';
+    const domColorScheme = root.style && root.style.colorScheme;
+    const visualThemeChanged = domIsDark !== nextIsDark
+        || !domColorScheme
+        || domColorScheme !== nextTheme;
+
+    currentTheme = nextTheme;
+    if (visualThemeChanged) {
+        if (nextIsDark) root.setAttribute('data-theme', 'dark');
+        else root.removeAttribute('data-theme');
+        try { root.style.colorScheme = nextTheme; } catch (_) { }
+    }
+    updateThemeControls();
+}
+
+function syncResolvedThemeToStorage() {
+    try {
+        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
+            browserAPI.storage.local.set({
+                themePreference: currentThemePreference,
+                currentTheme
+            }, () => { });
+        }
+    } catch (_) { }
+}
+
+function setThemePreference(mode, options = {}) {
+    const previousTheme = currentTheme;
+    currentThemePreference = normalizeThemeMode(mode);
+    if (options.persist !== false) {
+        try { __saveLocalStorageRaw('themePreference', currentThemePreference); } catch (_) { }
+    }
+    applyResolvedTheme(currentThemePreference);
+    if (options.syncStorage !== false) syncResolvedThemeToStorage();
+    try {
+        if (currentView === 'canvas' && previousTheme !== currentTheme && typeof renderEdges === 'function') renderEdges();
+    } catch (_) { }
+}
+
+function bindSystemThemeListener() {
+    if (themeSystemMediaQuery || !window.matchMedia) return;
+    try {
+        themeSystemMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        const onChange = () => {
+            if (currentThemePreference !== THEME_MODES.SYSTEM) return;
+            setThemePreference(THEME_MODES.SYSTEM, { persist: false });
+        };
+        if (typeof themeSystemMediaQuery.addEventListener === 'function') {
+            themeSystemMediaQuery.addEventListener('change', onChange);
+        } else if (typeof themeSystemMediaQuery.addListener === 'function') {
+            themeSystemMediaQuery.addListener(onChange);
+        }
+    } catch (_) { }
+}
+
 function getLangOverride() {
     try {
         return localStorage.getItem('historyViewerCustomLang');
@@ -4604,7 +4741,7 @@ function getLangOverride() {
 
 async function loadUserSettings() {
     return new Promise((resolve) => {
-        browserAPI.storage.local.get(['preferredLang', 'currentTheme'], (result) => {
+        browserAPI.storage.local.get(['preferredLang', 'currentTheme', 'themePreference'], (result) => {
             const mainUILang = (result.preferredLang === 'zh_CN' || result.preferredLang === 'en')
                 ? result.preferredLang
                 : (function () {
@@ -4614,7 +4751,23 @@ async function loadUserSettings() {
                     } catch (_) { }
                     return 'en';
                 })();
-            const mainUITheme = result.currentTheme || 'dark';
+            const localPreference = readThemePreference();
+            const storagePreference = result && (result.themePreference === THEME_MODES.DARK
+                || result.themePreference === THEME_MODES.LIGHT
+                || result.themePreference === THEME_MODES.SYSTEM)
+                ? result.themePreference
+                : null;
+            const storedPreference = localPreference || storagePreference;
+            const legacyThemeValue = String(result && result.currentTheme || '').toLowerCase();
+            const legacyTheme = [THEME_MODES.DARK, THEME_MODES.LIGHT, THEME_MODES.SYSTEM].includes(legacyThemeValue)
+                ? legacyThemeValue
+                : null;
+            const mainUITheme = storedPreference || legacyTheme || THEME_MODES.DARK;
+
+            // One-time upgrade: preserve the legacy theme before using the new three-state preference.
+            if (!storedPreference && legacyTheme) {
+                __saveLocalStorageRaw('themePreference', legacyTheme);
+            }
 
             // Keep History Viewer in sync with main UI.
             // Legacy: older versions supported per-page overrides, but that commonly caused "not linked" confusion.
@@ -4625,7 +4778,8 @@ async function loadUserSettings() {
                 __removeLocalStorageKey('historyViewerCustomLang');
             } catch (_) { }
 
-            currentTheme = mainUITheme;
+            currentThemePreference = mainUITheme;
+            bindSystemThemeListener();
             ;
 
             currentLang = mainUILang;
@@ -4633,14 +4787,7 @@ async function loadUserSettings() {
             ;
 
             // 应用主题
-            if (currentTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-            else document.documentElement.removeAttribute('data-theme');
-
-            // 更新主题切换按钮图标
-            const themeIcon = document.querySelector('#themeToggle i');
-            if (themeIcon) {
-                themeIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-            }
+            applyResolvedTheme(currentThemePreference);
 
             // 应用语言
             applyLanguage();
@@ -5114,6 +5261,7 @@ function applyLanguage() {
         btn.title = i18n.floatingToolsModeShownText[currentLang];
         btn.setAttribute('aria-label', i18n.floatingToolsModeShownText[currentLang]);
     });
+    updateFloatingToolsModeControlState();
     const settingsSidePanelText = document.getElementById('settingsSidePanelText');
     if (settingsSidePanelText) settingsSidePanelText.textContent = i18n.settingsSidePanelText[currentLang];
     const settingsCanvasManageText = document.getElementById('settingsCanvasManageText');
@@ -5259,14 +5407,7 @@ function applyLanguage() {
     const langText = document.querySelector('#langToggle .lang-text');
     if (langText) langText.textContent = currentLang === 'zh_CN' ? 'EN' : '中';
 
-    const themeIcon = document.querySelector('#themeToggle i');
-    if (themeIcon) {
-        themeIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-    }
-    const settingsThemeIcon = document.querySelector('#settingsMenu [data-action="toggle-theme"] i');
-    if (settingsThemeIcon) {
-        settingsThemeIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-    }
+    updateThemeControls();
     const canvasPerfSettingsText = document.getElementById('canvasPerfSettingsText');
     if (canvasPerfSettingsText) canvasPerfSettingsText.textContent = i18n.canvasPerfSettingsText[currentLang];
     if (typeof updateShortcutsDisplay === 'function') {
@@ -5288,40 +5429,10 @@ function applyLanguage() {
 // 设置覆盖后会显示重置按钮
 
 function toggleTheme() {
-    currentTheme = currentTheme === 'light' ? 'dark' : 'light';
-    if (currentTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-    else document.documentElement.removeAttribute('data-theme');
-
-    // 主题切换后立即刷新画布连接线标签背景色
-    try {
-        if (currentView === 'canvas' && typeof renderEdges === 'function') {
-            renderEdges();
-        }
-    } catch (_) { }
-
-    // Sync with main UI:
-    // - theme.js uses localStorage.themePreference
-    // - History Viewer follows chrome.storage.local.currentTheme
-    try {
-        __saveLocalStorageRaw('themePreference', currentTheme);
-        __removeLocalStorageKey('historyViewerHasCustomTheme');
-        __removeLocalStorageKey('historyViewerCustomTheme');
-    } catch (_) { }
-    try {
-        if (browserAPI && browserAPI.storage && browserAPI.storage.local) {
-            browserAPI.storage.local.set({ currentTheme }, () => { });
-        }
-    } catch (_) { }
-
-    // 更新图标
-    const icon = document.querySelector('#themeToggle i');
-    if (icon) {
-        icon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-    }
-    const settingsIcon = document.querySelector('#settingsMenu [data-action="toggle-theme"] i');
-    if (settingsIcon) {
-        settingsIcon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-    }
+    const modes = [THEME_MODES.DARK, THEME_MODES.LIGHT, THEME_MODES.SYSTEM];
+    const currentIndex = modes.indexOf(normalizeThemeMode(currentThemePreference));
+    const nextMode = modes[(currentIndex + 1) % modes.length];
+    setThemePreference(nextMode);
 }
 
 function toggleLanguage() {
@@ -5512,6 +5623,8 @@ function setupSidePanelSettingsMenu() {
     const viewSyncPanel = document.getElementById('canvasViewSyncPanel');
     const floatingToolsToggle = document.getElementById('settingsFloatingToolsToggle');
     const floatingToolsPanel = document.getElementById('floatingToolsModePanel');
+    const themeChoiceToggle = document.getElementById('settingsThemeToggle');
+    const themeChoicePanel = document.getElementById('settingsThemePanel');
     if (!toggle || !menu) return;
     if (menu.dataset.bound === 'true') return;
     menu.dataset.bound = 'true';
@@ -5522,6 +5635,24 @@ function setupSidePanelSettingsMenu() {
         }
         if (floatingToolsToggle) {
             floatingToolsToggle.setAttribute('aria-expanded', 'false');
+        }
+    };
+
+    const closeThemeChoicePanel = () => {
+        if (themeChoicePanel && !themeChoicePanel.hasAttribute('hidden')) {
+            themeChoicePanel.setAttribute('hidden', '');
+        }
+        if (themeChoiceToggle) themeChoiceToggle.setAttribute('aria-expanded', 'false');
+    };
+
+    const toggleThemeChoicePanel = () => {
+        if (!themeChoicePanel) return;
+        if (themeChoicePanel.hasAttribute('hidden')) {
+            themeChoicePanel.removeAttribute('hidden');
+            if (themeChoiceToggle) themeChoiceToggle.setAttribute('aria-expanded', 'true');
+            updateThemeControls();
+        } else {
+            closeThemeChoicePanel();
         }
     };
 
@@ -5549,6 +5680,7 @@ function setupSidePanelSettingsMenu() {
 
     const closeMenu = () => {
         closeFloatingToolsPanel();
+        closeThemeChoicePanel();
         closeViewSyncPanel();
         if (!menu.hasAttribute('hidden')) menu.setAttribute('hidden', '');
     };
@@ -5560,6 +5692,7 @@ function setupSidePanelSettingsMenu() {
         menu.removeAttribute('hidden');
         closeViewSyncPanel();
         closeFloatingToolsPanel();
+        closeThemeChoicePanel();
     };
 
     toggle.addEventListener('click', (e) => {
@@ -5579,6 +5712,14 @@ function setupSidePanelSettingsMenu() {
             return;
         }
 
+        const themeModeBtn = e.target && e.target.closest ? e.target.closest('#settingsThemePanel .theme-segment-btn') : null;
+        if (themeModeBtn && menu.contains(themeModeBtn)) {
+            e.stopPropagation();
+            setThemePreference(themeModeBtn.dataset.themeMode);
+            closeThemeChoicePanel();
+            return;
+        }
+
         const storageBtn = e.target && e.target.closest ? e.target.closest('#settingsStorageSyncBlock button') : null;
         if (storageBtn && menu.contains(storageBtn)) {
             const keepOpen = storageBtn.id === 'clearMenuOtherBtn' || storageBtn.id === 'clearTempNodesOtherHelpBtn';
@@ -5593,19 +5734,19 @@ function setupSidePanelSettingsMenu() {
 
         if (action === 'open-floating-toolbar') {
             closeViewSyncPanel();
+            closeThemeChoicePanel();
             toggleFloatingToolsPanel();
             return;
         }
 
-        closeMenu();
-
-        if (action === 'toggle-theme') {
-            const themeToggle = document.getElementById('themeToggle');
-            if (themeToggle && typeof themeToggle.click === 'function') {
-                themeToggle.click();
-            }
+        if (action === 'open-theme-choice') {
+            closeViewSyncPanel();
+            closeFloatingToolsPanel();
+            toggleThemeChoicePanel();
             return;
         }
+
+        closeMenu();
 
         if (action === 'toggle-language') {
             const langToggle = document.getElementById('langToggle');
@@ -5686,6 +5827,7 @@ function setupSidePanelSettingsMenu() {
         const titleSettingsBtn = document.getElementById('titleSettingsToggleBtn');
         if (menu.contains(e.target) || toggle.contains(e.target) || (titleSettingsBtn && titleSettingsBtn.contains(e.target))) return;
         if (floatingToolsPanel && !floatingToolsPanel.hasAttribute('hidden') && floatingToolsPanel.contains(e.target)) return;
+        if (themeChoicePanel && !themeChoicePanel.hasAttribute('hidden') && themeChoicePanel.contains(e.target)) return;
         closeMenu();
     });
 
@@ -8993,8 +9135,12 @@ function initializeUI() {
     });
 
     // 工具按钮
-    const themeToggle = document.getElementById('themeToggle');
-    if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
+    document.querySelectorAll('.theme-segmented-control .theme-segment-btn').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setThemePreference(button.dataset.themeMode);
+        });
+    });
     const langToggle = document.getElementById('langToggle');
     if (langToggle) langToggle.addEventListener('click', toggleLanguage);
 
@@ -9638,6 +9784,16 @@ function applySidePanelFloatingToolsMode(mode) {
 
 function updateFloatingToolsModeControlState() {
     const mode = getSidePanelFloatingToolsMode();
+    const modeLabels = {
+        [SIDE_PANEL_FLOATING_TOOLS_MODES.NONE]: i18n.floatingToolsModeNoneText[currentLang],
+        [SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN]: i18n.floatingToolsModeHiddenText[currentLang],
+        [SIDE_PANEL_FLOATING_TOOLS_MODES.SHOWN]: i18n.floatingToolsModeShownText[currentLang]
+    };
+    const summary = `${currentLang === 'en' ? 'Floating tools: ' : '悬浮工具窗：'}${modeLabels[mode] || modeLabels[SIDE_PANEL_FLOATING_TOOLS_MODES.HIDDEN]}`;
+    const summaryText = document.getElementById('settingsFloatText');
+    const summaryToggle = document.getElementById('settingsFloatingToolsToggle');
+    if (summaryText) summaryText.textContent = summary;
+    if (summaryToggle) summaryToggle.setAttribute('aria-label', summary);
     document.querySelectorAll('.floating-tools-mode-switch').forEach((switchEl) => {
         switchEl.querySelectorAll('.floating-tools-mode-btn').forEach((btn) => {
             const isActive = btn.dataset.mode === mode;
@@ -16447,26 +16603,30 @@ function handleStorageChange(changes, namespace) {
 
     ;
 
-    // 主题变化（只在没有覆盖设置时跟随主UI）
-    if (changes.currentTheme && !hasThemeOverride()) {
-        const newTheme = changes.currentTheme.newValue;
-        ;
-        currentTheme = newTheme;
-        if (currentTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-        else document.documentElement.removeAttribute('data-theme');
+    // 主题变化：localStorage 保存三态偏好，chrome.storage 同步解析后的实际主题。
+    if ((changes.currentTheme || changes.themePreference) && !hasThemeOverride()) {
+        const previousTheme = currentTheme;
+        const newTheme = changes.currentTheme && changes.currentTheme.newValue;
+        const storedPreference = readThemePreference();
+        const changedPreference = changes.themePreference && changes.themePreference.newValue;
+        if (changedPreference === THEME_MODES.DARK || changedPreference === THEME_MODES.LIGHT || changedPreference === THEME_MODES.SYSTEM) {
+            currentThemePreference = changedPreference;
+        } else if (storedPreference) {
+            currentThemePreference = storedPreference;
+        }
+        if (currentThemePreference !== THEME_MODES.SYSTEM) {
+            applyResolvedTheme(normalizeThemeMode(newTheme || currentThemePreference));
+        } else {
+            applyResolvedTheme(THEME_MODES.SYSTEM);
+        }
 
         // 主题切换后立即刷新连线标签背景色
         try {
-            if (currentView === 'canvas' && typeof renderEdges === 'function') {
+            if (currentView === 'canvas' && previousTheme !== currentTheme && typeof renderEdges === 'function') {
                 renderEdges();
             }
         } catch (_) { }
 
-        // 更新主题切换按钮图标
-        const icon = document.querySelector('#themeToggle i');
-        if (icon) {
-            icon.className = currentTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-        }
     }
 
     // 语言变化（只在没有覆盖设置时跟随主UI）

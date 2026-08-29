@@ -114,11 +114,16 @@
             <!-- 工具按钮组 -->
             <div class="tool-buttons">
 
-                <!-- 主题切换按钮 - 独立设置，主UI优先 -->
-                <button id="themeToggle" class="tool-btn">
-                    <i class="fas fa-moon"></i>
-                    <span class="btn-tooltip" id="themeTooltip"></span>
-                </button>
+                <!-- 主题选择 - 三段式直接选择，主UI优先 -->
+                <div id="themeToggle" class="theme-segmented-control" role="group"
+                    data-i18n-aria-label="settingsThemeText" aria-label="主题">
+                    <button class="theme-segment-btn" data-theme-mode="dark" type="button"
+                        aria-pressed="false">深色</button>
+                    <button class="theme-segment-btn" data-theme-mode="light" type="button"
+                        aria-pressed="false">浅色</button>
+                    <button class="theme-segment-btn" data-theme-mode="system" type="button"
+                        aria-pressed="false">系统</button>
+                </div>
                 <!-- 语言切换按钮 - 独立设置，主UI优先 -->
                 <button id="langToggle" class="tool-btn">
                     <span class="lang-text">EN</span>
@@ -399,10 +404,24 @@
                     <span id="settingsCanvasManageText">画布管理</span>
                 </button>
                 <div class="settings-menu-divider" aria-hidden="true"></div>
-                <button class="settings-menu-item" data-action="toggle-theme" type="button">
-                    <i class="fas fa-moon"></i>
-                    <span id="settingsThemeText"></span>
-                </button>
+                <div class="settings-theme-dropdown">
+                    <button class="settings-menu-item settings-menu-item-expandable" data-action="open-theme-choice"
+                        id="settingsThemeToggle" type="button" aria-expanded="false">
+                        <i id="settingsThemeIcon" class="fas fa-adjust" aria-hidden="true"></i>
+                        <span id="settingsThemeText">主题：深色</span>
+                        <i class="fas fa-chevron-down settings-submenu-caret" aria-hidden="true"></i>
+                    </button>
+                    <div class="settings-theme-panel" id="settingsThemePanel" hidden>
+                        <div class="theme-segmented-control" role="group" aria-label="主题">
+                            <button class="theme-segment-btn" data-theme-mode="dark" type="button"
+                                aria-pressed="false">深色</button>
+                            <button class="theme-segment-btn" data-theme-mode="light" type="button"
+                                aria-pressed="false">浅色</button>
+                            <button class="theme-segment-btn" data-theme-mode="system" type="button"
+                                aria-pressed="false">系统</button>
+                        </div>
+                    </div>
+                </div>
                 <button class="settings-menu-item" data-action="toggle-language" type="button">
                     <i class="fas fa-language"></i>
                     <span id="settingsLanguageText"></span>

@@ -1,9 +1,9 @@
 // Apply theme early to avoid flash (no inline script for CSP)
 (function () {
   try {
-    // Keep consistent with main UI theme.js:
+    // Keep consistent with the runtime theme controller:
     // - localStorage.themePreference: 'system' | 'light' | 'dark'
-    // - only set data-theme='dark' when dark, otherwise remove the attribute.
+    // - an unset/invalid preference defaults to dark.
     // Legacy override keys are cleared to avoid "not linked" confusion.
     try {
       localStorage.removeItem('historyViewerHasCustomTheme');
@@ -13,10 +13,13 @@
     const pref = localStorage.getItem('themePreference');
     const theme = (pref === 'dark' || pref === 'light')
       ? pref
-      : 'dark';
+      : (pref === 'system'
+        ? ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light')
+        : 'dark');
 
     if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
     else document.documentElement.removeAttribute('data-theme');
+    document.documentElement.style.colorScheme = theme;
   } catch (_) { }
 })();
 
