@@ -458,11 +458,17 @@ async function movePermanentBookmarkNode(nodeId, target, options = {}) {
     try {
         const moved = await chrome.bookmarks.move(nodeId, target);
         if (options.createdEvents && Array.isArray(options.createdEvents)) {
+            const parentId = moved && moved.parentId != null ? moved.parentId : target.parentId;
+            const index = moved && typeof moved.index === 'number' ? moved.index : target.index;
+            const moveInfo = { parentId, index };
+            if (options.oldParentId != null) moveInfo.oldParentId = options.oldParentId;
+            if (typeof options.oldIndex === 'number') moveInfo.oldIndex = options.oldIndex;
             options.createdEvents.push({
                 type: 'moved',
                 id: nodeId,
-                parentId: target.parentId,
-                index: target.index
+                parentId,
+                index,
+                moveInfo
             });
         }
         return moved;

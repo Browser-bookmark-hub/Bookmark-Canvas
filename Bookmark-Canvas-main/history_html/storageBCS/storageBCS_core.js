@@ -2757,7 +2757,16 @@ function __applyPermanentRemovedBookmarkEventToBcsRoot(root, event) {
 
 function __applyPermanentMovedBookmarkEventToBcsRoot(root, event) {
     const nodeId = String(event && event.id || '').trim();
-    const moveInfo = event && event.moveInfo && typeof event.moveInfo === 'object' ? event.moveInfo : {};
+    // Accept the canonical nested moveInfo shape and legacy top-level fields.
+    const moveInfo = event && typeof event === 'object'
+        ? {
+            parentId: event.parentId,
+            index: event.index,
+            oldParentId: event.oldParentId,
+            oldIndex: event.oldIndex,
+            ...(event.moveInfo && typeof event.moveInfo === 'object' ? event.moveInfo : {})
+        }
+        : {};
     const parentId = String(moveInfo.parentId || '').trim();
     if (!nodeId || !parentId) throw new Error('[Permanent JSON] moved event id and parentId are required.');
     const entry = __findPermanentNodeEntryById(root, nodeId);
