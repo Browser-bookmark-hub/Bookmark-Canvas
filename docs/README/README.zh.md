@@ -1,6 +1,22 @@
-## Switch to [English](../../README.md)...
+# Bookmark-Canvas
 
 [![Linux.do](https://img.shields.io/badge/Linux.do-Portfolio-FFD700?logo=discourse&logoColor=white)](https://linux.do/u/kk1/activity/portfolio) [![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) [![Chrome 应用商店](https://img.shields.io/chrome-web-store/v/phfcempdjanpkhejmlhaokkpnkmbinao?color=0F9D58&logo=googlechrome&logoColor=white&label=Chrome+Web+Store)](https://chromewebstore.google.com/detail/bookmark-canvas/phfcempdjanpkhejmlhaokkpnkmbinao) [![Microsoft Edge Add-ons](https://img.shields.io/badge/Edge_Add--ons-Available-0078D7?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/aghognidifljbnchpnnfddjccodjaigg) [![GitHub Bookmark-Backup](https://img.shields.io/badge/GitHub-Bookmark--Backup-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Backup) [![GitHub Bookmark-Record-Recommend](https://img.shields.io/badge/GitHub-Bookmark--Record--Recommend-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
+
+## Switch to [English](../../README.md)...
+
+如果您临时需要一份供 AI 编辑使用的约束文件，或希望了解本项目导出数据的格式与处理边界，请按以下说明操作。对于 `.canvas` 数据包（包括整张画布、卡片组或临时选区导出的数据包），使用包内附带的约束文件（示例：`AGENTS.md`）。<ins>对于单独导出的 JSON 或 HTML，请复制下方与任务语言对应的模板链接地址，直接提供给 Agents 即可。</ins>
+
+`AGENTS_template_en.md`：
+
+```text
+https://raw.githubusercontent.com/Browser-bookmark-hub/Bookmark-Canvas/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template/AGENTS_template_en.md
+```
+
+`AGENTS_template_zh.md`：
+
+```text
+https://raw.githubusercontent.com/Browser-bookmark-hub/Bookmark-Canvas/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template/AGENTS_template_zh.md
+```
 
 ### 简介
 

@@ -1,6 +1,22 @@
-## Switch to [中文文档](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/blob/main/docs/README/README.zh.md)...
+# Bookmark-Canvas
 
 [![Linux.do](https://img.shields.io/badge/Linux.do-Portfolio-FFD700?logo=discourse&logoColor=white)](https://linux.do/u/kk1/activity/portfolio) [![GitHub Releases](https://img.shields.io/github/v/release/Browser-bookmark-hub/Bookmark-Canvas?logo=github&logoColor=white&label=GitHub+Releases)](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) [![Chrome Web Store](https://img.shields.io/chrome-web-store/v/phfcempdjanpkhejmlhaokkpnkmbinao?color=0F9D58&logo=googlechrome&logoColor=white&label=Chrome+Web+Store)](https://chromewebstore.google.com/detail/bookmark-canvas/phfcempdjanpkhejmlhaokkpnkmbinao) [![Microsoft Edge Add-ons](https://img.shields.io/badge/Edge_Add--ons-Available-0078D7?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/aghognidifljbnchpnnfddjccodjaigg) [![GitHub Bookmark-Backup](https://img.shields.io/badge/GitHub-Bookmark--Backup-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Backup) [![GitHub Bookmark-Record-Recommend](https://img.shields.io/badge/GitHub-Bookmark--Record--Recommend-181717?logo=github&logoColor=white)](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
+
+## Switch to [中文文档](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/blob/main/docs/README/README.zh.md)...
+
+If you need a rules file for a one-off AI-assisted edit, or want to understand the format and processing boundaries of this project's exported data, follow the guidance below. For a `.canvas` package, including a full-canvas, card-group, or temporary-selection export, read the bundled `AGENTS.md`. <ins>For a standalone JSON or HTML export, copy the URL for the template matching the task language below and provide it directly to your agents.</ins>
+
+`AGENTS_template_en.md`:
+
+```text
+https://raw.githubusercontent.com/Browser-bookmark-hub/Bookmark-Canvas/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template/AGENTS_template_en.md
+```
+
+`AGENTS_template_zh.md`:
+
+```text
+https://raw.githubusercontent.com/Browser-bookmark-hub/Bookmark-Canvas/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template/AGENTS_template_zh.md
+```
 
 ### Overview
 
