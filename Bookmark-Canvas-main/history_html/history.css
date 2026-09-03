@@ -162,6 +162,8 @@
 
 html {
     height: 100%;
+    /* The application scrolls its inner panels/canvas, never the document. */
+    overflow: hidden;
     scrollbar-gutter: auto;
 }
 
@@ -576,7 +578,9 @@ option {
     justify-content: space-between;
     align-items: center;
     box-shadow: var(--shadow-sm);
-    position: sticky;
+    /* Body is a column flex layout; sticky is unnecessary and can overlap the
+       main container when the browser restores a non-zero document scroll. */
+    position: relative;
     top: 0;
     z-index: 100;
     overflow: visible;

@@ -11774,6 +11774,21 @@ function initHeaderToggle() {
         return clamp(Math.round(value), COMPACT_LEFT_MIN, getCompactLeftMax());
     }
 
+    function resetDocumentScrollPosition() {
+        const elements = [
+            document.scrollingElement,
+            document.documentElement,
+            document.body
+        ];
+        elements.forEach((element) => {
+            if (!element) return;
+            try {
+                if (element.scrollTop !== 0) element.scrollTop = 0;
+                if (element.scrollLeft !== 0) element.scrollLeft = 0;
+            } catch (_) { }
+        });
+    }
+
     // The bootstrap stylesheet applies the persisted header position before
     // this module is ready. Once the real state is known, release those
     // one-shot classes and pin both flex children to a single authoritative
@@ -11783,6 +11798,10 @@ function initHeaderToggle() {
         const root = document.documentElement;
         const main = document.querySelector('.main-container');
         const isBottomDock = currentHeaderDockSide === 'bottom';
+
+        // The document root is intentionally not scrollable. Clear a stale
+        // browser/BFCache scroll offset before measuring the flex layout.
+        resetDocumentScrollPosition();
 
         if (root) {
             root.classList.remove(
@@ -12244,6 +12263,7 @@ function initHeaderToggle() {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') reconcileHeaderFlexLayout();
     });
+    window.addEventListener('scroll', resetDocumentScrollPosition, { passive: true });
 
     window.addEventListener('resize', () => {
         reconcileHeaderFlexLayout();

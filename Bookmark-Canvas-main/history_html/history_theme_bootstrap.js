@@ -1,6 +1,14 @@
 // Apply theme early to avoid flash (no inline script for CSP)
 (function () {
   try {
+    // The document itself is not a scroll surface. Canvas and panels restore
+    // their own nested scroll positions from storage instead.
+    try {
+      if (window.history && 'scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+    } catch (_) { }
+
     // Keep consistent with the runtime theme controller:
     // - localStorage.themePreference: 'system' | 'light' | 'dark'
     // - an unset/invalid preference defaults to dark.
