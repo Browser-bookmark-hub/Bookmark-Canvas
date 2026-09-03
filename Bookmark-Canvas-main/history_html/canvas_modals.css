@@ -4194,6 +4194,31 @@ body.canvas-popover-active .md-align-popover {
     filter: brightness(1.2);
 }
 
+/* Note highlighting for bookmark-tree titles and font icons. The source
+ * attribute is resolved by the shared last-write-wins ordering state. */
+.tree-item.has-note-highlight[data-highlight-source="note"] i.fas.fa-folder,
+.tree-item.has-note-highlight[data-highlight-source="note"] i.fas.fa-folder-open {
+    background: var(--note-highlight-color, var(--text-secondary)) !important;
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    color: var(--note-highlight-color, var(--text-secondary)) !important;
+}
+
+.tree-item.has-note-highlight[data-highlight-source="note"] .tree-label,
+.tree-item.has-note-highlight[data-highlight-source="note"] a.tree-label {
+    display: inline-block !important;
+    width: fit-content !important;
+    flex: 0 1 auto !important;
+    background: var(--note-highlight-color, var(--text-primary)) !important;
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    color: var(--note-highlight-color, var(--text-primary)) !important;
+    font-weight: 600 !important;
+    text-shadow: 0 0 2px color-mix(in srgb, var(--note-highlight-color, var(--text-primary)) 40%, transparent) !important;
+}
+
 .settings-github-split {
     margin-top: 6px;
 }

@@ -2496,6 +2496,7 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     bookmarkTreeTagPositionThreshold: 420, // 自动切换阈值 (px)
     bookmarkTreeNotePosition: 'auto', // 书签树笔记标识位置：left / right / auto
     bookmarkTreeNotePositionThreshold: 420, // 自动切换阈值 (px)
+    bookmarkTreeNoteHighlightEnabled: true, // 书签树笔记是否高亮标题与图标
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
         p0: { x: 0, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR) },
@@ -2982,6 +2983,9 @@ function normalizeCanvasOtherSettings(input) {
         2000,
         out.bookmarkTreeNotePositionThreshold
     );
+    if (typeof input.bookmarkTreeNoteHighlightEnabled === 'boolean') {
+        out.bookmarkTreeNoteHighlightEnabled = input.bookmarkTreeNoteHighlightEnabled;
+    }
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
     out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
     out.trackpadZoomRate = __clampNumber(input.trackpadZoomRate, TRACKPAD_ZOOM_RATE_MIN, TRACKPAD_ZOOM_RATE_MAX, out.trackpadZoomRate);
@@ -42903,6 +42907,10 @@ function openCanvasAppearanceSettingsModal() {
         otherNoteThresholdInput.value = __clampNumber(otherBookmarkNoteThreshold, 100, 2000, 420);
     }
     __updateOtherBookmarkNotePositionMode(modal);
+    const otherBookmarkNoteHighlight = modal.querySelector('#otherBookmarkNoteHighlightEnabled');
+    if (otherBookmarkNoteHighlight) {
+        otherBookmarkNoteHighlight.checked = otherSettings.bookmarkTreeNoteHighlightEnabled !== false;
+    }
 
     modal.style.display = 'flex';
 }
@@ -43313,6 +43321,20 @@ function createCanvasAppearanceSettingsModal() {
                             </div>
                         </div>
                     </div>
+                    <div class="appearance-row other-sub-row">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Highlight bookmark tree items with notes' : '笔记高亮书签树标题与图标'}</span>
+                            <button class="perf-help-btn" id="otherBookmarkNoteHighlightHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content">
+                            <label class="other-toggle-switch">
+                                <input type="checkbox" id="otherBookmarkNoteHighlightEnabled">
+                                <span class="other-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
                     <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
                     <div class="appearance-row">
                         <div class="appearance-row-label appearance-row-label-inline">
@@ -43379,6 +43401,13 @@ function createCanvasAppearanceSettingsModal() {
                             </select>
                         </div>
                     </div>
+        </div>
+        <div class="perf-help-popover" id="otherBookmarkNoteHighlightHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? 'When enabled, a bookmark or folder with a note uses the note color for its title and folder icon. The most recently applied Note or Temporary Trace highlight wins when both are present.'
+            : '开启后，有笔记的书签或文件夹会使用笔记颜色高亮标题和文件夹图标。笔记与临时溯源同时存在时，后应用的高亮覆盖先应用的高亮。'}
+            </div>
         </div>
         <div class="perf-help-popover" id="otherGridSnapHelpPopover">
             <div class="perf-help-popover-content">
@@ -43532,12 +43561,15 @@ function createCanvasAppearanceSettingsModal() {
     const otherTempUnlockHelpPopover = modal.querySelector('#otherTempColorUnlockHelpPopover');
     const otherTempAutoLockHelpBtn = modal.querySelector('#otherTempColorAutoLockHelpBtn');
     const otherTempAutoLockHelpPopover = modal.querySelector('#otherTempColorAutoLockHelpPopover');
+    const otherBookmarkNoteHighlightHelpBtn = modal.querySelector('#otherBookmarkNoteHighlightHelpBtn');
+    const otherBookmarkNoteHighlightHelpPopover = modal.querySelector('#otherBookmarkNoteHighlightHelpPopover');
     bindClickHelpPopover(otherTempHelpBtn, otherTempHelpPopover);
     bindClickHelpPopover(otherMenuDefaultColorSyncHelpBtn, otherMenuDefaultColorSyncHelpPopover);
     bindClickHelpPopover(otherMenuLocatableColorSyncHelpBtn, otherMenuLocatableColorSyncHelpPopover);
     bindClickHelpPopover(otherSidebarCollapseModeHelpBtn, otherSidebarCollapseModeHelpPopover);
     bindClickHelpPopover(otherTempUnlockHelpBtn, otherTempUnlockHelpPopover);
     bindClickHelpPopover(otherTempAutoLockHelpBtn, otherTempAutoLockHelpPopover);
+    bindClickHelpPopover(otherBookmarkNoteHighlightHelpBtn, otherBookmarkNoteHighlightHelpPopover);
 
     if (otherAutoLinkToggle) {
         otherAutoLinkToggle.addEventListener('change', () => {
@@ -43637,6 +43669,12 @@ function createCanvasAppearanceSettingsModal() {
         otherBookmarkNoteThresholdInput.addEventListener('change', () => {
             const n = parseInt(otherBookmarkNoteThresholdInput.value, 10);
             otherBookmarkNoteThresholdInput.value = String(__clampNumber(n, 100, 2000, 420));
+            scheduleOtherSave();
+        });
+    }
+    const otherBookmarkNoteHighlightToggle = modal.querySelector('#otherBookmarkNoteHighlightEnabled');
+    if (otherBookmarkNoteHighlightToggle) {
+        otherBookmarkNoteHighlightToggle.addEventListener('change', () => {
             scheduleOtherSave();
         });
     }
@@ -44270,6 +44308,7 @@ function saveCanvasOtherSettings(options = {}) {
     if (bookmarkNoteThresholdInput && document.activeElement !== bookmarkNoteThresholdInput) {
         bookmarkNoteThresholdInput.value = String(bookmarkNoteThreshold);
     }
+    const bookmarkNoteHighlightInput = modal.querySelector('#otherBookmarkNoteHighlightEnabled');
 
     const gridPointSpacingRaw = gridPointSpacingInput
         ? parseInt(gridPointSpacingInput.value, 10)
@@ -44310,6 +44349,9 @@ function saveCanvasOtherSettings(options = {}) {
         bookmarkTreeTagPositionThreshold: bookmarkTagThreshold,
         bookmarkTreeNotePosition: bookmarkNotePosition,
         bookmarkTreeNotePositionThreshold: bookmarkNoteThreshold,
+        bookmarkTreeNoteHighlightEnabled: bookmarkNoteHighlightInput
+            ? !!bookmarkNoteHighlightInput.checked
+            : prevSettings.bookmarkTreeNoteHighlightEnabled !== false,
         useDefaultZoomCurve: useDefault,
         zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || prevSettings.zoomCurve || getCanvasZoomCurveSettings()),
         trackpadZoomRate: trackpadRatePercent / 100,

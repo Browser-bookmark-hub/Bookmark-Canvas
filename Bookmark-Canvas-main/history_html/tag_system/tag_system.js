@@ -1408,6 +1408,7 @@
     let __permNoteIndex = null;
     let __permNoteIndexLoading = null;
     const __tempNoteSyncOverlay = new Map();
+    const __noteHighlightMutations = new WeakSet();
 
     function __normalizeNote(raw) {
         if (raw === undefined || raw === null) return '';
@@ -1547,11 +1548,49 @@
             if (settings) {
                 return {
                     position: settings.bookmarkTreeNotePosition || 'auto',
-                    threshold: settings.bookmarkTreeNotePositionThreshold !== undefined ? settings.bookmarkTreeNotePositionThreshold : 420
+                    threshold: settings.bookmarkTreeNotePositionThreshold !== undefined ? settings.bookmarkTreeNotePositionThreshold : 420,
+                    highlightEnabled: settings.bookmarkTreeNoteHighlightEnabled !== false
                 };
             }
         }
-        return { position: 'auto', threshold: 420 };
+        return { position: 'auto', threshold: 420, highlightEnabled: true };
+    }
+
+    function __applyNoteHighlightToTreeItem(treeItem, noteMeta) {
+        if (!treeItem || !treeItem.classList || !treeItem.classList.contains('tree-item')) return;
+        const settings = __getBookmarkTreeNoteSettings();
+        const meta = __normalizeNoteMeta(noteMeta);
+        const note = meta.note;
+        if (!note || settings.highlightEnabled === false) {
+            if (treeItem.classList.contains('has-note-highlight')) {
+                __noteHighlightMutations.add(treeItem);
+            }
+            treeItem.classList.remove('has-note-highlight');
+            treeItem.removeAttribute('data-note-highlight-color');
+            treeItem.style.removeProperty('--note-highlight-color');
+            if (typeof window.__updateTreeHighlightSource === 'function') {
+                window.__updateTreeHighlightSource(treeItem);
+            } else if (!treeItem.classList.contains('has-trace')) {
+                treeItem.removeAttribute('data-highlight-source');
+            }
+            return;
+        }
+
+        const noteColor = __normalizeNoteColor(meta.color || meta.noteColor);
+        if (!treeItem.classList.contains('has-note-highlight')) {
+            __noteHighlightMutations.add(treeItem);
+        }
+        treeItem.classList.add('has-note-highlight');
+        treeItem.dataset.noteHighlightColor = noteColor;
+        treeItem.style.setProperty('--note-highlight-color', `var(--tag-${noteColor}, var(--text-primary))`);
+        if (typeof window.__updateTreeHighlightSource === 'function') {
+            window.__updateTreeHighlightSource(treeItem);
+        } else {
+            const source = typeof window.__getTreeHighlightSource === 'function'
+                ? window.__getTreeHighlightSource(treeItem)
+                : 'note';
+            if (source) treeItem.dataset.highlightSource = source;
+        }
     }
 
     function __isWideNoteContext(treeItem, currentModeIsWide, cardWidthCache) {
@@ -1588,6 +1627,8 @@
         marker.dataset.noteKey = noteKey;
         marker.setAttribute('aria-label', __lang() === 'en' ? 'Note' : '笔记');
         marker.innerHTML = '<i class="fas fa-pencil-alt"></i>';
+        marker.addEventListener('mouseenter', () => __showNoteHoverBubble(marker));
+        marker.addEventListener('mouseleave', () => __hideNoteHoverBubbleForMarker(marker));
         return marker;
     }
 
@@ -1620,8 +1661,12 @@
         const noteMeta = __getNoteMetaForTreeItemSync(treeItem);
         const note = noteMeta.note;
         const noteColor = __normalizeNoteColor(noteMeta.color);
+        __applyNoteHighlightToTreeItem(treeItem, noteMeta);
         if (!note) {
-            if (existing) existing.remove();
+            if (existing) {
+                __hideNoteHoverBubbleForMarker(existing);
+                existing.remove();
+            }
             return;
         }
 
@@ -1641,7 +1686,10 @@
         }
 
         const next = __buildNoteMarker(noteColor, wide, noteKey);
-        if (existing) existing.replaceWith(next);
+        if (existing) {
+            __hideNoteHoverBubbleForMarker(existing);
+            existing.replaceWith(next);
+        }
         __placeNoteMarker(treeItem, next, wide);
     }
 
@@ -1676,6 +1724,7 @@
                 const noteMeta = __getNoteMetaForTreeItemSync(treeItem);
                 const note = noteMeta.note;
                 const noteColor = __normalizeNoteColor(noteMeta.color);
+                __applyNoteHighlightToTreeItem(treeItem, noteMeta);
                 if (!note) {
                     if (existing) updates.push({ action: 'remove', existing });
                     return;
@@ -1708,6 +1757,7 @@
             if (!updates.length) return;
             updates.forEach((up) => {
                 if (up.action === 'remove') {
+                    __hideNoteHoverBubbleForMarker(up.existing);
                     up.existing.remove();
                     return;
                 }
@@ -1716,13 +1766,17 @@
                     return;
                 }
                 const next = __buildNoteMarker(up.noteColor, up.wide, up.noteKey);
-                if (up.existing) up.existing.replaceWith(next);
+                if (up.existing) {
+                    __hideNoteHoverBubbleForMarker(up.existing);
+                    up.existing.replaceWith(next);
+                }
                 __placeNoteMarker(up.treeItem, next, up.wide);
             });
         });
     }
 
     let __noteHoverBubble = null;
+    let __activeNoteMarker = null;
     function __ensureNoteHoverBubble() {
         if (__noteHoverBubble) return __noteHoverBubble;
         const el = document.createElement('div');
@@ -1734,10 +1788,14 @@
     }
 
     function __showNoteHoverBubble(marker) {
+        if (!marker || !document.contains(marker)) return;
         const treeItem = marker && marker.closest ? marker.closest('.tree-item') : null;
         const noteMeta = __getNoteMetaForTreeItemSync(treeItem);
         const note = __normalizeNote(noteMeta && noteMeta.note);
-        if (!note) return;
+        if (!note) {
+            __hideNoteHoverBubble();
+            return;
+        }
         const bubble = __ensureNoteHoverBubble();
         const targetParent = getOverlayContainer();
         if (bubble.parentElement !== targetParent) targetParent.appendChild(bubble);
@@ -1751,6 +1809,7 @@
         bubble.dataset.color = color;
         bubble.innerHTML = `<strong class="note-hover-bubble-prefix" style="font-weight: 600; margin-right: 4px; display: inline-block;">${prefix}</strong><span class="note-hover-bubble-content" style="white-space: pre-wrap; vertical-align: top;">${safeNote}</span>`;
 
+        __activeNoteMarker = marker;
         bubble.hidden = false;
         const r = marker.getBoundingClientRect();
         const br = bubble.getBoundingClientRect();
@@ -1764,8 +1823,23 @@
     }
 
     function __hideNoteHoverBubble() {
+        __activeNoteMarker = null;
         if (__noteHoverBubble) __noteHoverBubble.hidden = true;
     }
+
+    function __hideNoteHoverBubbleForMarker(marker) {
+        if (__activeNoteMarker === marker) __hideNoteHoverBubble();
+    }
+
+    // A marker can be replaced while hovered when Tag/Note metadata refreshes.
+    // In that case browsers do not always emit mouseleave for the removed node.
+    document.addEventListener('pointermove', (ev) => {
+        if (!__activeNoteMarker) return;
+        if (!document.contains(__activeNoteMarker) || !__activeNoteMarker.matches(':hover')) {
+            __hideNoteHoverBubble();
+        }
+    }, { passive: true });
+    window.addEventListener('blur', __hideNoteHoverBubble);
 
     function __isWideRowContext(treeItem, currentModeIsWide, cardWidthCache) {
         if (!treeItem) return false;
@@ -1955,29 +2029,26 @@
 
     document.addEventListener('mouseover', (ev) => {
         const dot = ev.target.closest('.tree-item-tag-dots.dots-leading .tag-dot');
-        if (dot && !dot.classList.contains('tag-dot-more')) __showHoverBubble(dot);
+        if (!dot || dot.classList.contains('tag-dot-more')) return;
+        if (ev.relatedTarget && dot.contains(ev.relatedTarget)) return;
+        __showHoverBubble(dot);
     });
     document.addEventListener('mouseout', (ev) => {
         const dot = ev.target.closest('.tree-item-tag-dots.dots-leading .tag-dot');
-        if (dot) __hideHoverBubble();
-    });
-
-    document.addEventListener('mouseover', (ev) => {
-        const marker = ev.target.closest('.tree-item-note-marker');
-        if (marker) __showNoteHoverBubble(marker);
-    });
-    document.addEventListener('mouseout', (ev) => {
-        const marker = ev.target.closest('.tree-item-note-marker');
-        if (marker) __hideNoteHoverBubble();
+        if (!dot || (ev.relatedTarget && dot.contains(ev.relatedTarget))) return;
+        __hideHoverBubble();
     });
 
     // Mutation observer: auto-inject dots on newly-rendered tree items.
-    let __pendingTreeItems = new Set();
+    let __pendingTagTreeItems = new Set();
     let __pendingFlushScheduled = false;
     const __resizeObservedTreeItems = new WeakSet();
     const __treeItemResizeObserver = (typeof ResizeObserver !== 'undefined')
         ? new ResizeObserver((entries) => {
-            entries.forEach((entry) => __observeTreeItem(entry.target));
+            entries.forEach((entry) => {
+                __observeTagTreeItem(entry.target);
+                __observeNoteTreeItem(entry.target);
+            });
         })
         : null;
     function __scheduleFlushDots() {
@@ -1985,8 +2056,8 @@
         __pendingFlushScheduled = true;
         requestAnimationFrame(async () => {
             __pendingFlushScheduled = false;
-            const items = Array.from(__pendingTreeItems);
-            __pendingTreeItems.clear();
+            const items = Array.from(__pendingTagTreeItems);
+            __pendingTagTreeItems.clear();
             // Ensure perm index is ready if any of the items are permanent.
             const hasPermItems = items.some((el) => {
                 const tt = el.dataset.treeType || el.getAttribute('data-tree-type') || '';
@@ -2141,14 +2212,19 @@
         });
     }
 
-    function __observeTreeItem(el) {
+    function __observeTagTreeItem(el) {
         if (!el || !el.classList || !el.classList.contains('tree-item')) return;
         if (__treeItemResizeObserver && !__resizeObservedTreeItems.has(el)) {
             __resizeObservedTreeItems.add(el);
             __treeItemResizeObserver.observe(el);
         }
-        __pendingTreeItems.add(el);
+        __pendingTagTreeItems.add(el);
         __scheduleFlushDots();
+    }
+
+    function __observeTreeItem(el) {
+        if (!el || !el.classList || !el.classList.contains('tree-item')) return;
+        __observeTagTreeItem(el);
         __observeNoteTreeItem(el);
     }
 
@@ -2200,6 +2276,14 @@
             if (m.type === 'attributes') {
                 const target = m.target;
                 if (target.classList && target.classList.contains('tree-item')) {
+                    if (typeof window.__consumeTreeHighlightMutation === 'function' &&
+                        window.__consumeTreeHighlightMutation(target)) {
+                        continue;
+                    }
+                    if (__noteHighlightMutations.has(target)) {
+                        __noteHighlightMutations.delete(target);
+                        continue;
+                    }
                     __observeTreeItem(target);
                 } else if (
                     target.querySelectorAll &&
@@ -2292,7 +2376,7 @@
             else sel = `.tree-item[data-node-id="${CSS.escape(t.chromeId || '')}"]:not([data-tree-type="temporary"])`;
             document.querySelectorAll(sel).forEach((el) => items.add(el));
         });
-        items.forEach(__observeTreeItem);
+        items.forEach(__observeTagTreeItem);
 
         if (!skipBroadcast) {
             try {
@@ -2307,15 +2391,42 @@
     window.__refreshTagDotsForTargets = refreshTagDotsForTargets;
     window.__refreshAllTagDots = function () {
         __invalidatePermIdentityIndex();
-        document.querySelectorAll('.tree-item').forEach(__observeTreeItem);
+        document.querySelectorAll('.tree-item').forEach(__observeTagTreeItem);
     };
 
     const noteSyncChannel = new BroadcastChannel('bookmark-canvas-note-sync');
+    function broadcastNoteRevisions() {
+        try {
+            const entries = typeof window.__getTreeHighlightRevisionEntries === 'function'
+                ? window.__getTreeHighlightRevisionEntries('note')
+                : [];
+            noteSyncChannel.postMessage({
+                action: 'sync-note-revisions',
+                noteRevisionEntries: entries
+            });
+        } catch (_) {}
+    }
     noteSyncChannel.onmessage = (event) => {
         const data = event && event.data ? event.data : {};
-        const { action, targets } = data;
+        const { action, targets, revision, noteRevisionEntries } = data;
+        if (action === 'request-notes-state') {
+            broadcastNoteRevisions();
+            return;
+        }
+        if (action === 'sync-note-revisions') {
+            if (typeof window.__applyTreeHighlightRevisionEntries === 'function') {
+                window.__applyTreeHighlightRevisionEntries('note', noteRevisionEntries);
+            }
+            document.querySelectorAll('.tree-item.has-note-highlight, .tree-item.has-trace')
+                .forEach((treeItem) => {
+                    if (typeof window.__updateTreeHighlightSource === 'function') {
+                        window.__updateTreeHighlightSource(treeItem);
+                    }
+                });
+            return;
+        }
         if (action !== 'sync-notes') return;
-        refreshNoteMarkersForTargets(targets, true);
+        refreshNoteMarkersForTargets(targets, true, revision);
         try {
             if (typeof window.markCanvasSearchBookmarkNoteDirty === 'function') {
                 window.markCanvasSearchBookmarkNoteDirty(targets);
@@ -2336,8 +2447,12 @@
         } catch (_) {}
     };
 
-    function refreshNoteMarkersForTargets(targets, skipBroadcast = false) {
+    function refreshNoteMarkersForTargets(targets, skipBroadcast = false, revision) {
         if (!Array.isArray(targets)) return;
+        let noteRevision = null;
+        if (typeof window.__markNoteHighlightRevision === 'function') {
+            noteRevision = window.__markNoteHighlightRevision(targets, revision);
+        }
         __mergeTempNoteSyncOverlay(targets);
         const hasPerm = targets.some((t) => t && t.kind === 'permanent');
         if (hasPerm) __invalidatePermNoteIndex();
@@ -2350,13 +2465,14 @@
             else sel = `.tree-item[data-node-id="${CSS.escape(t.chromeId || '')}"]:not([data-tree-type="temporary"])`;
             document.querySelectorAll(sel).forEach((el) => items.add(el));
         });
-        items.forEach(__observeTreeItem);
+        items.forEach(__observeNoteTreeItem);
 
         if (!skipBroadcast) {
             try {
                 noteSyncChannel.postMessage({
                     action: 'sync-notes',
-                    targets
+                    targets,
+                    revision: noteRevision
                 });
             } catch (_) {}
         }
@@ -2365,8 +2481,12 @@
     window.__refreshNoteMarkersForTargets = refreshNoteMarkersForTargets;
     window.__refreshAllNoteMarkers = function () {
         __invalidatePermNoteIndex();
-        document.querySelectorAll('.tree-item').forEach(__observeTreeItem);
+        document.querySelectorAll('.tree-item').forEach(__observeNoteTreeItem);
     };
+
+    try {
+        noteSyncChannel.postMessage({ action: 'request-notes-state' });
+    } catch (_) {}
 
     // -------------------------------------------------------------------------
     // Public entry points

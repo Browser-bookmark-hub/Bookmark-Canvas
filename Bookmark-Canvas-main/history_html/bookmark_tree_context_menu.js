@@ -6835,13 +6835,276 @@ const TRACE_PALETTE = {
     gray: { hex: '#8e8e93', rgb: [142, 142, 147], class: 'tag-dot-gray', labelZh: '灰色', labelEn: 'Gray' }
 };
 
+// Note and temporary-trace highlighting share one last-write-wins ordering.
+// Keep the ordering outside either renderer so DOM rebuilds and broadcasts use
+// the same precedence rules.
+const treeHighlightState = window.__bookmarkTreeHighlightState || {
+    clock: 0,
+    traceRevisions: new Map(),
+    noteRevisions: new Map()
+};
+window.__bookmarkTreeHighlightState = treeHighlightState;
+if (!(treeHighlightState.traceRevisions instanceof Map)) treeHighlightState.traceRevisions = new Map();
+if (!(treeHighlightState.noteRevisions instanceof Map)) treeHighlightState.noteRevisions = new Map();
+
+const treeHighlightRevisionOrigin = window.__treeHighlightRevisionOrigin ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+window.__treeHighlightRevisionOrigin = treeHighlightRevisionOrigin;
+let treeHighlightRevisionSequence = 0;
+
+function createTreeHighlightRevision() {
+    treeHighlightRevisionSequence += 1;
+    return {
+        time: Date.now(),
+        sequence: treeHighlightRevisionSequence,
+        origin: treeHighlightRevisionOrigin
+    };
+}
+
+function observeTreeHighlightRevision(revision) {
+    const normalized = normalizeTreeHighlightRevision(revision);
+    if (normalized) {
+        treeHighlightRevisionSequence = Math.max(treeHighlightRevisionSequence, normalized.sequence);
+    }
+    return normalized;
+}
+
+function normalizeTreeHighlightRevision(value) {
+    if (value && typeof value === 'object') {
+        const time = Number(value.time);
+        const sequence = Number(value.sequence);
+        const origin = String(value.origin || '');
+        if (Number.isFinite(time) && Number.isFinite(sequence)) {
+            return { time, sequence, origin };
+        }
+    }
+    const legacy = Number(value);
+    return Number.isFinite(legacy) && legacy > 0
+        ? { time: legacy, sequence: 0, origin: '' }
+        : null;
+}
+
+function compareTreeHighlightRevisions(left, right) {
+    const a = normalizeTreeHighlightRevision(left);
+    const b = normalizeTreeHighlightRevision(right);
+    if (!a && !b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    if (a.time !== b.time) return a.time > b.time ? 1 : -1;
+    if (a.sequence !== b.sequence) return a.sequence > b.sequence ? 1 : -1;
+    if (a.origin === b.origin) return 0;
+    return a.origin > b.origin ? 1 : -1;
+}
+
+function getTreeHighlightRevisionEntries(kind, keys) {
+    const revisions = kind === 'note' ? treeHighlightState.noteRevisions : treeHighlightState.traceRevisions;
+    const selectedKeys = Array.isArray(keys)
+        ? keys
+        : Array.from(revisions.keys());
+    return getTreeHighlightRevisionKeys(selectedKeys).map((key) => ({
+        key,
+        revision: normalizeTreeHighlightRevision(revisions.get(key))
+    })).filter((entry) => entry.revision);
+}
+
+window.__getTreeHighlightRevisionEntries = getTreeHighlightRevisionEntries;
+window.__applyTreeHighlightRevisionEntries = function(kind, entries) {
+    const revisions = kind === 'note' ? treeHighlightState.noteRevisions : treeHighlightState.traceRevisions;
+    if (!Array.isArray(entries)) return;
+    entries.forEach((entry) => {
+        const key = String(entry && entry.key || '').trim();
+        const revision = observeTreeHighlightRevision(entry && entry.revision);
+        if (!key || !revision) return;
+        if (compareTreeHighlightRevisions(revision, revisions.get(key)) >= 0) {
+            revisions.set(key, revision);
+        }
+    });
+};
+
+// The tag/note observer also watches tree-item class changes. Count trace-owned
+// mutations so its callback can ignore renderer bookkeeping without hiding
+// unrelated tree updates that happen in the same frame.
+const treeHighlightMutationCounts = window.__treeHighlightMutationCounts || new WeakMap();
+window.__treeHighlightMutationCounts = treeHighlightMutationCounts;
+window.__markTreeHighlightMutation = function(treeItem) {
+    if (!treeItem || !treeItem.classList || !treeItem.classList.contains('tree-item')) return;
+    treeHighlightMutationCounts.set(treeItem, (treeHighlightMutationCounts.get(treeItem) || 0) + 1);
+};
+window.__consumeTreeHighlightMutation = function(treeItem) {
+    if (!treeItem) return false;
+    const count = treeHighlightMutationCounts.get(treeItem) || 0;
+    if (!count) return false;
+    if (count === 1) treeHighlightMutationCounts.delete(treeItem);
+    else treeHighlightMutationCounts.set(treeItem, count - 1);
+    return true;
+};
+
+function getTreeHighlightTargetKey(target) {
+    if (!target) return '';
+    if (target.kind === 'temporary') {
+        const sectionId = String(target.sectionId || '').trim();
+        const itemId = String(target.itemId || '').trim();
+        return sectionId && itemId ? `temporary:${sectionId}:${itemId}` : '';
+    }
+    const chromeId = String(target.chromeId || '').trim();
+    return chromeId ? `permanent:${chromeId}` : '';
+}
+
+function getTreeHighlightKeyForItem(treeItem) {
+    if (!treeItem || !treeItem.dataset) return '';
+    const nodeId = String(treeItem.dataset.nodeId || '').trim();
+    if (!nodeId) return '';
+    if (String(treeItem.dataset.treeType || '').toLowerCase() === 'temporary') {
+        const sectionId = String(treeItem.dataset.sectionId || '').trim();
+        return sectionId ? `temporary:${sectionId}:${nodeId}` : '';
+    }
+    return `permanent:${nodeId}`;
+}
+
+function getTreeHighlightKeyForTrace(trace) {
+    if (!trace) return '';
+    const explicitKey = String(trace.targetKey || '').trim();
+    if (explicitKey) return explicitKey;
+    const targetId = String(trace.targetId || '').trim();
+    if (!targetId) return '';
+    const scopeKey = String(trace.scopeKey || '').trim();
+    if (scopeKey.startsWith('temporary:')) {
+        const sectionId = scopeKey.substring('temporary:'.length).trim();
+        return sectionId ? `temporary:${sectionId}:${targetId}` : '';
+    }
+    return `permanent:${targetId}`;
+}
+
+function getTreeHighlightRevisionKeys(targets) {
+    if (!Array.isArray(targets)) return [];
+    const keys = new Set();
+    targets.forEach((target) => {
+        if (typeof target === 'string') {
+            const key = target.trim();
+            if (key) keys.add(key);
+            return;
+        }
+        if (!target) return;
+        if (Array.isArray(target.highlightKeys)) {
+            target.highlightKeys.forEach((key) => {
+                const normalizedKey = String(key || '').trim();
+                if (normalizedKey) keys.add(normalizedKey);
+            });
+        }
+        const key = getTreeHighlightKeyForTrace(target) || getTreeHighlightTargetKey(target);
+        if (key) keys.add(key);
+    });
+    return Array.from(keys);
+}
+
+function collectTraceHighlightKeys(trace) {
+    const keys = new Set(getTreeHighlightRevisionKeys([trace]));
+    const targetId = String(trace && trace.targetId || '').trim();
+    if (!targetId) return Array.from(keys);
+    document.querySelectorAll(`.tree-item[data-node-id="${CSS.escape(targetId)}"]`).forEach((startItem) => {
+        getDOMPathElements(startItem, trace.level).forEach((element) => {
+            if (!element.classList || !element.classList.contains('tree-item')) return;
+            const key = getTreeHighlightKeyForItem(element);
+            if (key) keys.add(key);
+        });
+    });
+    return Array.from(keys);
+}
+
+function ensureTraceHighlightKeys(trace) {
+    if (!trace || typeof trace !== 'object') return [];
+    const keys = collectTraceHighlightKeys(trace);
+    trace.highlightKeys = keys;
+    const baseKey = getTreeHighlightKeyForTrace(trace);
+    const baseRevision = baseKey ? treeHighlightState.traceRevisions.get(baseKey) : null;
+    if (baseRevision) {
+        keys.forEach((key) => {
+            if (!treeHighlightState.traceRevisions.has(key)) {
+                treeHighlightState.traceRevisions.set(key, baseRevision);
+            }
+        });
+    }
+    return keys;
+}
+
+window.__markTraceHighlightRevision = function(targets, revision) {
+    treeHighlightState.clock += 1;
+    const appliedRevision = observeTreeHighlightRevision(revision) || createTreeHighlightRevision();
+    const revisionTargets = Array.isArray(targets)
+        ? targets
+        : (Array.isArray(window.__activeTraces) ? window.__activeTraces : []);
+    getTreeHighlightRevisionKeys(revisionTargets).forEach((key) => {
+        if (compareTreeHighlightRevisions(appliedRevision, treeHighlightState.traceRevisions.get(key)) >= 0) {
+            treeHighlightState.traceRevisions.set(key, appliedRevision);
+        }
+    });
+    return appliedRevision;
+};
+
+window.__markNoteHighlightRevision = function(targets, revision) {
+    if (!Array.isArray(targets)) return 0;
+    let appliedRevision = observeTreeHighlightRevision(revision);
+    targets.forEach((target) => {
+        const key = getTreeHighlightTargetKey(target);
+        if (!key) return;
+        if (!appliedRevision) {
+            treeHighlightState.clock += 1;
+            appliedRevision = createTreeHighlightRevision();
+        }
+        if (compareTreeHighlightRevisions(appliedRevision, treeHighlightState.noteRevisions.get(key)) >= 0) {
+            treeHighlightState.noteRevisions.set(key, appliedRevision);
+        }
+    });
+    return appliedRevision || 0;
+};
+
+window.__getTreeHighlightSource = function(treeItem) {
+    if (!treeItem || !treeItem.classList || !treeItem.classList.contains('tree-item')) return '';
+    const hasNote = treeItem.classList.contains('has-note-highlight');
+    const hasTrace = treeItem.classList.contains('has-trace');
+    if (!hasNote && !hasTrace) return '';
+    if (!hasNote) return 'trace';
+    if (!hasTrace) return 'note';
+    const key = getTreeHighlightKeyForItem(treeItem);
+    const noteRevision = treeHighlightState.noteRevisions.get(key);
+    const traceRevision = treeHighlightState.traceRevisions.get(key);
+    return compareTreeHighlightRevisions(noteRevision, traceRevision) > 0 ? 'note' : 'trace';
+};
+
+window.__updateTreeHighlightSource = function(treeItem) {
+    if (!treeItem || !treeItem.classList || !treeItem.classList.contains('tree-item')) return '';
+    const source = window.__getTreeHighlightSource(treeItem);
+    if (source) treeItem.dataset.highlightSource = source;
+    else treeItem.removeAttribute('data-highlight-source');
+    return source;
+};
+
+window.__refreshTreeHighlightSources = function(root = document) {
+    if (!root || !root.querySelectorAll) return;
+    const items = root.matches && root.matches('.tree-item')
+        ? [root, ...root.querySelectorAll('.tree-item')]
+        : Array.from(root.querySelectorAll('.tree-item'));
+    items.forEach(window.__updateTreeHighlightSource);
+};
+
 let currentTraceLevel = '2'; // 默认溯源层级
 
 const traceSyncChannel = new BroadcastChannel('bookmark-canvas-trace-sync');
 traceSyncChannel.onmessage = (event) => {
-    const { action, traces } = event.data;
+    const { action, traces, traceRevisionKeys, traceRevisionEntries, revision } = event.data;
     if (action === 'sync-traces') {
         window.__activeTraces = traces || [];
+        if (typeof window.__applyTreeHighlightRevisionEntries === 'function' && Array.isArray(traceRevisionEntries)) {
+            window.__applyTreeHighlightRevisionEntries('trace', traceRevisionEntries);
+        } else if (typeof window.__markTraceHighlightRevision === 'function') {
+            window.__markTraceHighlightRevision(
+                Array.isArray(traceRevisionKeys) ? traceRevisionKeys : undefined,
+                revision
+            );
+        }
+        if (Array.isArray(window.__activeTraces)) {
+            window.__activeTraces.forEach(ensureTraceHighlightKeys);
+        }
         if (typeof window.__updateTraceHighlights === 'function') {
             window.__updateTraceHighlights();
         }
@@ -6852,11 +7115,20 @@ traceSyncChannel.onmessage = (event) => {
     }
 };
 
-function broadcastTraces() {
+function broadcastTraces(revisionTargets, revision) {
     try {
+        if (Array.isArray(window.__activeTraces)) {
+            window.__activeTraces.forEach(ensureTraceHighlightKeys);
+        }
+        const traceRevisionKeys = Array.isArray(revisionTargets)
+            ? getTreeHighlightRevisionKeys(revisionTargets)
+            : getTreeHighlightRevisionKeys(window.__activeTraces);
         traceSyncChannel.postMessage({
             action: 'sync-traces',
-            traces: window.__activeTraces
+            traces: window.__activeTraces,
+            traceRevisionKeys,
+            traceRevisionEntries: getTreeHighlightRevisionEntries('trace', traceRevisionKeys),
+            revision: normalizeTreeHighlightRevision(revision)
         });
     } catch (e) {
         console.warn('[Trace Sync] Broadcast failed:', e);
@@ -6871,8 +7143,14 @@ try {
 // 页面隐藏/卸载（如关闭侧边栏/标签页）时，清空当前溯源状态并广播给其他同步页面
 function clearAndBroadcastTracesOnUnload() {
     if (window.__activeTraces && window.__activeTraces.length > 0) {
+        window.__activeTraces.forEach(ensureTraceHighlightKeys);
+        const removedTraceKeys = getTreeHighlightRevisionKeys(window.__activeTraces);
         window.__activeTraces = [];
-        broadcastTraces();
+        let traceRevision = null;
+        if (typeof window.__markTraceHighlightRevision === 'function') {
+            traceRevision = window.__markTraceHighlightRevision(removedTraceKeys);
+        }
+        broadcastTraces(removedTraceKeys, traceRevision);
         if (typeof window.__updateTraceHighlights === 'function') {
             window.__updateTraceHighlights();
         }
@@ -7003,8 +7281,15 @@ function cancelTracesPassingThrough(clickedElement) {
     }
 
     if (tracesToRemove.size > 0) {
+        const removedTraces = window.__activeTraces.filter((trace) => tracesToRemove.has(trace.targetId));
+        removedTraces.forEach(ensureTraceHighlightKeys);
+        const removedTraceKeys = getTreeHighlightRevisionKeys(removedTraces);
         window.__activeTraces = window.__activeTraces.filter(t => !tracesToRemove.has(t.targetId));
-        broadcastTraces();
+        let traceRevision = null;
+        if (typeof window.__markTraceHighlightRevision === 'function') {
+            traceRevision = window.__markTraceHighlightRevision(removedTraceKeys);
+        }
+        broadcastTraces(removedTraceKeys, traceRevision);
         window.__updateTraceHighlights();
     }
 }
@@ -7047,16 +7332,23 @@ function clearTracesForCurrentCard(context) {
     const cardTargetIds = collectTraceTargetIdsInCard(scope.card);
     if (!scope.key && cardTargetIds.size === 0) return false;
 
-    const originalLength = window.__activeTraces.length;
-    window.__activeTraces = window.__activeTraces.filter((trace) => {
+    const removedTraces = window.__activeTraces.filter((trace) => {
         const targetId = String(trace && trace.targetId || '').trim();
         const traceScopeKey = String(trace && trace.scopeKey || '').trim();
-        if (scope.key && traceScopeKey && traceScopeKey === scope.key) return false;
-        return !targetId || !cardTargetIds.has(targetId);
+        return (scope.key && traceScopeKey && traceScopeKey === scope.key) ||
+            (!!targetId && cardTargetIds.has(targetId));
     });
+    const removedTraceSet = new Set(removedTraces);
+    removedTraces.forEach(ensureTraceHighlightKeys);
+    const removedTraceKeys = getTreeHighlightRevisionKeys(removedTraces);
 
-    if (window.__activeTraces.length === originalLength) return false;
-    broadcastTraces();
+    if (removedTraces.length === 0) return false;
+    window.__activeTraces = window.__activeTraces.filter((trace) => !removedTraceSet.has(trace));
+    let traceRevision = null;
+    if (typeof window.__markTraceHighlightRevision === 'function') {
+        traceRevision = window.__markTraceHighlightRevision(removedTraceKeys);
+    }
+    broadcastTraces(removedTraceKeys, traceRevision);
     window.__updateTraceHighlights();
     return true;
 }
@@ -7064,10 +7356,26 @@ function clearTracesForCurrentCard(context) {
 // 更新 DOM 的溯源高亮渲染
 window.__updateTraceHighlights = function() {
     // 1. 清除旧高亮及所有自定义高度、偏移、并排颜色线等属性
-    const prevHighlighted = document.querySelectorAll('.has-trace');
+    const prevHighlighted = Array.from(document.querySelectorAll('.has-trace'));
+    const sourceItems = new Set(
+        prevHighlighted.filter((el) => el.classList && el.classList.contains('tree-item'))
+    );
     prevHighlighted.forEach(el => {
-        el.classList.remove('has-trace');
-        el.classList.remove('has-trace-no-line');
+        if (el.classList.contains('has-trace')) {
+            if (el.classList.contains('tree-item') && typeof window.__markTreeHighlightMutation === 'function') {
+                window.__markTreeHighlightMutation(el);
+            }
+            el.classList.remove('has-trace');
+        }
+        if (el.classList.contains('has-trace-no-line')) {
+            if (el.classList.contains('tree-item') && typeof window.__markTreeHighlightMutation === 'function') {
+                window.__markTreeHighlightMutation(el);
+            }
+            el.classList.remove('has-trace-no-line');
+        }
+        if (el.classList.contains('tree-item') && !el.classList.contains('has-note-highlight')) {
+            el.removeAttribute('data-highlight-source');
+        }
         el.style.removeProperty('--trace-color');
         el.style.removeProperty('--trace-shadow-color');
         el.style.removeProperty('--trace-line-top');
@@ -7080,7 +7388,10 @@ window.__updateTraceHighlights = function() {
         el.style.removeProperty('--trace-text-shadow');
     });
 
-    if (!window.__activeTraces || window.__activeTraces.length === 0) return;
+    if (!window.__activeTraces || window.__activeTraces.length === 0) {
+        sourceItems.forEach((treeItem) => window.__updateTreeHighlightSource(treeItem));
+        return;
+    }
 
     // Helper: 计算元素相对于其容器祖先元素的本地 offsetTop 偏移量，避免受 CSS 缩放/变换影响
     function getRelativeOffsetTop(element, ancestor) {
@@ -7191,9 +7502,20 @@ window.__updateTraceHighlights = function() {
         const rgbColors = Array.from(colorsSet).map(name => TRACE_PALETTE[name]?.rgb).filter(Boolean);
 
         if (hexColors.length > 0) {
-            el.classList.add('has-trace');
+            if (!el.classList.contains('has-trace')) {
+                if (el.classList.contains('tree-item') && typeof window.__markTreeHighlightMutation === 'function') {
+                    window.__markTreeHighlightMutation(el);
+                }
+                el.classList.add('has-trace');
+            }
+            if (el.classList.contains('tree-item')) sourceItems.add(el);
             if (noLineItemsSet.has(el)) {
-                el.classList.add('has-trace-no-line');
+                if (!el.classList.contains('has-trace-no-line')) {
+                    if (el.classList.contains('tree-item') && typeof window.__markTreeHighlightMutation === 'function') {
+                        window.__markTreeHighlightMutation(el);
+                    }
+                    el.classList.add('has-trace-no-line');
+                }
             }
 
             // 主要颜色变量设置为首选色作为 Fallback
@@ -7260,8 +7582,10 @@ window.__updateTraceHighlights = function() {
                     el.style.setProperty('--trace-item-line-background', primaryColor, 'important');
                 }
             }
+
         }
     }
+    sourceItems.forEach((treeItem) => window.__updateTreeHighlightSource(treeItem));
 };
 
 // 渲染二级溯源菜单
@@ -7417,7 +7741,10 @@ function renderTraceSubmenu(context) {
             const level = currentTraceLevel;
             const traceScope = getTraceCardScope((context && context.node) || currentContextNode);
             const nextTrace = { targetId, colorName, level };
+            const targetKey = getTreeHighlightKeyForItem((context && context.node) || currentContextNode);
+            if (targetKey) nextTrace.targetKey = targetKey;
             if (traceScope && traceScope.key) nextTrace.scopeKey = traceScope.key;
+            ensureTraceHighlightKeys(nextTrace);
 
             const existingIndex = window.__activeTraces.findIndex(t => t.targetId === targetId);
             if (existingIndex !== -1) {
@@ -7426,7 +7753,11 @@ function renderTraceSubmenu(context) {
                 window.__activeTraces.push(nextTrace);
             }
 
-            broadcastTraces();
+            let traceRevision = null;
+            if (typeof window.__markTraceHighlightRevision === 'function') {
+                traceRevision = window.__markTraceHighlightRevision([nextTrace]);
+            }
+            broadcastTraces([nextTrace], traceRevision);
             window.__updateTraceHighlights();
             hideContextMenu();
         });
@@ -7454,9 +7785,16 @@ function renderTraceSubmenu(context) {
             e.stopPropagation();
             const targetId = context.nodeId;
             const originalLength = window.__activeTraces.length;
+            const removedTraces = window.__activeTraces.filter((trace) => trace.targetId === targetId);
+            removedTraces.forEach(ensureTraceHighlightKeys);
+            const removedTraceKeys = getTreeHighlightRevisionKeys(removedTraces);
             window.__activeTraces = window.__activeTraces.filter(t => t.targetId !== targetId);
             if (window.__activeTraces.length !== originalLength) {
-                broadcastTraces();
+                let traceRevision = null;
+                if (typeof window.__markTraceHighlightRevision === 'function') {
+                    traceRevision = window.__markTraceHighlightRevision(removedTraceKeys);
+                }
+                broadcastTraces(removedTraceKeys, traceRevision);
                 window.__updateTraceHighlights();
             }
             hideContextMenu();
@@ -7480,6 +7818,21 @@ function renderTraceSubmenu(context) {
             hideContextMenu();
         });
     }
+}
+
+const INFO_NOTE_COLOR_LABELS = {
+    red: { zh_CN: '红色', en: 'Red' },
+    orange: { zh_CN: '橙色', en: 'Orange' },
+    yellow: { zh_CN: '黄色', en: 'Yellow' },
+    green: { zh_CN: '绿色', en: 'Green' },
+    blue: { zh_CN: '蓝色', en: 'Blue' },
+    purple: { zh_CN: '紫色', en: 'Purple' },
+    gray: { zh_CN: '灰色', en: 'Gray' }
+};
+
+function getInfoNoteColorLabel(color, lang) {
+    const labels = INFO_NOTE_COLOR_LABELS[color];
+    return labels ? (labels[lang] || labels.zh_CN) : color;
 }
 
 // 渲染二级信息菜单
@@ -7591,14 +7944,13 @@ function renderInfoSubmenu(context) {
         const safeColor = safeNote ? normalizeInfoNoteColor(noteColor) : getLastInfoNoteColor();
         const label = lang === 'zh_CN' ? '笔记' : 'NOTE';
         const placeholder = lang === 'zh_CN' ? '添加笔记...' : 'Add note...';
-        const colorTitle = lang === 'zh_CN' ? '笔记颜色' : 'Note color';
         return `
             <div class="info-card-row info-card-note-row" data-note-color="${escapeHtml(safeColor)}">
                 <div class="info-note-heading">
                     <span class="info-card-label">${label}</span>
-                    <div class="info-note-color-palette" title="${escapeHtml(colorTitle)}" aria-label="${escapeHtml(colorTitle)}">
+                    <div class="info-note-color-palette" aria-label="${escapeHtml(lang === 'zh_CN' ? '笔记颜色' : 'Note color')}">
                         ${INFO_NOTE_COLOR_PALETTE.map((color) =>
-                            `<button class="tag-palette-btn info-note-color-btn${color === safeColor ? ' is-selected' : ''}" data-note-color="${escapeHtml(color)}" type="button" aria-label="${escapeHtml(color)}"><span class="tag-dot tag-dot-${escapeHtml(color)}"></span></button>`
+                            `<button class="tag-palette-btn info-note-color-btn${color === safeColor ? ' is-selected' : ''}" data-note-color="${escapeHtml(color)}" type="button" title="${escapeHtml(getInfoNoteColorLabel(color, lang))}" aria-label="${escapeHtml(getInfoNoteColorLabel(color, lang))}"><span class="tag-dot tag-dot-${escapeHtml(color)}"></span></button>`
                         ).join('')}
                     </div>
                 </div>
@@ -9764,7 +10116,7 @@ function showBatchNoteEditModal(targets) {
                         <div class="batch-note-edit-heading-controls">
                             <div class="info-note-color-palette">
                                 ${palette.map((color) =>
-                                    `<button class="tag-palette-btn info-note-color-btn${color === selectedInitial ? ' is-selected' : ''}" data-note-color="${escapeHtml(color)}" type="button" aria-label="${escapeHtml(color)}"><span class="tag-dot tag-dot-${escapeHtml(color)}"></span></button>`
+                                    `<button class="tag-palette-btn info-note-color-btn${color === selectedInitial ? ' is-selected' : ''}" data-note-color="${escapeHtml(color)}" type="button" title="${escapeHtml(getInfoNoteColorLabel(color, lang))}" aria-label="${escapeHtml(getInfoNoteColorLabel(color, lang))}"><span class="tag-dot tag-dot-${escapeHtml(color)}"></span></button>`
                                 ).join('')}
                             </div>
                             <div class="batch-note-edit-actions">
