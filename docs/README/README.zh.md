@@ -4,6 +4,12 @@
 
 ## Switch to [English](../../README.md)...
 
+### 书签聚合研究插件
+
+[插件仓库与安装说明（Codex、Claude Code、Pi、DSH）→](https://github.com/kwenxu/Bookmark-Research)
+
+### AI 编辑数据的约束文件
+
 如果您临时需要一份供 AI 编辑使用的约束文件，或希望了解本项目导出数据的格式与处理边界，请按以下说明操作。对于 `.canvas` 数据包（包括整张画布、卡片组或临时选区导出的数据包），使用包内附带的约束文件（示例：`AGENTS.md`）。<ins>对于单独导出的 JSON 或 HTML，请复制下方与任务语言对应的模板链接地址，直接提供给 Agents 即可。</ins>
 
 `AGENTS_template_en.md`：
