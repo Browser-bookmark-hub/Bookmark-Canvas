@@ -4,6 +4,12 @@
 
 ## Switch to [中文文档](docs/README/README.zh.md)...
 
+### Bookmark Research plugin
+
+[Plugin repository and installation guide (Codex, Claude Code, Pi, DSH) →](https://github.com/kwenxu/Bookmark-Research)
+
+### Rules for AI-assisted data editing
+
 If you need a rules file for a one-off AI-assisted edit, or want to understand the format and processing boundaries of this project's exported data, follow the guidance below. For a `.canvas` package, including a full-canvas, card-group, or temporary-selection export, read the bundled `AGENTS.md`. <ins>For a standalone JSON or HTML export, copy the URL for the template matching the task language below and provide it directly to your agents.</ins>
 
 `AGENTS_template_en.md`:
