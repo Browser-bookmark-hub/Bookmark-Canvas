@@ -6717,8 +6717,7 @@ function initCanvasView() {
     // 同时保留 rAF 路径作为冗余保障
     __scheduleCanvasViewportVisualSync();
 
-    // [Fix-v7] Windows 焦点激活：确保 canvasWorkspace 可以接收焦点并激活 rAF 调度。
-    // macOS 下浏览器会自动给予悬停面板焦点，Windows 需要显式 focus。
+    // Windows/Linux 冷启动焦点激活；各平台的悬停与滚轮焦点由 setupCanvasZoomAndPan 接管。
     if (CANVAS_RUNTIME_WINDOWS_LIKE) {
         try {
             const ws = document.getElementById('canvasWorkspace');
@@ -8021,6 +8020,26 @@ function setupCanvasZoomAndPan() {
         console.warn('[Canvas] 找不到workspace或container元素');
         return;
     }
+    if (!workspace.hasAttribute('tabindex')) workspace.setAttribute('tabindex', '-1');
+
+    function ensureCanvasInputFocus() {
+        if (document.hidden || document.hasFocus()) return;
+        try {
+            // 侧边栏 iframe / 新标签页在首次点击前可能只收到 wheel，收不到 keydown/keyup。
+            // 在悬停时激活文档，保留已有输入框的焦点与光标位置。
+            window.focus();
+            const active = document.activeElement;
+            if (!active || active === document.body || active === document.documentElement) {
+                workspace.focus({ preventScroll: true });
+            }
+        } catch (_) { }
+    }
+
+    workspace.addEventListener('pointerenter', (e) => {
+        ensureCanvasInputFocus();
+        syncCanvasCtrlStateWithEvent(e);
+    });
+
     __logCanvasWinInput('wheel-debug-init', {
         enabled: __isCanvasWinInputDebugEnabled(),
         debugKey: CANVAS_WIN_INPUT_DEBUG_KEY,
@@ -8084,6 +8103,7 @@ function setupCanvasZoomAndPan() {
 
     // Ctrl + 滚轮缩放（以鼠标位置为中心）- 性能优化版本
     workspace.addEventListener('wheel', (e) => {
+        ensureCanvasInputFocus();
         syncCanvasCtrlStateWithEvent(e);
 
         // [Fix] 消除 缩放 结束并释放 Ctrl/修饰键 时，由于触控板惯性产生的突然平移 (突然加速、连带了一下)
@@ -8446,6 +8466,22 @@ function setupCanvasZoomAndPan() {
 
     function syncCanvasCtrlStateWithEvent(e) {
         if (!e) return;
+        if (e.type !== 'wheel') {
+            // 鼠标/指针事件携带真实修饰键状态，可补回在画布外发生的按键变化。
+            // wheel.ctrlKey 也可能由捏合合成，不能用它推断物理 Ctrl 已按下。
+            const modifiers = CanvasState.physicalModifiers;
+            const wasZoomModifierPressed = !!(modifiers[canvasShortcuts.ctrlKey] || modifiers.Meta);
+            modifiers.Control = !!e.ctrlKey;
+            modifiers.Alt = !!e.altKey;
+            modifiers.Shift = !!e.shiftKey;
+            modifiers.Meta = !!e.metaKey;
+            const isZoomModifierPressed = !!(modifiers[canvasShortcuts.ctrlKey] || modifiers.Meta);
+            if (wasZoomModifierPressed && !isZoomModifierPressed && CanvasState.zoomOccurredWithModifier) {
+                CanvasState.lastModifierKeyReleaseTime = Date.now();
+                CanvasState.zoomOccurredWithModifier = false;
+                __cancelCanvasActiveZoomGesture('pointer-modifier-release');
+            }
+        }
         let physicalCtrl = isCustomCtrlKeyPressed(e);
         if (e.type === 'wheel' && __isCanvasTouchpadPinch(e)) {
             physicalCtrl = false;
@@ -8516,7 +8552,8 @@ function setupCanvasZoomAndPan() {
         }
         if (e.code.startsWith('Meta')) {
             CanvasState.physicalModifiers.Meta = false;
-            if (key === 'Meta') modifierReleased = true;
+            // Command 始终可以触发缩放，松开时同样需要截断惯性。
+            modifierReleased = true;
         }
         if (modifierReleased) {
             if (CanvasState.zoomOccurredWithModifier) {
@@ -8621,6 +8658,7 @@ function setupCanvasZoomAndPan() {
     }, true);
 
     document.addEventListener('mousemove', (e) => {
+        if (workspace.contains(e.target)) ensureCanvasInputFocus();
         syncCanvasCtrlStateWithEvent(e);
         if (CanvasState.isPanning) {
             // 标记正在拖动/滚动
@@ -33710,7 +33748,8 @@ function __isCanvasTouchpadPinch(e) {
     // Touchpad pinch always sends a wheel event with ctrlKey: true.
     // And the physical Ctrl key is not pressed on the keyboard.
     // Also, it is not a discrete/step-wise wheel event.
-    return !!(e.ctrlKey && !CanvasState.isCtrlPressed && !__isLikelyCanvasDiscreteWheelEvent(e));
+    return !!(e.ctrlKey && !CanvasState.physicalModifiers.Control
+        && !CanvasState.isCtrlPressed && !__isLikelyCanvasDiscreteWheelEvent(e));
 }
 
 function resolveCanvasZoomInputMode(event) {
