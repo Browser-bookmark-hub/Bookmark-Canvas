@@ -2311,7 +2311,8 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
 .canvas-node-maximized > .resize-handle,
 .canvas-node-maximized .resize-handle,
 .canvas-node-maximized .canvas-node-anchor,
-.canvas-node-maximized .canvas-anchor-zone {
+.canvas-node-maximized .canvas-anchor-zone,
+.canvas-node-maximized > .canvas-section-ctrl-overlay {
     display: none !important;
     pointer-events: none !important;
 }

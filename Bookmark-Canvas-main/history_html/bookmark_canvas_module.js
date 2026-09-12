@@ -1567,6 +1567,7 @@ function updateCanvasGridLayerTransform(panX, panY, scale, force = false) {
 // =================================================================================
 
 function isSectionCtrlModeEvent(e) {
+    if (__isCanvasNodeMaximizedActive()) return false;
     if (typeof clickToClearModeActive !== 'undefined' && clickToClearModeActive) return false;
     if (CanvasState.isSpacePressed) return false;
     return !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active) || (!!e && (isCustomCtrlKeyPressed(e) || e.metaKey));
@@ -1669,7 +1670,10 @@ function registerSectionCtrlOverlay(element) {
     overlay.dataset.sectionType = isPermanentSection
         ? 'permanent-section'
         : (element.classList.contains('md-canvas-node') ? 'md-node' : 'temp-node');
-    const isOverlayActive = !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active) || (typeof clickToClearModeActive !== 'undefined' && clickToClearModeActive);
+    const isOverlayActive = !__isNodeMaximized(element) && (
+        !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active) ||
+        (typeof clickToClearModeActive !== 'undefined' && clickToClearModeActive)
+    );
     overlay.classList.toggle('active', isOverlayActive);
 
     if (CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize && CanvasState.sectionCtrlMode.resize.element === element) {
@@ -1944,6 +1948,7 @@ function __handleLowDetailSurfaceContextMenu(event) {
 }
 
 function setSectionCtrlModeActive(active) {
+    active = active === true && !__isCanvasNodeMaximizedActive();
     const wasActive = !!(CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.active);
     if (wasActive === active) return;
     CanvasState.sectionCtrlMode.active = active;
@@ -1954,6 +1959,7 @@ function setSectionCtrlModeActive(active) {
 }
 
 function startSectionDrag(element, event, options = {}) {
+    if (__isNodeMaximized(element)) return false;
     const opts = (options && typeof options === 'object') ? options : {};
     if (opts.requireCtrl !== false && !isSectionCtrlModeEvent(event)) return false;
     if (!element || event.button !== 0) return false;
@@ -2113,6 +2119,7 @@ function __willCanvasEnterLowDetailOnLoad() {
 // Import/export transfer logic moved to transfer_AI_sync/import-export-transfer-ui-support.js
 
 function startSectionResize(element, event) {
+    if (__isNodeMaximized(element)) return false;
     if (!isSectionCtrlModeEvent(event)) return false;
     if (!element || event.button !== 2) return false;
     if (CanvasState.dragState && CanvasState.dragState.isDragging) return false;
@@ -8420,6 +8427,7 @@ function setupCanvasZoomAndPan() {
     }
 
     function beginCanvasPanFromMouseEvent(e) {
+        if (__isCanvasNodeMaximizedActive()) return false;
         if (!e || !(CanvasState.isSpacePressed || CanvasState.isCtrlPressed)) return false;
         e.preventDefault();
         e.stopPropagation();
@@ -8519,7 +8527,7 @@ function setupCanvasZoomAndPan() {
         // 在 contenteditable 元素内编辑时不拦截键盘事件（允许输入空格等）
         if (e.target.isContentEditable || e.target.closest('[contenteditable="true"]')) return;
 
-        if (isSpaceShortcut) {
+        if (isSpaceShortcut && !__isCanvasNodeMaximizedActive()) {
             e.preventDefault();
             __cancelCanvasActiveZoomGesture('space-key');
             CanvasState.isSpacePressed = true;
@@ -27175,6 +27183,7 @@ function setupCanvasEventListeners() {
     // 初始蒙版同步
     refreshSectionCtrlOverlays();
     __bindMaximizedNodeRemovalSync();
+    __bindMaximizedNodeInteractionRecovery();
 
     if (document && document.documentElement && document.documentElement.dataset.tempRaiseNodeBound !== 'true') {
         document.documentElement.dataset.tempRaiseNodeBound = 'true';
@@ -41053,6 +41062,46 @@ async function openLastMaximizedNode(options = {}) {
     return { success: false, reason: 'not-found', descriptor };
 }
 
+function __recoverMaximizedNodeInteraction() {
+    if (!__isCanvasNodeMaximizedActive()) return;
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+
+    // Canvas gestures can outlive a missed keyup/pointerup or a hidden document.
+    // Fullscreen uses native card controls and scrolling, not canvas pan overlays.
+    CanvasState.isSpacePressed = false;
+    CanvasState.isCtrlPressed = false;
+    CanvasState.isPanning = false;
+    workspace.classList.remove('space-pressed', 'ctrl-pressed', 'panning', 'is-scrolling');
+    if (scrollStopTimer) clearTimeout(scrollStopTimer);
+    scrollStopTimer = null;
+    isScrolling = false;
+    setSectionCtrlModeActive(false);
+    workspace.querySelectorAll('.canvas-node-maximized > .canvas-section-ctrl-overlay')
+        .forEach(overlay => overlay.classList.remove('active', 'ctrl-resize'));
+    __cancelCanvasActiveZoomGesture('node-fullscreen-recovery');
+    __cancelCanvasWheelPanMotion();
+    updateCanvasZoomPerformanceMode({ forceOff: true });
+}
+
+function __bindMaximizedNodeInteractionRecovery() {
+    if (document.documentElement.dataset.maximizedInteractionRecoveryBound === 'true') return;
+    document.documentElement.dataset.maximizedInteractionRecoveryBound = 'true';
+    ['focus', 'blur', 'pageshow', 'pagehide'].forEach(type => {
+        window.addEventListener(type, __recoverMaximizedNodeInteraction);
+    });
+    ['visibilitychange', 'freeze', 'resume'].forEach(type => {
+        document.addEventListener(type, __recoverMaximizedNodeInteraction);
+    });
+    document.addEventListener('pointerdown', event => {
+        const target = __getEventTargetElement(event);
+        if (target && target.closest('.canvas-node-maximized') &&
+            target.closest('.permanent-section-header, .temp-node-header, .md-node-toolbar')) {
+            __recoverMaximizedNodeInteraction();
+        }
+    }, true);
+}
+
 function __updateNodeMaximizedState() {
     try {
         const wasActive = CanvasState.nodeMaximizedActive;
@@ -41060,6 +41109,7 @@ function __updateNodeMaximizedState() {
         if (document && document.body) {
             document.body.classList.toggle('canvas-node-maximized-active', CanvasState.nodeMaximizedActive);
         }
+        __recoverMaximizedNodeInteraction();
 
         // Dispatch custom event to notify external listeners of the fullscreen state change
         window.dispatchEvent(new CustomEvent('canvas-maximized-state-change', {
@@ -41251,6 +41301,8 @@ function scheduleMaximizedNodesRefresh(options = {}) {
 
 function maximizeCanvasNode(element, options = {}) {
     if (!element) return;
+    // Finish an active resize before saving/replacing the normal card geometry.
+    setSectionCtrlModeActive(false);
     if (__isNodeMaximized(element)) {
         __wakeCanvasNodeFromLazyState(element);
         if (refreshMaximizedNodes({ stabilize: false })) {

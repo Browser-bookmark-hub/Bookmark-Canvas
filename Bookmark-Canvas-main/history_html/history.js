@@ -10388,12 +10388,10 @@ function bindCanvasFloatingToolsLifecycleRecovery() {
     };
 
     window.addEventListener('pageshow', recover, true);
-    window.addEventListener('canvas-maximized-state-change', (event) => {
-        // Card fullscreen hides the canvas floating tools. Reconcile the
-        // interaction layer immediately when that state is removed.
-        if (event && event.detail && event.detail.active === true) return;
-        recover();
-    }, true);
+    // Entering fullscreen hides the toolbar too; release its capture first.
+    window.addEventListener('canvas-maximized-state-change', recover, true);
+    window.addEventListener('blur', resetCanvasFloatingToolsInteractionState, true);
+    window.addEventListener('pagehide', resetCanvasFloatingToolsInteractionState, true);
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') recover();
         else resetCanvasFloatingToolsInteractionState();

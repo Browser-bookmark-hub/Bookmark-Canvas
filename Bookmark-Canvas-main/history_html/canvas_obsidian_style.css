@@ -100,8 +100,8 @@
     pointer-events: none;
 }
 
-.canvas-workspace.space-pressed .canvas-pan-capture-layer,
-.canvas-workspace.panning .canvas-pan-capture-layer {
+:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.space-pressed .canvas-pan-capture-layer,
+:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.panning .canvas-pan-capture-layer {
     pointer-events: auto;
     cursor: inherit;
 }
@@ -728,8 +728,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 /* 低缩放 + 大量卡片的热交互性能模式：低细节外观不变，只降低命中测试/动画成本。 */
-.canvas-workspace.canvas-zoom-performance .canvas-content,
-.canvas-workspace.canvas-zoom-performance .canvas-content * {
+:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.canvas-zoom-performance .canvas-content,
+:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.canvas-zoom-performance .canvas-content * {
     pointer-events: none !important;
     transition: none !important;
 }
@@ -1727,7 +1727,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 /* .canvas-workspace.is-zooming::before { opacity: 0; } */
 
 /* 内容层：禁用交互，且禁用过渡以消除操作延迟 */
-.canvas-workspace.is-zooming .canvas-content {
+:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.is-zooming .canvas-content {
     /* 停止鼠标命中测试，这是唯一保留的高性价比优化 */
     pointer-events: none;
 
@@ -3057,8 +3057,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 /* 2. 拖动时的性能模式 */
-.canvas-workspace.is-dragging .canvas-content *,
-.canvas-workspace.panning .canvas-content * {
+:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.is-dragging .canvas-content *,
+:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.panning .canvas-content * {
     /* 拖动期间禁止绝大多数鼠标事件响应，防止 Hover/HitTest 计算风暴 */
     pointer-events: none !important;
 }
