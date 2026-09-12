@@ -39935,7 +39935,7 @@ function __applyNodeLayoutZoom(element, percent) {
     try {
         element.style.setProperty('--canvas-node-layout-zoom', String(safe / 100));
     } catch (_) { }
-    if (element.dataset) {
+    if (element.dataset && element.dataset.layoutZoomPercent !== String(safe)) {
         element.dataset.layoutZoomPercent = String(safe);
     }
     __updateNodeLayoutZoomDisplay(element, safe);
