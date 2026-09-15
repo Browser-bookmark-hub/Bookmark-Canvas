@@ -8424,14 +8424,37 @@ function renderTagSubmenu(context) {
         return;
     }
 
-    if (!tagSubmenuCtx || JSON.stringify(tagSubmenuCtx.targets) !== JSON.stringify(targets)) {
-        tagSubmenuCtx = {
-            targets,
-            selectedColor: null,
-            editingTag: null,
-            recentLimit: 3
+    // Use the same popover as the shortcut/tag-dot entry point. Keeping a second
+    // renderer here caused the global-tag list and wheel event routing to drift.
+    if (window.TagSystem && typeof window.TagSystem.openTagPopover === 'function') {
+        const anchor = lastSubmenuTriggerItem || contextSubmenu;
+        const anchorRect = anchor.getBoundingClientRect();
+        anchor.__tagPopoverAnchorRect = {
+            left: anchorRect.left,
+            right: anchorRect.right,
+            top: anchorRect.top,
+            bottom: anchorRect.bottom,
+            width: anchorRect.width,
+            height: anchorRect.height
         };
+        hideContextMenu();
+        window.TagSystem.openTagPopover({
+            targets,
+            anchor
+        });
+        return;
     }
+
+    if (!tagSubmenuCtx || JSON.stringify(tagSubmenuCtx.targets) !== JSON.stringify(targets)) {
+            tagSubmenuCtx = {
+                targets,
+                selectedColor: null,
+                editingTag: null,
+                recentLimit: 3,
+                bucketLimits: {}
+            };
+    }
+    if (!tagSubmenuCtx.bucketLimits) tagSubmenuCtx.bucketLimits = {};
 
     const TAG_SUBMENU_I18N = {
         inputPlaceholder: { 'zh_CN': '可选：自定义文字...', 'en': 'Optional: custom text...' },
@@ -8651,6 +8674,9 @@ function renderTagSubmenu(context) {
         try {
             if (bridge && bridge.collectAllUsedTags) globalTags = await bridge.collectAllUsedTags();
         } catch (_) {}
+        if (tagSubmenuCtx.selectedColor) {
+            globalTags = globalTags.filter((tag) => tag.color === tagSubmenuCtx.selectedColor);
+        }
 
         recentHeader.textContent = t('recentHeader');
         recentEl.innerHTML = '';
@@ -8662,57 +8688,102 @@ function renderTagSubmenu(context) {
             recentEl.appendChild(empty);
             recentMore.hidden = true;
         } else {
-            const limit = Math.min(10, Math.max(3, tagSubmenuCtx.recentLimit || 3));
-            tagSubmenuCtx.recentLimit = limit;
-            const visible = globalTags.slice(0, limit);
-
-            visible.forEach((tag) => {
-                const k = keyOf(tag.color, tag.text);
-                const entry = aggregate.get(k);
-                const row = document.createElement('div');
-                row.className = 'tag-applied-row';
-                row.dataset.color = tag.color;
-                row.dataset.text = tag.text;
-                let statusMark = '+';
-                if (entry) {
-                    if (entry.present === targets.length) {
-                        row.classList.add('is-active');
-                        statusMark = '✓';
-                    } else {
-                        row.classList.add('is-mixed');
-                        statusMark = '–';
-                    }
+            const getBucketKey = (text) => {
+                if (typeof getTagBrowseBucketKey === 'function') {
+                    try { return getTagBrowseBucketKey(text); } catch (_) { }
                 }
-                row.innerHTML = `
-                    <span class="tag-dot tag-dot-${tag.color}"></span>
-                    <span class="tag-applied-text"></span>
-                    <span class="tag-applied-status">${statusMark}</span>
-                `;
-                row.querySelector('.tag-applied-text').textContent = tag.text || colorName(tag.color);
-
-                row.addEventListener('click', async (e) => {
-                    e.stopPropagation();
-                    if (row.classList.contains('is-active') || row.classList.contains('is-mixed')) {
-                        tagSubmenuCtx.editingTag = tag;
-                        tagSubmenuCtx.selectedColor = tag.color;
-                        inputEl.value = tag.text || colorName(tag.color);
-                        updatePreview();
-                        await renderList();
-                    } else {
-                        await toggleTagOnAllTargets(tag, { mode: 'auto' });
-                    }
-                });
-
-                recentEl.appendChild(row);
+                const first = String(text || '').trim().charAt(0).toUpperCase();
+                if (/^[0-9]$/.test(first)) return '0-9';
+                if (/^[A-Z]$/.test(first)) return first;
+                return '#';
+            };
+            const buckets = new Map();
+            globalTags.forEach((tag) => {
+                const key = getBucketKey(tag.text || colorName(tag.color));
+                if (!buckets.has(key)) buckets.set(key, []);
+                buckets.get(key).push(tag);
             });
-
-            const hiddenCount = Math.max(0, Math.min(globalTags.length, 10) - visible.length);
-            if (hiddenCount > 0) {
-                recentMore.hidden = false;
-                recentMore.textContent = t('moreEllipsis', { n: hiddenCount });
-            } else {
-                recentMore.hidden = true;
+            const bucketOrder = ['0-9'].concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')).concat(['#']);
+            const activeBuckets = bucketOrder.filter((key) => buckets.has(key) && buckets.get(key).length);
+            buckets.forEach((_, key) => { if (!activeBuckets.includes(key)) activeBuckets.push(key); });
+            let collator = null;
+            if (typeof getTagBrowseSortCollator === 'function') {
+                try { collator = getTagBrowseSortCollator(lang === 'zh_CN'); } catch (_) { }
             }
+            const compareTags = (a, b) => {
+                const aText = a.text || colorName(a.color);
+                const bText = b.text || colorName(b.color);
+                const result = collator ? collator.compare(aText, bText) : aText.localeCompare(bText, lang === 'zh_CN' ? 'zh-CN' : 'en', { numeric: true, sensitivity: 'base' });
+                return result || String(a.color).localeCompare(String(b.color));
+            };
+
+            activeBuckets.forEach((bucketKey) => {
+                const bucket = buckets.get(bucketKey).sort(compareTags);
+                const bucketDiv = document.createElement('div');
+                bucketDiv.className = 'tag-global-bucket';
+                const title = document.createElement('div');
+                title.className = 'tag-global-bucket-title';
+                title.textContent = bucketKey;
+                bucketDiv.appendChild(title);
+                const list = document.createElement('div');
+                list.className = 'tag-global-bucket-list';
+                const limit = tagSubmenuCtx.bucketLimits[bucketKey] || 5;
+                tagSubmenuCtx.bucketLimits[bucketKey] = limit;
+                bucket.slice(0, limit).forEach((tag) => {
+                    const k = keyOf(tag.color, tag.text);
+                    const entry = aggregate.get(k);
+                    const row = document.createElement('div');
+                    row.className = 'tag-applied-row';
+                    row.dataset.color = tag.color;
+                    row.dataset.text = tag.text;
+                    let statusMark = '+';
+                    if (entry) {
+                        if (entry.present === targets.length) {
+                            row.classList.add('is-active');
+                            statusMark = '✓';
+                        } else {
+                            row.classList.add('is-mixed');
+                            statusMark = '–';
+                        }
+                    }
+                    row.innerHTML = `
+                        <span class="tag-dot tag-dot-${tag.color}"></span>
+                        <span class="tag-applied-text"></span>
+                        <span class="tag-applied-status">${statusMark}</span>
+                    `;
+                    row.querySelector('.tag-applied-text').textContent = tag.text || colorName(tag.color);
+
+                    row.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        if (row.classList.contains('is-active') || row.classList.contains('is-mixed')) {
+                            tagSubmenuCtx.editingTag = tag;
+                            tagSubmenuCtx.selectedColor = tag.color;
+                            inputEl.value = tag.text || colorName(tag.color);
+                            updatePreview();
+                            await renderList();
+                        } else {
+                            await toggleTagOnAllTargets(tag, { mode: 'auto' });
+                        }
+                    });
+
+                    list.appendChild(row);
+                });
+                bucketDiv.appendChild(list);
+                if (bucket.length > limit) {
+                    const more = document.createElement('button');
+                    more.className = 'tag-popover-more';
+                    more.type = 'button';
+                    more.textContent = lang === 'zh_CN' ? `展开 ${Math.min(5, bucket.length - limit)} 项` : `Load +${Math.min(5, bucket.length - limit)}`;
+                    more.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        tagSubmenuCtx.bucketLimits[bucketKey] = limit + Math.min(5, bucket.length - limit);
+                        await renderList();
+                    });
+                    bucketDiv.appendChild(more);
+                }
+                recentEl.appendChild(bucketDiv);
+            });
+            recentMore.hidden = true;
         }
         updatePreview();
     }
@@ -8763,6 +8834,10 @@ function renderTagSubmenu(context) {
     });
 
     renderList();
+
+    // The canvas-level wheel handler must not steal scrolling from this menu,
+    // including when the pointer is directly over the native scrollbar thumb.
+    contextSubmenu.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
 }
 
 // 捕获阶段的全局点击监听，用于检测是否点击了高亮导引线并取消 Trace
