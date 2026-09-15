@@ -10460,7 +10460,10 @@ function __getBookmarkAddPositionOptions(context) {
                 value: 'inside',
                 label: isCanvasBlank
                     ? (lang === 'zh_CN' ? '生成特殊临时栏目' : 'Generate Special Temporary Section')
-                    : (lang === 'zh_CN' ? '根目录' : 'Root Directory')
+                    : (lang === 'zh_CN' ? '根目录' : 'Root Directory'),
+                icon: isCanvasBlank ? '' : 'home',
+                iconText: isCanvasBlank ? '✦' : '',
+                iconTone: isCanvasBlank ? 'special' : ''
             }
         ];
     }
@@ -10469,15 +10472,18 @@ function __getBookmarkAddPositionOptions(context) {
         return [
             {
                 value: 'inside',
-                label: lang === 'zh_CN' ? '文件夹内（默认）' : 'Inside Folder (Default)'
+                label: lang === 'zh_CN' ? '文件夹内' : 'Inside Folder',
+                icon: 'folder-open'
             },
             {
                 value: 'before',
-                label: lang === 'zh_CN' ? '文件夹上方' : 'Above Folder'
+                label: lang === 'zh_CN' ? '文件夹上方' : 'Above Folder',
+                icon: 'arrow-up'
             },
             {
                 value: 'after',
-                label: lang === 'zh_CN' ? '文件夹下方' : 'Below Folder'
+                label: lang === 'zh_CN' ? '文件夹下方' : 'Below Folder',
+                icon: 'arrow-down'
             }
         ];
     }
@@ -10485,11 +10491,13 @@ function __getBookmarkAddPositionOptions(context) {
     return [
         {
             value: 'after',
-            label: lang === 'zh_CN' ? '当前书签下方（默认）' : 'Below Bookmark (Default)'
+            label: lang === 'zh_CN' ? '当前书签下方' : 'Below Bookmark',
+            icon: 'arrow-down'
         },
         {
             value: 'before',
-            label: lang === 'zh_CN' ? '当前书签上方' : 'Above Bookmark'
+            label: lang === 'zh_CN' ? '当前书签上方' : 'Above Bookmark',
+            icon: 'arrow-up'
         }
     ];
 }
@@ -11609,12 +11617,23 @@ function __renderBookmarkAddPositionOptions(container, context, position) {
     const options = __getBookmarkAddPositionOptions(context);
     const selected = __normalizeBookmarkAddPosition(context, position);
 
-    container.innerHTML = options.map((option) => `
+    container.innerHTML = options.map((option) => {
+        let iconHtml = '';
+        if (option.iconText) {
+            const toneClass = option.iconTone ? `canvas-dir-icon-badge-${option.iconTone}` : '';
+            iconHtml = `<span class="canvas-dir-icon-badge ${toneClass}">${option.iconText}</span>`;
+        } else if (option.icon) {
+            iconHtml = `<i class="fas fa-${option.icon}"></i>`;
+        }
+        return `
         <label class="bookmark-add-secondary-choice">
             <input type="radio" name="bookmarkAddPosition" value="${option.value}" ${option.value === selected ? 'checked' : ''}>
-            <span class="bookmark-add-secondary-choice-label">${option.label}</span>
+            <span class="bookmark-add-secondary-choice-label">
+                <span class="bookmark-add-secondary-choice-main">${iconHtml}<span>${option.label}</span></span>
+            </span>
         </label>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function __readCheckedValue(root, selector, fallback = '') {

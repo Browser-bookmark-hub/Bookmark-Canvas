@@ -5095,8 +5095,10 @@ html.side-panel-mode #bookmarkAddSecondaryModal .modal-body {
     box-sizing: border-box;
 }
 
-.bookmark-add-secondary-choice-label i {
+.bookmark-add-secondary-choice-label i,
+.bookmark-add-secondary-choice-label .canvas-dir-icon-badge {
     width: 14px;
+    min-width: 14px;
     text-align: center;
     color: var(--text-secondary);
 }
