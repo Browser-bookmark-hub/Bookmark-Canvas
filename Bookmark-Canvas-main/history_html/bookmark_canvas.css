@@ -106,7 +106,7 @@
     cursor: move !important;
     z-index: 1000;
     user-select: none;
-    will-change: left, top;
+    will-change: transform;
     /* 拖拽时启用硬件加速 */
 }
 
@@ -738,7 +738,7 @@
     transform: scale(1.02);
     z-index: 1000;
     user-select: none;
-    will-change: left, top, transform;
+    will-change: transform;
     /* 拖拽时启用硬件加速 */
 }
 
@@ -1239,7 +1239,7 @@
 .permanent-section-body.canvas-scroll-perf-active,
 .temp-node-body.canvas-scroll-perf-active {
     contain: paint;
-    will-change: scroll-position, transform;
+    will-change: transform;
     transform: translateZ(0);
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
@@ -1247,7 +1247,7 @@
 
 .permanent-bookmark-section.canvas-node-maximized .permanent-section-body,
 .temp-canvas-node.canvas-node-maximized .temp-node-body {
-    will-change: scroll-position, transform;
+    will-change: transform;
     transform: translateZ(0);
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
@@ -1660,14 +1660,14 @@
 .permanent-bookmark-section.temp-node-enter,
 .md-canvas-node.temp-node-enter {
     opacity: 0 !important;
-    transform: translateY(18px) scale(0.82) !important;
+    transform: translateY(6px) !important;
 }
 
 [data-theme="dark"] .temp-canvas-node.temp-node-enter,
 [data-theme="dark"] .permanent-bookmark-section.temp-node-enter,
 [data-theme="dark"] .md-canvas-node.temp-node-enter {
     opacity: 0 !important;
-    transform: translateY(18px) scale(0.82) !important;
+    transform: translateY(6px) !important;
 }
 
 /* Canvas中的书签项样式 */
@@ -3742,7 +3742,6 @@ body.canvas-node-maximized-active .canvas-edge-label {
     font-size: 12px;
     min-width: max-content;
     transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.22s ease, padding 0.22s ease;
-    will-change: padding;
 }
 
 .canvas-floating-toggle-mini {
@@ -3974,7 +3973,6 @@ body.canvas-node-maximized-active .canvas-edge-label {
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
     opacity: 0.96;
     transition: none !important;
-    will-change: left, top;
 }
 
 .canvas-floating-show-hints .canvas-floating-drag-hint {
@@ -4079,7 +4077,6 @@ body.canvas-node-maximized-active .canvas-edge-label {
 
 .canvas-zoom-indicator.canvas-floating-dragging {
     transition: none !important;
-    will-change: left, top;
 }
 
 .canvas-zoom-indicator.floating-tools-collapsed {

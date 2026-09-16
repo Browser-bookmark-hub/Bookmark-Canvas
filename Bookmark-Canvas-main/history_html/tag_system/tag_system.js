@@ -1378,8 +1378,34 @@
         __permIdentityIndex = null;
     }
 
+    const __targetResolveCache = new WeakMap();
+
+    function __treeItemTargetSignature(treeItem) {
+        if (!treeItem) return '';
+        const nodeId = treeItem.dataset.nodeId || treeItem.getAttribute('data-node-id') || '';
+        const treeType = treeItem.dataset.treeType || treeItem.getAttribute('data-tree-type') || '';
+        const sectionId = treeItem.dataset.sectionId || treeItem.getAttribute('data-section-id') || '';
+        return `${nodeId}|${treeType}|${sectionId}`;
+    }
+
+    function __resolveCachedTargetFromTreeItem(treeItem) {
+        if (!treeItem) return null;
+        try {
+            const signature = __treeItemTargetSignature(treeItem);
+            const cached = __targetResolveCache.get(treeItem);
+            if (cached && cached.signature === signature) {
+                return cached.target;
+            }
+            const target = __resolveTargetFromTreeItem(treeItem);
+            __targetResolveCache.set(treeItem, { signature, target });
+            return target;
+        } catch (_) {
+            return __resolveTargetFromTreeItem(treeItem);
+        }
+    }
+
     function __getTagsForTreeItemSync(treeItem) {
-        const target = __resolveTargetFromTreeItem(treeItem);
+        const target = __resolveCachedTargetFromTreeItem(treeItem);
         if (!target) return [];
         if (target.kind === 'temporary') {
             try {
@@ -1566,11 +1592,11 @@
     }
 
     function __getNoteForTreeItemSync(treeItem) {
-        return __getNoteForTargetSync(__resolveTargetFromTreeItem(treeItem));
+        return __getNoteForTargetSync(__resolveCachedTargetFromTreeItem(treeItem));
     }
 
     function __getNoteMetaForTreeItemSync(treeItem) {
-        return __getNoteMetaForTargetSync(__resolveTargetFromTreeItem(treeItem));
+        return __getNoteMetaForTargetSync(__resolveCachedTargetFromTreeItem(treeItem));
     }
 
     function __getBookmarkTreeNoteSettings() {
@@ -1714,6 +1740,20 @@
 
     let __pendingNoteTreeItems = new Set();
     let __pendingNoteFlushScheduled = false;
+    const __TAG_FLUSH_CHUNK_MS_DEFAULT = 4;
+    const __TAG_FLUSH_BUSY_RETRY_MS = 220;
+
+    // 分片预算随画布性能档位伸缩（主线程性能越强，单帧可处理越多标记）。
+    function __tagFlushChunkMs() {
+        try {
+            const cm = (typeof window !== 'undefined') ? window.CanvasModule : null;
+            if (cm && typeof cm.getPerfConfig === 'function') {
+                const c = cm.getPerfConfig();
+                if (c && Number.isFinite(c.tagFlushChunkMs)) return c.tagFlushChunkMs;
+            }
+        } catch (_) { }
+        return __TAG_FLUSH_CHUNK_MS_DEFAULT;
+    }
 
     function __observeNoteTreeItem(el) {
         if (!el || !el.classList || !el.classList.contains('tree-item')) return;
@@ -1724,73 +1764,119 @@
     function __scheduleFlushNoteMarkers() {
         if (__pendingNoteFlushScheduled) return;
         __pendingNoteFlushScheduled = true;
-        requestAnimationFrame(async () => {
-            __pendingNoteFlushScheduled = false;
-            const items = Array.from(__pendingNoteTreeItems);
-            __pendingNoteTreeItems.clear();
-            const hasPermItems = items.some((el) => {
-                const tt = el.dataset.treeType || el.getAttribute('data-tree-type') || '';
-                return tt !== 'temporary';
-            });
-            if (hasPermItems && !__permNoteIndex) {
-                await __loadPermNoteIndex();
+        const run = () => {
+            // 交互（缩放/平移/拖动）中让路：保持 pending 不清空，稍后重试，
+            // 避免在交互帧里对整棵树重算标记拖垮主线程。
+            if (__isCanvasInteractionBusyForTagDots()) {
+                setTimeout(() => {
+                    requestAnimationFrame(run);
+                }, __TAG_FLUSH_BUSY_RETRY_MS);
+                return;
             }
-            const cardWidthCache = new Map();
-            const updates = [];
-            items.forEach((treeItem) => {
-                if (!document.contains(treeItem)) return;
-                const existing = treeItem.querySelector(':scope > .tree-item-note-marker');
-                const noteMeta = __getNoteMetaForTreeItemSync(treeItem);
-                const note = noteMeta.note;
-                const noteColor = __normalizeNoteColor(noteMeta.color);
-                __applyNoteHighlightToTreeItem(treeItem, noteMeta);
-                if (!note) {
-                    if (existing) updates.push({ action: 'remove', existing });
-                    return;
-                }
+            __pendingNoteFlushScheduled = false;
+            Promise.resolve(__flushNoteMarkersChunk()).catch(() => { });
+        };
+        requestAnimationFrame(run);
+    }
 
-                const currentModeIsWide = existing
-                    ? existing.classList.contains('note-trailing')
-                    : null;
-                const wide = __isWideNoteContext(treeItem, currentModeIsWide, cardWidthCache);
-                const nextMode = wide ? 'note-trailing' : 'note-leading';
-                const currentMode = existing
-                    ? (existing.classList.contains('note-trailing') ? 'note-trailing' : 'note-leading')
-                    : null;
-                const noteKey = `${noteColor}:${__getNoteMarkerSignature(note)}`;
+    async function __flushNoteMarkersChunk() {
+        const items = Array.from(__pendingNoteTreeItems);
+        __pendingNoteTreeItems.clear();
+        if (!items.length) return;
+        const hasPermItems = items.some((el) => {
+            const tt = el.dataset.treeType || el.getAttribute('data-tree-type') || '';
+            return tt !== 'temporary';
+        });
+        if (hasPermItems && !__permNoteIndex) {
+            await __loadPermNoteIndex();
+        }
+        // await 期间可能又开始了交互：再让一次路。
+        if (__isCanvasInteractionBusyForTagDots()) {
+            for (let i = 0; i < items.length; i++) __pendingNoteTreeItems.add(items[i]);
+            __scheduleFlushNoteMarkers();
+            return;
+        }
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.beginFrameBudget === 'function') {
+                window.CanvasModule.beginFrameBudget(__tagFlushFrameTs);
+            }
+        } catch (_) { }
+        const __chunkMs = __tagFlushChunkMs();
+        const cardWidthCache = new Map();
+        const updates = [];
+        const startAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        let index = 0;
+        for (; index < items.length; index++) {
+            if (index > 0) {
+                const nowAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                const chunkExceeded = (nowAt - startAt) >= __chunkMs;
+                const frameExceeded = (window.CanvasModule && typeof window.CanvasModule.frameBudgetExceeded === 'function')
+                    ? window.CanvasModule.frameBudgetExceeded(nowAt)
+                    : false;
+                const inputPending = (window.CanvasModule && typeof window.CanvasModule.hasPendingInput === 'function')
+                    ? window.CanvasModule.hasPendingInput()
+                    : false;
+                if (chunkExceeded || frameExceeded || inputPending) break;
+            }
+            const treeItem = items[index];
+            if (!document.contains(treeItem)) continue;
+            const existing = treeItem.querySelector(':scope > .tree-item-note-marker');
+            const noteMeta = __getNoteMetaForTreeItemSync(treeItem);
+            const note = noteMeta.note;
+            const noteColor = __normalizeNoteColor(noteMeta.color);
+            __applyNoteHighlightToTreeItem(treeItem, noteMeta);
+            if (!note) {
+                if (existing) updates.push({ action: 'remove', existing });
+                continue;
+            }
 
-                if (existing && existing.dataset.noteKey === noteKey && currentMode === nextMode) {
-                    updates.push({ action: 'place', treeItem, existing, wide });
-                    return;
-                }
-                updates.push({
-                    action: existing ? 'replace' : 'insert',
-                    treeItem,
-                    existing,
-                    noteColor,
-                    wide,
-                    noteKey
-                });
+            const currentModeIsWide = existing
+                ? existing.classList.contains('note-trailing')
+                : null;
+            const wide = __isWideNoteContext(treeItem, currentModeIsWide, cardWidthCache);
+            const nextMode = wide ? 'note-trailing' : 'note-leading';
+            const currentMode = existing
+                ? (existing.classList.contains('note-trailing') ? 'note-trailing' : 'note-leading')
+                : null;
+            const noteKey = `${noteColor}:${__getNoteMarkerSignature(note)}`;
+
+            if (existing && existing.dataset.noteKey === noteKey && currentMode === nextMode) {
+                updates.push({ action: 'place', treeItem, existing, wide });
+                continue;
+            }
+            updates.push({
+                action: existing ? 'replace' : 'insert',
+                treeItem,
+                existing,
+                noteColor,
+                wide,
+                noteKey
             });
+        }
 
-            if (!updates.length) return;
-            updates.forEach((up) => {
-                if (up.action === 'remove') {
-                    __hideNoteHoverBubbleForMarker(up.existing);
-                    up.existing.remove();
-                    return;
-                }
-                if (up.action === 'place') {
-                    __placeNoteMarker(up.treeItem, up.existing, up.wide);
-                    return;
-                }
-                const next = __buildNoteMarker(up.noteColor, up.wide, up.noteKey);
-                if (up.existing) {
-                    __hideNoteHoverBubbleForMarker(up.existing);
-                    up.existing.replaceWith(next);
-                }
-                __placeNoteMarker(up.treeItem, next, up.wide);
-            });
+        // 未处理完的项归还队列，下一帧继续（时间切片）。
+        if (index < items.length) {
+            for (let i = index; i < items.length; i++) __pendingNoteTreeItems.add(items[i]);
+            __scheduleFlushNoteMarkers();
+        }
+
+        if (!updates.length) return;
+        updates.forEach((up) => {
+            if (up.action === 'remove') {
+                __hideNoteHoverBubbleForMarker(up.existing);
+                up.existing.remove();
+                return;
+            }
+            if (up.action === 'place') {
+                __placeNoteMarker(up.treeItem, up.existing, up.wide);
+                return;
+            }
+            const next = __buildNoteMarker(up.noteColor, up.wide, up.noteKey);
+            if (up.existing) {
+                __hideNoteHoverBubbleForMarker(up.existing);
+                up.existing.replaceWith(next);
+            }
+            __placeNoteMarker(up.treeItem, next, up.wide);
         });
     }
 
@@ -2048,6 +2134,7 @@
     // Mutation observer: auto-inject dots on newly-rendered tree items.
     let __pendingTagTreeItems = new Set();
     let __pendingFlushScheduled = false;
+    let __tagFlushFrameTs = 0;
     const __resizeObservedTreeItems = new WeakSet();
     const __treeItemResizeObserver = (typeof ResizeObserver !== 'undefined')
         ? new ResizeObserver((entries) => {
@@ -2060,162 +2147,218 @@
     function __scheduleFlushDots() {
         if (__pendingFlushScheduled) return;
         __pendingFlushScheduled = true;
-        requestAnimationFrame(async () => {
+        const run = (ts) => {
+            __tagFlushFrameTs = (typeof ts === 'number') ? ts : 0;
+            try {
+                if (window.CanvasModule && typeof window.CanvasModule.beginFrameBudget === 'function') {
+                    window.CanvasModule.beginFrameBudget(__tagFlushFrameTs);
+                }
+            } catch (_) { }
+            // 交互中让路：保持 pending，稍后重试，避免在缩放/平移帧里批量写 DOM。
+            if (__isCanvasInteractionBusyForTagDots()) {
+                setTimeout(() => {
+                    requestAnimationFrame(run);
+                }, __TAG_FLUSH_BUSY_RETRY_MS);
+                return;
+            }
             __pendingFlushScheduled = false;
-            const items = Array.from(__pendingTagTreeItems);
-            __pendingTagTreeItems.clear();
-            // Ensure perm index is ready if any of the items are permanent.
-            const hasPermItems = items.some((el) => {
-                const tt = el.dataset.treeType || el.getAttribute('data-tree-type') || '';
-                return tt !== 'temporary';
-            });
-            if (hasPermItems && !__permIdentityIndex) {
-                await __loadPermIdentityIndex();
+            Promise.resolve(__flushTagDotsChunk()).catch(() => { });
+        };
+        requestAnimationFrame(run);
+    }
+
+    async function __flushTagDotsChunk() {
+        const items = Array.from(__pendingTagTreeItems);
+        __pendingTagTreeItems.clear();
+        if (!items.length) return;
+        // Ensure perm index is ready if any of the items are permanent.
+        const hasPermItems = items.some((el) => {
+            const tt = el.dataset.treeType || el.getAttribute('data-tree-type') || '';
+            return tt !== 'temporary';
+        });
+        if (hasPermItems && !__permIdentityIndex) {
+            await __loadPermIdentityIndex();
+        }
+        // await 期间可能又开始了交互：再让一次路。
+        if (__isCanvasInteractionBusyForTagDots()) {
+            for (let i = 0; i < items.length; i++) __pendingTagTreeItems.add(items[i]);
+            __scheduleFlushDots();
+            return;
+        }
+
+        // --- BATCHED READ PHASE (time-sliced) ---
+        try {
+            if (window.CanvasModule && typeof window.CanvasModule.beginFrameBudget === 'function') {
+                window.CanvasModule.beginFrameBudget(__tagFlushFrameTs);
+            }
+        } catch (_) { }
+        const __chunkMs = __tagFlushChunkMs();
+        const cardWidthCache = new Map();
+        const updates = [];
+        const startAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        let index = 0;
+        for (; index < items.length; index++) {
+            if (index > 0) {
+                const nowAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                const chunkExceeded = (nowAt - startAt) >= __chunkMs;
+                const frameExceeded = (window.CanvasModule && typeof window.CanvasModule.frameBudgetExceeded === 'function')
+                    ? window.CanvasModule.frameBudgetExceeded(nowAt)
+                    : false;
+                const inputPending = (window.CanvasModule && typeof window.CanvasModule.hasPendingInput === 'function')
+                    ? window.CanvasModule.hasPendingInput()
+                    : false;
+                if (chunkExceeded || frameExceeded || inputPending) break;
+            }
+            const treeItem = items[index];
+            if (!document.contains(treeItem)) continue;
+
+            const existing = treeItem.querySelector(':scope > .tree-item-tag-dots');
+            const tags = __getTagsForTreeItemSync(treeItem);
+
+            if (!tags.length) {
+                if (existing) {
+                    updates.push({ treeItem, action: 'remove', existing });
+                }
+                continue;
             }
 
-            // --- BATCHED READ PHASE ---
-            const cardWidthCache = new Map();
-            const updates = [];
-            items.forEach((treeItem) => {
-                if (!document.contains(treeItem)) return;
+            // Querying layout settings and offsetWidth in batch before writing to the DOM
+            const currentModeIsWide = existing
+                ? existing.classList.contains('dots-trailing')
+                : null;
+            const wide = __isWideRowContext(treeItem, currentModeIsWide, cardWidthCache);
+            const nextMode = wide ? 'dots-trailing' : 'dots-leading';
+            const currentMode = existing
+                ? (existing.classList.contains('dots-trailing') ? 'dots-trailing' : 'dots-leading')
+                : null;
 
-                const existing = treeItem.querySelector(':scope > .tree-item-tag-dots');
-                const tags = __getTagsForTreeItemSync(treeItem);
+            const tagsKey = tags.map(t => `${t.color}:${t.text || ''}`).join('|');
+            const existingTagsKey = existing ? existing.dataset.tagsKey : null;
 
-                if (!tags.length) {
-                    if (existing) {
-                        updates.push({ treeItem, action: 'remove', existing });
-                    }
-                    return;
-                }
+            // Compare tags and layout mode to skip redundant updates
+            if (existing && existingTagsKey === tagsKey && currentMode === nextMode) {
+                continue;
+            }
 
-                // Querying layout settings and offsetWidth in batch before writing to the DOM
-                const currentModeIsWide = existing
-                    ? existing.classList.contains('dots-trailing')
-                    : null;
-                const wide = __isWideRowContext(treeItem, currentModeIsWide, cardWidthCache);
-                const nextMode = wide ? 'dots-trailing' : 'dots-leading';
-                const currentMode = existing
-                    ? (existing.classList.contains('dots-trailing') ? 'dots-trailing' : 'dots-leading')
-                    : null;
-
-                const tagsKey = tags.map(t => `${t.color}:${t.text || ''}`).join('|');
-                const existingTagsKey = existing ? existing.dataset.tagsKey : null;
-
-                // Compare tags and layout mode to skip redundant updates
-                if (existing && existingTagsKey === tagsKey && currentMode === nextMode) {
-                    return;
-                }
-
-                updates.push({
-                    treeItem,
-                    action: existing ? 'replace' : 'insert',
-                    existing,
-                    tags,
-                    wide,
-                    tagsKey
-                });
+            updates.push({
+                treeItem,
+                action: existing ? 'replace' : 'insert',
+                existing,
+                tags,
+                wide,
+                tagsKey
             });
+        }
 
-            // If there are no updates, exit early to avoid any layout invalidations or animations
-            if (updates.length === 0) return;
+        // 未处理完的项归还队列，下一帧继续（时间切片）。
+        if (index < items.length) {
+            for (let i = index; i < items.length; i++) __pendingTagTreeItems.add(items[i]);
+            __scheduleFlushDots();
+        }
 
-            // --- BATCHED WRITE PHASE ---
-            // 1. First, measure all previous rects (Reads)
-            const previousModes = [];
-            const previousRects = updates.map((up, idx) => {
-                if (up.action === 'replace') {
-                    previousModes[idx] = up.existing.classList.contains('dots-trailing') ? 'trailing' : 'leading';
-                    return up.existing.getBoundingClientRect();
-                }
-                previousModes[idx] = null;
-                return null;
-            });
+        // If there are no updates, exit early to avoid any layout invalidations or animations
+        if (updates.length === 0) return;
 
-            // 2. Perform all DOM mutations (Writes)
-            const elementsToAnimate = [];
-            updates.forEach((up, idx) => {
-                const { treeItem, action, existing, tags, wide, tagsKey } = up;
+        // --- BATCHED WRITE PHASE ---
+        // 只在少量更新时做 FLIP 位移动画；滚动中大量补点时跳过同步 gBCR 读取，
+        // 避免写入阶段打断 Blink 流水线造成强制回流（Layout Thrashing）。
+        const __flipEnabled = updates.length <= 6;
+        // 1. First, measure all previous rects (Reads)
+        const previousModes = [];
+        const previousRects = updates.map((up, idx) => {
+            if (__flipEnabled && up.action === 'replace') {
+                previousModes[idx] = up.existing.classList.contains('dots-trailing') ? 'trailing' : 'leading';
+                return up.existing.getBoundingClientRect();
+            }
+            previousModes[idx] = null;
+            return null;
+        });
 
-                if (action === 'remove') {
-                    existing.remove();
-                    return;
-                }
+        // 2. Perform all DOM mutations (Writes)
+        const elementsToAnimate = [];
+        updates.forEach((up, idx) => {
+            const { treeItem, action, existing, tags, wide, tagsKey } = up;
 
-                // Build new dots element passing wide/tagsKey directly
-                const next = __buildDotsElement(tags, wide, tagsKey);
+            if (action === 'remove') {
+                existing.remove();
+                return;
+            }
 
-                if (action === 'replace') {
-                    existing.replaceWith(next);
+            // Build new dots element passing wide/tagsKey directly
+            const next = __buildDotsElement(tags, wide, tagsKey);
+
+            if (action === 'replace') {
+                existing.replaceWith(next);
+                if (__flipEnabled) {
                     elementsToAnimate.push({
                         element: next,
                         previousRect: previousRects[idx],
                         previousMode: previousModes[idx]
                     });
-                } else if (action === 'insert') {
-                    if (wide) {
-                        const tip = treeItem.querySelector(':scope > .tree-tip-icon');
-                        if (tip) treeItem.insertBefore(next, tip);
-                        else treeItem.appendChild(next);
-                    } else {
-                        treeItem.insertBefore(next, treeItem.firstChild);
-                    }
-                    elementsToAnimate.push({
-                        element: next,
-                        previousRect: null,
-                        previousMode: null
-                    });
                 }
-            });
-
-            // 3. Batch the animation offset calculations (Reads)
-            const animationData = [];
-            elementsToAnimate.forEach((anim) => {
-                const { element, previousRect, previousMode } = anim;
-                if (!previousRect) return; // Only animate replacements
-
-                const nextMode = element.classList.contains('dots-trailing') ? 'trailing' : 'leading';
-                if (previousMode && previousMode !== nextMode) return;
-
-                const nextRect = element.getBoundingClientRect(); // Read!
-                const dx = previousRect.left - nextRect.left;
-                const dy = previousRect.top - nextRect.top;
-
-                if (Number.isFinite(dx) && Number.isFinite(dy) && (Math.abs(dx) >= 1 || Math.abs(dy) >= 1)) {
-                    animationData.push({
-                        element,
-                        dx,
-                        dy
-                    });
+            } else if (action === 'insert') {
+                if (wide) {
+                    const tip = treeItem.querySelector(':scope > .tree-tip-icon, :scope > .tree-info-icon');
+                    if (tip) treeItem.insertBefore(next, tip);
+                    else treeItem.appendChild(next);
+                } else {
+                    treeItem.insertBefore(next, treeItem.firstChild);
                 }
-            });
-
-            // 4. Batch initial animation style assignments (Writes)
-            animationData.forEach(({ element, dx, dy }) => {
-                element.style.setProperty('--tag-dot-shift-x', `${Math.round(dx)}px`);
-                element.style.setProperty('--tag-dot-shift-y', `${Math.round(dy)}px`);
-                element.style.opacity = '0.86';
-            });
-
-            // 5. Trigger transition in subsequent frames without forcing synchronous layout
-            if (animationData.length > 0) {
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        animationData.forEach(({ element }) => {
-                            element.style.setProperty('--tag-dot-shift-x', '0px');
-                            element.style.setProperty('--tag-dot-shift-y', '0px');
-                            element.style.opacity = '';
-                        });
-                        window.setTimeout(() => {
-                            animationData.forEach(({ element }) => {
-                                element.style.removeProperty('--tag-dot-shift-x');
-                                element.style.removeProperty('--tag-dot-shift-y');
-                            });
-                        }, 260);
-                    });
+                elementsToAnimate.push({
+                    element: next,
+                    previousRect: null,
+                    previousMode: null
                 });
             }
         });
+
+        // 3. Batch the animation offset calculations (Reads)
+        const animationData = [];
+        elementsToAnimate.forEach((anim) => {
+            const { element, previousRect, previousMode } = anim;
+            if (!previousRect) return; // Only animate replacements
+
+            const nextMode = element.classList.contains('dots-trailing') ? 'trailing' : 'leading';
+            if (previousMode && previousMode !== nextMode) return;
+
+            const nextRect = element.getBoundingClientRect(); // Read!
+            const dx = previousRect.left - nextRect.left;
+            const dy = previousRect.top - nextRect.top;
+
+            if (Number.isFinite(dx) && Number.isFinite(dy) && (Math.abs(dx) >= 1 || Math.abs(dy) >= 1)) {
+                animationData.push({
+                    element,
+                    dx,
+                    dy
+                });
+            }
+        });
+
+        // 4. Batch initial animation style assignments (Writes)
+        animationData.forEach(({ element, dx, dy }) => {
+            element.style.setProperty('--tag-dot-shift-x', `${Math.round(dx)}px`);
+            element.style.setProperty('--tag-dot-shift-y', `${Math.round(dy)}px`);
+            element.style.opacity = '0.86';
+        });
+
+        // 5. Trigger transition in subsequent frames without forcing synchronous layout
+        if (animationData.length > 0) {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    animationData.forEach(({ element }) => {
+                        element.style.setProperty('--tag-dot-shift-x', '0px');
+                        element.style.setProperty('--tag-dot-shift-y', '0px');
+                        element.style.opacity = '';
+                    });
+                    window.setTimeout(() => {
+                        animationData.forEach(({ element }) => {
+                            element.style.removeProperty('--tag-dot-shift-x');
+                            element.style.removeProperty('--tag-dot-shift-y');
+                        });
+                    }, 260);
+                });
+            });
+        }
     }
 
     function __observeTagTreeItem(el) {
@@ -2239,7 +2382,11 @@
         const workspace = document.getElementById('canvasWorkspace');
         const state = (window.CanvasModule && window.CanvasModule.CanvasState) ? window.CanvasModule.CanvasState : null;
         const resizeState = state && state.sectionCtrlMode && state.sectionCtrlMode.resize;
+        const isRecovering = !!(window.CanvasModule && typeof window.CanvasModule.isCanvasRecovering === 'function' && window.CanvasModule.isCanvasRecovering());
+        const hasNativeResizing = !!document.querySelector('.temp-canvas-node.resizing, .md-canvas-node.resizing, .permanent-bookmark-section.resizing');
         return !!(
+            isRecovering ||
+            hasNativeResizing ||
             (workspace && (
                 workspace.classList.contains('is-zooming') ||
                 workspace.classList.contains('is-scrolling') ||
@@ -2265,7 +2412,9 @@
                 __scheduleDeferredTreeItemScan();
                 return;
             }
-            __scanTreeItemsForTagDots(document);
+            requestAnimationFrame(() => {
+                __scanTreeItemsForTagDots(document);
+            });
         }, 180);
     }
 
@@ -2300,7 +2449,7 @@
                 } else if (
                     target.querySelectorAll &&
                     target.matches &&
-                    target.matches('.canvas-fullscreen-active, .canvas-fullscreen-node, .canvas-content, .canvas-workspace, .search-results-panel, body')
+                    target.matches('.canvas-fullscreen-active, .canvas-fullscreen-node, .canvas-node-maximized, .search-results-panel, body.canvas-node-maximized-active')
                 ) {
                     __queueTreeItemScanForTagDots(target);
                 }

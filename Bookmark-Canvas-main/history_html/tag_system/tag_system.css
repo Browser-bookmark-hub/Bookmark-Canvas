@@ -49,8 +49,12 @@
     z-index: 1;
     margin-right: 4px;
     flex-shrink: 0;
-    will-change: transform, opacity;
+    /* 不再常驻 will-change（会在每一行各建一个合成层，导致 Layerize 爆炸）；
+       仅在悬停/动画时才临时提升。 */
     transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.16s ease;
+}
+.tree-item-tag-dots:hover {
+    will-change: transform, opacity;
 }
 .tree-item-tag-dots .tag-dot {
     width: 12px;

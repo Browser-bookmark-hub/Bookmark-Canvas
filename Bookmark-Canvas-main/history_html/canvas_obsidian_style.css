@@ -525,46 +525,66 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     transition: none !important;
 }
 
-/* [Fix] 缩放时彻底禁用元素过渡，防止卡片“收缩/挤压”视觉瑕疵 */
+/* [Fix] 缩放与滚动时彻底禁用顶层卡片过渡，防止卡片位置滞后与挤压视觉瑕疵。
+   注意：严禁使用深层通配符（如 *），避免在手势起手瞬间触发全画布成千上万个 DOM 节点的强制样式重算（Recalculate Style）。
+   子孙节点的 hover 状态已由下方 pointer-events: none 在合成器层原生阻断。 */
 .canvas-workspace.is-zooming .canvas-content,
 .canvas-workspace.is-zooming .temp-canvas-node,
 .canvas-workspace.is-zooming .permanent-bookmark-section,
 .canvas-workspace.is-zooming .md-canvas-node,
-.canvas-workspace.is-zooming .card-group-canvas-node,
-.canvas-workspace.is-zooming .card-group-canvas-node * {
+.canvas-workspace.is-zooming .card-group-canvas-node {
     transition: none !important;
     animation: none !important;
 }
 
-/* [Fix] 缩放时禁用书签树节点的过渡效果，防止阴影/hover闪烁 */
-/* 使用通配符确保canvas内所有元素的过渡都被禁用 */
-.canvas-workspace.is-zooming .tree-item,
-.canvas-workspace.is-zooming .tree-item *,
-.canvas-workspace.is-zooming .tree-node,
-.canvas-workspace.is-zooming .bookmark-tree,
-.canvas-workspace.is-zooming .bookmark-tree *,
-.canvas-workspace.is-zooming .tree-tip-icon,
-.canvas-workspace.is-zooming .tree-item::before,
-.canvas-workspace.is-zooming .tree-label,
-.canvas-workspace.is-zooming .temp-bookmark-tree,
-.canvas-workspace.is-zooming .temp-bookmark-tree * {
+/* 交互（缩放/平移）中按需恢复的卡片：柔和淡入 + 轻微上浮，避免突兀弹出。
+   使用关键帧而不是过渡，这样在缩放期间（上面统一禁用了 transition）也能平滑出现。 */
+@keyframes canvasRecoveryReveal {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.temp-canvas-node.canvas-recovery-enter,
+.permanent-bookmark-section.canvas-recovery-enter,
+.md-canvas-node.canvas-recovery-enter,
+.card-group-canvas-node.canvas-recovery-enter {
+    animation: canvasRecoveryReveal 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 缩放期间默认禁用卡片动画；仅放行一次性恢复淡入，保证缩小/放大时进入视野的卡片不“啪”地出现。 */
+.canvas-workspace.is-zooming .temp-canvas-node.canvas-recovery-enter,
+.canvas-workspace.is-zooming .permanent-bookmark-section.canvas-recovery-enter,
+.canvas-workspace.is-zooming .md-canvas-node.canvas-recovery-enter,
+.canvas-workspace.is-zooming .card-group-canvas-node.canvas-recovery-enter {
+    animation: canvasRecoveryReveal 0.42s cubic-bezier(0.22, 1, 0.36, 1) both !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .temp-canvas-node.canvas-recovery-enter,
+    .permanent-bookmark-section.canvas-recovery-enter,
+    .md-canvas-node.canvas-recovery-enter,
+    .card-group-canvas-node.canvas-recovery-enter {
+        animation: none !important;
+    }
+}
+
+/* [Perf] 平移滚动期间禁用顶层卡片过渡，避免卡片自身产生滞后抖动 */
+.canvas-workspace.is-scrolling .canvas-content,
+.canvas-workspace.is-scrolling .temp-canvas-node,
+.canvas-workspace.is-scrolling .permanent-bookmark-section,
+.canvas-workspace.is-scrolling .md-canvas-node,
+.canvas-workspace.is-scrolling .card-group-canvas-node {
     transition: none !important;
 }
 
-/* 缩放时隐藏 hover 状态的拖拽提示点，避免闪烁 */
-.canvas-workspace.is-zooming .tree-tip-icon {
-    opacity: 0 !important;
-}
-
-/* 缩放时禁用hover效果，防止样式重计算导致闪烁 */
-.canvas-workspace.is-zooming .tree-item:hover {
-    background: transparent !important;
-}
-
+/* [Zero-Recalc] 交互（缩放/滚动/拖拽）期间全局禁用内容命中测试：
+   从根本上切断所有子孙节点的 :hover、title/tip 渲染与事件派发，
+   由浏览器合成层（Compositor）直接吞掉指针检测，完全消除首帧样式重算开销。 */
+.canvas-workspace.is-zooming .canvas-content,
+.canvas-workspace.is-scrolling .canvas-content,
 .canvas-workspace.space-pressed .canvas-content,
 .canvas-workspace.panning .canvas-content {
-    /* Panning 时禁用命中测试，避免大量 hover/重算样式导致掉帧与内容闪烁 */
-    pointer-events: none;
+    pointer-events: none !important;
 }
 
 .canvas-workspace.panning .canvas-section-ctrl-overlay {
@@ -1803,6 +1823,34 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 .bookmark-tree.animate-fade-in {
     animation: fadeInContent 0.15s ease-out forwards;
+}
+
+/* 低细节 -> 完整内容 的柔和过渡：内容区淡入上浮，替代生硬的瞬间切换 */
+@keyframes canvasContentReveal {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.temp-canvas-node.canvas-content-enter .temp-node-header,
+.temp-canvas-node.canvas-content-enter .temp-node-description-container,
+.temp-canvas-node.canvas-content-enter .temp-node-body,
+.permanent-bookmark-section.canvas-content-enter .permanent-section-header,
+.permanent-bookmark-section.canvas-content-enter .permanent-section-body,
+.md-canvas-node.canvas-content-enter .md-canvas-editor,
+.md-canvas-node.canvas-content-enter .md-canvas-text {
+    animation: canvasContentReveal 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .temp-canvas-node.canvas-content-enter .temp-node-header,
+    .temp-canvas-node.canvas-content-enter .temp-node-description-container,
+    .temp-canvas-node.canvas-content-enter .temp-node-body,
+    .permanent-bookmark-section.canvas-content-enter .permanent-section-header,
+    .permanent-bookmark-section.canvas-content-enter .permanent-section-body,
+    .md-canvas-node.canvas-content-enter .md-canvas-editor,
+    .md-canvas-node.canvas-content-enter .md-canvas-text {
+        animation: none !important;
+    }
 }
 
 /* 性能管理弹窗样式 */
