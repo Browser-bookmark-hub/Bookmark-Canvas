@@ -3243,6 +3243,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     --card-group-pill-fg: #f8fafc;
     --card-group-pill-scale-hard-max: 6;
     --card-group-corner-radius: 14px;
+    --card-group-pill-radius: 4px;
     --card-group-highlight-color: rgba(9, 105, 218, 0.9);
     --card-group-anchor-color: var(--card-group-border);
     --card-group-pill-scale-effective: min(var(--canvas-scale-inv, 1), var(--card-group-pill-scale-max, 999));
@@ -3477,7 +3478,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     align-items: center;
     background: var(--card-group-pill-bg);
     color: var(--card-group-pill-fg);
-    border-radius: 8px;
+    border-radius: var(--card-group-pill-radius, 4px);
     font-size: 13px !important;
     font-weight: 600;
     line-height: 1;
