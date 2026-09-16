@@ -8200,6 +8200,7 @@ function setupCanvasZoomAndPan() {
             // [OPT] 缩放开始：进入高性能模式
             workspace.classList.add('is-zooming');
             try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
+            try { __ensureCanvasInteractionRecoveryLoop(); } catch (_) { }
 
             // [数据密集模式] 缩放开始的一瞬间：如果视界窗口数据量过多，立即进入低细节模式
             // 这避免了在大数据量场景下缩放时的卡顿和闪烁
@@ -35075,6 +35076,9 @@ function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoom
     }
 
     const LAZY_LOAD_MAX_PER_FRAME = 4;
+    // 交互中（缩放/平移）的壳体恢复：每帧只处理少量节点，避免构建树 DOM 时掉帧。
+    const interactionShellOnly = !!options.interactionShellOnly;
+    const interactionMaxPerFrame = interactionShellOnly ? 2 : LAZY_LOAD_MAX_PER_FRAME;
     let index = 0;
 
     const renderItem = (item) => {
@@ -35147,27 +35151,186 @@ function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoom
 
         const currentBounds = __getCanvasViewportBounds(workspace, 0);
 
-        while (index < queue.length && count < LAZY_LOAD_MAX_PER_FRAME) {
+        while (index < queue.length && count < interactionMaxPerFrame) {
             const item = queue[index];
             const inViewport = !__isCanvasRectOutsideBounds(item.x, item.y, item.w, item.h, currentBounds);
-
-            renderItem(item);
             index++;
 
-            if (!inViewport) {
+            if (interactionShellOnly) {
+                // 交互中：视野已经移开的排队项直接跳过，避免浪费帧预算。
+                if (!inViewport) continue;
+                try { __updateNodeOffScreenState(item.id, false); } catch (_) { }
+                renderItem(item);
                 count++;
+            } else {
+                renderItem(item);
+                if (!inViewport) count++;
             }
         }
         if (index < queue.length) {
             __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
         } else {
             __canvasLazyLoadQueue.frameId = null;
-            try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
-            try { scheduleEdgesRender(0); } catch (_) { }
+            // 交互批次结束时不触发全局组状态/连线重算，避免高频重排；交由交互结束后的主流程统一处理。
+            if (!interactionShellOnly) {
+                try { __applyCardGroupLowDetailMembershipState({ force: true }); } catch (_) { }
+                try { scheduleEdgesRender(0); } catch (_) { }
+            }
         }
     };
 
     __canvasLazyLoadQueue.frameId = requestAnimationFrame(step);
+}
+
+// 交互（缩放/平移/惯性滚动）期间的“视口内卡片恢复”：
+// 原逻辑在交互中完全跳过虚拟化更新，导致进入视野的卡片要等交互停止后才开始加载
+// （视觉上先是一片空白，然后停止后集中加载，割裂感强）。
+// 这里在交互过程中以每帧少量、按距视口中心排序的方式逐步恢复卡片，重内容构建被分摊到多帧，
+// 既不空白也不会在停止瞬间集中卡顿。只做“补渲染”，不做卸载，避免交互中抖动/闪烁。
+let canvasInteractionRecoveryRaf = null;
+let canvasInteractionRecoveryLastAt = 0;
+const CANVAS_INTERACTION_RECOVERY_THROTTLE_MS = 110;
+
+function __isCanvasInteractionActive() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return false;
+    return !!(
+        isScrolling ||
+        (CanvasState.touchpadState && CanvasState.touchpadState.isScrolling) ||
+        CanvasState.isPanning ||
+        (CanvasState.dragState && CanvasState.dragState.isDragging) ||
+        (CanvasState.inertiaState && CanvasState.inertiaState.isActive) ||
+        workspace.classList.contains('is-zooming')
+    );
+}
+
+function __collectCanvasInteractionMissingNodes(workspace, bounds) {
+    if (!workspace || !bounds) return [];
+    const items = [];
+    const rect = workspace.getBoundingClientRect();
+    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const centerX = (rect.width / 2 - (CanvasState.panOffsetX || 0)) / zoom;
+    const centerY = (rect.height / 2 - (CanvasState.panOffsetY || 0)) / zoom;
+    const isGlobalLowDetail = !!CanvasState.lowDetailActive;
+    const add = (item) => {
+        const cx = item.x + item.w / 2;
+        const cy = item.y + item.h / 2;
+        item.dist2 = (cx - centerX) * (cx - centerX) + (cy - centerY) * (cy - centerY);
+        items.push(item);
+    };
+
+    for (const section of (CanvasState.tempSections || [])) {
+        if (!section || !section.id) continue;
+        if (document.getElementById(section.id)) continue;
+        const baseSize = getTempSectionBaseSize(section);
+        const x = Number(section.x);
+        const y = Number(section.y);
+        const w = Number(section.width || baseSize.width);
+        const h = Number(section.height || baseSize.height);
+        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
+        if (__isCanvasRectOutsideBounds(x, y, w, h, bounds)) continue;
+        add({ type: 'temp', id: section.id, x, y, w, h, data: section });
+    }
+
+    for (const node of (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [])) {
+        if (!node || !node.id) continue;
+        if (document.getElementById(node.id)) continue;
+        const isGroup = node.subtype === 'card-group';
+        const x = Number(node.x);
+        const y = Number(node.y);
+        const w = Number(node.width) || 100;
+        const h = Number(node.height) || 100;
+        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
+        if (__isCanvasRectOutsideBounds(x, y, w, h, bounds)) continue;
+        add({
+            type: isGroup ? 'group' : 'md',
+            id: node.id,
+            x, y, w, h,
+            shouldActive: !isGroup && isGlobalLowDetail,
+            data: node
+        });
+    }
+
+    try {
+        const existingMeta = (typeof __readPermanentSectionCopies === 'function' ? __readPermanentSectionCopies() : []) || [];
+        const copyStateById = (CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object')
+            ? CanvasState.permanentLayout.copiesById
+            : {};
+        for (const meta of existingMeta) {
+            if (!meta || !meta.id) continue;
+            const cardState = copyStateById[meta.id];
+            if (!cardState) continue;
+            const elId = 'permanent-section-copy-' + meta.id;
+            if (document.getElementById(elId)) continue;
+            const x = Number(cardState.left) || 0;
+            const y = Number(cardState.top) || 0;
+            const w = Number(cardState.width) || 100;
+            const h = Number(cardState.height) || 100;
+            if (__isCanvasRectOutsideBounds(x, y, w, h, bounds)) continue;
+            add({
+                type: 'copy',
+                id: elId,
+                x, y, w, h,
+                shouldActive: isGlobalLowDetail,
+                copyId: meta.id,
+                displayIndex: meta.displayIndex,
+                data: cardState
+            });
+        }
+    } catch (_) { }
+
+    items.sort((a, b) => a.dist2 - b.dist2);
+    return items;
+}
+
+function __runCanvasInteractionShellRecovery() {
+    const workspace = document.getElementById('canvasWorkspace');
+    if (!workspace) return;
+    if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective() && !CanvasState.lowDetailActive) return;
+    if (workspace.classList && workspace.classList.contains(CANVAS_LOW_DETAIL_RIPPLE_CLASS)) return;
+    // 正常虚拟化正在处理队列时让路，避免互相清空。
+    if (__canvasLazyLoadQueue.frameId) return;
+
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (now - canvasInteractionRecoveryLastAt < CANVAS_INTERACTION_RECOVERY_THROTTLE_MS) return;
+    canvasInteractionRecoveryLastAt = now;
+
+    const bounds = __getCanvasViewportBounds(workspace, 0);
+    if (!bounds) return;
+    const items = __collectCanvasInteractionMissingNodes(workspace, bounds);
+    if (!items.length) return;
+
+    const rect = workspace.getBoundingClientRect();
+    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const viewportCenterX = (rect.width / 2 - (CanvasState.panOffsetX || 0)) / zoom;
+    const viewportCenterY = (rect.height / 2 - (CanvasState.panOffsetY || 0)) / zoom;
+
+    __clearCanvasLazyLoadQueue();
+    items.forEach(__enqueueCanvasLazyLoadNode);
+    __startCanvasLazyLoadProcessing(
+        workspace,
+        bounds,
+        'distance',
+        false,
+        viewportCenterX,
+        viewportCenterY,
+        { interactionShellOnly: true }
+    );
+}
+
+function __ensureCanvasInteractionRecoveryLoop() {
+    if (canvasInteractionRecoveryRaf) return;
+    const tick = () => {
+        canvasInteractionRecoveryRaf = null;
+        try {
+            if (!__isCanvasInteractionActive()) return;
+            __runCanvasInteractionShellRecovery();
+            canvasInteractionRecoveryRaf = requestAnimationFrame(tick);
+        } catch (_) {
+            canvasInteractionRecoveryRaf = null;
+        }
+    };
+    canvasInteractionRecoveryRaf = requestAnimationFrame(tick);
 }
 
 function __syncCanvasLowDetailVisibleShells(options = {}) {
@@ -35289,6 +35452,8 @@ function runCanvasVirtualizationUpdate(options = {}) {
         if (!doLoad && doUnload) {
             scheduleCanvasVirtualizationUnloadUpdate(isCanvasHugeData() ? 320 : 180);
         } else {
+            // 交互中：以分帧方式逐步恢复视口内卡片，避免交互停止后才集中加载造成的空白与割裂感。
+            try { __runCanvasInteractionShellRecovery(); } catch (_) { }
             scheduleCanvasVirtualizationUpdate(isCanvasHugeData() ? 320 : 180);
         }
         return;
@@ -37878,6 +38043,7 @@ function markScrolling() {
         if (ws) ws.classList.add('is-scrolling');
     } catch (_) { }
     try { updateCanvasZoomPerformanceMode({ deferOff: true }); } catch (_) { }
+    try { __ensureCanvasInteractionRecoveryLoop(); } catch (_) { }
 
     // 清除之前的停止计时器
     if (scrollStopTimer) {
