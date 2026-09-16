@@ -2321,8 +2321,7 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
 .canvas-node-maximized .permanent-section-header,
 .canvas-node-maximized .temp-node-header,
 .canvas-node-maximized .md-node-header,
-.canvas-node-maximized .card-group-header,
-.canvas-node-maximized .card-group-low-detail-overlay {
+.canvas-node-maximized .card-group-header {
     cursor: default !important;
 }
 

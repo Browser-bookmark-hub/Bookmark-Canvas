@@ -1817,7 +1817,7 @@ function __handleCardGroupBlankAreaCtrlContextMenu(event) {
     event.stopPropagation();
 }
 
-const CANVAS_LOW_DETAIL_SURFACE_SELECTOR = '.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node';
+const CANVAS_LOW_DETAIL_SURFACE_SELECTOR = '.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node:not(.card-group-canvas-node)';
 const CANVAS_LOW_DETAIL_RIPPLE_CLASS = 'canvas-low-detail-ripple';
 const CANVAS_VIEWPORT_LAZY_SHELL_CLASS = 'canvas-viewport-lazy-shell';
 const CANVAS_MD_CONTENT_UNLOADED_CLASS = 'md-content-unloaded';
@@ -1851,7 +1851,7 @@ function __forceOffCanvasZoomPerformanceForPointer(event) {
 
 function __isLowDetailSurfaceActive(element) {
     if (!element || !element.classList) return false;
-    if (element.classList.contains('card-group-low-detail-child-hidden')) return false;
+    if (element.classList.contains('card-group-canvas-node') || element.classList.contains('md-canvas-node')) return false;
     if (__isCanvasLowDetailModeActive()) return true;
     return !!(
         element.classList.contains('low-detail-active') ||
@@ -13048,7 +13048,14 @@ function clearMdSelection() {
     try {
         if (CanvasState.selectedMdNodeId) {
             const prev = document.getElementById(CanvasState.selectedMdNodeId);
-            if (prev) prev.classList.remove('selected');
+            if (prev) {
+                prev.classList.remove('selected', 'editing');
+                prev.removeAttribute('data-editing');
+            }
+            const prevNode = (CanvasState.mdNodes || []).find(n => n && n.id === CanvasState.selectedMdNodeId);
+            if (prevNode) {
+                prevNode.isEditing = false;
+            }
         }
         document.querySelectorAll('.selected-member').forEach(el => {
             el.classList.remove('selected-member');
@@ -13059,7 +13066,13 @@ function clearMdSelection() {
 
 function selectMdNode(nodeId) {
     if (!nodeId) return;
-    if (CanvasState.selectedMdNodeId === nodeId) return;
+    if (CanvasState.selectedMdNodeId === nodeId) {
+        const el = document.getElementById(nodeId);
+        if (el && !el.classList.contains('selected')) {
+            el.classList.add('selected');
+        }
+        return;
+    }
     clearMdSelection();
     // 清除连接线的选择
     clearEdgeSelection();
@@ -13277,6 +13290,13 @@ function __getMdNodeLowDetailTitleAndIndex(node) {
 
 function __ensureMdNodeLowDetailOverlay(el, node) {
     if (!el || !node) return;
+    if (node.subtype === 'card-group' || (el.classList && el.classList.contains('card-group-canvas-node'))) {
+        try {
+            const oldOverlay = el.querySelector('.temp-node-low-detail-overlay, .card-group-low-detail-overlay');
+            if (oldOverlay) oldOverlay.remove();
+        } catch (_) { }
+        return;
+    }
 
     let overlay = el.querySelector('.temp-node-low-detail-overlay');
     if (!overlay) {
@@ -13313,7 +13333,7 @@ function __ensureMdNodeLowDetailOverlay(el, node) {
 }
 
 function __updateAllMdNodeLowDetailOverlays() {
-    const nodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(Boolean) : [];
+    const nodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(n => n && n.subtype !== 'card-group') : [];
     nodes.forEach(node => {
         const el = document.getElementById(node.id);
         if (el) {
@@ -13361,14 +13381,11 @@ function __prepareMdNodeShellElement(el, node, options = {}) {
     try {
         el.classList.add(CANVAS_MD_CONTENT_UNLOADED_CLASS);
         el.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
-        if (CanvasState && CanvasState.lowDetailActive && __isNodeGeometricallyInsideAnyCardGroup(node, 'md-node')) {
-            el.classList.add('card-group-low-detail-child-hidden');
-            const hostGroup = __findHostCardGroup(node, 'md-node');
-            if (hostGroup) {
-                el.dataset.lowDetailHostGroupId = hostGroup.id;
+        if (el.dataset) delete el.dataset.lowDetailHostGroupId;
+        if (CanvasState && CanvasState.lowDetailActive && !(el.classList && el.classList.contains('canvas-node-maximized'))) {
+            if (node.subtype !== 'card-group') {
+                el.classList.add('low-detail-active');
             }
-        } else if (!(el.classList && el.classList.contains('canvas-node-maximized'))) {
-            el.classList.add('low-detail-active');
         }
         el.classList.remove('editing');
         __setCanvasViewportLazyShellClass(el, true);
@@ -13398,13 +13415,11 @@ function __prepareMdNodeShellElement(el, node, options = {}) {
 function __unloadMdNodeContentInPlace(node) {
     if (!node || !node.id || node.subtype === 'card-group') return false;
     let el = document.getElementById(node.id);
-    if (el && __shouldKeepLazyCardDomLoaded(el)) return false;
-    if (el && el.dataset && el.dataset.mdContentLoaded === 'false') {
-        try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) { }
-        __setCanvasViewportLazyShellClass(el, true);
-        return false;
-    }
-    renderMdNode(node, { shellOnly: true });
+    if (!el) return false;
+    if (__shouldKeepLazyCardDomLoaded(el)) return false;
+    el.classList.add('low-detail-active');
+    try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) { }
+    __setCanvasViewportLazyShellClass(el, false);
     return true;
 }
 
@@ -13412,19 +13427,16 @@ function __ensureMdNodeContentLoadedInPlace(node, options = {}) {
     if (!node || !node.id || node.subtype === 'card-group') return false;
     const opts = (options && typeof options === 'object') ? options : {};
     let el = document.getElementById(node.id);
-    if (CanvasState.lowDetailActive && !opts.force) {
-        if (!el) renderMdNode(node, { shellOnly: true });
-        else {
-            try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) { }
-            __setCanvasViewportLazyShellClass(el, true);
+    if (!el) {
+        renderMdNode(node);
+        el = document.getElementById(node.id);
+    }
+    if (el) {
+        if (!CanvasState.lowDetailActive || opts.force) {
+            el.classList.remove('low-detail-active');
         }
-        return false;
-    }
-    if (el && el.dataset && el.dataset.mdContentLoaded === 'true' && !el.classList.contains(CANVAS_MD_CONTENT_UNLOADED_CLASS)) {
         __setCanvasViewportLazyShellClass(el, false);
-        return false;
     }
-    renderMdNode(node);
     return true;
 }
 
@@ -13536,10 +13548,6 @@ function __renderMdNodeImpl(node, options = {}) {
         el.id = node.id;
         el.className = 'md-canvas-node';
         container.appendChild(el);
-    } else if (shellOnly && el.dataset && el.dataset.mdContentLoaded === 'false') {
-        // Keep the existing light shell; only position/style/overlay need updating.
-        el.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
-        if (el.dataset) delete el.dataset.lowDetailHostGroupId;
     } else {
         el = __resetMdNodeElementForRender(el);
         try { el.innerHTML = ''; } catch (_) { }
@@ -13548,15 +13556,7 @@ function __renderMdNodeImpl(node, options = {}) {
     }
 
     if (CanvasState && CanvasState.lowDetailActive && !(el.classList && el.classList.contains('canvas-node-maximized'))) {
-        if (node.subtype === 'card-group') {
-            el.classList.add('low-detail-active');
-        } else if (__isNodeGeometricallyInsideAnyCardGroup(node, 'md-node')) {
-            el.classList.add('card-group-low-detail-child-hidden');
-            const hostGroup = __findHostCardGroup(node, 'md-node');
-            if (hostGroup) {
-                el.dataset.lowDetailHostGroupId = hostGroup.id;
-            }
-        } else {
+        if (node.subtype !== 'card-group') {
             el.classList.add('low-detail-active');
         }
     }
@@ -13612,15 +13612,12 @@ function __renderMdNodeImpl(node, options = {}) {
         el.removeAttribute('aria-label');
     }
 
-    if (shellOnly) {
-        __prepareMdNodeShellElement(el, node, { isNew });
-        return;
-    }
-
     try {
         el.classList.remove(CANVAS_MD_CONTENT_UNLOADED_CLASS);
         if (!CanvasState.lowDetailActive && !opts.preserveLowDetail) {
             el.classList.remove('low-detail-active');
+        } else {
+            el.classList.add('low-detail-active');
         }
         __setCanvasViewportLazyShellClass(el, false);
         if (el.dataset) {
@@ -17176,6 +17173,7 @@ function __renderMdNodeImpl(node, options = {}) {
         event.stopPropagation();
         justSelectedOnClick = false;
         suppressNextClickForDrag = true;
+        try { selectMdNode(node.id); } catch (_) { }
         if (typeof showBookmarkTreeObjectContextMenu === 'function') {
             showBookmarkTreeObjectContextMenu(event, {
                 type: 'md-node',
@@ -17409,6 +17407,9 @@ function __renderMdNodeImpl(node, options = {}) {
             return;
         }
         if (CanvasState.selectedMdNodeId === node.id) {
+            if (CanvasState.lowDetailActive || el.classList.contains('low-detail-active')) {
+                return;
+            }
             e.preventDefault();
             e.stopPropagation();
             enterEditMode();
@@ -17422,6 +17423,7 @@ function __renderMdNodeImpl(node, options = {}) {
             : (e.target && e.target.parentElement ? e.target.parentElement : null);
         if (!target) return;
         if (target.closest('.resize-handle') || target.closest('.md-node-toolbar-btn') || target.closest('.canvas-layout-zoom-controls')) return;
+        if (CanvasState.lowDetailActive || el.classList.contains('low-detail-active')) return;
         e.preventDefault();
         e.stopPropagation();
     }, true);
@@ -22115,15 +22117,10 @@ function __renderTempNodeImpl(section, options = {}) {
     }
 
     if (isLowDetail) {
-        if (__isNodeGeometricallyInsideAnyCardGroup(section, 'temp-section')) {
-            nodeElement.classList.add('card-group-low-detail-child-hidden');
-            const hostGroup = __findHostCardGroup(section, 'temp-section');
-            if (hostGroup) {
-                nodeElement.dataset.lowDetailHostGroupId = hostGroup.id;
-            }
-        } else {
-            nodeElement.classList.add('low-detail-active');
-        }
+        nodeElement.classList.remove('card-group-low-detail-child-hidden');
+        if (nodeElement.dataset) delete nodeElement.dataset.lowDetailHostGroupId;
+        nodeElement.classList.add('low-detail-active');
+        try { __ensureTempSectionLowDetailOverlay(section, nodeElement); } catch (_) { }
     }
     const isMax = nodeElement.classList && nodeElement.classList.contains('canvas-node-maximized');
     if (!isMax) {
@@ -27275,10 +27272,19 @@ function setupCanvasEventListeners() {
             return;
         }
 
+        const draggedEl = CanvasState.dragState.draggedElement;
+        const wasMoved = !!CanvasState.dragState.hasMoved;
+
         if (CanvasState.dragState.dragSource === 'temp-node') {
             finalizeTempNodeDrag();
         } else if (CanvasState.dragState.dragSource === 'permanent-section') {
             finalizePermanentSectionDrag();
+        }
+
+        if (!wasMoved && draggedEl && draggedEl.id) {
+            if (draggedEl.classList.contains('md-canvas-node') || draggedEl.classList.contains('card-group-canvas-node')) {
+                try { selectMdNode(draggedEl.id); } catch (_) { }
+            }
         }
 
         CanvasState.dragState.isDragging = false;
@@ -29277,12 +29283,7 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
                 if (!inLazyRange) return;
             }
 
-            let skipTree = shouldRenderShellOnly;
-            if (!skipTree && willBeLowDetail) {
-                if (__isNodeGeometricallyInsideAnyCardGroup(section, 'temp-section')) {
-                    skipTree = true;
-                }
-            }
+            let skipTree = shouldRenderShellOnly || willBeLowDetail;
 
             // 大数据/极限模式 / 区块休眠：先渲染“壳体”，树内容按需加载（避免启动即卡死/一上来全量加载）
             renderTempNode(section, skipTree ? { skipTree: true } : {});
@@ -29295,19 +29296,20 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
             node.width = w;
             node.height = h;
 
+            // 视口外懒加载模式：超出初始视口边界的节点（包含卡片组）暂不渲染，由后续虚拟化按需加载
             if (shouldRenderShellOnly && initialLazyBounds) {
                 const inLazyRange = __isMdNodeInViewportBounds(node, initialLazyBounds, null);
                 if (!inLazyRange) return;
             }
 
-            let shellOnly = shouldRenderShellOnly && node && node.subtype !== 'card-group';
-            if (!shellOnly && willBeLowDetail && node && node.subtype !== 'card-group') {
-                if (__isNodeGeometricallyInsideAnyCardGroup(node, 'md-node')) {
-                    shellOnly = true;
+            renderMdNode(node);
+            if (willBeLowDetail && node && node.subtype !== 'card-group') {
+                const el = document.getElementById(node.id);
+                if (el) {
+                    el.classList.add('low-detail-active');
+                    try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) { }
                 }
             }
-
-            renderMdNode(node, shellOnly ? { shellOnly: true } : {});
         });
 
         try { loadCanvasNodeUiState(); } catch (_) { }
@@ -30491,36 +30493,15 @@ function __isCardGroupEdgeEndpoint(nodeId) {
 }
 
 function __isCardGroupLowDetailEdgeContextEndpoint(nodeId) {
-    const el = __getCardGroupLowDetailEdgeElement(nodeId);
-    if (!el || !el.classList) return false;
-    if (el.classList.contains('card-group-low-detail-child-hidden')) return true;
-    if (el.classList.contains('card-group-low-detail-nested-visible')) return true;
-    return !!(el.dataset && el.dataset.lowDetailHostGroupId);
+    return false;
 }
 
 function __isCardGroupLowDetailHiddenEndpoint(nodeId) {
-    const el = __getCardGroupLowDetailEdgeElement(nodeId);
-    if (!el || !el.classList) return false;
-    return el.classList.contains('card-group-low-detail-child-hidden')
-        || !!(el.dataset && el.dataset.lowDetailHostGroupId);
+    return false;
 }
 
 function __shouldSkipEdgeForCardGroupLowDetail(edge) {
-    if (!edge) return false;
-    const fromNode = String(edge.fromNode || '').trim();
-    const toNode = String(edge.toNode || '').trim();
-
-    // A hidden child has no visible anchor, so an edge attached to it must not
-    // remain as a floating line. This includes nested card groups hidden by a
-    // larger low-detail group.
-    if (__isCardGroupLowDetailHiddenEndpoint(fromNode) || __isCardGroupLowDetailHiddenEndpoint(toNode)) {
-        return true;
-    }
-
-    const fromInGroupLowDetail = __isCardGroupLowDetailEdgeContextEndpoint(fromNode);
-    const toInGroupLowDetail = __isCardGroupLowDetailEdgeContextEndpoint(toNode);
-    if (!fromInGroupLowDetail && !toInGroupLowDetail) return false;
-    return !(__isCardGroupEdgeEndpoint(fromNode) && __isCardGroupEdgeEndpoint(toNode));
+    return false;
 }
 
 function __collectEdgeDomRecords(svg) {
@@ -35113,7 +35094,7 @@ function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoom
                 }
             }
         } else if (type === 'md') {
-            try { renderMdNode(data, { shellOnly: item.shouldActive }); } catch (_) { }
+            try { renderMdNode(data); } catch (_) { }
             const el = document.getElementById(id);
             if (el) {
                 if (item.shouldActive) {
@@ -35151,10 +35132,11 @@ function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoom
             const el = document.getElementById(id);
             if (el) {
                 __setCanvasViewportLazyShellClass(el, false);
-                el.classList.toggle('low-detail-active', item.shouldActive);
-                if (item.shouldActive && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                    try { window.__BCSCardGroup.ensureLowDetailOverlay(el, data); } catch (_) { }
-                }
+                el.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
+                try {
+                    const oldOverlay = el.querySelector('.card-group-low-detail-overlay, .temp-node-low-detail-overlay');
+                    if (oldOverlay) oldOverlay.remove();
+                } catch (_) { }
             }
         }
     };
@@ -35235,19 +35217,10 @@ function __syncCanvasLowDetailVisibleShells(options = {}) {
             }
 
             try {
-                if (__isNodeGeometricallyInsideAnyCardGroup(section, 'temp-section')) {
-                    element.classList.remove('low-detail-active');
-                    element.classList.add('card-group-low-detail-child-hidden');
-                    const hostGroup = __findHostCardGroup(section, 'temp-section');
-                    if (hostGroup && element.dataset) {
-                        element.dataset.lowDetailHostGroupId = hostGroup.id;
-                    }
-                } else {
-                    element.classList.remove('card-group-low-detail-child-hidden');
-                    if (element.dataset) delete element.dataset.lowDetailHostGroupId;
-                    element.classList.add('low-detail-active');
-                    __ensureTempSectionLowDetailOverlay(section, element);
-                }
+                element.classList.remove('card-group-low-detail-child-hidden');
+                if (element.dataset) delete element.dataset.lowDetailHostGroupId;
+                element.classList.add('low-detail-active');
+                __ensureTempSectionLowDetailOverlay(section, element);
             } catch (_) { }
 
             if (doUnload && !shouldKeepLoaded) {
@@ -35596,6 +35569,7 @@ function runCanvasVirtualizationUpdate(options = {}) {
             }
 
             if (isLowDetail) {
+                try { __ensureTempSectionLowDetailOverlay(section, element); } catch (_) { }
                 const canUnload = __shouldNodeBeUnloaded(section.id);
                 if (doUnload && canUnload) {
                     try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
@@ -36764,6 +36738,19 @@ function __clearCardGroupLowDetailMembershipState() {
                 }
             } catch (_) { }
         });
+        workspace.querySelectorAll('.card-group-canvas-node').forEach(el => {
+            try {
+                if (el.classList.contains('low-detail-active')) {
+                    el.classList.remove('low-detail-active');
+                    changed = true;
+                }
+                const oldOverlay = el.querySelector('.card-group-low-detail-overlay, .temp-node-low-detail-overlay');
+                if (oldOverlay) {
+                    oldOverlay.remove();
+                    changed = true;
+                }
+            } catch (_) { }
+        });
     } catch (_) { }
 
     __cardGroupLowDetailMembershipSignature = '';
@@ -36774,280 +36761,16 @@ function __clearCardGroupLowDetailMembershipState() {
     return changed;
 }
 
-function __isCardGroupLowDetailMembershipDomSynced(desiredHosted, desiredNestedGroups, desiredGroupDepths, desiredGroupNodes) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return true;
-
-    const hostedClass = 'card-group-low-detail-child-hidden';
-    const nestedVisibleClass = 'card-group-low-detail-nested-visible';
-
-    try {
-        for (const [el, hostGroupId] of desiredHosted.entries()) {
-            if (!el || !el.classList || !el.classList.contains(hostedClass)) return false;
-            if (el.classList.contains('low-detail-active')) return false;
-            if (!el.dataset || el.dataset.lowDetailHostGroupId !== hostGroupId) return false;
-        }
-        for (const el of desiredNestedGroups) {
-            if (!el || !el.classList || !el.classList.contains(nestedVisibleClass)) return false;
-            if (el.classList.contains(hostedClass)) return false;
-            if (el.dataset && el.dataset.lowDetailHostGroupId) return false;
-        }
-        for (const [el, node] of desiredGroupNodes.entries()) {
-            if (!el || !el.classList || !el.classList.contains('low-detail-active')) return false;
-            if (!el.querySelector('.card-group-low-detail-overlay')) return false;
-        }
-        for (const [el, depth] of desiredGroupDepths.entries()) {
-            const opacity = Math.max(0.48, 1 - depth * 0.16).toFixed(2);
-            if (!el || !el.style || el.style.getPropertyValue('--card-group-low-detail-title-opacity') !== opacity) return false;
-        }
-        const staleNodes = workspace.querySelectorAll(`.${hostedClass}, .${nestedVisibleClass}, [data-low-detail-host-group-id]`);
-        for (const stale of staleNodes) {
-            const staleHosted = stale.classList && stale.classList.contains(hostedClass);
-            const staleNested = stale.classList && stale.classList.contains(nestedVisibleClass);
-            if (staleHosted && !desiredHosted.has(stale)) return false;
-            if (staleNested && !desiredNestedGroups.has(stale)) return false;
-            if (stale.dataset && stale.dataset.lowDetailHostGroupId && !desiredHosted.has(stale)) return false;
-        }
-    } catch (_) {
-        return false;
-    }
-
+function __isCardGroupLowDetailMembershipDomSynced() {
     return true;
 }
 
 function __applyCardGroupLowDetailMembershipState(options = {}) {
-    const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return false;
-
-    const opts = (options && typeof options === 'object') ? options : {};
-    const force = !!opts.force;
-
-    const hostedClass = 'card-group-low-detail-child-hidden';
-    const nestedVisibleClass = 'card-group-low-detail-nested-visible';
-
-    const groupApi = (typeof window !== 'undefined') ? window.__BCSCardGroup : null;
-    if (!groupApi || typeof groupApi.getRecursiveGeometricMembers !== 'function') {
-        return __clearCardGroupLowDetailMembershipState();
-    }
-
-    const groupSelector = CanvasState.lowDetailActive
-        ? `.card-group-canvas-node:not(.${CANVAS_VIEWPORT_LAZY_SHELL_CLASS})`
-        : `.card-group-canvas-node.low-detail-active:not(.${CANVAS_VIEWPORT_LAZY_SHELL_CLASS})`;
-    const activeGroups = Array.from(workspace.querySelectorAll(groupSelector))
-        .map((element) => {
-            const node = __getCardGroupLowDetailNodeById(element.id);
-            if (!node) return null;
-            const width = Number(node.width) || parseFloat(element.style.width) || element.offsetWidth || 0;
-            const height = Number(node.height) || parseFloat(element.style.height) || element.offsetHeight || 0;
-            return { element, node, area: Math.max(1, width * height) };
-        })
-        .filter(Boolean)
-        .sort((a, b) => b.area - a.area);
-
-    if (!activeGroups.length) {
-        return __clearCardGroupLowDetailMembershipState();
-    }
-
-    const desiredHosted = new Map();
-    const desiredNestedGroups = new Set();
-    const desiredGroupDepths = new Map();
-    const desiredGroupNodes = new Map();
-    const desiredTempUnloads = new Set();
-    const setGroupLowDetailDepth = (element, depth) => {
-        if (!element) return;
-        const safeDepth = Math.max(0, Math.min(8, Math.floor(Number(depth) || 0)));
-        const prevDepth = desiredGroupDepths.has(element) ? desiredGroupDepths.get(element) : -1;
-        if (prevDepth >= safeDepth) return;
-        desiredGroupDepths.set(element, safeDepth);
-    };
-    const markHosted = (element, hostGroupId) => {
-        if (!element || !hostGroupId) return;
-        desiredHosted.set(element, String(hostGroupId));
-    };
-
-    activeGroups.forEach((entry) => {
-        if (!entry || !entry.node || !entry.element) return;
-        if (desiredHosted.has(entry.element)) return;
-        desiredGroupNodes.set(entry.element, entry.node);
-        if (!desiredGroupDepths.has(entry.element)) setGroupLowDetailDepth(entry.element, 0);
-
-        let members = [];
-        try { members = groupApi.getRecursiveGeometricMembers(entry.node) || []; } catch (_) { members = []; }
-        members.forEach((member) => {
-            if (!member || !member.data) return;
-            const memberId = String(member.data.id || '').trim();
-            if (!memberId || memberId === entry.node.id) return;
-            const memberEl = __resolveCardGroupLowDetailMemberElement(member);
-            if (!memberEl) return;
-
-            markHosted(memberEl, entry.node.id);
-
-            if (member.type === 'temp-section') {
-                desiredTempUnloads.add(memberId);
-            }
-        });
-    });
-
-    const activeKey = activeGroups
-        .map(({ element, node }) => {
-            const id = __getCardGroupLowDetailElementKey(element);
-            return `${id}:${Number(node.x) || 0},${Number(node.y) || 0},${Number(node.width) || 0},${Number(node.height) || 0}:${String(node.label || '')}`;
-        })
-        .sort()
-        .join('|');
-    const hostedKey = Array.from(desiredHosted.entries())
-        .map(([el, host]) => `${__getCardGroupLowDetailElementKey(el)}>${host}`)
-        .sort()
-        .join('|');
-    const nestedKey = Array.from(desiredNestedGroups)
-        .map(el => __getCardGroupLowDetailElementKey(el))
-        .sort()
-        .join('|');
-    const depthKey = Array.from(desiredGroupDepths.entries())
-        .map(([el, depth]) => `${__getCardGroupLowDetailElementKey(el)}:${depth}`)
-        .sort()
-        .join('|');
-    const signature = `${CanvasState.lowDetailActive ? '1' : '0'}::${activeKey}::${hostedKey}::${nestedKey}::${depthKey}`;
-    if (!force &&
-        signature === __cardGroupLowDetailMembershipSignature &&
-        __isCardGroupLowDetailMembershipDomSynced(desiredHosted, desiredNestedGroups, desiredGroupDepths, desiredGroupNodes)) {
-        __cardGroupLowDetailMembershipDirty = false;
-        return false;
-    }
-
-    let changed = false;
-    __cardGroupLowDetailMembershipSignature = signature;
-
-    desiredGroupNodes.forEach((node, el) => {
-        try {
-            if (el.classList.contains('canvas-node-maximized') && el.classList.contains('low-detail-active')) {
-                el.classList.remove('low-detail-active');
-                changed = true;
-            } else if (!el.classList.contains('low-detail-active') && !el.classList.contains('canvas-node-maximized')) {
-                el.classList.add('low-detail-active');
-                changed = true;
-            }
-            if (typeof groupApi.ensureLowDetailOverlay === 'function') {
-                groupApi.ensureLowDetailOverlay(el, node);
-            }
-        } catch (_) { }
-    });
-
-    desiredGroupDepths.forEach((depth, el) => {
-        try {
-            const opacity = Math.max(0.48, 1 - depth * 0.16).toFixed(2);
-            if (el.style.getPropertyValue('--card-group-low-detail-title-opacity') !== opacity) {
-                el.style.setProperty('--card-group-low-detail-title-opacity', opacity);
-                changed = true;
-            }
-        } catch (_) { }
-    });
-
-    desiredTempUnloads.forEach((memberId) => {
-        try {
-            if (__unloadTempSectionTreeInPlace(memberId)) changed = true;
-        } catch (_) { }
-    });
-
-    try {
-        workspace.querySelectorAll(`.${hostedClass}, [data-low-detail-host-group-id]`).forEach(el => {
-            if (desiredHosted.has(el)) return;
-            try {
-                if (el.classList.contains(hostedClass)) {
-                    el.classList.remove(hostedClass);
-                    changed = true;
-                    // 当离开卡片组低细节屏蔽状态时，如果全局低细节模式未开启，则立即加载卡片树内容
-                    if (!CanvasState.lowDetailActive) {
-                        const sectionId = el.id;
-                        if (el.classList.contains('temp-canvas-node')) {
-                            const section = (CanvasState.tempSections || []).find(s => s && s.id === sectionId);
-                            if (section) {
-                                try { __ensureTempSectionTreeLoadedInPlace(section); } catch (_) { }
-                            }
-                        } else if (el.classList.contains('permanent-bookmark-section')) {
-                            try { __ensurePermanentSectionTreeLoadedInPlace(el); } catch (_) { }
-                        } else if (el.classList.contains('md-canvas-node')) {
-                            const node = (CanvasState.mdNodes || []).find(n => n && n.id === sectionId);
-                            if (node) {
-                                try { __ensureMdNodeContentLoadedInPlace(node); } catch (_) { }
-                            }
-                        }
-                    }
-                }
-                if (el.dataset && el.dataset.lowDetailHostGroupId) {
-                    delete el.dataset.lowDetailHostGroupId;
-                    changed = true;
-                }
-            } catch (_) { }
-        });
-    } catch (_) { }
-
-    try {
-        workspace.querySelectorAll(`.${nestedVisibleClass}`).forEach(el => {
-            if (desiredNestedGroups.has(el)) return;
-            try {
-                el.classList.remove(nestedVisibleClass);
-                changed = true;
-            } catch (_) { }
-        });
-    } catch (_) { }
-
-    desiredNestedGroups.forEach(el => {
-        try {
-            if (!el.classList.contains(nestedVisibleClass)) {
-                el.classList.add(nestedVisibleClass);
-                changed = true;
-            }
-            if (el.classList.contains(hostedClass)) {
-                el.classList.remove(hostedClass);
-                changed = true;
-            }
-            if (el.dataset && el.dataset.lowDetailHostGroupId) {
-                delete el.dataset.lowDetailHostGroupId;
-                changed = true;
-            }
-        } catch (_) { }
-    });
-
-    desiredHosted.forEach((hostGroupId, el) => {
-        try {
-            if (!el.classList.contains(hostedClass)) {
-                el.classList.add(hostedClass);
-                changed = true;
-            }
-            if (el.classList.contains('low-detail-active')) {
-                el.classList.remove('low-detail-active');
-                changed = true;
-            }
-            if (el.dataset && el.dataset.lowDetailHostGroupId !== hostGroupId) {
-                el.dataset.lowDetailHostGroupId = hostGroupId;
-                changed = true;
-            }
-        } catch (_) { }
-    });
-
-    if (changed) {
-        try { scheduleEdgesRender(0); } catch (_) { }
-    }
-    __cardGroupLowDetailMembershipDirty = false;
-    return changed;
+    return __clearCardGroupLowDetailMembershipState();
 }
 
 function __maybeApplyCardGroupLowDetailMembershipState(options = {}) {
-    const opts = (options && typeof options === 'object') ? options : {};
-    if (!opts.force &&
-        CanvasState.lowDetailActive &&
-        !__cardGroupLowDetailMembershipDirty &&
-        __cardGroupLowDetailMembershipSignature) {
-        return false;
-    }
-    if (!opts.force &&
-        CanvasState.lowDetailActive &&
-        __cardGroupLowDetailMembershipDirty &&
-        __isCardGroupLowDetailMembershipHotInteraction()) {
-        return false;
-    }
-    return __applyCardGroupLowDetailMembershipState(opts);
+    return __clearCardGroupLowDetailMembershipState();
 }
 
 function __updateNonTempNodesViewportVisibility(options = {}) {
@@ -37100,7 +36823,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
 
         if (!el) {
             if (shouldInstantLoad) {
-                try { renderMdNode(node, { shellOnly: shouldActive }); } catch (_) { }
+                try { renderMdNode(node); } catch (_) { }
                 el = document.getElementById(node.id);
             } else {
                 __enqueueCanvasLazyLoadNode({
@@ -37117,7 +36840,8 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         }
 
         if (el) {
-            if (el.classList.contains('card-group-low-detail-child-hidden')) return;
+            el.classList.remove('card-group-low-detail-child-hidden');
+            if (el.dataset) delete el.dataset.lowDetailHostGroupId;
 
             if (shouldActive && !shouldKeepLoaded) {
                 const canUnload = __shouldNodeBeUnloaded(node.id);
@@ -37262,7 +36986,8 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         }
 
         if (el) {
-            if (el.classList.contains('card-group-low-detail-child-hidden')) return;
+            el.classList.remove('card-group-low-detail-child-hidden');
+            if (el.dataset) delete el.dataset.lowDetailHostGroupId;
 
             __setCanvasViewportLazyShellClass(el, false);
             if ((!CanvasState.lowDetailActive || el.classList.contains('canvas-node-maximized')) && !shouldActive) {
@@ -37282,7 +37007,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         }
     });
 
-    // 3) 卡片组
+    // 3) 卡片组 - 参与视口虚拟化（移出视口范围按需从 DOM 卸载，移入视口时恢复），但在视口内绝不进入低细节遮罩
     const cardGroupNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(node => node && node.id && node.subtype === 'card-group') : [];
     cardGroupNodes.forEach(node => {
         let el = document.getElementById(node.id);
@@ -37292,16 +37017,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         const inViewportStrict = !__isCanvasRectOutsideBounds(Number(node.x), Number(node.y), Number(node.width || 100), Number(node.height || 100), visualBounds);
         __updateNodeOffScreenState(node.id, !inViewportStrict);
 
-        let shouldActive = isGlobalLowDetail;
-        if (!shouldActive && allowViewportLowDetail) {
-            const isOutside = !__isMdNodeInViewportBounds(node, visualBounds, el);
-            shouldActive = __shouldNodeBeLowDetail(node.id, isOutside);
-        }
-        if (el && el.classList.contains('canvas-node-maximized')) {
-            shouldActive = false;
-        }
-
-        // Viewport-outside lazy loading mode: remove from DOM only if doUnload is true!
+        // 视口外虚拟化卸载：超出 lazyRange 且达到卸载时间时，安全从 DOM 移除
         if (!inLazyRange && !shouldKeepLoaded) {
             const canUnload = __shouldNodeBeUnloaded(node.id);
             if (doUnload && el && canUnload) {
@@ -37325,7 +37041,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
                     y: Number(node.y) || 0,
                     w: Number(node.width) || 100,
                     h: Number(node.height) || 100,
-                    shouldActive: shouldActive,
+                    shouldActive: false,
                     data: node
                 });
             }
@@ -37333,19 +37049,11 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
 
         if (el) {
             __setCanvasViewportLazyShellClass(el, false);
-
-            const wasActive = el.classList.contains('low-detail-active');
-            if (shouldActive !== wasActive) {
-                el.classList.toggle('low-detail-active', shouldActive);
-            }
-
-            if (shouldActive) {
-                try {
-                    if (window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                        window.__BCSCardGroup.ensureLowDetailOverlay(el, node);
-                    }
-                } catch (_) { }
-            }
+            el.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
+            try {
+                const oldOverlay = el.querySelector('.card-group-low-detail-overlay, .temp-node-low-detail-overlay');
+                if (oldOverlay) oldOverlay.remove();
+            } catch (_) { }
         }
     });
 
@@ -37377,10 +37085,9 @@ function __ensureCanvasLowDetailOverlaysReady(workspace = null) {
     try {
         ws.querySelectorAll('.card-group-canvas-node').forEach(el => {
             try {
-                const node = __getCardGroupLowDetailNodeById(el.id);
-                if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                    window.__BCSCardGroup.ensureLowDetailOverlay(el, node);
-                }
+                el.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
+                const oldOverlay = el.querySelector('.card-group-low-detail-overlay, .temp-node-low-detail-overlay');
+                if (oldOverlay) oldOverlay.remove();
             } catch (_) { }
         });
     } catch (_) { }
@@ -37479,7 +37186,7 @@ function __forceCanvasLowDetailVisualExit(workspace = null, options = {}) {
             const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
             cards.forEach(card => {
                 const activeForCard = __shouldKeepCardLowDetailAfterGlobalExit(card, bounds);
-                if (card.classList && !card.classList.contains('card-group-low-detail-child-hidden')) {
+                if (card.classList) {
                     card.classList.toggle('low-detail-active', activeForCard);
                 }
             });
@@ -37559,13 +37266,19 @@ function __isCardAlreadyLowDetailIntrinsic(card) {
         card.classList.contains('low-detail-active') ||
         card.classList.contains('dormant-content') ||
         card.classList.contains('temp-tree-unloaded') ||
-        card.classList.contains('permanent-tree-unloaded') ||
-        card.classList.contains('card-group-low-detail-child-hidden')
+        card.classList.contains('permanent-tree-unloaded')
     );
 }
 
 function __ensureLowDetailOverlayForCard(card) {
     if (!card || !card.classList) return;
+    if (card.classList.contains('card-group-canvas-node')) {
+        try {
+            const oldOverlay = card.querySelector('.card-group-low-detail-overlay, .temp-node-low-detail-overlay');
+            if (oldOverlay) oldOverlay.remove();
+        } catch (_) { }
+        return;
+    }
     try {
         if (card.classList.contains('temp-canvas-node')) {
             const sectionId = card.dataset ? (card.dataset.sectionId || card.id) : card.id;
@@ -37581,15 +37294,6 @@ function __ensureLowDetailOverlayForCard(card) {
         }
     } catch (_) { }
     try {
-        if (card.classList.contains('card-group-canvas-node')) {
-            const node = __getCardGroupLowDetailNodeById(card.id);
-            if (node && window.__BCSCardGroup && typeof window.__BCSCardGroup.ensureLowDetailOverlay === 'function') {
-                window.__BCSCardGroup.ensureLowDetailOverlay(card, node);
-            }
-            return;
-        }
-    } catch (_) { }
-    try {
         if (card.classList.contains('md-canvas-node')) {
             const node = (typeof getMdNodeById === 'function') ? getMdNodeById(card.id) : null;
             if (node) __ensureMdNodeLowDetailOverlay(card, node);
@@ -37599,12 +37303,11 @@ function __ensureLowDetailOverlayForCard(card) {
 
 function __shouldKeepCardLowDetailAfterGlobalExit(card, bounds) {
     if (!card || !card.classList) return false;
-    if (card.classList.contains('card-group-low-detail-child-hidden')) return true;
+    if (card.classList.contains('card-group-canvas-node')) return false;
     if (card.classList.contains('canvas-node-maximized')) return false;
 
     if (card.classList.contains('md-canvas-node') ||
         card.classList.contains('permanent-bookmark-section') ||
-        card.classList.contains('card-group-canvas-node') ||
         card.classList.contains('temp-canvas-node')) {
         if (__isViewportLowDetailEffective()) {
             return __isCardOutsideViewportBounds(card, bounds);
@@ -37626,7 +37329,6 @@ function __collectCanvasLowDetailRippleCards(workspace, shouldActive) {
 
     cards.forEach(card => {
         if (!card || !card.classList) return;
-        if (card.classList.contains('card-group-low-detail-child-hidden')) return;
         const rect = (typeof card.getBoundingClientRect === 'function') ? card.getBoundingClientRect() : null;
         if (!rect || rect.width <= 0 || rect.height <= 0) return;
         if (!__isRectNearLowDetailRippleViewport(rect, viewportRect)) return;
@@ -37665,7 +37367,7 @@ function __finalizeCanvasLowDetailExitVisualState(workspace) {
     const cards = Array.from(ws.querySelectorAll(CANVAS_LOW_DETAIL_SURFACE_SELECTOR));
     cards.forEach(card => {
         const activeForCard = __shouldKeepCardLowDetailAfterGlobalExit(card, bounds);
-        if (card.classList && !card.classList.contains('card-group-low-detail-child-hidden')) {
+        if (card.classList) {
             card.classList.toggle('low-detail-active', activeForCard);
         }
         if (activeForCard) {

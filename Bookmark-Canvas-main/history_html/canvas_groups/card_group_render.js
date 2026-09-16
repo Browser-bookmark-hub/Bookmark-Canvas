@@ -244,6 +244,7 @@ function __cardGroupAttachContextMenu(element, node) {
             ? e.target
             : (e.target && e.target.parentElement ? e.target.parentElement : null);
         if (target && target.closest && target.closest('input, textarea, [contenteditable="true"], .card-group-toolbar, .canvas-node-anchor')) return;
+        try { if (typeof selectMdNode === 'function') selectMdNode(node.id); } catch (_) { }
         if (window.__BCSCardGroupToolbar && typeof window.__BCSCardGroupToolbar.showContextMenu === 'function') {
             window.__BCSCardGroupToolbar.showContextMenu(e, node);
         }
@@ -312,7 +313,6 @@ function __cardGroupStartRenamePill(pill, node) {
             root.dataset.title = finalLabel;
             root.setAttribute('aria-label', finalLabel);
             root.classList.remove('card-group-renaming');
-            try { __ensureCardGroupLowDetailOverlay(root, node); } catch (_) { }
         }
         if (toolbar) {
             toolbar.style.display = '';
@@ -372,7 +372,7 @@ function __cardGroupUpdateHeaderPillScaleCap(element) {
     const hardMaxRaw = window.getComputedStyle ? window.getComputedStyle(pill).getPropertyValue('--card-group-pill-scale-hard-max') : '';
     const hardMax = parseFloat(hardMaxRaw);
     const widthCap = cardWidth / basePillWidth;
-    const cap = Math.min(widthCap, (Number.isFinite(hardMax) && hardMax > 0) ? hardMax : 2);
+    const cap = Math.min(widthCap, (Number.isFinite(hardMax) && hardMax > 0) ? hardMax : 6);
     if (Number.isFinite(cap) && cap > 0) {
         element.style.setProperty('--card-group-pill-scale-max', String(cap));
         pill.style.setProperty('--card-group-pill-scale-max', String(cap));
@@ -384,44 +384,16 @@ function __cardGroupUpdateHeaderPillScaleCap(element) {
 
 function __cardGroupUpdateLowDetailTitleMetrics(element, node) {
     if (!element) return;
-    const width = Math.max(160,
-        Number(node && node.width) ||
-        parseFloat(element.style.width) ||
-        element.offsetWidth ||
-        0);
-    const height = Math.max(120,
-        Number(node && node.height) ||
-        parseFloat(element.style.height) ||
-        element.offsetHeight ||
-        0);
-    const minSide = Math.min(width, height);
-    const raw = Math.min(width * 0.035, height * 0.10, minSide * 0.09);
-    const fontSize = Math.max(14, Math.min(30, raw));
-    try { element.style.setProperty('--card-group-low-detail-title-size', `${fontSize.toFixed(1)}px`); } catch (_) { }
+    try { element.style.removeProperty('--card-group-low-detail-title-size'); } catch (_) { }
 }
 
 function __ensureCardGroupLowDetailOverlay(element, node) {
-    if (!element || !node) return null;
-    let overlay = element.querySelector('.card-group-low-detail-overlay');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.className = 'card-group-low-detail-overlay';
-
-        const content = document.createElement('div');
-        content.className = 'card-group-low-detail-content';
-
-        const title = document.createElement('div');
-        title.className = 'card-group-low-detail-title';
-
-        content.appendChild(title);
-        overlay.appendChild(content);
-        element.appendChild(overlay);
-    }
-
-    const title = overlay.querySelector('.card-group-low-detail-title');
-    if (title) title.textContent = __getCardGroupNodeDisplayLabel(node);
-    __cardGroupUpdateLowDetailTitleMetrics(element, node);
-    return overlay;
+    if (!element) return null;
+    try {
+        const overlay = element.querySelector('.card-group-low-detail-overlay');
+        if (overlay) overlay.remove();
+    } catch (_) { }
+    return null;
 }
 
 function renderCardGroup(node) {
@@ -442,12 +414,13 @@ function renderCardGroup(node) {
         el.classList.add('card-group-canvas-node');
         el.innerHTML = '';
         try { el.style.cssText = ''; } catch (_) { }
-        el.classList.remove('low-detail-active');
     }
 
-    if (typeof CanvasState !== 'undefined' && CanvasState && CanvasState.lowDetailActive) {
-        el.classList.add('low-detail-active');
-    }
+    el.classList.remove('low-detail-active');
+    try {
+        const overlay = el.querySelector('.card-group-low-detail-overlay');
+        if (overlay) overlay.remove();
+    } catch (_) { }
 
     const width = Math.max(160, Number(node.width) || 480);
     const height = Math.max(120, Number(node.height) || 320);
@@ -480,8 +453,6 @@ function renderCardGroup(node) {
     body.className = 'card-group-body';
     el.appendChild(body);
 
-    try { __ensureCardGroupLowDetailOverlay(el, node); } catch (_) { }
-
     const mask = document.createElement('div');
     mask.className = 'card-group-drag-mask';
     el.appendChild(mask);
@@ -495,6 +466,16 @@ function renderCardGroup(node) {
     try { __cardGroupAttachPillDrag(pill, el, node); } catch (_) { }
     try { __cardGroupAttachMaskDrag(mask, el, node); } catch (_) { }
     try { __cardGroupAttachContextMenu(el, node); } catch (_) { }
+
+    if (!el.dataset.cardGroupClickWired) {
+        el.dataset.cardGroupClickWired = 'true';
+        el.addEventListener('click', (e) => {
+            if (e.button !== 0) return;
+            const target = e.target;
+            if (target && target.closest && target.closest('.card-group-header-pill, .card-group-toolbar, .resize-handle, .canvas-node-anchor, .card-group-color-popover')) return;
+            try { if (typeof selectMdNode === 'function') selectMdNode(node.id); } catch (_) { }
+        });
+    }
 
     try {
         if (typeof makeTempNodeResizable === 'function') {
@@ -526,7 +507,6 @@ function updateCardGroupLabel(node, nextLabel) {
         if (pill && pill.dataset.renaming !== 'true') {
             pill.textContent = label;
         }
-        try { __ensureCardGroupLowDetailOverlay(el, node); } catch (_) { }
         try { __cardGroupUpdateHeaderPillScaleCap(el); } catch (_) { }
         el.dataset.title = label;
         el.setAttribute('aria-label', label);

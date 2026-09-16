@@ -1427,15 +1427,14 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 /* 视口外懒加载壳体：保留几何尺寸供画布/连线计算，卸掉重内容与命中测试。 */
-.canvas-viewport-lazy-shell:not(.selected):not(.editing):not(.dragging):not(.resizing):not(.canvas-node-maximized) {
+.canvas-viewport-lazy-shell:not(.selected):not(.editing):not(.dragging):not(.resizing):not(.canvas-node-maximized):not(.low-detail-active) {
     pointer-events: none !important;
     content-visibility: auto;
     contain-intrinsic-size: auto 300px;
 }
 
 .md-canvas-node.md-content-unloaded .md-canvas-editor,
-.md-canvas-node.md-content-unloaded .md-canvas-text,
-.md-canvas-node.md-content-unloaded .md-node-toolbar {
+.md-canvas-node.md-content-unloaded .md-canvas-text {
     display: none !important;
 }
 
@@ -1465,11 +1464,6 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     display: none !important;
 }
 
-.card-group-low-detail-child-hidden .canvas-node-anchor,
-.card-group-low-detail-child-hidden .canvas-anchor-zone {
-    display: none !important;
-}
-
 /* Hide resize handles on low-detail cards; the central low-detail overlay becomes the only visible affordance. */
 .temp-canvas-node.low-detail-active > .resize-handle,
 .temp-canvas-node.dormant-content > .resize-handle,
@@ -1477,7 +1471,6 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .permanent-bookmark-section.low-detail-active > .resize-handle,
 .permanent-bookmark-section.permanent-tree-unloaded > .resize-handle,
 .md-canvas-node.low-detail-active > .resize-handle,
-.card-group-canvas-node.low-detail-active > .resize-handle,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .resize-handle {
     display: none !important;
 }
@@ -1485,32 +1478,24 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 
 .md-canvas-node.low-detail-active .md-canvas-editor,
 .md-canvas-node.low-detail-active .md-canvas-text,
-.md-canvas-node.low-detail-active .md-node-toolbar,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .md-canvas-editor,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .md-canvas-text,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .md-node-toolbar {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .md-canvas-text {
     display: none !important;
 }
 
-.card-group-canvas-node.low-detail-active .card-group-header-pill,
-.card-group-canvas-node.low-detail-active .card-group-toolbar,
 .temp-canvas-node.low-detail-active .canvas-section-ctrl-overlay,
 .permanent-bookmark-section.low-detail-active .canvas-section-ctrl-overlay,
 .md-canvas-node.low-detail-active .canvas-section-ctrl-overlay,
-.card-group-canvas-node.low-detail-active .canvas-section-ctrl-overlay,
 .temp-canvas-node.dormant-content .canvas-section-ctrl-overlay,
 .temp-canvas-node.temp-tree-unloaded .canvas-section-ctrl-overlay,
 .permanent-bookmark-section.permanent-tree-unloaded .canvas-section-ctrl-overlay,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-header-pill,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-toolbar,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .canvas-section-ctrl-overlay {
     display: none !important;
 }
 
 /* 低缩放：栏目/永久栏目“序号(#) + 标题”居中大字（反向缩放，保证在很小缩放下仍可读） */
 .temp-node-low-detail-overlay,
-.permanent-node-low-detail-overlay,
-.card-group-low-detail-overlay {
+.permanent-node-low-detail-overlay {
     position: absolute;
     inset: 0;
     display: none;
@@ -1527,25 +1512,21 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .permanent-bookmark-section.low-detail-active .permanent-node-low-detail-overlay,
 .permanent-bookmark-section.permanent-tree-unloaded .permanent-node-low-detail-overlay,
 .md-canvas-node.low-detail-active .temp-node-low-detail-overlay,
-.card-group-canvas-node.low-detail-active .card-group-low-detail-overlay,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-bookmark-section .permanent-node-low-detail-overlay,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .temp-node-low-detail-overlay,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node .card-group-low-detail-overlay {
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .temp-node-low-detail-overlay {
     display: flex;
 }
 
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-bookmark-section,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node,
 .temp-canvas-node.low-detail-active,
 .temp-canvas-node.dormant-content,
 .temp-canvas-node.temp-tree-unloaded,
 .permanent-bookmark-section.low-detail-active,
 .permanent-bookmark-section.permanent-tree-unloaded,
-.md-canvas-node.low-detail-active,
-.card-group-canvas-node.low-detail-active {
+.md-canvas-node.low-detail-active {
     cursor: grab;
 }
 
@@ -1595,20 +1576,8 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     cursor: grabbing;
 }
 
-.card-group-canvas-node.low-detail-active .card-group-low-detail-overlay,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node .card-group-low-detail-overlay {
-    pointer-events: auto;
-    cursor: grab;
-}
-
-.canvas-workspace.is-dragging .card-group-canvas-node.dragging .card-group-low-detail-overlay,
-.canvas-workspace.is-dragging .card-group-canvas-node.card-group-dragging .card-group-low-detail-overlay {
-    cursor: grabbing;
-}
-
 .temp-node-low-detail-content,
-.permanent-node-low-detail-content,
-.card-group-low-detail-content {
+.permanent-node-low-detail-content {
     text-align: center;
     width: 90%;
     /* 关键：内容会做 scale(反向缩放)，因此这里要按比例缩小“布局宽度”，避免视觉上溢出被裁剪 */
@@ -1629,8 +1598,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 [data-theme="dark"] .temp-node-low-detail-content,
-[data-theme="dark"] .permanent-node-low-detail-content,
-[data-theme="dark"] .card-group-low-detail-content {
+[data-theme="dark"] .permanent-node-low-detail-content {
     color: #e5e7eb;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
@@ -1660,44 +1628,15 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     word-break: break-word;
 }
 
-.card-group-low-detail-title {
-    font-size: var(--card-group-low-detail-title-size, 20px);
-    font-weight: 750;
-    line-height: 1.15;
-    opacity: var(--card-group-low-detail-title-opacity, 1);
-    width: 100%;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-}
-
-.card-group-canvas-node.card-group-low-detail-nested-visible {
-    z-index: 245 !important;
-}
-
-.card-group-low-detail-child-hidden {
-    visibility: hidden !important;
-    pointer-events: none !important;
-    content-visibility: hidden !important;
-}
-
-.card-group-low-detail-child-hidden .temp-node-low-detail-overlay,
-.card-group-low-detail-child-hidden .permanent-node-low-detail-overlay,
-.card-group-low-detail-child-hidden .card-group-low-detail-overlay {
-    display: none !important;
-}
-
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-bookmark-section,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node,
 .temp-canvas-node.low-detail-active,
 .temp-canvas-node.dormant-content,
 .temp-canvas-node.temp-tree-unloaded,
 .permanent-bookmark-section.low-detail-active,
 .permanent-bookmark-section.permanent-tree-unloaded,
-.md-canvas-node.low-detail-active,
-.card-group-canvas-node.low-detail-active {
+.md-canvas-node.low-detail-active {
     content-visibility: auto;
     contain-intrinsic-size: auto 300px;
 }
@@ -3073,18 +3012,21 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     z-index: 9999 !important;
 }
 
+/* 拖动卡片组时，随同移动的子成员卡片层级应高于卡片组框体自身，确保子卡片不被蒙版或框体遮挡 */
+.canvas-workspace.is-dragging .canvas-content.card-group-drag-active .card-group-dragging:not(.card-group-canvas-node) {
+    z-index: 10000 !important;
+}
+
 /* 3. 极速模式下的样式简化（色块模式） */
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-bookmark-section,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .card-group-canvas-node,
 .permanent-bookmark-section.low-detail-active,
 .permanent-bookmark-section.permanent-tree-unloaded,
 .temp-canvas-node.low-detail-active,
 .temp-canvas-node.dormant-content,
 .temp-canvas-node.temp-tree-unloaded,
-.md-canvas-node.low-detail-active,
-.card-group-canvas-node.low-detail-active {
+.md-canvas-node.low-detail-active {
     /* 色块模式下不需要绘制阴影和圆角细节，能省则省 */
     box-shadow: none !important;
     filter: none !important;
@@ -3209,7 +3151,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     --card-group-fill: rgba(148, 163, 184, 0.06);
     --card-group-pill-bg: #475569;
     --card-group-pill-fg: #f8fafc;
-    --card-group-pill-scale-hard-max: 2;
+    --card-group-pill-scale-hard-max: 6;
     --card-group-corner-radius: 14px;
     --card-group-highlight-color: rgba(9, 105, 218, 0.9);
     --card-group-anchor-color: var(--card-group-border);
@@ -3494,9 +3436,16 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     border-radius: 8px;
     background: var(--bg-elevated);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    z-index: 13050;
 }
 
 .card-group-canvas-node.selected .card-group-toolbar {
+    opacity: 1;
+    pointer-events: auto;
+    transition: none;
+}
+
+.md-canvas-node.selected .md-node-toolbar {
     opacity: 1;
     pointer-events: auto;
     transition: none;
