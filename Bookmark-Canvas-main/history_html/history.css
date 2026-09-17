@@ -4802,13 +4802,15 @@ a.tree-label.tree-bookmark-link:hover {
 
 /* 编辑书签 / 重命名文件夹弹窗 */
 #editBookmarkModal {
-    background: transparent;
     align-items: center;
     justify-content: center;
 }
 
 /* 覆盖 .modal.content-center：在 HTML 页面与侧边栏都保持全屏居中 */
-#editBookmarkModal.modal.content-center {
+#editBookmarkModal.modal.content-center,
+#bookmarkAddSecondaryModal.modal.content-center,
+#canvasCardGroupCreateModal.modal.content-center,
+.batch-note-edit-modal.modal.content-center {
     left: 0;
     width: 100%;
 }
@@ -4817,7 +4819,6 @@ a.tree-label.tree-bookmark-link:hover {
     width: min(92vw, 520px);
     max-width: 520px;
     max-height: min(84vh, 700px);
-    box-shadow: none;
 }
 
 #editBookmarkModal .modal-header.compact {
@@ -4911,17 +4912,10 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     filter: brightness(0.95);
 }
 
-#bookmarkAddSecondaryModal.modal.content-center {
-    left: 0;
-    width: 100%;
-    background: transparent;
-}
-
 #bookmarkAddSecondaryModal .modal-content {
     width: min(92vw, 560px);
     max-width: 560px;
     max-height: min(84vh, 760px);
-    box-shadow: none;
 }
 
 #bookmarkAddSecondaryModal .modal-header.compact {

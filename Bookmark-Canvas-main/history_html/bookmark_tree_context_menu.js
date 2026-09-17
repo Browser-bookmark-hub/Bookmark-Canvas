@@ -9421,6 +9421,7 @@ function showBookmarkEditorModal(options = {}) {
             refs.saveBtn.removeEventListener('click', handleSave);
             refs.cancelBtn.removeEventListener('click', handleCancel);
             refs.closeBtn.removeEventListener('click', handleCancel);
+            refs.modal.removeEventListener('click', handleBackdropClick);
             refs.titleInput.removeEventListener('keydown', handleKeydown);
             refs.urlInput.removeEventListener('keydown', handleKeydown);
             delete refs.modal.dataset.bookmarkEditorType;
@@ -9432,6 +9433,12 @@ function showBookmarkEditorModal(options = {}) {
             cleanup();
             refs.modal.classList.remove('show');
             resolve(result);
+        }
+
+        function handleBackdropClick(e) {
+            if (e.target === refs.modal) {
+                closeModal(null);
+            }
         }
 
         function handleSave() {
@@ -9468,6 +9475,7 @@ function showBookmarkEditorModal(options = {}) {
         refs.saveBtn.addEventListener('click', handleSave);
         refs.cancelBtn.addEventListener('click', handleCancel);
         refs.closeBtn.addEventListener('click', handleCancel);
+        refs.modal.addEventListener('click', handleBackdropClick);
         refs.titleInput.addEventListener('keydown', handleKeydown);
         refs.urlInput.addEventListener('keydown', handleKeydown);
     });
