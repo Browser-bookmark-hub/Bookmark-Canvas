@@ -35892,6 +35892,22 @@ function __ensureCanvasInteractionRecoveryLoop() {
                 return;
             }
             __sampleCanvasInteractionSpeed();
+
+            // [实验/验证] 缩放手势期间不做任何卡片物料化，只让 transform 变化。
+            // 依据（三次 trace 的 A/B 对照）：
+            //   拖滚动条平移（无 DOM 写入）→ 不闪
+            //   空格拖拽平移（有 DOM 写入，但缩放比例不变）→ 不闪
+            //   滚轮缩放 / resize 窗口（缩放比例或视口尺寸变化）→ 闪
+            // 即：DOM 写入只是"扣扳机"，比例变化才是"子弹"——缩放期间任何一处绘制失效，
+            // 都会被按新比例重画，而周围的 tile 还是旧比例，形成可见的比例不一致（闪烁）。
+            // 所以缩放期间必须做到零绘制失效；物料化一律延后到手势结束后由
+            // dwell + runCanvasVirtualizationUpdate 统一补齐（平移路径不受影响，保持原行为）。
+            const __lodWorkspace = document.getElementById('canvasWorkspace');
+            if (__lodWorkspace && __lodWorkspace.classList && __lodWorkspace.classList.contains('is-zooming')) {
+                canvasInteractionRecoveryRaf = requestAnimationFrame(tick);
+                return;
+            }
+
             // 快速掠过：把已经离屏的卡片尽快回收，DOM 规模始终贴近视口，避免全量加载卡顿。
             if (canvasInteractionSpeedPeak >= CANVAS_INTERACTION_SPEED_SKIM) {
                 try { __recycleCanvasCardsDuringSkim(document.getElementById('canvasWorkspace')); } catch (_) { }
