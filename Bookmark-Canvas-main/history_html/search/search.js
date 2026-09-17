@@ -12573,7 +12573,13 @@ async function locateCanvasElement(elementId, type, options = {}) {
     // [Fix] Force wake up target temp section after jump
     if (type === 'temp-section' && window.CanvasModule && typeof window.CanvasModule.forceWakeAndRender === 'function') {
         // Use a small timeout to allow the transform to settle/apply first
-        setTimeout(() => window.CanvasModule.forceWakeAndRender(elementId), 50);
+        setTimeout(() => {
+            window.CanvasModule.forceWakeAndRender(elementId);
+            const targetEl = document.getElementById(elementId) || document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(elementId)}"]`);
+            if (targetEl && typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(targetEl);
+            }
+        }, 50);
     }
 
     // 2. 尝试高亮 DOM 元素 (Best Effort)
@@ -12581,6 +12587,9 @@ async function locateCanvasElement(elementId, type, options = {}) {
         const tryHighlight = () => {
             const el = document.querySelector(highlightSelector);
             if (el) {
+                if (typeof window.__flushTagAndNoteForElement === 'function') {
+                    window.__flushTagAndNoteForElement(el);
+                }
                 // Apply Highlight Class & Color
                 el.style.setProperty('--search-highlight-color', highlightColor);
                 // For edges, we use a specific class

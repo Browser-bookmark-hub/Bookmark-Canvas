@@ -1748,8 +1748,8 @@
 
     let __pendingNoteTreeItems = new Set();
     let __pendingNoteFlushScheduled = false;
-    const __TAG_FLUSH_CHUNK_MS_DEFAULT = 4;
-    const __TAG_FLUSH_BUSY_RETRY_MS = 220;
+    const __TAG_FLUSH_CHUNK_MS_DEFAULT = 16;
+    const __TAG_FLUSH_BUSY_RETRY_MS = 30;
 
     // 分片预算随画布性能档位伸缩（主线程性能越强，单帧可处理越多标记）。
     function __tagFlushChunkMs() {
@@ -1757,7 +1757,7 @@
             const cm = (typeof window !== 'undefined') ? window.CanvasModule : null;
             if (cm && typeof cm.getPerfConfig === 'function') {
                 const c = cm.getPerfConfig();
-                if (c && Number.isFinite(c.tagFlushChunkMs)) return c.tagFlushChunkMs;
+                if (c && Number.isFinite(c.tagFlushChunkMs)) return Math.max(16, c.tagFlushChunkMs);
             }
         } catch (_) { }
         return __TAG_FLUSH_CHUNK_MS_DEFAULT;
@@ -1821,10 +1821,7 @@
                 const frameExceeded = (window.CanvasModule && typeof window.CanvasModule.frameBudgetExceeded === 'function')
                     ? window.CanvasModule.frameBudgetExceeded(nowAt)
                     : false;
-                const inputPending = (window.CanvasModule && typeof window.CanvasModule.hasPendingInput === 'function')
-                    ? window.CanvasModule.hasPendingInput()
-                    : false;
-                if (chunkExceeded || frameExceeded || inputPending) break;
+                if (chunkExceeded || frameExceeded) break;
             }
             const treeItem = items[index];
             if (!document.contains(treeItem)) continue;
@@ -2212,10 +2209,7 @@
                 const frameExceeded = (window.CanvasModule && typeof window.CanvasModule.frameBudgetExceeded === 'function')
                     ? window.CanvasModule.frameBudgetExceeded(nowAt)
                     : false;
-                const inputPending = (window.CanvasModule && typeof window.CanvasModule.hasPendingInput === 'function')
-                    ? window.CanvasModule.hasPendingInput()
-                    : false;
-                if (chunkExceeded || frameExceeded || inputPending) break;
+                if (chunkExceeded || frameExceeded) break;
             }
             const treeItem = items[index];
             if (!document.contains(treeItem)) continue;
@@ -2389,13 +2383,10 @@
     function __isCanvasInteractionBusyForTagDots() {
         const cm = (typeof window !== 'undefined') ? window.CanvasModule : null;
 
-        // [Perf/正确性] 首选与类名无关的"输入新鲜度"信号。
-        // 原先靠 workspace 类名判断交互，trace 实测在缩放期间未能生效：
-        // 4.2s 内刷新被调用 255 次（按让路重试间隔本应约 38 次），其中 84% 紧跟着一次全视口重绘。
-        // 该信号由画布侧任何输入事件刷新，宁可多让路、也不要在用户操作期间改写 DOM。
+        // [Perf] 仅在持续高频手势（如滚轮连续滚动、手势连续缩放）短时间让路，不因普通鼠标滑动而阻断
         if (cm && typeof cm.isInputRecentlyActive === 'function') {
             try {
-                if (cm.isInputRecentlyActive(400)) return true;
+                if (cm.isInputRecentlyActive(100)) return true;
             } catch (_) { }
         }
 
@@ -2403,11 +2394,7 @@
         const state = (cm && cm.CanvasState) ? cm.CanvasState : null;
         const resizeState = state && state.sectionCtrlMode && state.sectionCtrlMode.resize;
 
-        // [Perf] 先用只读类名/状态位做廉价判断，命中即返回。
-        // 原实现在这里无条件执行 document.querySelector(3 个类选择器)：
-        // 在 6000 元素的画布上会强制样式与选择器匹配刷新，单次约 0.85ms；
-        // 交互期间本函数被调用约 60 次/秒，实测这是"全视口重绘 + 整层重新光栅化（GPU 进程 52%）"的源头。
-        // 下面的 quickBusy 与最后的 querySelector 仍是同一个 OR，语义完全等价。
+        // 先用只读类名/状态位做廉价判断，命中即返回
         const quickBusy = !!(
             (workspace && (
                 workspace.classList.contains('is-zooming') ||
@@ -2421,10 +2408,10 @@
         );
         if (quickBusy) return true;
 
-        const isRecovering = !!(window.CanvasModule && typeof window.CanvasModule.isCanvasRecovering === 'function' && window.CanvasModule.isCanvasRecovering());
-        if (isRecovering) return true;
+        // 注意：卡片从休眠/懒加载恢复（Recovering）期间正是节点进入视口展示的时刻，
+        // Tag/Note 应当随内容正常补齐，不再在此处阻断。
 
-        // 仅当上面全部为假时，才做那次昂贵的全文档查询。
+        // 仅当上面全部为假时，才做那次全文档查询
         return !!document.querySelector('.temp-canvas-node.resizing, .md-canvas-node.resizing, .permanent-bookmark-section.resizing');
     }
 
@@ -2444,7 +2431,7 @@
             requestAnimationFrame(() => {
                 __scanTreeItemsForTagDots(document);
             });
-        }, 180);
+        }, 40);
     }
 
     function __queueTreeItemScanForTagDots(scope) {
@@ -2578,6 +2565,75 @@
         }
     }
 
+    // 即时为指定容器内的书签项刷新 Tag 与 Note 标记（用于定位跳转、卡片唤醒时的即刻呈现）
+    function __flushTagAndNoteForElement(container) {
+        if (!container) return;
+        const treeItems = [];
+        if (container.classList && container.classList.contains('tree-item')) {
+            treeItems.push(container);
+        }
+        if (container.querySelectorAll) {
+            container.querySelectorAll('.tree-item').forEach((item) => {
+                if (item !== container) treeItems.push(item);
+            });
+        }
+        if (!treeItems.length) return;
+
+        // 若包含永久书签且索引未就绪，异步预热索引以便下次补齐
+        const hasPermItems = Array.from(treeItems).some((el) => {
+            const tt = el.dataset.treeType || el.getAttribute('data-tree-type') || '';
+            return tt !== 'temporary';
+        });
+        if (hasPermItems && (!__permIdentityIndex || !__permNoteIndex)) {
+            Promise.all([
+                __permIdentityIndex ? null : __loadPermIdentityIndex(),
+                __permNoteIndex ? null : __loadPermNoteIndex()
+            ]).then(() => {
+                __flushTagAndNoteForElement(container);
+            }).catch(() => { });
+        }
+
+        const cardWidthCache = new Map();
+        treeItems.forEach((treeItem) => {
+            // 1. Tag dots
+            try {
+                const existingTag = treeItem.querySelector(':scope > .tree-item-tag-dots');
+                const tags = __getTagsForTreeItemSync(treeItem);
+                if (!tags.length) {
+                    if (existingTag) existingTag.remove();
+                } else {
+                    const currentModeIsWide = existingTag ? existingTag.classList.contains('dots-trailing') : null;
+                    const wide = __isWideRowContext(treeItem, currentModeIsWide, cardWidthCache);
+                    const nextMode = wide ? 'dots-trailing' : 'dots-leading';
+                    const currentMode = existingTag ? (existingTag.classList.contains('dots-trailing') ? 'dots-trailing' : 'dots-leading') : null;
+                    const tagsKey = tags.map(t => `${t.color}:${t.text || ''}`).join('|');
+                    const existingTagsKey = existingTag ? existingTag.dataset.tagsKey : null;
+                    if (!existingTag || existingTagsKey !== tagsKey || currentMode !== nextMode) {
+                        const next = __buildDotsElement(tags, wide, tagsKey);
+                        if (existingTag) {
+                            existingTag.replaceWith(next);
+                        } else if (wide) {
+                            const tip = treeItem.querySelector(':scope > .tree-tip-icon, :scope > .tree-info-icon');
+                            if (tip) treeItem.insertBefore(next, tip);
+                            else treeItem.appendChild(next);
+                        } else {
+                            treeItem.insertBefore(next, treeItem.firstChild);
+                        }
+                    }
+                }
+            } catch (_) { }
+
+            // 2. Note marker & note highlight
+            try {
+                __injectNoteMarkerIntoTreeItem(treeItem, cardWidthCache);
+            } catch (_) { }
+
+            __pendingTagTreeItems.delete(treeItem);
+            __pendingNoteTreeItems.delete(treeItem);
+        });
+    }
+
+    window.__flushTagAndNoteForElement = __flushTagAndNoteForElement;
     window.__refreshTagDotsForTargets = refreshTagDotsForTargets;
     window.__refreshAllTagDots = function () {
         __invalidatePermIdentityIndex();

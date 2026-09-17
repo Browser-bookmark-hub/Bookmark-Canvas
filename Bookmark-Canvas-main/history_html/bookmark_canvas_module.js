@@ -1833,16 +1833,22 @@ function __markCanvasUserInput() {
     canvasLastUserInputAt = Date.now();
 }
 function __isCanvasInputRecent(windowMs) {
-    const span = (typeof windowMs === 'number' && isFinite(windowMs)) ? windowMs : 400;
+    const span = (typeof windowMs === 'number' && isFinite(windowMs)) ? windowMs : 100;
     return canvasLastUserInputAt > 0 && (Date.now() - canvasLastUserInputAt) < span;
 }
 function __bindCanvasUserInputRecencyTracking() {
     if (canvasUserInputTrackingBound) return;
     canvasUserInputTrackingBound = true;
     const handler = () => { __markCanvasUserInput(); };
-    ['wheel', 'pointerdown', 'pointermove', 'touchstart', 'touchmove', 'keydown'].forEach((type) => {
+    // [Perf] 仅监听高频连续手势，排除普通鼠标悬停/移动（pointermove）和按键打字（keydown）
+    ['wheel', 'touchstart', 'touchmove'].forEach((type) => {
         try { document.addEventListener(type, handler, { passive: true, capture: true }); } catch (_) { }
     });
+    try {
+        document.addEventListener('pointermove', (e) => {
+            if (e && e.buttons > 0) __markCanvasUserInput();
+        }, { passive: true, capture: true });
+    } catch (_) { }
 }
 
 const CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME = 28;
@@ -9837,6 +9843,11 @@ function __wakeCanvasNodeFromLazyState(element) {
     // 3. 按卡片类型恢复内容
     if (element.classList.contains('permanent-bookmark-section')) {
         try { __ensurePermanentSectionTreeLoadedInPlace(element); } catch (_) { }
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(element);
+            }
+        } catch (_) { }
         return;
     }
 
@@ -9861,6 +9872,11 @@ function __wakeCanvasNodeFromLazyState(element) {
         if (!treeLoaded && typeof renderTempNode === 'function') {
             try { renderTempNode(section, { forceBuildTree: true }); } catch (_) { }
         }
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(refreshedNode || element);
+            }
+        } catch (_) { }
         return;
     }
 
@@ -9992,6 +10008,11 @@ function locateToPermanentSection(targetZoom = null) {
     // 定位唤醒：解除低细节/虚拟化懒加载状态
     __wakeCanvasNodeFromLazyState(permanentSection);
     __schedulePostLocateViewportRefresh();
+    try {
+        if (typeof window.__flushTagAndNoteForElement === 'function') {
+            window.__flushTagAndNoteForElement(permanentSection);
+        }
+    } catch (_) { }
     if (CanvasState.nodeMaximizedActive) {
         refreshMaximizedNodes();
     }
@@ -10142,6 +10163,11 @@ function locateToElement(el, targetZoom = null) {
     // 定位唤醒：解除低细节/虚拟化懒加载状态
     __wakeCanvasNodeFromLazyState(el);
     __schedulePostLocateViewportRefresh();
+    try {
+        if (typeof window.__flushTagAndNoteForElement === 'function') {
+            window.__flushTagAndNoteForElement(el);
+        }
+    } catch (_) { }
     if (CanvasState.nodeMaximizedActive) {
         refreshMaximizedNodes();
     }
@@ -23967,6 +23993,11 @@ function loadMoreRootItems(section, treeContainer, loadMoreBtn) {
         }
 
         treeContainer.insertBefore(fragment, loadMoreBtn);
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(treeContainer);
+            }
+        } catch (_) { }
 
         // 持久化新的可见数量
         persistTempSectionRootVisibleCount(section.id, endIndex);
@@ -24330,6 +24361,11 @@ function loadFolderChildren(section, parentItemId, childrenContainer) {
         }
 
         childrenContainer.appendChild(fragment);
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(childrenContainer);
+            }
+        } catch (_) { }
 
         // 更新父节点状态
         if (parentTreeItem) {
@@ -24475,6 +24511,11 @@ function loadMoreChildren(section, parentItemId, startIndex, loadMoreBtn) {
         }
 
         childrenContainer.appendChild(fragment);
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(childrenContainer);
+            }
+        } catch (_) { }
 
         // 附加更新后的操作按钮容器
         const lazyActions = createTempFolderLazyActions(section, itemEntry.item, endIndex);
@@ -24543,6 +24584,11 @@ function loadAllChildren(section, parentItemId, loadAllBtn) {
         }
 
         childrenContainer.appendChild(fragment);
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(childrenContainer);
+            }
+        } catch (_) { }
 
         // 附加更新后的操作按钮容器（由于全展开，此时只会渲染收起按钮）
         const lazyActions = createTempFolderLazyActions(section, itemEntry.item, total);
@@ -34779,6 +34825,13 @@ function __ensurePermanentSectionTreeLoadedInPlace(sectionEl) {
             }
         } catch (_) { }
     }
+    if (rendered) {
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(tree);
+            }
+        } catch (_) { }
+    }
     return rendered;
 }
 
@@ -35123,7 +35176,7 @@ function scheduleCanvasVirtualizationUnloadUpdate(delayMs = null) {
 }
 
 function scheduleCanvasVirtualizationUpdate(delayMs = null) {
-    if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective()) {
+    if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective() && !CanvasState.lowDetailActive) {
         cancelAllCanvasVirtualizationTimers();
         return;
     }
@@ -35731,7 +35784,7 @@ function __collectCanvasInteractionMissingNodes(workspace, bounds) {
     return items;
 }
 
-function __runCanvasInteractionShellRecovery() {
+function __runCanvasInteractionShellRecovery(options = {}) {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return false;
     if (!isCanvasVirtualizationEnabled() && !__isViewportLowDetailEffective() && !CanvasState.lowDetailActive) return false;
@@ -35739,12 +35792,17 @@ function __runCanvasInteractionShellRecovery() {
     // 正常虚拟化正在处理队列时让路，避免互相清空。
     if (__canvasLazyLoadQueue.frameId) return false;
 
+    const opts = (options && typeof options === 'object') ? options : {};
+    const isForce = !!opts.force;
+    const isZooming = !!(workspace.classList && workspace.classList.contains('is-zooming'));
+
     const now = __canvasRecoveryNow();
-    // 节流改为“约 2 帧”，随刷新率自适应，不再读旧档位的 120ms 漫长等待。
+    // 节流随刷新率自适应：缩放手势期间自适应小步节流（约 3 帧），平移时约 2 帧；force 时跳过节流。
     // 新 pass 只在上一轮 step 队列跑完（frameId 为空）后才会进入，故不会互相清空。
     const __frameMs = __canvasPerfFrameBudgetMs();
-    const throttleMs = Math.max(8, Math.min(64, __frameMs * 2));
-    if (now - canvasInteractionRecoveryLastAt < throttleMs) return false;
+    const throttleMultiplier = isZooming ? 3 : 2;
+    const throttleMs = Math.max(8, Math.min(64, __frameMs * throttleMultiplier));
+    if (!isForce && (now - canvasInteractionRecoveryLastAt < throttleMs)) return false;
     canvasInteractionRecoveryLastAt = now;
 
     const bounds = __getCanvasViewportBounds(workspace, 0);
@@ -35758,12 +35816,7 @@ function __runCanvasInteractionShellRecovery() {
     const viewportCenterY = (rect.height / 2 - (CanvasState.panOffsetY || 0)) / zoom;
 
     // 智能：慢速/精细移动时负载可控，直接补全内容；快速/惯性滑动时才用低细节过渡壳，避免白建 DOM。
-    // [Fix] 优先级倒置修复：缩小方向必须一律走壳体。
-    // 原实现只看速度，导致"从大比例缩到小比例"时先按完整内容把卡片（含整棵书签树）建一遍，
-    // 等越过低细节阈值再统一转成色块——建了又扔，既掉帧又浪费时间，
-    // 表现就是"先加载懒加载卡片，然后才做低细节"。
-    // 现在缩小手势、以及已经缩到低细节预热阈值以下时，一律只建低细节过渡壳，
-    // 内容等手势结束后的升级 pass（dwell + runCanvasVirtualizationUpdate）再补。
+    // 缩放手势期间（isZooming）、缩小方向或低细节预热阈值以下时，一律走低细节过渡壳，绝对不建重型树 DOM。
     let nearLowDetailZoom = false;
     try {
         const displayZoomForLod = getCanvasDisplayZoom();
@@ -35774,6 +35827,7 @@ function __runCanvasInteractionShellRecovery() {
             displayZoomForLod <= prewarmZoom;
     } catch (_) { }
     const lowDetailTransition = !!CanvasState.lowDetailActive
+        || isZooming
         || nearLowDetailZoom
         || canvasInteractionZoomOutPeak > 0.5
         || canvasInteractionSpeedPeak >= CANVAS_INTERACTION_SPEED_SLOW;
@@ -35882,31 +35936,19 @@ function __ensureCanvasInteractionRecoveryLoop() {
         canvasInteractionRecoveryRaf = null;
         try {
             if (!__isCanvasInteractionActive()) {
-                // 交互结束：若恢复过程中产生过低细节过渡卡片，按“最近手感速度”自适应停留后再补全内容。
-                if (canvasInteractionRecoveryDidWork) {
+                // 交互结束：若恢复过程中产生过低细节过渡卡片，或视口内仍有未补齐卡片，按“最近手感速度”自适应停留后再补全内容。
+                const ws = document.getElementById('canvasWorkspace');
+                const bounds = ws ? __getCanvasViewportBounds(ws, 0) : null;
+                const hasMissing = bounds && __collectCanvasInteractionMissingNodes(ws, bounds).length > 0;
+                if (canvasInteractionRecoveryDidWork || hasMissing) {
                     const dwell = __resolveCanvasInteractionDwellMs();
                     CanvasState.interactionLowDetailHoldUntil = __canvasRecoveryNow() + dwell;
                     canvasInteractionRecoveryDidWork = false;
-                    try { scheduleCanvasVirtualizationUpdate(dwell + 40); } catch (_) { }
+                    try { scheduleCanvasVirtualizationUpdate(dwell + 20); } catch (_) { }
                 }
                 return;
             }
             __sampleCanvasInteractionSpeed();
-
-            // [实验/验证] 缩放手势期间不做任何卡片物料化，只让 transform 变化。
-            // 依据（三次 trace 的 A/B 对照）：
-            //   拖滚动条平移（无 DOM 写入）→ 不闪
-            //   空格拖拽平移（有 DOM 写入，但缩放比例不变）→ 不闪
-            //   滚轮缩放 / resize 窗口（缩放比例或视口尺寸变化）→ 闪
-            // 即：DOM 写入只是"扣扳机"，比例变化才是"子弹"——缩放期间任何一处绘制失效，
-            // 都会被按新比例重画，而周围的 tile 还是旧比例，形成可见的比例不一致（闪烁）。
-            // 所以缩放期间必须做到零绘制失效；物料化一律延后到手势结束后由
-            // dwell + runCanvasVirtualizationUpdate 统一补齐（平移路径不受影响，保持原行为）。
-            const __lodWorkspace = document.getElementById('canvasWorkspace');
-            if (__lodWorkspace && __lodWorkspace.classList && __lodWorkspace.classList.contains('is-zooming')) {
-                canvasInteractionRecoveryRaf = requestAnimationFrame(tick);
-                return;
-            }
 
             // 快速掠过：把已经离屏的卡片尽快回收，DOM 规模始终贴近视口，避免全量加载卡顿。
             if (canvasInteractionSpeedPeak >= CANVAS_INTERACTION_SPEED_SKIM) {
@@ -36912,7 +36954,12 @@ function __ensureTempSectionTreeLoadedInPlace(section) {
             } catch (_) { }
         }
 
-        try { treeContainer.appendChild(treeFragment); } catch (_) { }
+        try {
+            treeContainer.appendChild(treeFragment);
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(treeContainer);
+            }
+        } catch (_) { }
     }
 
     try { treeContainer.style.display = ''; } catch (_) { }
@@ -39643,9 +39690,10 @@ function __onCanvasZoomEndCleanup() {
     if (!isCanvasVirtualizationEnabled()) {
         try { prewarmCanvasLowDetailVisibleTrees(); } catch (_) { }
     }
-    // 缩放真正停止后再统一恢复/按需加载（避免 is-zooming 阶段被判定为交互中而跳过补渲染）
-    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective()) {
-        try { scheduleCanvasVirtualizationUpdate(); } catch (_) { }
+    // 缩放真正停止后：立即触发一次壳体恢复与补齐，彻底解决快速缩小到小比例时的空白未加载问题
+    try { __runCanvasInteractionShellRecovery({ force: true }); } catch (_) { }
+    if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective() || CanvasState.lowDetailActive) {
+        try { scheduleCanvasVirtualizationUpdate(0); } catch (_) { }
     } else {
         try { scheduleDormancyUpdate(); } catch (_) { }
     }
@@ -39772,6 +39820,10 @@ function __cancelCanvasActiveZoomGesture(reason = 'interrupt') {
         updateCanvasGridLayerTransform(CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom, true);
         updateCanvasLowDetailMode(true);
         updateCanvasZoomPerformanceMode({ deferOff: true });
+        try { __runCanvasInteractionShellRecovery({ force: true }); } catch (_) { }
+        if (isCanvasVirtualizationEnabled() || __isViewportLowDetailEffective() || CanvasState.lowDetailActive) {
+            try { scheduleCanvasVirtualizationUpdate(0); } catch (_) { }
+        }
     } catch (_) { }
 
     __logCanvasWinInput('zoom-interrupt', { reason }, {

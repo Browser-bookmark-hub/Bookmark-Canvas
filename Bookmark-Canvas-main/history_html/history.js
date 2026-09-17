@@ -2880,9 +2880,13 @@ function __renderPermanentTreeIntoTree(tree, options = {}) {
         tree.dataset.permanentTreeRenderRole = tree.id === 'bookmarkTree' ? 'primary' : 'copy';
     } catch (_) { }
 
-    if (typeof releaseVisualLock === 'function') releaseVisualLock();
-
     try { delete tree._existingLoadedCounts; } catch (_) {}
+
+    try {
+        if (typeof window.__flushTagAndNoteForElement === 'function') {
+            window.__flushTagAndNoteForElement(tree);
+        }
+    } catch (_) { }
 
     return true;
 }
@@ -13973,6 +13977,12 @@ async function loadPermanentFolderChildrenLazy(parentId, childrenContainer, star
             childrenContainer.appendChild(frag);
         }
 
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(childrenContainer);
+            }
+        } catch (_) { }
+
         if (item) {
             item.dataset.childrenLoaded = 'true';
             item.dataset.hasChildren = 'true';
@@ -14209,6 +14219,12 @@ async function loadAllPermanentChildren(parentId, loadAllBtn, isReadOnly) {
         if (oldActions) oldActions.remove();
 
         childrenContainer.appendChild(fragment);
+
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(childrenContainer);
+            }
+        } catch (_) { }
 
         // 附加更新后的操作按钮容器（全展开后只会有"收起已加载"按钮）
         const lazyActions = createPermanentFolderLazyActions(parentId, childrenForRender.length, childrenForRender.length);
