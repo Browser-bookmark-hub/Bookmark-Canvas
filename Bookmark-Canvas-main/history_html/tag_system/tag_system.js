@@ -1638,8 +1638,16 @@
             __noteHighlightMutations.add(treeItem);
         }
         treeItem.classList.add('has-note-highlight');
-        treeItem.dataset.noteHighlightColor = noteColor;
-        treeItem.style.setProperty('--note-highlight-color', `var(--tag-${noteColor}, var(--text-primary))`);
+        // [Perf] 值没变就不写。
+        // dataset / style 赋值即使内容相同也会生成属性变更、让该元素失效并触发重绘；
+        // 而本函数在每次批注刷新时都会对每个待处理节点调用一遍，缩放期间约 60 次/秒。
+        if (treeItem.dataset.noteHighlightColor !== noteColor) {
+            treeItem.dataset.noteHighlightColor = noteColor;
+        }
+        const highlightColorVar = `var(--tag-${noteColor}, var(--text-primary))`;
+        if (treeItem.style.getPropertyValue('--note-highlight-color') !== highlightColorVar) {
+            treeItem.style.setProperty('--note-highlight-color', highlightColorVar);
+        }
         if (typeof window.__updateTreeHighlightSource === 'function') {
             window.__updateTreeHighlightSource(treeItem);
         } else {
@@ -2379,14 +2387,28 @@
 
     let __deferredTreeItemScanTimer = null;
     function __isCanvasInteractionBusyForTagDots() {
+        const cm = (typeof window !== 'undefined') ? window.CanvasModule : null;
+
+        // [Perf/正确性] 首选与类名无关的"输入新鲜度"信号。
+        // 原先靠 workspace 类名判断交互，trace 实测在缩放期间未能生效：
+        // 4.2s 内刷新被调用 255 次（按让路重试间隔本应约 38 次），其中 84% 紧跟着一次全视口重绘。
+        // 该信号由画布侧任何输入事件刷新，宁可多让路、也不要在用户操作期间改写 DOM。
+        if (cm && typeof cm.isInputRecentlyActive === 'function') {
+            try {
+                if (cm.isInputRecentlyActive(400)) return true;
+            } catch (_) { }
+        }
+
         const workspace = document.getElementById('canvasWorkspace');
-        const state = (window.CanvasModule && window.CanvasModule.CanvasState) ? window.CanvasModule.CanvasState : null;
+        const state = (cm && cm.CanvasState) ? cm.CanvasState : null;
         const resizeState = state && state.sectionCtrlMode && state.sectionCtrlMode.resize;
-        const isRecovering = !!(window.CanvasModule && typeof window.CanvasModule.isCanvasRecovering === 'function' && window.CanvasModule.isCanvasRecovering());
-        const hasNativeResizing = !!document.querySelector('.temp-canvas-node.resizing, .md-canvas-node.resizing, .permanent-bookmark-section.resizing');
-        return !!(
-            isRecovering ||
-            hasNativeResizing ||
+
+        // [Perf] 先用只读类名/状态位做廉价判断，命中即返回。
+        // 原实现在这里无条件执行 document.querySelector(3 个类选择器)：
+        // 在 6000 元素的画布上会强制样式与选择器匹配刷新，单次约 0.85ms；
+        // 交互期间本函数被调用约 60 次/秒，实测这是"全视口重绘 + 整层重新光栅化（GPU 进程 52%）"的源头。
+        // 下面的 quickBusy 与最后的 querySelector 仍是同一个 OR，语义完全等价。
+        const quickBusy = !!(
             (workspace && (
                 workspace.classList.contains('is-zooming') ||
                 workspace.classList.contains('is-scrolling') ||
@@ -2397,6 +2419,13 @@
             (state && state.touchpadState && state.touchpadState.isScrolling) ||
             (resizeState && resizeState.active)
         );
+        if (quickBusy) return true;
+
+        const isRecovering = !!(window.CanvasModule && typeof window.CanvasModule.isCanvasRecovering === 'function' && window.CanvasModule.isCanvasRecovering());
+        if (isRecovering) return true;
+
+        // 仅当上面全部为假时，才做那次昂贵的全文档查询。
+        return !!document.querySelector('.temp-canvas-node.resizing, .md-canvas-node.resizing, .permanent-bookmark-section.resizing');
     }
 
     function __scanTreeItemsForTagDots(scope) {

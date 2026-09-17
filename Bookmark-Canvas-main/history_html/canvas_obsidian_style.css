@@ -538,7 +538,9 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 /* 交互（缩放/平移）中按需恢复的卡片：柔和淡入 + 轻微上浮，避免突兀弹出。
-   使用关键帧而不是过渡，这样在缩放期间（上面统一禁用了 transition）也能平滑出现。 */
+   使用关键帧而不是过渡，这样在缩放期间（上面统一禁用了 transition）也能平滑出现。
+   注意：不要使用 both/forwards 填充——填充态会一直压住元素的内联 transform，
+   导致卡片入场后的这段时间内拖拽/缩放变换失效（表现为"拖不动"）。 */
 @keyframes canvasRecoveryReveal {
     from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -548,7 +550,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .permanent-bookmark-section.canvas-recovery-enter,
 .md-canvas-node.canvas-recovery-enter,
 .card-group-canvas-node.canvas-recovery-enter {
-    animation: canvasRecoveryReveal 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: canvasRecoveryReveal 0.30s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* 缩放期间默认禁用卡片动画；仅放行一次性恢复淡入，保证缩小/放大时进入视野的卡片不“啪”地出现。 */
@@ -556,7 +558,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .canvas-workspace.is-zooming .permanent-bookmark-section.canvas-recovery-enter,
 .canvas-workspace.is-zooming .md-canvas-node.canvas-recovery-enter,
 .canvas-workspace.is-zooming .card-group-canvas-node.canvas-recovery-enter {
-    animation: canvasRecoveryReveal 0.42s cubic-bezier(0.22, 1, 0.36, 1) both !important;
+    animation: canvasRecoveryReveal 0.30s cubic-bezier(0.22, 1, 0.36, 1) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -758,9 +760,13 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     will-change: auto;
 }
 
-/* 低缩放 + 大量卡片的热交互性能模式：低细节外观不变，只降低命中测试/动画成本。 */
-:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.canvas-zoom-performance .canvas-content,
-:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.canvas-zoom-performance .canvas-content * {
+/* 低缩放 + 大量卡片的热交互性能模式：低细节外观不变，只降低命中测试/动画成本。
+   [Perf] 这里原来带着 `.canvas-content *` 通配后代选择器：只要切换 canvas-zoom-performance 类，
+   Blink 就必须把整棵画布子树的每个元素重新匹配一遍 —— trace 实测单次 6,026 个元素重算、约 15ms
+   （120Hz 下接近 2 帧），而且它和 is-zooming / is-scrolling 的 pointer-events 规则重复。
+   与 4906ba9 的处理一致：只对 .canvas-content 本级禁用命中测试，由合成器阻断子孙的 hover，
+   不再使用通配符。 */
+:where(body:not(.canvas-node-maximized-active)) .canvas-workspace.canvas-zoom-performance .canvas-content {
     pointer-events: none !important;
     transition: none !important;
 }
@@ -1469,16 +1475,25 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     contain-intrinsic-size: auto 300px;
 }
 
-.md-canvas-node.md-content-unloaded .md-canvas-editor,
-.md-canvas-node.md-content-unloaded .md-canvas-text {
-    display: none !important;
+/* [UX/Perf] 三态切换（完整内容 ⇄ 低细节色块 ⇄ 懒加载壳）不再用 display 硬切，统一改为透明度交叉淡化。
+   原因：display 不可动画，切换瞬间就是"啪"的一下；而且 display:none 会把整棵子树移出布局，
+   切回来时样式 + 布局需要全量重算（trace 中 6k+ 元素重算的主要来源之一）。
+   这里改用 opacity（合成器属性）+ visibility：
+   - 元素保留在布局中 → 不产生重排，只更新合成器；
+   - visibility 延迟到淡出结束后再生效 → 命中测试 / 可访问性语义与原 display:none 等价。 */
+.temp-canvas-node .temp-node-header,
+.temp-canvas-node .temp-node-description-container,
+.temp-canvas-node .temp-node-body,
+.permanent-bookmark-section .permanent-section-header,
+.permanent-bookmark-section .permanent-section-body,
+.md-canvas-node .md-canvas-editor,
+.md-canvas-node .md-canvas-text {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 140ms linear, visibility 0s linear 0s;
 }
 
-.md-canvas-node.md-content-unloaded .temp-node-low-detail-overlay {
-    display: flex;
-}
-
-/* 低缩放细节模式：用轻量色块 + 中央文字替代完整卡片内容。 */
+/* 低细节 / 休眠 / 内容卸载：内容淡出（而不是瞬间消失）。 */
 .temp-canvas-node.low-detail-active .temp-node-header,
 .temp-canvas-node.low-detail-active .temp-node-description-container,
 .temp-canvas-node.low-detail-active .temp-node-body,
@@ -1487,17 +1502,32 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .temp-canvas-node.dormant-content .temp-node-body,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-header,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-description-container,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-body {
-    display: none !important;
-}
-
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-body,
 .permanent-bookmark-section.low-detail-active .permanent-section-header,
 .permanent-bookmark-section.low-detail-active .permanent-section-body,
 .permanent-bookmark-section.permanent-tree-unloaded .permanent-section-header,
 .permanent-bookmark-section.permanent-tree-unloaded .permanent-section-body,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-section-header,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-section-body {
-    display: none !important;
+.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-section-body,
+.md-canvas-node.md-content-unloaded .md-canvas-editor,
+.md-canvas-node.md-content-unloaded .md-canvas-text {
+    opacity: 0 !important;
+    visibility: hidden;
+    pointer-events: none !important;
+    transition: opacity 140ms linear, visibility 0s linear 140ms;
+}
+
+/* 系统开启"减弱动态效果"时不做淡化，直接切换。 */
+@media (prefers-reduced-motion: reduce) {
+    .temp-canvas-node .temp-node-header,
+    .temp-canvas-node .temp-node-description-container,
+    .temp-canvas-node .temp-node-body,
+    .permanent-bookmark-section .permanent-section-header,
+    .permanent-bookmark-section .permanent-section-body,
+    .md-canvas-node .md-canvas-editor,
+    .md-canvas-node .md-canvas-text {
+        transition: none !important;
+    }
 }
 
 /* Hide resize handles on low-detail cards; the central low-detail overlay becomes the only visible affordance. */
@@ -1516,7 +1546,10 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .md-canvas-node.low-detail-active .md-canvas-text,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .md-canvas-editor,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .md-canvas-text {
-    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden;
+    pointer-events: none !important;
+    transition: opacity 140ms linear, visibility 0s linear 140ms;
 }
 
 .temp-canvas-node.low-detail-active .canvas-section-ctrl-overlay,
@@ -1534,7 +1567,11 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .permanent-node-low-detail-overlay {
     position: absolute;
     inset: 16px;
-    display: none;
+    /* [UX/Perf] 常驻布局、用透明度切换：display:none↔flex 是不可动画的硬切，
+       且每次切换都要重建整棵子树的布局。 */
+    display: flex;
+    opacity: 0;
+    visibility: hidden;
     align-items: center;
     justify-content: center;
     pointer-events: none;
@@ -1543,6 +1580,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     /* 蒙版层：“回”字造型，内部蒙版与外边框保持间隔，圆角内收贴合 */
     border-radius: 7px;
     background: color-mix(in srgb, var(--section-color, #2563eb) 8%, var(--bg-secondary, #fafafa));
+    transition: opacity 140ms linear, visibility 0s linear 140ms;
 }
 
 [data-theme="dark"] .temp-node-low-detail-overlay,
@@ -1563,10 +1601,14 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 .permanent-bookmark-section.low-detail-active .permanent-node-low-detail-overlay,
 .permanent-bookmark-section.permanent-tree-unloaded .permanent-node-low-detail-overlay,
 .md-canvas-node.low-detail-active .temp-node-low-detail-overlay,
+.md-canvas-node.md-content-unloaded .temp-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node .temp-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .permanent-bookmark-section .permanent-node-low-detail-overlay,
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node .temp-node-low-detail-overlay {
-    display: flex;
+    opacity: 1;
+    visibility: visible;
+    /* 淡入时 visibility 必须立刻生效（延迟 0s），否则前 140ms 仍然不可见。 */
+    transition: opacity 140ms linear, visibility 0s linear 0s;
 }
 
 .canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .temp-canvas-node,
@@ -1600,9 +1642,12 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     margin: 9px 0;
     border-radius: 5px;
     background: linear-gradient(90deg, rgba(148, 163, 184, 0.16), rgba(148, 163, 184, 0.28), rgba(148, 163, 184, 0.16));
-    background-size: 180% 100%;
+    /* [Perf] 原实现用 background-size + background-position 做流光：这是非合成属性，
+       每条骨架线每一帧都要重新光栅化。骨架屏恰好在"快速平移 + 大量卡片卸载"时出现，
+       是 trace 中 Layerize/Paint 的主要来源之一。改为只动 opacity（合成器属性）：
+       绘制一次，之后只更新透明度，不产生重绘。 */
     opacity: 0.82;
-    animation: tempTreeSkeletonPulse 1.4s ease-in-out infinite;
+    animation: tempTreeSkeletonPulse 1.6s ease-in-out infinite;
 }
 
 .temp-tree-skeleton-line:nth-child(1) {
@@ -1639,18 +1684,13 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 @keyframes tempTreeSkeletonPulse {
-    0% {
-        background-position: 120% 0;
-        opacity: 0.64;
+    0%,
+    100% {
+        opacity: 0.45;
     }
 
     50% {
-        opacity: 0.9;
-    }
-
-    100% {
-        background-position: -80% 0;
-        opacity: 0.64;
+        opacity: 0.92;
     }
 }
 
@@ -1812,33 +1852,12 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     animation: fadeInContent 0.15s ease-out forwards;
 }
 
-/* 低细节 -> 完整内容 的柔和过渡：内容区淡入上浮，替代生硬的瞬间切换 */
-@keyframes canvasContentReveal {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-
-.temp-canvas-node.canvas-content-enter .temp-node-header,
-.temp-canvas-node.canvas-content-enter .temp-node-description-container,
-.temp-canvas-node.canvas-content-enter .temp-node-body,
-.permanent-bookmark-section.canvas-content-enter .permanent-section-header,
-.permanent-bookmark-section.canvas-content-enter .permanent-section-body,
-.md-canvas-node.canvas-content-enter .md-canvas-editor,
-.md-canvas-node.canvas-content-enter .md-canvas-text {
-    animation: canvasContentReveal 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .temp-canvas-node.canvas-content-enter .temp-node-header,
-    .temp-canvas-node.canvas-content-enter .temp-node-description-container,
-    .temp-canvas-node.canvas-content-enter .temp-node-body,
-    .permanent-bookmark-section.canvas-content-enter .permanent-section-header,
-    .permanent-bookmark-section.canvas-content-enter .permanent-section-body,
-    .md-canvas-node.canvas-content-enter .md-canvas-editor,
-    .md-canvas-node.canvas-content-enter .md-canvas-text {
-        animation: none !important;
-    }
-}
+/* [UX/Perf] 低细节 -> 完整内容的过渡已由上面的 opacity 交叉淡化统一接管。
+   原先这里还有一套 canvas-content-enter 关键帧（0.26s both）叠加在同一次切换上，造成：
+   a. 与 opacity 过渡打架（动画优先级高于过渡与内联样式，最终谁生效取决于时序）；
+   b. "卡片入场淡入 0.42s + 内容淡入 0.26s" 两套效果叠在同一张卡上；
+   c. both 填充会在动画结束后继续压住元素样式。
+   JS 侧仍会挂/清 canvas-content-enter 类，这里不再给它任何声明，等于空操作。 */
 
 /* 性能管理弹窗样式 */
 .perf-settings-modal {

@@ -1822,9 +1822,34 @@ const CANVAS_LOW_DETAIL_RIPPLE_CLASS = 'canvas-low-detail-ripple';
 const CANVAS_VIEWPORT_LAZY_SHELL_CLASS = 'canvas-viewport-lazy-shell';
 const CANVAS_MD_CONTENT_UNLOADED_CLASS = 'md-content-unloaded';
 const CANVAS_LOW_DETAIL_RIPPLE_NEAR_MARGIN = 96;
+// [Perf] 最近一次用户输入的时间戳，仅用于"低优先级任务让路"判断。
+// 背景：tag/note 刷新原先靠 workspace 上的 is-zooming / is-scrolling 类名判断是否在交互，
+// 但 trace 实测在缩放期间该判断未生效——4.2s 内刷新被调用 255 次，且 84% 紧跟着一次
+// 全视口重绘（最终把 GPU 进程推到 52%）。这里提供一个与类名无关、单调更新的"输入新鲜度"信号：
+// 任何输入事件都会刷新它，低优先级任务据此让路，避免在用户操作期间改写 DOM 触发重绘。
+let canvasLastUserInputAt = 0;
+let canvasUserInputTrackingBound = false;
+function __markCanvasUserInput() {
+    canvasLastUserInputAt = Date.now();
+}
+function __isCanvasInputRecent(windowMs) {
+    const span = (typeof windowMs === 'number' && isFinite(windowMs)) ? windowMs : 400;
+    return canvasLastUserInputAt > 0 && (Date.now() - canvasLastUserInputAt) < span;
+}
+function __bindCanvasUserInputRecencyTracking() {
+    if (canvasUserInputTrackingBound) return;
+    canvasUserInputTrackingBound = true;
+    const handler = () => { __markCanvasUserInput(); };
+    ['wheel', 'pointerdown', 'pointermove', 'touchstart', 'touchmove', 'keydown'].forEach((type) => {
+        try { document.addEventListener(type, handler, { passive: true, capture: true }); } catch (_) { }
+    });
+}
+
 const CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME = 28;
 const CANVAS_LOW_DETAIL_RIPPLE_MIN_MS = 180;
 const CANVAS_LOW_DETAIL_RIPPLE_MAX_MS = 520;
+// [Perf] 涟漪的单帧时间预算：只按"张数"限制不够——卡片大/树大时 28 张也会超帧。
+const CANVAS_LOW_DETAIL_RIPPLE_FRAME_BUDGET_MS = 4;
 
 function __getEventTargetElement(event) {
     const target = event && event.target ? event.target : null;
@@ -2532,7 +2557,11 @@ const DEFAULT_PERF_BASELINE = {
 };
 
 const CANVAS_LOW_DETAIL_PREWARM_GAP = 0.05;
-const CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS = 0.02;
+// [UX] 低细节"进入/退出"滞回带。原值 0.02 = 进入点 70%、退出点 72%：
+// 用户只要在 70%~72% 之间轻微来回滚轮，就会让整块画布在"完整内容 ⇄ 低细节色块"之间反复切换，
+// 这是缩放过程中最刺眼的"整屏闪"。放宽到 0.08（进入 70% / 退出 78%）后，
+// 阈值附近的小幅抖动不再触发反向切换，用户需要明确地放大回来才会恢复完整内容。
+const CANVAS_LOW_DETAIL_SWITCH_HYSTERESIS = 0.08;
 
 function __deriveCanvasLowDetailPrewarmThreshold(enterThreshold) {
     const enter = Number(enterThreshold);
@@ -8229,7 +8258,9 @@ function setupCanvasZoomAndPan() {
 
             // [数据密集模式] 缩放开始的一瞬间：如果视界窗口数据量过多，立即进入低细节模式
             // 这避免了在大数据量场景下缩放时的卡顿和闪烁
-            if (shouldInstantLowDetailOnZoom() && !CanvasState.lowDetailActive) {
+            // [Fix] 触控板双指捏合同样要走这条提前进入路径：捏合不会设置 isCtrlPressed，
+            // 原先只有 Ctrl+滚轮能提前进低细节，捏合缩放就退化成"先按完整内容建卡、再转色块"。
+            if (shouldInstantLowDetailOnZoom(isPinch) && !CanvasState.lowDetailActive) {
                 try {
                     __clearCanvasLazyLoadQueue();
                     CanvasState.lowDetailActive = true;
@@ -8705,7 +8736,11 @@ function setupCanvasZoomAndPan() {
         }
     }, true);
 
+    // [Perf] 输入新鲜度跟踪（供 tag/note 打点等低优先级任务让路）：被动监听、只记时间戳。
+    try { __bindCanvasUserInputRecencyTracking(); } catch (_) { }
+
     document.addEventListener('mousemove', (e) => {
+        __markCanvasUserInput();
         if (workspace.contains(e.target)) ensureCanvasInputFocus();
         syncCanvasCtrlStateWithEvent(e);
         if (CanvasState.isPanning) {
@@ -23131,7 +23166,12 @@ function __renderTempNodeImpl(section, options = {}) {
     treeContainer.appendChild(treeFragment);
     body.appendChild(treeContainer);
     if (treeStartsUnloaded) {
-        try { __ensureTempTreeSkeleton(body); } catch (_) { }
+        // [Perf] 低细节模式下 body 的 opacity 是 0，骨架屏完全不可见。
+        // 这里每张卡会建 7 行骨架（7 个元素 + 7 个样式节点），批量建卡时是纯浪费；
+        // 只有"已卸载但不在低细节"（即懒加载壳，用户能看到骨架）时才需要。
+        if (!isLowDetail) {
+            try { __ensureTempTreeSkeleton(body); } catch (_) { }
+        }
     }
 
     nodeElement.appendChild(header);
@@ -23566,17 +23606,19 @@ function __patchTempSectionLowDetailOverlayInPlace(section, nodeElement) {
     const badgeEl = overlay.querySelector('.temp-node-low-detail-badge');
     if (badgeEl) {
         const badgeText = [getTempSectionLabel(section), __getTempLowDetailOriginText(section)].filter(Boolean).join(' ');
-        if (badgeText) {
-            badgeEl.textContent = badgeText;
-            badgeEl.style.display = '';
-        } else {
-            badgeEl.textContent = '';
-            badgeEl.style.display = 'none';
-        }
+        // [Perf] 只在文本真的变了才写：textContent 赋值即使内容相同也会重建文本节点并让元素失效。
+        // 低细节入口会对所有已渲染卡片跑一遍 patch（__ensureCanvasLowDetailOverlaysReady），
+        // 几百张卡的重复写入会在阈值穿越那一帧堆成尖峰。
+        if (badgeEl.textContent !== badgeText) badgeEl.textContent = badgeText;
+        const nextBadgeDisplay = badgeText ? '' : 'none';
+        if (badgeEl.style.display !== nextBadgeDisplay) badgeEl.style.display = nextBadgeDisplay;
     }
 
     const titleEl = overlay.querySelector('.temp-node-low-detail-title');
-    if (titleEl) titleEl.textContent = getTempSectionDisplayTitle(section);
+    if (titleEl) {
+        const titleText = getTempSectionDisplayTitle(section);
+        if (titleEl.textContent !== titleText) titleEl.textContent = titleText;
+    }
 }
 
 function __getTempDescriptionPlaceholderText() {
@@ -30294,8 +30336,15 @@ function scheduleEdgesRender(delayMs = 90) {
         edgesRenderPending = false;
         const ws = document.getElementById('canvasWorkspace');
         const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
-        const isResizing = !!((resizeState && resizeState.active) || (ws && ws.querySelector && ws.querySelector('.resizing')));
-        const isInteracting = ws && (isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || ws.classList.contains('is-zooming') || isResizing);
+        // [Perf] 先算廉价信号；一旦已能判定在交互中，就不再执行昂贵的全子树 querySelector。
+        // 与原式 `ws && (isScrolling || ... || isZooming || isResizing)` 等价：
+        // querySelector('.resizing') 无副作用，只是贵（6000 元素画布上会强制样式/选择器匹配刷新）。
+        const interactingCheap = !!(ws && (
+            isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || ws.classList.contains('is-zooming')
+        ));
+        const isResizing = !!(resizeState && resizeState.active) ||
+            (!interactingCheap && !!(ws && ws.querySelector && ws.querySelector('.resizing')));
+        const isInteracting = interactingCheap || !!(ws && isResizing);
         if (isInteracting) {
             scheduleEdgesRender(isCanvasHugeData() ? 260 : 140);
             return;
@@ -34382,7 +34431,7 @@ function updateDataIntensiveMode(force = false, options = {}) {
  * 检查是否应该即时触发低细节模式
  * 在数据密集模式下，缩放开始的瞬间就进入低细节
  */
-function shouldInstantLowDetailOnZoom() {
+function shouldInstantLowDetailOnZoom(isPinchZoom = false) {
     // 检查数据密集模式状态
     const dim = CanvasState.dataIntensiveMode;
     if (!dim) return false;
@@ -34402,9 +34451,9 @@ function shouldInstantLowDetailOnZoom() {
         return false;
     }
 
-    // 只有在数据量过大(active) 且用户按住 Ctrl 键缩放时，才提前进入低细节；
-    // Ctrl 不能越过用户设置的低细节阈值，否则阈值~安全区之间会反复闪成色块。
-    const isCtrl = !!(CanvasState.isCtrlPressed || (CanvasState.dragState && CanvasState.dragState.meta && CanvasState.dragState.meta.ctrlOverlay));
+    // 只有在数据量过大(active) 且用户按住 Ctrl 键（或触控板双指捏合）缩放时，才提前进入低细节；
+    // 两者都不能越过用户设置的低细节阈值，否则阈值~安全区之间会反复闪成色块。
+    const isCtrl = !!(isPinchZoom || CanvasState.isCtrlPressed || (CanvasState.dragState && CanvasState.dragState.meta && CanvasState.dragState.meta.ctrlOverlay));
 
     // 使用缓存的active状态（避免在缩放热路径上做重计算）
     return dim.active && isCtrl;
@@ -35106,6 +35155,22 @@ function scheduleCanvasVirtualizationUpdate(delayMs = null) {
     }, delay);
 }
 
+// [Perf] 懒加载吞吐的"闭环刹车"。
+// 现有动态上限只依赖 EWMA 单卡成本，而该成本只统计了 renderItem() 这个 JS 函数的耗时；
+// 插入卡片真正的大头（样式重算 / 布局 / 层化 / 绘制）发生在函数返回之后，JS 侧量不到。
+// 于是机器越快、卡片越简单，算出的每帧吞吐就越乐观：缩得越快 → 队列越长 → 连续几十帧满负荷塞卡 → 掉帧。
+// 这里用"上一帧实际帧长"作为真实成本的代理：超期就乘性收缩，按时就缓慢加性恢复。
+let __canvasLazyThroughputScale = 1;
+let __canvasLazyLastStepTs = 0;
+// 真实刷新间隔的"下界"，专门用于刹车判据。
+// 不能用 __canvasFrameIntervalMs（它是观测帧长的 EWMA，会被自身造成的掉帧越推越高，
+// 掉帧越重反而越不刹车，判据会自我失效）。这里用滚动最小值：对偶发抖动免疫，
+// 只有真实刷新率变化（60Hz↔120Hz）时才以极慢速度上浮跟随。
+let __canvasFrameIntervalFloor = 0;
+const CANVAS_LAZY_SCALE_MIN = 0.2;
+const CANVAS_LAZY_SCALE_SHRINK = 0.6;
+const CANVAS_LAZY_SCALE_RECOVER = 1.12;
+
 let __canvasLazyLoadQueue = {
     generation: 0,
     frameId: null,
@@ -35129,6 +35194,10 @@ function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoom
     const generation = __canvasLazyLoadQueue.generation;
     const queue = __canvasLazyLoadQueue.queue;
     if (!queue.length) return;
+
+    // 新一轮队列：清掉上一轮的帧时间戳，否则首帧会拿很久以前的 ts 算 dt，
+    // 被误判成"严重超期"而把吞吐一次性压到最低。
+    __canvasLazyLastStepTs = 0;
 
     // Calculate distance and sort the queue
     queue.forEach(item => {
@@ -35242,8 +35311,36 @@ function __startCanvasLazyLoadProcessing(workspace, visualBounds, sortMode, zoom
         // 共享帧预算：不再独占，和 tag 打点等其它主线程任务分摊同一份预算。
         const __budgetMs = __canvasFrameBudgetBegin(ts);
         const __frameStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-        // 动态吞吐上限：由“预算 ÷ 实测单卡成本”推导，而非写死档位；16 仅为绝对安全天花板。
-        const __dynCap = __canvasDynamicCardCap(__budgetMs);
+
+        // [Perf] 闭环刹车：用上一帧的实际帧长校准吞吐。
+        // 上一帧超期 → 真实成本（含插入后的样式/布局/绘制）超出 JS 记账 → 收缩；
+        // 上一帧按时 → 缓慢恢复，最终仍能跑满强机的算力。
+        if (typeof ts === 'number' && ts > 0) {
+            if (__canvasLazyLastStepTs > 0) {
+                const frameDt = ts - __canvasLazyLastStepTs;
+                // 刷新间隔下界：取滚动最小值，极慢上浮；不会因为掉帧而膨胀
+                if (frameDt >= 3 && frameDt <= 60) {
+                    if (__canvasFrameIntervalFloor <= 0 || frameDt < __canvasFrameIntervalFloor) {
+                        __canvasFrameIntervalFloor = frameDt;
+                    } else {
+                        __canvasFrameIntervalFloor = Math.min(40, __canvasFrameIntervalFloor * 1.002);
+                    }
+                }
+                const expectedFrame = (__canvasFrameIntervalFloor > 0)
+                    ? __canvasFrameIntervalFloor
+                    : ((typeof __canvasFrameIntervalMs === 'number' && __canvasFrameIntervalMs > 0) ? __canvasFrameIntervalMs : 16.67);
+                if (frameDt > expectedFrame * 1.25) {
+                    __canvasLazyThroughputScale = Math.max(CANVAS_LAZY_SCALE_MIN, __canvasLazyThroughputScale * CANVAS_LAZY_SCALE_SHRINK);
+                } else if (frameDt < expectedFrame * 1.1) {
+                    __canvasLazyThroughputScale = Math.min(1, __canvasLazyThroughputScale * CANVAS_LAZY_SCALE_RECOVER);
+                }
+            }
+            __canvasLazyLastStepTs = ts;
+        }
+
+        // 动态吞吐上限：由“预算 ÷ 实测单卡成本”推导，再乘以帧长反馈系数；
+        // 24 为绝对安全天花板。
+        const __dynCap = Math.max(1, Math.round(__canvasDynamicCardCap(__budgetMs) * __canvasLazyThroughputScale));
         const __loopCap = interactionShellOnly ? __dynCap : Math.max(__dynCap, LAZY_LOAD_MAX_PER_FRAME);
 
         while (index < queue.length && count < __loopCap) {
@@ -35450,6 +35547,10 @@ const CANVAS_INTERACTION_RECYCLE_MAX_PER_PASS = 8;
 
 let canvasInteractionSpeedPeak = 0;
 let canvasInteractionSpeedSample = { x: 0, y: 0, zoom: 1, t: 0 };
+// [Fix] 最近是否处于"缩小"方向（0~1，半衰期同速度峰值）。
+// 缩小时如果把卡片按"完整内容"建出来，往往越过低细节阈值后马上又要转成色块，
+// 属于白建一遍；用它把缩小手势强制导到低细节过渡壳路径。
+let canvasInteractionZoomOutPeak = 0;
 let canvasInteractionLastRecycleAt = 0;
 let canvasInteractionMaterialized = new Map();
 
@@ -35473,9 +35574,12 @@ function __sampleCanvasInteractionSpeed() {
     const zoomRel = Math.abs(zoom - s.zoom) / (s.zoom || zoom || 1);
     // 缩放没有“屏幕位移”，按约 500px 的视觉半径折算成等价位移
     const speed = (dist + zoomRel * 500) / dt;
+    // 相对阈值（0.01%）而不是 1e-6：避免浮点噪声/钳位抖动被误判成"正在缩小"
+    const zoomDecreasing = zoom < s.zoom * (1 - 1e-4);
     s.x = x; s.y = y; s.zoom = zoom; s.t = now;
     const decay = Math.pow(0.5, dt / CANVAS_INTERACTION_SPEED_HALFLIFE_MS);
     canvasInteractionSpeedPeak = Math.max(speed, canvasInteractionSpeedPeak * decay);
+    canvasInteractionZoomOutPeak = zoomDecreasing ? 1 : canvasInteractionZoomOutPeak * decay;
     return canvasInteractionSpeedPeak;
 }
 
@@ -35518,31 +35622,21 @@ function __applyCanvasRecoveryReveal(el) {
         try { el.removeEventListener('animationend', cleanup); } catch (_) { }
     };
     try { el.addEventListener('animationend', cleanup, { once: true }); } catch (_) { }
-    // 兜底：动画时长 0.42s，设置 460ms 即可及时释放并发槽位，避免脱落 DOM 导致长期阻塞
-    setTimeout(cleanup, 460);
+    // 兜底：动画时长 0.30s，设置 340ms 即可及时释放并发槽位，避免脱落 DOM 导致长期阻塞
+    setTimeout(cleanup, 340);
 }
 
 // 低细节 -> 完整内容：内容区柔和淡入上浮，避免“啪”地切换。
 function __applyCanvasContentReveal(el) {
-    if (!el || !el.classList) return;
-    try { el.classList.remove('canvas-content-enter'); } catch (_) { }
-    // 系统开启减弱动态效果时直接显示，不占用并发动画名额
-    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        return;
-    }
-    if (!__tryBeginRevealAnimation()) return; // 并发已满：直接显示
-    try { el.classList.add('canvas-content-enter'); } catch (_) { }
-    let ended = false;
-    const cleanup = () => {
-        if (ended) return;
-        ended = true;
-        __endRevealAnimation();
-        try { el.classList.remove('canvas-content-enter'); } catch (_) { }
-        try { el.removeEventListener('animationend', cleanup); } catch (_) { }
-    };
-    try { el.addEventListener('animationend', cleanup, { once: true }); } catch (_) { }
-    // 兜底：动画时长 0.26s，设置 300ms 及时释放并发槽位
-    setTimeout(cleanup, 300);
+    // [UX] 低细节 -> 完整内容的过渡已由 CSS 的 opacity 交叉淡化统一接管
+    // （见 canvas_obsidian_style.css 中 .temp-node-header/.temp-node-body/.permanent-section-*/
+    //   .md-canvas-editor/.md-canvas-text 的 opacity + visibility 规则）。
+    // 这里不再叠加 canvas-content-enter 关键帧，原因：
+    // 1) 关键帧与过渡会争抢同一个 opacity（动画优先级更高），效果不可预期；
+    // 2) 它会白占 __activeRevealAnimations 的并发槽位（最长 300ms），
+    //    把真正需要入场的卡片挤掉。
+    // 保留函数与调用点，便于回退与外部兼容。
+    void el;
 }
 
 function __isCanvasInteractionActive() {
@@ -35664,7 +35758,25 @@ function __runCanvasInteractionShellRecovery() {
     const viewportCenterY = (rect.height / 2 - (CanvasState.panOffsetY || 0)) / zoom;
 
     // 智能：慢速/精细移动时负载可控，直接补全内容；快速/惯性滑动时才用低细节过渡壳，避免白建 DOM。
-    const lowDetailTransition = canvasInteractionSpeedPeak >= CANVAS_INTERACTION_SPEED_SLOW;
+    // [Fix] 优先级倒置修复：缩小方向必须一律走壳体。
+    // 原实现只看速度，导致"从大比例缩到小比例"时先按完整内容把卡片（含整棵书签树）建一遍，
+    // 等越过低细节阈值再统一转成色块——建了又扔，既掉帧又浪费时间，
+    // 表现就是"先加载懒加载卡片，然后才做低细节"。
+    // 现在缩小手势、以及已经缩到低细节预热阈值以下时，一律只建低细节过渡壳，
+    // 内容等手势结束后的升级 pass（dwell + runCanvasVirtualizationUpdate）再补。
+    let nearLowDetailZoom = false;
+    try {
+        const displayZoomForLod = getCanvasDisplayZoom();
+        const prewarmZoom = getCanvasLowDetailPrewarmDisplayZoomThreshold();
+        nearLowDetailZoom = Number.isFinite(displayZoomForLod) &&
+            Number.isFinite(prewarmZoom) &&
+            prewarmZoom > 0 &&
+            displayZoomForLod <= prewarmZoom;
+    } catch (_) { }
+    const lowDetailTransition = !!CanvasState.lowDetailActive
+        || nearLowDetailZoom
+        || canvasInteractionZoomOutPeak > 0.5
+        || canvasInteractionSpeedPeak >= CANVAS_INTERACTION_SPEED_SLOW;
 
     __clearCanvasLazyLoadQueue();
     items.forEach(__enqueueCanvasLazyLoadNode);
@@ -35762,6 +35874,7 @@ function __ensureCanvasInteractionRecoveryLoop() {
     canvasInteractionRecoveryLastAt = __canvasRecoveryNow();
     canvasInteractionRecoveryDidWork = false;
     canvasInteractionSpeedPeak = 0;
+    canvasInteractionZoomOutPeak = 0;
     canvasInteractionSpeedSample = { x: 0, y: 0, zoom: 1, t: 0 };
     canvasInteractionLastRecycleAt = 0;
     canvasInteractionMaterialized.clear();
@@ -36528,7 +36641,61 @@ function cancelCanvasLowDetailUnloadJob() {
     lowDetailUnloadJobQueue = null;
 }
 
-function __unloadTempSectionTreeInPlace(sectionId) {
+// [UX] 低细节交叉淡化时长（与 CSS 里的 140ms 对应，留少量余量）。
+const CANVAS_LOD_CONTENT_FADE_MS = 150;
+// 每帧最多真正拆除几张卡的内容。拆除一棵书签树是重活（销毁子树 + 样式失效），
+// 必须按帧限量排空，否则会从"逐卡分散"退化成"同一时刻集中爆发"。
+const CANVAS_LOD_UNLOAD_MAX_PER_FRAME = 6;
+const CANVAS_LOD_UNLOAD_FRAME_BUDGET_MS = 4;
+const __lodPendingUnloads = new Map(); // sectionId -> 允许拆除的时间点(ms, performance 时基)
+let __lodUnloadDrainRaf = 0;
+
+function __cancelDeferredLodContentUnload(sectionId) {
+    if (!sectionId) return;
+    __lodPendingUnloads.delete(sectionId);
+}
+
+// 进入低细节时不要立刻清空书签树 DOM：先让 CSS 把内容淡出（140ms），淡出结束后再卸载。
+// 否则用户看到的是"内容瞬间消失、只剩空卡片在淡出"，而不是真正的交叉淡化。
+// 卸载本身按帧限量，避免几百张卡在同一帧集中拆 DOM。
+function __scheduleDeferredLodContentUnload(sectionId) {
+    if (!sectionId) return;
+    __lodPendingUnloads.set(sectionId, __canvasRecoveryNow() + CANVAS_LOD_CONTENT_FADE_MS);
+    if (__lodUnloadDrainRaf) return;
+    const drain = () => {
+        __lodUnloadDrainRaf = 0;
+        const startedAt = __canvasRecoveryNow();
+        let done = 0;
+        for (const entry of Array.from(__lodPendingUnloads)) {
+            const id = entry[0];
+            const notBefore = entry[1];
+            if (done >= CANVAS_LOD_UNLOAD_MAX_PER_FRAME) break;
+            if (startedAt < notBefore) continue; // 还没淡完，留到下一帧
+            __lodPendingUnloads.delete(id);
+            const el = document.getElementById(id);
+            if (!el || !el.classList) continue;
+            const ws = document.getElementById('canvasWorkspace');
+            // 淡出这段时间里用户可能已经平移回来并恢复了内容：放弃卸载，
+            // 避免在已经回到完整内容的卡片上突然清空 DOM（那才是真正的"闪一下"）。
+            const stillWantsUnload = el.classList.contains('low-detail-active') ||
+                el.classList.contains('dormant-content') ||
+                el.classList.contains('temp-tree-unloaded') ||
+                el.classList.contains('canvas-viewport-lazy-shell') ||
+                (el.dataset && el.dataset.viewportLazy === 'true') ||
+                !!(ws && ws.classList.contains('canvas-low-detail'));
+            if (!stillWantsUnload) continue;
+            try { __unloadTempSectionTreeInPlace(id, { immediate: true }); } catch (_) { }
+            done += 1;
+            if (__canvasRecoveryNow() - startedAt >= CANVAS_LOD_UNLOAD_FRAME_BUDGET_MS) break;
+        }
+        if (__lodPendingUnloads.size) {
+            __lodUnloadDrainRaf = requestAnimationFrame(drain);
+        }
+    };
+    __lodUnloadDrainRaf = requestAnimationFrame(drain);
+}
+
+function __unloadTempSectionTreeInPlace(sectionId, options = {}) {
     if (!sectionId) return false;
     const element = document.getElementById(sectionId);
     if (!element) return false;
@@ -36538,6 +36705,12 @@ function __unloadTempSectionTreeInPlace(sectionId) {
     const alreadyUnloaded = (treeContainer.dataset && treeContainer.dataset.contentUnloaded === 'true') ||
         (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(sectionId));
     if (alreadyUnloaded) return false;
+
+    // 非立即模式：先让内容淡出，再在下一拍真正卸载。
+    if (!(options && options.immediate)) {
+        __scheduleDeferredLodContentUnload(sectionId);
+        return true;
+    }
 
     // 保存滚动位置，避免卸载 DOM 后 scrollTop 重置丢失
     const body = element.querySelector('.temp-node-body');
@@ -36692,6 +36865,9 @@ function __ensureTempSectionTreeLoadedInPlace(section) {
 
     const treeContainer = element.querySelector('.temp-bookmark-tree');
     if (!treeContainer) return false;
+
+    // 内容要恢复：取消可能还在排队中的"淡出后卸载"，否则会在恢复后被清空一次。
+    __cancelDeferredLodContentUnload(section.id);
 
     const isUnloaded = (treeContainer.dataset && treeContainer.dataset.contentUnloaded === 'true') ||
         (CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(section.id));
@@ -38123,12 +38299,19 @@ function __startCanvasLowDetailVisualRipple(shouldActive, workspace = null) {
         const t = Math.max(0, Math.min(1, (current - start) / duration));
         const threshold = maxWave * t;
         let applied = 0;
+        const frameStartAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         while (index < entries.length &&
             (entries[index].wave <= threshold || (t >= 1 && applied < CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME)) &&
             applied < CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME) {
             applyEntry(entries[index]);
             index++;
             applied++;
+            // [Perf] 时间预算刹车：每切换 4 张卡就看一次表，超预算立刻收手、留到下一帧继续。
+            // 否则"缩得太快"时波纹会连着几帧都顶到 28 张/帧的上限，成片触发样式失效与层化。
+            if (applied >= 4 && applied < CANVAS_LOW_DETAIL_RIPPLE_MAX_PER_FRAME) {
+                const spent = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - frameStartAt;
+                if (spent >= CANVAS_LOW_DETAIL_RIPPLE_FRAME_BUDGET_MS) break;
+            }
         }
         if (index >= entries.length) {
             finish();
@@ -38252,8 +38435,13 @@ function updateCanvasLowDetailMode(force = false) {
     const isZoomingClass = workspace.classList.contains('is-zooming');
     const isScrolling = CanvasState.touchpadState.isScrolling || false;
     const resizeState = CanvasState.sectionCtrlMode && CanvasState.sectionCtrlMode.resize;
-    const isResizing = !!((resizeState && resizeState.active) || (workspace.querySelector && workspace.querySelector('.resizing')));
-    const isInteracting = isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || isZoomingClass || isResizing;
+    // [Perf] 同一个 OR，但把昂贵的 workspace.querySelector('.resizing') 放到最后并短路。
+    // 缩放/滚动/拖动期间廉价信号已为真，这里就不会再走一次全子树选择器匹配
+    // （本函数每个缩放步进都会被调用一次，trace 实测这是全视口重绘的第二个来源）。
+    const isInteractingCheap = !!(isScrolling || CanvasState.isPanning || CanvasState.dragState.isDragging || isZoomingClass);
+    const isResizing = !!(resizeState && resizeState.active) ||
+        (!isInteractingCheap && !!(workspace.querySelector && workspace.querySelector('.resizing')));
+    const isInteracting = isInteractingCheap || isResizing;
 
     // 稳定低细节交互帧只需要保持 transform/CSS 变量，不要重算数据量或组成员。
     const safeZoneEnabled = isCanvasSafeZoneEnabled();
@@ -38500,9 +38688,14 @@ function applyPanOffset() {
     const scale = CanvasState.zoom;
     applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, scale);
 
-    // 同步 CSS 变量：用于背景网格、以及其它依赖变量的样式
-    container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
-    container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+    // [Perf] 不再写 --canvas-pan-x/--canvas-pan-y。
+    // 它们是"继承型自定义属性"，写在 container（画布全部卡片的祖先）上，
+    // Blink 无法只失效真正引用它的那一个元素，只能把整棵子树标记为需要重算样式：
+    // trace 实测单次触发 4000+ 元素重算、约 11ms（120Hz 下 1.3 帧），
+    // 一次快速缩放里这条路径被调用 16 次 ≈ 180ms 纯样式重算。
+    // 而全仓库唯一的消费者是 .canvas-content 的 transform 兜底声明，
+    // 同一段代码紧接着就写入了内联 transform（优先级更高）——这些写入是纯开销。
+    // 冷路径（__forceCanvasViewportVisualSync）仍保留一次同步，作为极端情况下的兜底。
 
     // 调度滚动条更新（RAF 去抖）
     scheduleScrollbarUpdate();
@@ -38572,8 +38765,7 @@ function onScrollStop() {
 
     if (container && content) {
         setCanvasScaleVars(container, CanvasState.zoom);
-        container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
-        container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+        // [Perf] 同上：不写 --canvas-pan-*，避免手势结束时再一次整树样式重算
         applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom);
     }
 
@@ -38833,8 +39025,7 @@ function runInertiaScroll() {
         const content = getCachedContent();
         if (container && content) {
             setCanvasScaleVars(container, CanvasState.zoom);
-            container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
-            container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+            // [Perf] 同上：不写 --canvas-pan-*，避免惯性结束再触发整树样式重算
             applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom);
         }
         scheduleScrollbarUpdate();
@@ -39082,8 +39273,7 @@ function stopEdgeAutoScroll() {
         const content = getCachedContent();
         if (container && content) {
             setCanvasScaleVars(container, CanvasState.zoom);
-            container.style.setProperty('--canvas-pan-x', `${CanvasState.panOffsetX}px`);
-            container.style.setProperty('--canvas-pan-y', `${CanvasState.panOffsetY}px`);
+            // [Perf] 同上：不写 --canvas-pan-*，避免拖动结束再触发整树样式重算
             applyCanvasContentTransform(content, CanvasState.panOffsetX, CanvasState.panOffsetY, CanvasState.zoom);
         }
         scheduleScrollbarUpdate();
@@ -43127,6 +43317,9 @@ window.CanvasModule = {
     frameBudgetRemaining: __canvasFrameBudgetRemaining,
     hasPendingInput: __canvasHasPendingInput,
     isCanvasRecovering: __isCanvasRecovering,
+    // [Perf] 输入新鲜度：任何输入事件（wheel/pointer/touch/key）后 N 毫秒内为 true。
+    // 与类名状态无关，供低优先级任务（tag 打点、批注标记）可靠让路。
+    isInputRecentlyActive: __isCanvasInputRecent,
     serializeMaximizedNode: __serializeMaximizedNode,
     isNodeMaximized: __isNodeMaximized,
     wakeCanvasNodeFromLazyState: __wakeCanvasNodeFromLazyState,
