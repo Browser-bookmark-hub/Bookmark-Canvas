@@ -1550,25 +1550,12 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     background: color-mix(in srgb, var(--section-color, #60a5fa) 10%, var(--bg-secondary, #242526));
 }
 
+/* 空白栏目（md-canvas-node）不套用新版「回」字蒙版：保持原有“居中标题”样式，
+   去掉内收 inset / 圆角 / 蒙版底色，也不把节点背景透明化。仍参与低细节（内容可被卸载）。 */
 .md-canvas-node .temp-node-low-detail-overlay {
-    inset: 8px;
-    border-radius: 6px;
-    background: var(--bg-secondary);
-}
-
-.md-canvas-node[data-has-color="true"] .temp-node-low-detail-overlay {
-    inset: 8px;
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--section-color, #2563eb) 8%, var(--bg-secondary, #fafafa));
-}
-
-[data-theme="dark"] .md-canvas-node[data-has-color="true"] .temp-node-low-detail-overlay {
-    background: color-mix(in srgb, var(--section-color, #60a5fa) 10%, var(--bg-secondary, #242526));
-}
-
-.md-canvas-node.low-detail-active,
-.canvas-workspace.canvas-low-detail:not(.canvas-low-detail-ripple) .md-canvas-node {
-    background: transparent !important;
+    inset: 0;
+    border-radius: 0;
+    background: transparent;
 }
 
 .temp-canvas-node.low-detail-active .temp-node-low-detail-overlay,

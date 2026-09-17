@@ -34420,7 +34420,7 @@ function isCanvasVirtualizationEnabled() {
         const totals = __getCanvasTotalDataStatsSync();
         const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && isFinite(CanvasState.virtualizationMinColumns))
             ? CanvasState.virtualizationMinColumns
-            : 25;
+            : 15;
         if (totals && totals.totalColumnCount < minCols) {
             return false;
         }
@@ -46256,7 +46256,7 @@ function loadCanvasDataIntensiveSettings() {
         if (minCols !== null) {
             CanvasState.virtualizationMinColumns = parseInt(minCols, 10);
         } else {
-            CanvasState.virtualizationMinColumns = 25;
+            CanvasState.virtualizationMinColumns = 15;
         }
 
         CanvasState.virtualizationUnloadDebounceMs = CanvasState.virtualizationUnloadDelayS * 1000;
@@ -46337,7 +46337,7 @@ function openCanvasPerfSettingsModal() {
     if (triVirt) __setTriStateValue(triVirt, CanvasState.virtualizationEnabled || 'auto');
     const inputVirtMinCols = document.getElementById('perfInputVirtualizationMinCols');
     if (inputVirtMinCols) {
-        inputVirtMinCols.value = typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 25;
+        inputVirtMinCols.value = typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 15;
     }
     const inputUnloadDelay = document.getElementById('perfInputVirtualizationUnloadDelay');
     if (inputUnloadDelay) {
@@ -46507,7 +46507,7 @@ function updateCanvasPerfSettingsUI() {
     // 超过用户设置的启用虚拟化的最小栏目数时，将总栏目数高亮显示为警告色（橙色）
     const minColsLimit = (typeof CanvasState.virtualizationMinColumns === 'number' && Number.isFinite(CanvasState.virtualizationMinColumns))
         ? CanvasState.virtualizationMinColumns
-        : 25;
+        : 15;
     const overTotalSec = (totals.totalColumnCount || 0) >= minColsLimit;
     setTotalColor('perfStatVisSec', overTotalSec ? 'var(--warning)' : null);
 
@@ -47138,7 +47138,7 @@ function restoreDefaultZoomSettings() {
 
 function restoreDefaultVirtualizationSettings() {
     const minCols = document.getElementById('perfInputVirtualizationMinCols');
-    if (minCols) minCols.value = 25;
+    if (minCols) minCols.value = 15;
     const unloadDelay = document.getElementById('perfInputVirtualizationUnloadDelay');
     if (unloadDelay) unloadDelay.value = 6.0;
     // 三态控件恢复默认 'auto'
