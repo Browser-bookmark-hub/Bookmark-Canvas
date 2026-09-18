@@ -2098,7 +2098,6 @@ async function __performOverwriteImport(payload) {
 
         success = true;
     } catch (mainErr) {
-        console.error('[Overwrite Import] main flow failed:', mainErr);
         // Attempt auto-rollback from the just-written backup slot. Restore
         // callers may provide an in-memory snapshot because they must not
         // overwrite the backup slot being restored.
@@ -2220,6 +2219,10 @@ function __reloadCanvasDocumentAfterImport(reason = 'import', delayMs = 1500) {
     }
 }
 
+if (typeof window !== 'undefined') {
+    window.__reloadCanvasDocumentAfterImport = __reloadCanvasDocumentAfterImport;
+}
+
 function __hideImportReloadProgress() {
     try {
         if (typeof window !== 'undefined' && typeof window.__hideCanvasReloadProgressPanel === 'function') {
@@ -2229,6 +2232,12 @@ function __hideImportReloadProgress() {
 }
 
 function __resolveCanvasImportPlacement(width, height, options = {}) {
+    if (typeof window !== 'undefined' && typeof window.calculateUnifiedCanvasImportPlacement === 'function') {
+        const unified = window.calculateUnifiedCanvasImportPlacement(width, height, options);
+        if (unified && typeof unified === 'object' && Number.isFinite(unified.x) && Number.isFinite(unified.y)) {
+            return unified;
+        }
+    }
     const explicitPosition = __normalizeCanvasImportPosition(options && options.canvasPosition);
     if (explicitPosition) {
         return {
@@ -2329,6 +2338,20 @@ async function __importBookmarkFilesBatch(type, filesInput, options = {}) {
                 : `成功导入 ${importedFiles} 个文件（${totalBookmarks} 个书签）`,
             'success'
         );
+        if (importedSections.length > 0) {
+            try {
+                const firstSec = importedSections[0];
+                const firstEl = document.getElementById(firstSec.id);
+                if (typeof window !== 'undefined' && typeof window.locateCanvasImportResult === 'function') {
+                    window.locateCanvasImportResult({
+                        type: 'temp-section',
+                        id: firstSec.id,
+                        element: firstEl,
+                        zoom: 'fit'
+                    });
+                }
+            } catch (_) { }
+        }
     }
     if (failedFiles > 0) {
         showCanvasToast(
@@ -2563,21 +2586,19 @@ async function handleFileImport(e) {
 
             if (forceSnapshotImport) {
                 __setCanvasImportRuntimeMode('permanent');
-                __showImportReloadProgress('snapshot', 'processing');
                 await __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
                     source: 'zip',
                     trigger: importOptions.trigger || 'canvas-position-import',
                     canvasPosition
                 }, {
-                    deferRuntimeRender: true,
-                    willReloadAfterImport: true
+                    deferRuntimeRender: false,
+                    willReloadAfterImport: false
                 });
                 const activeDialog = document.getElementById('canvasImportDialog');
                 if (activeDialog) activeDialog.remove();
                 e.target.value = '';
                 e.target.__canvasImportOptions = null;
-                __showImportReloadProgress('snapshot');
-                __reloadCanvasDocumentAfterImport('import-snapshot');
+                showCanvasToast(isEn ? 'Snapshot package imported successfully.' : '快照包导入成功。', 'success');
                 return;
             }
 
@@ -2618,32 +2639,28 @@ async function handleFileImport(e) {
                     __reloadCanvasDocumentAfterImport('import-overwrite');
                 } catch (err) {
                     __hideImportReloadProgress();
-                    console.error('[Overwrite Import] failed:', err);
                     alert(isEn ? `Overwrite import failed: ${err.message}` : `覆盖导入失败：${err.message}`);
                 }
                 return;
             }
             __setCanvasImportRuntimeMode(mode);
-            __showImportReloadProgress('snapshot', 'processing');
 
             await __processImportedPackage(parsedTempState, parsedStorage, parsedPrimaryState, file.name, {
                 source: type === 'package-archive' ? 'zip' : 'json',
                 trigger: canvasPosition ? 'canvas-position-import' : 'manual-file-import',
                 canvasPosition
             }, {
-                deferRuntimeRender: true,
-                willReloadAfterImport: true
+                deferRuntimeRender: false,
+                willReloadAfterImport: false
             });
-            __showImportReloadProgress('snapshot');
-            __reloadCanvasDocumentAfterImport('import-snapshot');
+            const activeDialog = document.getElementById('canvasImportDialog');
+            if (activeDialog) activeDialog.remove();
+            showCanvasToast(isEn ? 'Snapshot package imported successfully.' : '快照包导入成功。', 'success');
         } else if (type === 'html' || type === 'json') {
             if (files.length > 1) {
-                __showImportReloadProgress('bookmarks', 'processing');
                 await __importBookmarkFilesBatch(type, files, {
                     canvasPosition
                 });
-                __showImportReloadProgress('bookmarks');
-                __reloadCanvasDocumentAfterImport('import-bookmarks');
             } else {
                 const text = await file.text();
                 if (type === 'html') {
@@ -2663,7 +2680,6 @@ async function handleFileImport(e) {
         // 成功提示已在各导入函数中显示，这里不再重复
     } catch (error) {
         __hideImportReloadProgress();
-        console.error('[Canvas] 导入失败:', error);
         const { isEn } = __getLang();
         showCanvasToast((isEn ? 'Import failed: ' : '导入失败: ') + (error && error.message ? error.message : error), 'error');
     }
@@ -2703,21 +2719,19 @@ async function handleFolderImport(e) {
         const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName);
         if (forceSnapshotImport) {
             __setCanvasImportRuntimeMode('permanent');
-            __showImportReloadProgress('snapshot', 'processing');
             await __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
                 source: 'folder',
                 trigger: importOptions.trigger || 'canvas-position-import',
                 canvasPosition
             }, {
-                deferRuntimeRender: true,
-                willReloadAfterImport: true
+                deferRuntimeRender: false,
+                willReloadAfterImport: false
             });
             const activeDialog = document.getElementById('canvasImportDialog');
             if (activeDialog) activeDialog.remove();
             e.target.value = '';
             e.target.__canvasImportOptions = null;
-            __showImportReloadProgress('snapshot');
-            __reloadCanvasDocumentAfterImport('import-snapshot');
+            showCanvasToast(isEn ? 'Snapshot package folder imported successfully.' : '快照包文件夹导入成功。', 'success');
             return;
         }
 
@@ -2757,30 +2771,26 @@ async function handleFolderImport(e) {
                 __reloadCanvasDocumentAfterImport('import-overwrite');
             } catch (err) {
                 __hideImportReloadProgress();
-                console.error('[Overwrite Import] failed:', err);
                 alert(isEn ? `Overwrite import failed: ${err.message}` : `覆盖导入失败：${err.message}`);
             }
             return;
         }
         __setCanvasImportRuntimeMode(mode);
-        __showImportReloadProgress('snapshot', 'processing');
 
         await __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
             source: 'folder',
             trigger: canvasPosition ? 'canvas-position-import' : 'manual-folder-import',
             canvasPosition
         }, {
-            deferRuntimeRender: true,
-            willReloadAfterImport: true
+            deferRuntimeRender: false,
+            willReloadAfterImport: false
         });
 
         const activeDialog = document.getElementById('canvasImportDialog');
         if (activeDialog) activeDialog.remove();
-        __showImportReloadProgress('snapshot');
-        __reloadCanvasDocumentAfterImport('import-snapshot');
+        showCanvasToast(isEn ? 'Snapshot package folder imported successfully.' : '快照包文件夹导入成功。', 'success');
     } catch (error) {
         __hideImportReloadProgress();
-        console.error('[Canvas] 文件夹导入失败:', error);
         showCanvasToast((isEn ? 'Import failed: ' : '导入失败: ') + (error && error.message ? error.message : error), 'error');
     }
 
@@ -2917,9 +2927,21 @@ async function importHtmlBookmarks(html, importFileName = '', options = {}) {
         __saveTransferImportSectionsDelta(section);
     }
 
-    // 添加呼吸式闪烁效果，吸引用户注意
+    // 添加官方标准定位、自适应放大与呼吸式闪烁效果，吸引用户注意
     const nodeElement = document.getElementById(section.id);
     if (nodeElement) {
+        try {
+            if (typeof window !== 'undefined' && typeof window.locateCanvasImportResult === 'function') {
+                window.locateCanvasImportResult({
+                    type: 'temp-section',
+                    id: section.id,
+                    element: nodeElement,
+                    zoom: 'fit'
+                });
+            } else if (typeof window !== 'undefined' && window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
+                window.CanvasModule.locateSection(section.id, 'fit');
+            }
+        } catch (_) { }
         pulseBreathingEffect(nodeElement, 1500);
     }
 
@@ -3533,9 +3555,21 @@ async function importJsonBookmarks(json, importFileName = '', options = {}) {
         __saveTransferImportSectionsDelta(section);
     }
 
-    // 添加呼吸式闪烁效果，吸引用户注意
+    // 添加官方标准定位、自适应放大与呼吸式闪烁效果，吸引用户注意
     const nodeElement = document.getElementById(section.id);
     if (nodeElement) {
+        try {
+            if (typeof window !== 'undefined' && typeof window.locateCanvasImportResult === 'function') {
+                window.locateCanvasImportResult({
+                    type: 'temp-section',
+                    id: section.id,
+                    element: nodeElement,
+                    zoom: 'fit'
+                });
+            } else if (typeof window !== 'undefined' && window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
+                window.CanvasModule.locateSection(section.id, 'fit');
+            }
+        } catch (_) { }
         pulseBreathingEffect(nodeElement, 1500);
     }
 
@@ -5742,7 +5776,8 @@ async function importCanvasGithubFolderPackage(folderFiles, folderName, options 
         importFileName: parsed.importFileName || folderName || '',
         importMeta: {
             source: 'github',
-            trigger: importMode === 'overwrite' ? 'github-pull-overwrite' : 'github-pull-snapshot'
+            trigger: importMode === 'overwrite' ? 'github-pull-overwrite' : 'github-pull-snapshot',
+            ...(options && options.importMeta && typeof options.importMeta === 'object' ? options.importMeta : {})
         }
     });
 }

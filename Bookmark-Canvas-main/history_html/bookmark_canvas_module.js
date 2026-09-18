@@ -28043,6 +28043,28 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external', optio
             try { __refreshCanvasNodeCounters(); } catch (_) {}
             try { updateCanvasScrollBounds(); } catch (_) {}
             try { updateScrollbarThumbs(); } catch (_) {}
+
+            // 8.1 跨窗口/侧边栏同步：联动刷新目录树、搜索索引与元数据标记
+            try {
+                if (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refresh === 'function') {
+                    window.CanvasSidebarDirectory.refresh({ force: true });
+                }
+            } catch (_) { }
+            try {
+                if (typeof window !== 'undefined' && window.SearchIndexManager && typeof window.SearchIndexManager.markDirty === 'function') {
+                    window.SearchIndexManager.markDirty({ full: true });
+                }
+            } catch (_) { }
+            try {
+                if (typeof window !== 'undefined' && typeof window.__refreshAllTagDots === 'function') {
+                    window.__refreshAllTagDots();
+                }
+            } catch (_) { }
+            try {
+                if (typeof window !== 'undefined' && typeof window.__refreshAllNoteMarkers === 'function') {
+                    window.__refreshAllNoteMarkers();
+                }
+            } catch (_) { }
         }
 
         // 9. 依然执行永久栏目的布局位置同步

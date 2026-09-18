@@ -296,6 +296,16 @@ function __rectFullyInside(inner, outer, margin = 0) {
 let importPositionOffset = 0;
 
 function findAvailablePositionInViewport(width = null, height = null) {
+    if (typeof window !== 'undefined' && typeof window.calculateUnifiedCanvasImportPlacement === 'function') {
+        const unified = window.calculateUnifiedCanvasImportPlacement(width, height);
+        if (unified && typeof unified === 'object' && Number.isFinite(unified.x) && Number.isFinite(unified.y)) {
+            return {
+                x: unified.x,
+                y: unified.y,
+                needsHigherZIndex: unified.needsHigherZIndex !== false
+            };
+        }
+    }
     const defaults = getTempSectionBaseSize();
     const resolvedWidth = Number.isFinite(width) ? width : defaults.width;
     const resolvedHeight = Number.isFinite(height) ? height : defaults.height;
@@ -355,7 +365,38 @@ function findAvailablePositionInViewport(width = null, height = null) {
     };
 
     const collidesWithExisting = (x, y) => {
-        // 仅用状态数据做碰撞检测（即使某些 DOM 休眠未渲染，也能避免重叠）
+        // 1. 永久栏目主卡片（优先读取状态，避免 DOM 强制重排）
+        try {
+            const permSize = (typeof getPermanentSectionBaseSize === 'function') ? getPermanentSectionBaseSize() : { width: 600, height: 600 };
+            const permPos = (CanvasState && CanvasState.permanentPosition) || {};
+            const px = Number.isFinite(Number(permPos.left)) ? Number(permPos.left) : 0;
+            const py = Number.isFinite(Number(permPos.top)) ? Number(permPos.top) : 0;
+            const pw = Number.isFinite(Number(permPos.width)) ? Number(permPos.width) : (permSize.width || 600);
+            const ph = Number.isFinite(Number(permPos.height)) ? Number(permPos.height) : (permSize.height || 600);
+            if (overlaps(x, y, resolvedWidth, resolvedHeight, px, py, pw, ph)) return true;
+        } catch (_) { }
+
+        // 2. 永久栏目副本
+        try {
+            const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+                ? CanvasState.permanentLayout.copiesById
+                : {};
+            const existingMeta = (typeof __readPermanentSectionCopies === 'function')
+                ? ((__readPermanentSectionCopies() || []).filter(item => item && item.id))
+                : [];
+            const permSize = (typeof getPermanentSectionBaseSize === 'function') ? getPermanentSectionBaseSize() : { width: 600, height: 600 };
+            for (const meta of existingMeta) {
+                const copyId = meta.id;
+                const cardState = copyStateById[copyId] || {};
+                const cx = Number.isFinite(Number(cardState.left)) ? Number(cardState.left) : 0;
+                const cy = Number.isFinite(Number(cardState.top)) ? Number(cardState.top) : 0;
+                const cw = Number.isFinite(Number(cardState.width)) ? Number(cardState.width) : (permSize.width || 600);
+                const ch = Number.isFinite(Number(cardState.height)) ? Number(cardState.height) : (permSize.height || 600);
+                if (overlaps(x, y, resolvedWidth, resolvedHeight, cx, cy, cw, ch)) return true;
+            }
+        } catch (_) { }
+
+        // 3. 临时栏目
         for (const sec of (CanvasState.tempSections || [])) {
             if (!sec) continue;
             // 自己还没 push 进 tempSections，此处无需排除 id
@@ -365,6 +406,8 @@ function findAvailablePositionInViewport(width = null, height = null) {
             const sh = Number(sec.height);
             if (overlaps(x, y, resolvedWidth, resolvedHeight, sx, sy, sw, sh)) return true;
         }
+
+        // 4. Markdown/空白卡片与卡片组
         for (const node of (CanvasState.mdNodes || [])) {
             if (!node) continue;
             const nx = Number(node.x);

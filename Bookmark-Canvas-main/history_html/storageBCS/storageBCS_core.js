@@ -5582,6 +5582,367 @@ function __rebuildPermanentViewShellSnapshotFromSyncFolderFiles(filesByPath) {
 }
 
 /**
+ * 全局统一的画布导入物理落点计算引擎
+ * 核心依据：当前画布视野的 panOffsetX, panOffsetY, zoom 以及可视窗口尺寸
+ * 放置规则：
+ * 1. 显式指定坐标（如右键菜单）优先并做就近微调避让；
+ * 2. 默认以当前视野正中心为绝对第 1 候选点（无障碍时正正好好落在当前屏幕中央）；
+ * 3. 视野中心有卡片时，在该障碍物的正右方（保持当前视野垂直居中对齐）排布，绝无负 Y 右上天花板偏移；
+ * 4. 全要素实体（永久栏目本体、永久栏目副本、临时栏目、普通卡片、卡片组）与连线走廊防穿透避让；
+ * 5. 若右侧排满则在下方顺延排布。
+ * 
+ * @param {number} targetWidth 目标元素宽度
+ * @param {number} targetHeight 目标元素高度
+ * @param {Object} [options] 额外配置
+ * @returns {{ x: number, y: number, needsHigherZIndex: boolean }}
+ */
+function calculateUnifiedCanvasImportPlacement(targetWidth, targetHeight, options = {}) {
+    const defaults = (typeof getTempSectionBaseSize === 'function')
+        ? getTempSectionBaseSize()
+        : { width: 360, height: 280 };
+    const resolvedWidth = Number.isFinite(targetWidth) && targetWidth > 0 ? targetWidth : defaults.width;
+    const resolvedHeight = Number.isFinite(targetHeight) && targetHeight > 0 ? targetHeight : defaults.height;
+
+    // 0. 显式指定坐标处理（如右键菜单、光标位置），安全提取数值，避免 0 被当作假值转换为 NaN
+    const explicitPos = (options && options.canvasPosition && typeof options.canvasPosition === 'object')
+        ? options.canvasPosition
+        : null;
+    const getValidCoord = (pos, keys) => {
+        if (!pos || typeof pos !== 'object') return null;
+        for (const k of keys) {
+            if (Object.prototype.hasOwnProperty.call(pos, k)) {
+                const n = Number(pos[k]);
+                if (Number.isFinite(n)) return n;
+            }
+        }
+        return null;
+    };
+    const explicitLeft = getValidCoord(explicitPos, ['left', 'x']);
+    const explicitTop = getValidCoord(explicitPos, ['top', 'y']);
+
+    // 1. 获取画布视口三要素：panOffsetX, panOffsetY, zoom
+    const zoom = (CanvasState && CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const panX = (CanvasState && Number.isFinite(CanvasState.panOffsetX)) ? CanvasState.panOffsetX : 0;
+    const panY = (CanvasState && Number.isFinite(CanvasState.panOffsetY)) ? CanvasState.panOffsetY : 0;
+
+    const workspace = document.getElementById('canvasWorkspace');
+    const workspaceRect = workspace ? workspace.getBoundingClientRect() : {
+        width: (typeof window !== 'undefined' ? window.innerWidth : 1200),
+        height: (typeof window !== 'undefined' ? window.innerHeight : 800)
+    };
+
+    const viewportLeft = -panX / zoom;
+    const viewportTop = -panY / zoom;
+    const viewportW = (workspaceRect.width || 1200) / zoom;
+    const viewportH = (workspaceRect.height || 800) / zoom;
+    const viewportRight = viewportLeft + viewportW;
+    const viewportBottom = viewportTop + viewportH;
+    const viewportCenterX = viewportLeft + viewportW / 2;
+    const viewportCenterY = viewportTop + viewportH / 2;
+
+    // 2. 全要素障碍物收集（纯基于 CanvasState 内存状态，杜绝 DOM forced reflow，兼容休眠与虚拟化）
+    const obstacles = [];
+    const obstacleMap = new Map();
+
+    // 2.1 主永久栏目
+    try {
+        const permSize = (typeof getPermanentSectionBaseSize === 'function') ? getPermanentSectionBaseSize() : { width: 600, height: 600 };
+        const permPos = (CanvasState && CanvasState.permanentPosition) || {};
+        const left = Number.isFinite(Number(permPos.left)) ? Number(permPos.left) : 0;
+        const top = Number.isFinite(Number(permPos.top)) ? Number(permPos.top) : 0;
+        const w = Number.isFinite(Number(permPos.width)) ? Number(permPos.width) : (permSize.width || 600);
+        const h = Number.isFinite(Number(permPos.height)) ? Number(permPos.height) : (permSize.height || 600);
+        const obs = { x: left, y: top, w, h, id: 'permanent-section' };
+        obstacles.push(obs);
+        obstacleMap.set('permanent-section', obs);
+        obstacleMap.set('permanentSection', obs);
+    } catch (_) { }
+
+    // 2.2 永久栏目副本
+    try {
+        const copyStateById = CanvasState.permanentLayout && CanvasState.permanentLayout.copiesById && typeof CanvasState.permanentLayout.copiesById === 'object'
+            ? CanvasState.permanentLayout.copiesById
+            : {};
+        const existingMeta = (typeof __readPermanentSectionCopies === 'function')
+            ? ((__readPermanentSectionCopies() || []).filter(item => item && item.id))
+            : [];
+        const permSize = (typeof getPermanentSectionBaseSize === 'function') ? getPermanentSectionBaseSize() : { width: 600, height: 600 };
+        existingMeta.forEach(meta => {
+            const copyId = meta.id;
+            const cardState = copyStateById[copyId] || {};
+            const left = Number.isFinite(Number(cardState.left)) ? Number(cardState.left) : 0;
+            const top = Number.isFinite(Number(cardState.top)) ? Number(cardState.top) : 0;
+            const w = Number.isFinite(Number(cardState.width)) ? Number(cardState.width) : (permSize.width || 600);
+            const h = Number.isFinite(Number(cardState.height)) ? Number(cardState.height) : (permSize.height || 600);
+            const obs = { x: left, y: top, w, h, id: `permanent-copy-${copyId}` };
+            obstacles.push(obs);
+            obstacleMap.set(obs.id, obs);
+            obstacleMap.set(`permanent-section-copy-${copyId}`, obs);
+        });
+    } catch (_) { }
+
+    // 2.3 临时栏目卡片（纯内存状态，不读取 DOM 避免 Layout Thrashing）
+    try {
+        (Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : []).forEach(sec => {
+            if (!sec || !sec.id) return;
+            const x = Number.isFinite(Number(sec.x)) ? Number(sec.x) : 0;
+            const y = Number.isFinite(Number(sec.y)) ? Number(sec.y) : 0;
+            const baseSize = (typeof getTempSectionBaseSize === 'function') ? getTempSectionBaseSize(sec) : { width: 360, height: 280 };
+            const w = Number.isFinite(Number(sec.width)) && Number(sec.width) > 0 ? Number(sec.width) : (baseSize.width || 360);
+            const h = Number.isFinite(Number(sec.height)) && Number(sec.height) > 0 ? Number(sec.height) : (baseSize.height || 280);
+            const obs = { x, y, w, h, id: sec.id };
+            obstacles.push(obs);
+            obstacleMap.set(sec.id, obs);
+        });
+    } catch (_) { }
+
+    // 2.4 空白卡片、Markdown 卡片、已有卡片组（纯内存状态）
+    try {
+        (Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : []).forEach(node => {
+            if (!node || !node.id) return;
+            const x = Number.isFinite(Number(node.x)) ? Number(node.x) : 0;
+            const y = Number.isFinite(Number(node.y)) ? Number(node.y) : 0;
+            const w = Number.isFinite(Number(node.width)) && Number(node.width) > 0 ? Number(node.width) : 300;
+            const h = Number.isFinite(Number(node.height)) && Number(node.height) > 0 ? Number(node.height) : 200;
+            const obs = { x, y, w, h, id: node.id };
+            obstacles.push(obs);
+            obstacleMap.set(node.id, obs);
+        });
+    } catch (_) { }
+
+    // 2.5 连线走廊（避免新卡片组直接横跨在相连两节点中间）
+    const edgeSegments = [];
+    try {
+        (Array.isArray(CanvasState.edges) ? CanvasState.edges : []).forEach(edge => {
+            if (!edge || !edge.fromNode || !edge.toNode) return;
+            const from = obstacleMap.get(edge.fromNode);
+            const to = obstacleMap.get(edge.toNode);
+            if (from && to) {
+                edgeSegments.push({
+                    x1: from.x + from.w / 2,
+                    y1: from.y + from.h / 2,
+                    x2: to.x + to.w / 2,
+                    y2: to.y + to.h / 2
+                });
+            }
+        });
+    } catch (_) { }
+
+    const pad = Math.max(20, Math.round(24 / zoom));
+    const rectOverlaps = (ax, ay, aw, ah, bx, by, bw, bh, m = pad) => {
+        if (![ax, ay, aw, ah, bx, by, bw, bh].every(v => typeof v === 'number' && Number.isFinite(v))) return false;
+        return !(
+            ax + aw + m <= bx ||
+            bx + bw + m <= ax ||
+            ay + ah + m <= by ||
+            by + bh + m <= ay
+        );
+    };
+
+    const lineIntersectsRect = (x1, y1, x2, y2, rx, ry, rw, rh, m = pad) => {
+        const minX = rx - m, maxX = rx + rw + m;
+        const minY = ry - m, maxY = ry + rh + m;
+        if (Math.max(x1, x2) < minX || Math.min(x1, x2) > maxX ||
+            Math.max(y1, y2) < minY || Math.min(y1, y2) > maxY) {
+            return false;
+        }
+        if ((x1 >= minX && x1 <= maxX && y1 >= minY && y1 <= maxY) ||
+            (x2 >= minX && x2 <= maxX && y2 >= minY && y2 <= maxY)) {
+            return true;
+        }
+        const p = [ -(x2 - x1), x2 - x1, -(y2 - y1), y2 - y1 ];
+        const q = [ x1 - minX, maxX - x1, y1 - minY, maxY - y1 ];
+        let u1 = 0, u2 = 1;
+        for (let i = 0; i < 4; i++) {
+            if (p[i] === 0) {
+                if (q[i] < 0) return false;
+            } else {
+                const t = q[i] / p[i];
+                if (p[i] < 0) {
+                    if (t > u2) return false;
+                    if (t > u1) u1 = t;
+                } else {
+                    if (t < u1) return false;
+                    if (t > u2) u2 = t;
+                }
+            }
+        }
+        return u1 <= u2;
+    };
+
+    const isBoxFree = (x, y, w, h, m = pad, checkEdges = true) => {
+        for (let i = 0; i < obstacles.length; i++) {
+            const obs = obstacles[i];
+            if (rectOverlaps(x, y, w, h, obs.x, obs.y, obs.w, obs.h, m)) return false;
+        }
+        if (checkEdges) {
+            for (let i = 0; i < edgeSegments.length; i++) {
+                const seg = edgeSegments[i];
+                if (lineIntersectsRect(seg.x1, seg.y1, seg.x2, seg.y2, x, y, w, h, m)) return false;
+            }
+        }
+        return true;
+    };
+
+    // 显式指定坐标处理
+    if (explicitLeft !== null && explicitTop !== null) {
+        if (isBoxFree(explicitLeft, explicitTop, resolvedWidth, resolvedHeight)) {
+            return { x: explicitLeft, y: explicitTop, needsHigherZIndex: true };
+        }
+        const offsets = [
+            [0, 0], [40, 0], [0, 40], [-40, 0], [0, -40],
+            [80, 0], [0, 80], [-80, 0], [0, -80],
+            [120, 60], [-120, 60], [120, -60], [-120, -60]
+        ];
+        for (const [dx, dy] of offsets) {
+            const cx = explicitLeft + dx / zoom;
+            const cy = explicitTop + dy / zoom;
+            if (isBoxFree(cx, cy, resolvedWidth, resolvedHeight)) {
+                return { x: cx, y: cy, needsHigherZIndex: true };
+            }
+        }
+        return { x: explicitLeft, y: explicitTop, needsHigherZIndex: true };
+    }
+
+    // 3. 常规导入：以【当前视野正中心】为第 1 候选点
+    // 侧边栏/窄视口自适应：当视口宽度比导入内容还窄时，防止 centerBaseX 变成极大的负数
+    let centerBaseX = viewportCenterX - resolvedWidth / 2;
+    if (viewportW < resolvedWidth) {
+        centerBaseX = viewportLeft + pad;
+    }
+    const centerBaseY = viewportCenterY - resolvedHeight / 2;
+
+    if (isBoxFree(centerBaseX, centerBaseY, resolvedWidth, resolvedHeight)) {
+        return { x: centerBaseX, y: centerBaseY, needsHigherZIndex: false };
+    }
+
+    // 4. 避让逻辑：视野中心有障碍物时，出现在对应障碍物的正右方（保持当前视野垂直居中对齐）
+    let maxRightOfObstacles = centerBaseX + resolvedWidth;
+    for (let i = 0; i < obstacles.length; i++) {
+        const obs = obstacles[i];
+        const centerOverlap = rectOverlaps(centerBaseX, centerBaseY, resolvedWidth, resolvedHeight, obs.x, obs.y, obs.w, obs.h, 0);
+        const verticalOverlap = !(obs.y + obs.h <= viewportTop || obs.y >= viewportBottom);
+        if (centerOverlap || (verticalOverlap && obs.x >= viewportLeft && obs.x <= viewportRight)) {
+            maxRightOfObstacles = Math.max(maxRightOfObstacles, obs.x + obs.w);
+        }
+    }
+
+    const stepX = resolvedWidth + pad;
+    const rightStart = Math.max(centerBaseX, maxRightOfObstacles) + pad;
+    const yNudges = [0, 32 / zoom, -32 / zoom, 64 / zoom, -64 / zoom];
+
+    // 两轮探测：第 1 轮严格避让卡片与连线；第 2 轮软化连线（防止跨屏长连线阻断全部 15 列候选点）
+    for (const checkEdges of [true, false]) {
+        for (let col = 0; col <= 14; col++) {
+            const candX = rightStart + col * stepX;
+            for (let n = 0; n < yNudges.length; n++) {
+                const candY = centerBaseY + yNudges[n];
+                if (n === 0 || (candY >= (viewportTop + pad) && (candY + resolvedHeight) <= (viewportBottom - pad))) {
+                    if (isBoxFree(candX, candY, resolvedWidth, resolvedHeight, pad, checkEdges)) {
+                        return { x: candX, y: candY, needsHigherZIndex: false };
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. 若右侧极度拥挤，沿正下方（水平居中对齐）顺延排布
+    let maxBottomOfObstacles = centerBaseY + resolvedHeight;
+    for (let i = 0; i < obstacles.length; i++) {
+        const obs = obstacles[i];
+        if (rectOverlaps(centerBaseX, centerBaseY, resolvedWidth, resolvedHeight, obs.x, obs.y, obs.w, obs.h, 0)) {
+            maxBottomOfObstacles = Math.max(maxBottomOfObstacles, obs.y + obs.h);
+        }
+    }
+    const bottomStart = Math.max(centerBaseY, maxBottomOfObstacles) + pad;
+    const stepY = resolvedHeight + pad;
+    for (const checkEdges of [true, false]) {
+        for (let row = 0; row <= 8; row++) {
+            const candY = bottomStart + row * stepY;
+            if (isBoxFree(centerBaseX, candY, resolvedWidth, resolvedHeight, pad, checkEdges)) {
+                return { x: centerBaseX, y: candY, needsHigherZIndex: false };
+            }
+        }
+    }
+
+    // 保底：正右方首位
+    return { x: rightStart, y: centerBaseY, needsHigherZIndex: true };
+}
+
+if (typeof window !== 'undefined') {
+    window.calculateUnifiedCanvasImportPlacement = calculateUnifiedCanvasImportPlacement;
+}
+
+/**
+ * 使用官方右键菜单与目录树统一的“定位并放大 (fit)”引擎
+ * 对齐右键菜单与侧边栏定位标准，取代旧的手写平移缩放逻辑
+ * @param {Object} options
+ * @param {string} [options.type] - 'card-group' | 'temp-section' | 'element'
+ * @param {string} [options.id] - 节点 ID 或 sectionId
+ * @param {HTMLElement} [options.element] - DOM 元素
+ * @param {string|number} [options.zoom] - 默认 'fit'
+ * @returns {boolean}
+ */
+function locateCanvasImportResult(options = {}) {
+    const { type, id, element, zoom = 'fit' } = options;
+    const performLocate = () => {
+        try {
+            const module = (typeof window !== 'undefined' && window.CanvasModule) || {};
+            const directory = (typeof window !== 'undefined' && window.CanvasSidebarDirectory) || {};
+
+            // 1. 卡片组：优先调用目录树/右键菜单统一的 locateCardGroup
+            if (type === 'card-group' || (id && String(id).startsWith('card-group'))) {
+                if (id && typeof directory.locateCardGroup === 'function') {
+                    const ok = directory.locateCardGroup(id, zoom);
+                    if (ok) return true;
+                }
+                const el = element || (id ? document.getElementById(id) : null);
+                if (el && typeof module.locateElement === 'function') {
+                    module.locateElement(el, zoom);
+                    return true;
+                }
+            }
+
+            // 2. 临时栏目卡片：优先调用右键菜单同款 locateSection 或 locateElement
+            if (type === 'temp-section' || (id && String(id).startsWith('temp-'))) {
+                if (id && typeof module.locateSection === 'function') {
+                    module.locateSection(id, zoom);
+                    return true;
+                }
+                const el = element || (id ? (document.getElementById(id) || document.querySelector(`[data-section-id="${CSS.escape(id)}"]`)) : null);
+                if (el && typeof module.locateElement === 'function') {
+                    module.locateElement(el, zoom);
+                    return true;
+                }
+            }
+
+            // 3. 通用元素定位（右键菜单同款 locateElement）
+            const el = element || (id ? document.getElementById(id) : null);
+            if (el && typeof module.locateElement === 'function') {
+                module.locateElement(el, zoom);
+                return true;
+            }
+        } catch (e) {
+            console.warn('[Canvas] locateCanvasImportResult error:', e);
+        }
+        return false;
+    };
+
+    let immediateOk = performLocate();
+    // 仅当首轮定位未命中（DOM 尚未完成挂载）时，才做轻微延时复验，避免已定位状态下的双重计算
+    if (!immediateOk && typeof window !== 'undefined') {
+        window.requestAnimationFrame(() => {
+            performLocate();
+        });
+    }
+    return immediateOk;
+}
+
+if (typeof window !== 'undefined') {
+    window.locateCanvasImportResult = locateCanvasImportResult;
+}
+
+/**
  * 沙箱导入核心处理逻辑
  * 被 importCanvasPackageZip 和 importCanvasPackageFolder 共同使用
  * @param {Object} tempState - 临时栏目状态数据
@@ -5590,7 +5951,7 @@ function __rebuildPermanentViewShellSnapshotFromSyncFolderFiles(filesByPath) {
  * @param {string} [importFileName] - 导入的文件名
  * @param {Object} [importMeta] - 审计上下文（source/trigger）
  */
-function __processImportedPackage(tempState, storage, primaryState, importFileName = '', importMeta = null, importOptions = {}) {
+async function __processImportedPackage(tempState, storage, primaryState, importFileName = '', importMeta = null, importOptions = {}) {
     const { isEn } = __getLang();
     const importMode = __getCanvasImportRuntimeMode();
     const normalizedImportMeta = (importMeta && typeof importMeta === 'object') ? importMeta : {};
@@ -5640,9 +6001,12 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     // 4. Create the "Group Container"
     const PADDING = 60;
     // 使用传入的文件名作为标题
-    const containerLabel = importFileName || (isEn
-        ? `📦 Imported Package(${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()})`
-        : `📦 导入的包(${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()})`);
+    const rawImportLabel = (typeof importFileName === 'string' && importFileName.trim())
+        ? importFileName.trim().replace(/^📦\s*/, '')
+        : '';
+    const containerLabel = rawImportLabel || (isEn
+        ? `Imported Package(${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()})`
+        : `导入的包(${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()})`);
 
     const getRuntimeRect = (node) => {
         if (!node) return null;
@@ -5696,85 +6060,14 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
         ? explicitContainerRect.h
         : bounds.height + (PADDING * 2);
 
-    const viewportRightCanvasX = (workspaceRect.width - panX) / zoom;
-    const viewportCenterCanvasY = (workspaceRect.height / 2 - panY) / zoom;
-
-    const getNodeRect = (node) => {
-        if (!node || !node.id) return null;
-        const x = Number(node.x);
-        const y = Number(node.y);
-        let w = Number(node.width);
-        let h = Number(node.height);
-        const el = document.getElementById(node.id);
-        if (el) {
-            const ew = el.offsetWidth;
-            const eh = el.offsetHeight;
-            if (typeof ew === 'number' && isFinite(ew) && ew > 0) w = ew;
-            if (typeof eh === 'number' && isFinite(eh) && eh > 0) h = eh;
-        }
-        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) return null;
-        return { x, y, w, h };
-    };
-
-    const padPx = 18;
-    const pad = padPx / zoom;
-    const overlaps = (ax, ay, aw, ah, bx, by, bw, bh) => {
-        if (![ax, ay, aw, ah, bx, by, bw, bh].every(v => typeof v === 'number' && isFinite(v))) return false;
-        return !(
-            ax + aw + pad <= bx ||
-            bx + bw + pad <= ax ||
-            ay + ah + pad <= by ||
-            by + bh + pad <= ay
-        );
-    };
-
-    const collidesWithExistingGroups = (x, y, w, h) => {
-        const nodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [];
-        for (const n of nodes) {
-            if (!n || n.subtype !== 'card-group') continue;
-            const r = getNodeRect(n);
-            if (!r) continue;
-            if (overlaps(x, y, w, h, r.x, r.y, r.w, r.h)) return true;
-        }
-        return false;
-    };
-
-    // Keep spacing constant in screen pixels across zoom levels
-    const screenSpacingPx = 160;
-    const baseX = viewportRightCanvasX + (screenSpacingPx / zoom);
-    const baseY = viewportCenterCanvasY - (bounds.height / 2);
-
-    // We solve for "bounds.minX after offset" (targetBoundsMinX),
-    // then container will be at (targetBoundsMinX - PADDING).
-    const tryFindBoundsMinXMinY = () => {
-        const xMultipliers = [0, 1, 2, 3, 4, 5, 6, 7];
-        const yMultipliers = [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5];
-
-        const stepX = Math.max(bounds.width + (screenSpacingPx / zoom), (workspaceRect.width / zoom) * 0.25);
-        const stepY = Math.max(bounds.height * 0.7 + (screenSpacingPx / zoom) * 0.5, (workspaceRect.height / zoom) * 0.18);
-
-        for (let xi = 0; xi < xMultipliers.length; xi++) {
-            for (let yi = 0; yi < yMultipliers.length; yi++) {
-                const targetBoundsMinX = baseX + xMultipliers[xi] * stepX;
-                const targetBoundsMinY = baseY + yMultipliers[yi] * stepY;
-                const containerX = targetBoundsMinX - PADDING;
-                const containerY = targetBoundsMinY - PADDING;
-                if (!collidesWithExistingGroups(containerX, containerY, containerWidth, containerHeight)) {
-                    return { targetBoundsMinX, targetBoundsMinY };
-                }
-            }
-        }
-        return null;
-    };
-
-    const found = requestedCanvasPosition
-        ? {
-            targetBoundsMinX: requestedCanvasPosition.left + (useExplicitContainerGroup ? 0 : PADDING),
-            targetBoundsMinY: requestedCanvasPosition.top + (useExplicitContainerGroup ? 0 : PADDING)
-        }
-        : tryFindBoundsMinXMinY();
-    const targetBoundsMinX = found ? found.targetBoundsMinX : baseX;
-    const targetBoundsMinY = found ? found.targetBoundsMinY : baseY;
+    // 3. 计算物理落点（调用全局统一的智能寻位避让引擎：首选当前视野正中心，避让时正右方排布）
+    const bestPlacement = calculateUnifiedCanvasImportPlacement(containerWidth, containerHeight, {
+        canvasPosition: requestedCanvasPosition
+    });
+    const containerX = (bestPlacement && Number.isFinite(bestPlacement.x)) ? bestPlacement.x : 0;
+    const containerY = (bestPlacement && Number.isFinite(bestPlacement.y)) ? bestPlacement.y : 0;
+    const targetBoundsMinX = containerX + (useExplicitContainerGroup ? 0 : PADDING);
+    const targetBoundsMinY = containerY + (useExplicitContainerGroup ? 0 : PADDING);
 
     // Calculate offset to move the batch near the viewport
     const offsetX = targetBoundsMinX - bounds.minX;
@@ -5839,12 +6132,27 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     // 导入属于正式内容，必须立即持久化，避免用户导入后立刻刷新导致丢失。
     // 新增内容只 upsert 本次导入的 section；bcs:canvas 仍作为 JsonCanvas 清单整体写入。
     let persistResult = null;
-    if (Array.isArray(remappedNodes.tempSections) && remappedNodes.tempSections.length && typeof saveCanvasSectionDelta === 'function') {
-        persistResult = saveCanvasSectionDelta({ upsertSections: remappedNodes.tempSections }, { immediate: true, skipValidation: true });
-    } else if (typeof saveCanvasManifestOnly === 'function') {
-        persistResult = saveCanvasManifestOnly({ immediate: true, skipValidation: true });
-    } else {
-        persistResult = saveTempNodes({ immediate: true, skipValidation: true });
+    try {
+        if (Array.isArray(remappedNodes.tempSections) && remappedNodes.tempSections.length && typeof saveCanvasSectionDelta === 'function') {
+            persistResult = await saveCanvasSectionDelta({ upsertSections: remappedNodes.tempSections }, { immediate: true, skipValidation: true });
+        } else if (typeof saveCanvasManifestOnly === 'function') {
+            persistResult = await saveCanvasManifestOnly({ immediate: true, skipValidation: true });
+        } else {
+            persistResult = await saveTempNodes({ immediate: true, skipValidation: true });
+        }
+    } catch (persistErr) {
+        console.error('[Snapshot Import] Persistence failed, scheduling reload recovery:', persistErr);
+        // 写入存储失败：由于新卡片已在内存与 DOM 暂挂，最彻底安全的方式是重载页面恢复干净老数据，绝不残留幽灵卡片，亦无误删老卡片风险
+        try {
+            if (typeof window !== 'undefined' && typeof window.__reloadCanvasDocumentAfterImport === 'function') {
+                window.__reloadCanvasDocumentAfterImport('import-failed-recovery', 1500);
+            } else if (typeof __reloadCanvasDocumentAfterImport === 'function') {
+                __reloadCanvasDocumentAfterImport('import-failed-recovery', 1500);
+            } else if (typeof window !== 'undefined' && window.location) {
+                setTimeout(() => { try { window.location.reload(); } catch (_) { } }, 1500);
+            }
+        } catch (_) { }
+        throw persistErr;
     }
 
     if (deferRuntimeRender) {
@@ -5886,18 +6194,23 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
     try { scheduleEdgesRender(); } catch (_) { }
     try { scheduleBoundsUpdate(); } catch (_) { }
 
-    // 9. Auto-Pan to the new group (镜头跟随)
-    const cx = containerNode.x + containerNode.width / 2;
-    const cy = containerNode.y + containerNode.height / 2;
-    // Zoom out slightly to see the whole package if it's big
-    const fitZoom = Math.min(1, (window.innerWidth - 100) / containerNode.width);
-    const z = Math.max(0.2, Math.min(1, fitZoom));
-
-    setCanvasZoom(z, cx, cy, { recomputeBounds: false }); // Set zoom first
-    CanvasState.panOffsetX = (window.innerWidth / 2) - (cx * z);
-    CanvasState.panOffsetY = (window.innerHeight / 2) - (cy * z);
-    updateCanvasScrollBounds();
-    savePanOffsetThrottled();
+    // 9. 使用官方成熟的卡片组定位与自适应放大引擎（对齐右键菜单与目录树标准）
+    try {
+        locateCanvasImportResult({
+            type: 'card-group',
+            id: containerNode.id,
+            element: document.getElementById(containerNode.id),
+            zoom: 'fit'
+        });
+    } catch (locErr) {
+        console.warn('[Snapshot Import] locateCanvasImportResult fallback:', locErr);
+        try {
+            const groupEl = document.getElementById(containerNode.id);
+            if (groupEl && typeof window.CanvasModule !== 'undefined' && typeof window.CanvasModule.locateElement === 'function') {
+                window.CanvasModule.locateElement(groupEl, 'fit');
+            }
+        } catch (_) { }
+    }
     // 导入后按需加载一次（只加载视口附近少量栏目）
     try { scheduleCanvasVirtualizationUpdate(60); } catch (_) { }
 
@@ -5935,8 +6248,22 @@ function __processImportedPackage(tempState, storage, primaryState, importFileNa
         }
     } catch (_) { }
 
-    ;
+    // 原地挂载后刷新左侧目录树，确保新增的卡片组和栏目立即可见
+    try {
+        if (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refresh === 'function') {
+            window.CanvasSidebarDirectory.refresh({ force: true });
+        }
+    } catch (_) { }
+
+    // 标记搜索索引脏，以便闲时增量更新
+    try {
+        if (typeof window !== 'undefined' && window.SearchIndexManager && typeof window.SearchIndexManager.markDirty === 'function') {
+            window.SearchIndexManager.markDirty({ full: true });
+        }
+    } catch (_) { }
+
     __setCanvasImportRuntimeMode('permanent');
+    return persistResult;
 }
 
 /**

@@ -2694,21 +2694,105 @@ ${isEn()
         return list;
     }
 
-    function buildFilteredSelectiveCanvasData(canvasData, selectedItems) {
-        const selectedIds = new Set((Array.isArray(selectedItems) ? selectedItems : [])
-            .map((item) => String(item && item.id || '').trim())
-            .filter(Boolean));
-        const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
-        const keptNodeIds = new Set(selectedIds);
-        const filteredNodes = nodes.filter((node) => {
-            if (!node || !node.id) return false;
-            const id = String(node.id || '').trim();
-            return selectedIds.has(id);
-        }).map((node) => ({ ...node }));
-        filteredNodes.forEach((node) => {
-            const id = String(node && node.id || '').trim();
-            if (id) keptNodeIds.add(id);
+    function arrangeSelectiveNodesInGrid(nodes) {
+        if (!Array.isArray(nodes) || nodes.length === 0) return nodes;
+
+        const count = nodes.length;
+        if (count === 1) {
+            nodes[0].x = 0;
+            nodes[0].y = 0;
+            return nodes;
+        }
+
+        // 自适应网格行列规则：
+        // 1项 -> 1列；2项 -> 2列；3项 -> 3列；4项 -> 2列(2x2方阵)；
+        // 5~6项 -> 3列；7~8项 -> 4列；9项以上 -> 最多4列，多行排列
+        let cols = 1;
+        if (count === 2) cols = 2;
+        else if (count === 3) cols = 3;
+        else if (count === 4) cols = 2;
+        else if (count === 5 || count === 6) cols = 3;
+        else if (count >= 7 && count <= 8) cols = 4;
+        else if (count >= 9) cols = Math.min(4, Math.ceil(Math.sqrt(count)));
+
+        const GAP_X = 40;
+        const GAP_Y = 40;
+
+        const rows = Math.ceil(count / cols);
+        const colWidths = new Array(cols).fill(0);
+        const rowHeights = new Array(rows).fill(0);
+
+        // 统计各列最大宽度和各行最大高度，保证对齐线工整
+        nodes.forEach((node, idx) => {
+            const c = idx % cols;
+            const r = Math.floor(idx / cols);
+            const w = Math.max(300, Number(node.width) || 600);
+            const h = Math.max(200, Number(node.height) || 600);
+            if (w > colWidths[c]) colWidths[c] = w;
+            if (h > rowHeights[r]) rowHeights[r] = h;
         });
+
+        // 累加计算每列水平起点 X 和每行垂直起点 Y
+        const colX = [0];
+        for (let c = 1; c < cols; c++) {
+            colX[c] = colX[c - 1] + colWidths[c - 1] + GAP_X;
+        }
+
+        const rowY = [0];
+        for (let r = 1; r < rows; r++) {
+            rowY[r] = rowY[r - 1] + rowHeights[r - 1] + GAP_Y;
+        }
+
+        // 应用几何坐标：顶端对齐，左侧对齐
+        nodes.forEach((node, idx) => {
+            const c = idx % cols;
+            const r = Math.floor(idx / cols);
+            node.x = colX[c];
+            node.y = rowY[r];
+        });
+
+        return nodes;
+    }
+
+    function buildFilteredSelectiveCanvasData(canvasData, selectedItems) {
+        const selectedIdOrder = (Array.isArray(selectedItems) ? selectedItems : [])
+            .map((item) => String(item && item.id || '').trim())
+            .filter(Boolean);
+        const selectedIds = new Set(selectedIdOrder);
+        const nodes = Array.isArray(canvasData && canvasData.nodes) ? canvasData.nodes : [];
+        const keptNodeIds = new Set();
+        
+        const nodeMap = new Map();
+        nodes.forEach((node) => {
+            if (!node || !node.id) return;
+            const id = String(node.id).trim();
+            if (selectedIds.has(id) && !nodeMap.has(id)) {
+                nodeMap.set(id, { ...node });
+            }
+        });
+
+        const filteredNodes = [];
+        selectedIdOrder.forEach((id) => {
+            const n = nodeMap.get(id);
+            if (n && !keptNodeIds.has(id)) {
+                filteredNodes.push(n);
+                keptNodeIds.add(id);
+            }
+        });
+
+        // 若部分选中节点未在 selectedIdOrder 中排上，兜底补充
+        nodes.forEach((node) => {
+            if (!node || !node.id) return;
+            const id = String(node.id).trim();
+            if (selectedIds.has(id) && !keptNodeIds.has(id)) {
+                filteredNodes.push({ ...node });
+                keptNodeIds.add(id);
+            }
+        });
+
+        // 对勾选拉取的卡片进行几何网格重排（几行几纵，统一定位基准，间距工整紧凑）
+        arrangeSelectiveNodesInGrid(filteredNodes);
+
         const filteredEdges = (Array.isArray(canvasData && canvasData.edges) ? canvasData.edges : [])
             .filter((edge) => {
                 if (!edge || !edge.id) return false;
@@ -2717,6 +2801,7 @@ ${isEn()
                 return !!(fromId && toId && keptNodeIds.has(fromId) && keptNodeIds.has(toId));
             })
             .map((edge) => ({ ...edge }));
+
         return {
             ...(canvasData && typeof canvasData === 'object' ? canvasData : {}),
             nodes: filteredNodes,
@@ -3394,13 +3479,22 @@ ${isEn()
                 (global.BookmarkCanvasPackageTransferBridge && global.BookmarkCanvasPackageTransferBridge.importCanvasGithubFolderPackage);
             if (typeof importFn !== 'function') throw new Error('Canvas import package bridge unavailable.');
             
-            updateProgress(80, importMode === 'overwrite' ? t('正在覆盖导入...', 'Importing with overwrite...') : t('正在快照导入...', 'Importing snapshot...'));
-            await importFn(folderFiles, getPathLeaf(config.remoteRoot), {
+            const isOverwrite = importMode === 'overwrite';
+            updateProgress(80, isOverwrite ? t('正在覆盖导入...', 'Importing with overwrite...') : t('正在快照导入...', 'Importing snapshot...'));
+            const folderLabel = mode === 'selective'
+                ? t(`GitHub选择拉取 (${selectedPullCount}个栏目)`, `GitHub Selective Pull (${selectedPullCount} sections)`)
+                : getPathLeaf(config.remoteRoot);
+            await importFn(folderFiles, folderLabel, {
                 importMode,
                 threshold: config.overwriteThreshold,
-                willReloadAfterImport: true,
-                deferRuntimeApply: true,
-                deferRuntimeRender: true
+                willReloadAfterImport: isOverwrite,
+                deferRuntimeApply: isOverwrite,
+                deferRuntimeRender: isOverwrite,
+                importMeta: {
+                    source: 'github',
+                    trigger: isOverwrite ? 'github-pull-overwrite' : (mode === 'selective' ? 'github-pull-selective' : 'github-pull-snapshot'),
+                    isSelective: mode === 'selective'
+                }
             });
             const note = mode === 'overwrite'
                 ? t('已完成 GitHub 拉取：覆盖导入。', 'GitHub pull complete: overwrite import.')
@@ -3430,9 +3524,14 @@ ${isEn()
                 commitMessage: pulledCommitMessage,
                 commitDescription: pulledCommitDescription
             });
-            showReloadProgressBeforeNavigation('pull');
-            showToast(note, 'success', 5000);
-            reloadCanvasDocumentAfterPull('github-pull');
+            if (isOverwrite) {
+                showReloadProgressBeforeNavigation('pull');
+                showToast(note, 'success', 5000);
+                reloadCanvasDocumentAfterPull('github-pull');
+            } else {
+                await closeProgressDialog(300);
+                showToast(note, 'success', 5000);
+            }
         } catch (error) {
             await closeProgressDialog(0, false);
             const msg = (error && error.message) || String(error);
