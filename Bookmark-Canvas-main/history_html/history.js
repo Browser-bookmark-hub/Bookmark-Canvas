@@ -7590,7 +7590,7 @@ function setupQuickAddMenu() {
                 optionEl = document.createElement('span');
                 optionEl.className = 'quick-add-window-folder-option';
                 optionEl.innerHTML = `
-                    <input type="checkbox" class="quick-add-window-folder-checkbox">
+                    <input type="checkbox" name="quick-add-window-folder" class="quick-add-window-folder-checkbox">
                     <span class="quick-add-window-folder-option-text"></span>
                 `;
                 item.appendChild(optionEl);

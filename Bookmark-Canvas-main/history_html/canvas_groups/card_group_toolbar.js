@@ -129,7 +129,7 @@ function __cardGroupBuildColorPopover(node) {
     const rgbPicker = document.createElement('div');
     rgbPicker.className = 'md-rgb-picker card-group-rgb-picker';
     rgbPicker.innerHTML = `
-        <input class="md-color-input" type="color" value="${node.colorHex || defaultColor}" title="${customColorTitle}" />
+        <input name="card-group-color" class="md-color-input" type="color" value="${node.colorHex || defaultColor}" title="${customColorTitle}" />
     `;
     pop.appendChild(rgbPicker);
 
@@ -402,6 +402,7 @@ function __cardGroupOpenContextRenamePopover(node, anchorPoint) {
 
     const input = document.createElement('input');
     input.type = 'text';
+    input.name = 'card-group-rename-input';
     input.className = 'temp-section-rename-popover-input card-group-context-rename-popover-input';
     input.value = String(node.label || '').trim() || fallbackLabel;
     input.placeholder = isEn ? 'Rename card group' : '重命名卡片组';

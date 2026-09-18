@@ -760,7 +760,7 @@ function __buildTempGroupColorPopover() {
     const rgbPicker = document.createElement('div');
     rgbPicker.className = 'md-rgb-picker temp-group-rgb-picker';
     rgbPicker.innerHTML = `
-        <input class="md-color-input" type="color" value="${(typeof CanvasState !== 'undefined' && CanvasState.tempGroupPrevColor) ? CanvasState.tempGroupPrevColor : '#66bbff'}" title="${customColorTitle}" />
+        <input name="temp-group-color" class="md-color-input" type="color" value="${(typeof CanvasState !== 'undefined' && CanvasState.tempGroupPrevColor) ? CanvasState.tempGroupPrevColor : '#66bbff'}" title="${customColorTitle}" />
     `;
     pop.appendChild(rgbPicker);
 

@@ -289,6 +289,7 @@ function __cardGroupStartRenamePill(pill, node) {
     const originalLabel = __getCardGroupNodeDisplayLabel(node);
     const input = document.createElement('input');
     input.type = 'text';
+    input.name = 'card-group-title-input';
     input.className = 'card-group-header-pill-input';
     input.value = originalLabel;
     pill.innerHTML = '';

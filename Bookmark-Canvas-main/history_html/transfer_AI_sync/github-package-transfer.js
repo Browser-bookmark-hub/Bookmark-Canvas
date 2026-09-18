@@ -541,6 +541,7 @@
         return new Promise((resolve) => {
             try {
                 const textarea = document.createElement('textarea');
+                textarea.name = 'clipboard-copy-helper';
                 textarea.value = value;
                 textarea.setAttribute('readonly', 'readonly');
                 textarea.style.position = 'fixed';

@@ -67,6 +67,10 @@
     return baseImage(safeHref, title, text);
   };
 
+  renderer.checkbox = function safeCheckbox(checked) {
+    return `<input name="markdown-task-checkbox" ${checked ? 'checked="" ' : ''}disabled="" type="checkbox">`;
+  };
+
   const allowedTags = new Set([
     'font',
     'span',

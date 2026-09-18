@@ -2513,8 +2513,8 @@
     }
 
     if (isGroup) {
-      const locateBtn = document.createElement('button');
-      locateBtn.type = 'button';
+      const locateBtn = document.createElement('span');
+      locateBtn.setAttribute('role', 'button');
       locateBtn.className = 'canvas-dir-folder-locate';
       locateBtn.dataset.nodeLocateKey = node.key;
       locateBtn.setAttribute('aria-label', t('定位并放大', 'Locate and zoom'));
@@ -2529,8 +2529,8 @@
       nodeDeleteActionMap.set(node.key, action);
 
       if (!deleteUiOpen) {
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
+        const deleteBtn = document.createElement('span');
+        deleteBtn.setAttribute('role', 'button');
         deleteBtn.className = 'canvas-dir-folder-delete';
         deleteBtn.dataset.nodeDeleteKey = node.key;
         deleteBtn.setAttribute('aria-label', labels.delete);
@@ -2542,8 +2542,8 @@
         secondaryWrap.className = 'canvas-dir-folder-delete-secondary';
 
         if (action.scopeOptions) {
-          const currentBtn = document.createElement('button');
-          currentBtn.type = 'button';
+          const currentBtn = document.createElement('span');
+          currentBtn.setAttribute('role', 'button');
           currentBtn.className = 'canvas-dir-folder-delete-current';
           currentBtn.dataset.nodeDeleteKey = node.key;
           currentBtn.setAttribute('aria-label', labels.current);
@@ -2555,8 +2555,8 @@
           }
           secondaryWrap.appendChild(currentBtn);
 
-          const allBtn = document.createElement('button');
-          allBtn.type = 'button';
+          const allBtn = document.createElement('span');
+          allBtn.setAttribute('role', 'button');
           allBtn.className = 'canvas-dir-folder-delete-all';
           allBtn.dataset.nodeDeleteKey = node.key;
           allBtn.setAttribute('aria-label', labels.all);
@@ -2568,8 +2568,8 @@
           }
           secondaryWrap.appendChild(allBtn);
         } else {
-          const confirmBtn = document.createElement('button');
-          confirmBtn.type = 'button';
+          const confirmBtn = document.createElement('span');
+          confirmBtn.setAttribute('role', 'button');
           confirmBtn.className = 'canvas-dir-folder-delete-confirm';
           confirmBtn.dataset.nodeDeleteKey = node.key;
           confirmBtn.title = labels.confirm;
@@ -2578,8 +2578,8 @@
           secondaryWrap.appendChild(confirmBtn);
         }
 
-        const cancelBtn = document.createElement('button');
-        cancelBtn.type = 'button';
+        const cancelBtn = document.createElement('span');
+        cancelBtn.setAttribute('role', 'button');
         cancelBtn.className = 'canvas-dir-folder-delete-cancel';
         cancelBtn.dataset.nodeDeleteKey = node.key;
         cancelBtn.title = labels.cancel;
@@ -2648,8 +2648,8 @@
       }
 
       if (node.showFoldControl) {
-        const toggleBtn = document.createElement('button');
-        toggleBtn.type = 'button';
+        const toggleBtn = document.createElement('span');
+        toggleBtn.setAttribute('role', 'button');
         toggleBtn.className = 'canvas-dir-folder-toggle';
         toggleBtn.setAttribute('aria-label', t('折叠 / 展开', 'Collapse / Expand'));
         toggleBtn.innerHTML = '<i class="fas fa-chevron-right" aria-hidden="true"></i>';
@@ -4240,6 +4240,7 @@
       const currentValue = slot.name || (isEn ? `Slot ${index + 1}` : `槽位 ${index + 1}`);
       const input = document.createElement('input');
       input.type = 'text';
+      input.name = 'anchor-slot-rename-input';
       input.className = 'anchor-slot-rename-input';
       input.value = currentValue;
       

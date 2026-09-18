@@ -609,7 +609,7 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
                 <button type="button" class="desc-height-settings-btn" data-mode="full">${fullLabel}</button>
                 <button type="button" class="desc-height-settings-btn" data-mode="rows">${rowsModeLabel}</button>
                 <div class="desc-height-settings-input-wrap">
-                    <input class="desc-height-settings-input" data-input="display" type="number" min="1" max="20" step="1" />
+                    <input name="desc-height-display-limit" class="desc-height-settings-input" data-input="display" type="number" min="1" max="20" step="1" />
                     <span class="desc-height-settings-unit">${rowsLabel}</span>
                 </div>
             </div>
@@ -620,7 +620,7 @@ function __showDescHeightSettingsPopover(anchorEl, options = {}) {
                 <button type="button" class="desc-height-settings-btn" data-mode="full">${fullLabel}</button>
                 <button type="button" class="desc-height-settings-btn" data-mode="rows">${rowsModeLabel}</button>
                 <div class="desc-height-settings-input-wrap">
-                    <input class="desc-height-settings-input" data-input="edit" type="number" min="1" max="20" step="1" />
+                    <input name="desc-height-edit-limit" class="desc-height-settings-input" data-input="edit" type="number" min="1" max="20" step="1" />
                     <span class="desc-height-settings-unit">${rowsLabel}</span>
                 </div>
             </div>
@@ -13778,7 +13778,7 @@ function __renderMdNodeImpl(node, options = {}) {
             <button class="md-node-toolbar-btn canvas-layout-zoom-btn" data-action="layout-zoom-out" data-tooltip="${layoutZoomOutTitle}" title="${layoutZoomOutTitle}">
                 <i class="fas fa-minus"></i>
             </button>
-            <input class="canvas-layout-zoom-value canvas-layout-zoom-input" data-layout-zoom-value title="${layoutZoomValueTitle}" data-tooltip="${layoutZoomValueTitle}" aria-label="${layoutZoomValueTitle}" value="${mdLayoutZoomDefaultPercent}%" />
+            <input name="canvas-md-layout-zoom" class="canvas-layout-zoom-value canvas-layout-zoom-input" data-layout-zoom-value title="${layoutZoomValueTitle}" data-tooltip="${layoutZoomValueTitle}" aria-label="${layoutZoomValueTitle}" value="${mdLayoutZoomDefaultPercent}%" />
             <button class="md-node-toolbar-btn canvas-layout-zoom-btn" data-action="layout-zoom-in" data-tooltip="${layoutZoomInTitle}" title="${layoutZoomInTitle}">
                 <i class="fas fa-plus"></i>
             </button>
@@ -14037,7 +14037,7 @@ function __renderMdNodeImpl(node, options = {}) {
         `;
         const rgbPicker = document.createElement('div');
         rgbPicker.className = 'md-rgb-picker';
-        rgbPicker.innerHTML = `<input class="md-color-input" type="color" value="${currentFontColor || '#2DC26B'}" title="${rgbPickerTitle}" />`;
+        rgbPicker.innerHTML = `<input name="md-font-color" class="md-color-input" type="color" value="${currentFontColor || '#2DC26B'}" title="${rgbPickerTitle}" />`;
         pop.appendChild(rgbPicker);
         const colorInput = rgbPicker.querySelector('.md-color-input');
         const recentChip = pop.querySelector('.md-fontcolor-recent-chip');
@@ -14476,6 +14476,7 @@ function __renderMdNodeImpl(node, options = {}) {
                 wrapper.className = 'md-task-item';
                 const taskCb = document.createElement('input');
                 taskCb.type = 'checkbox';
+                taskCb.name = 'markdown-task-checkbox';
                 taskCb.className = 'md-task-checkbox';
                 wrapper.appendChild(taskCb);
                 wrapper.appendChild(document.createTextNode(' ' + insertText));
@@ -15472,6 +15473,7 @@ function __renderMdNodeImpl(node, options = {}) {
                     newEl.className = 'md-task-item';
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
+                    checkbox.name = 'markdown-task-checkbox';
                     checkbox.className = 'md-task-checkbox';
                     checkbox.checked = pattern.type === 'task-checked';
                     newEl.appendChild(checkbox);
@@ -16097,6 +16099,7 @@ function __renderMdNodeImpl(node, options = {}) {
                     newEl.className = 'md-task-item';
                     const cb = document.createElement('input');
                     cb.type = 'checkbox';
+                    cb.name = 'markdown-task-checkbox';
                     cb.className = 'md-task-checkbox';
                     cb.checked = pattern.type === 'task-checked';
                     newEl.appendChild(cb);
@@ -17956,7 +17959,7 @@ function ensureMdColorPopover(toolbar, node) {
     const rgbPicker = document.createElement('div');
     rgbPicker.className = 'md-rgb-picker';
     rgbPicker.innerHTML = `
-        <input class="md-color-input" type="color" value="${node.colorHex || getBlankNodeDefaultColor()}" title="${customColorTitle}" />
+        <input name="blank-node-color" class="md-color-input" type="color" value="${node.colorHex || getBlankNodeDefaultColor()}" title="${customColorTitle}" />
     `;
     pop.appendChild(rgbPicker);
 
@@ -19477,6 +19480,7 @@ function __repairLegacyCanvasMarkdownSource(value) {
             const prev = normalized;
             try {
                 const textarea = document.createElement('textarea');
+                textarea.name = 'html-decode-helper';
                 textarea.innerHTML = normalized;
                 normalized = textarea.value || normalized;
             } catch (_) {
@@ -20118,6 +20122,7 @@ function __tryConvertBlockPatternsAtCaret(editorEl, explicitNode = null) {
         wrapper.className = 'md-task-item';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
+        cb.name = 'markdown-task-checkbox';
         cb.className = 'md-task-checkbox';
         if (String(taskMatch[1] || '').trim().toLowerCase() === 'x') cb.checked = true;
         wrapper.appendChild(cb);
@@ -20916,6 +20921,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                         div.className = 'md-task-item';
                         const checkbox = document.createElement('input');
                         checkbox.type = 'checkbox';
+                        checkbox.name = 'markdown-task-checkbox';
                         checkbox.className = 'md-task-checkbox';
                         if (pattern.type === 'task-checked') checkbox.checked = true;
                         div.appendChild(checkbox);
@@ -21441,7 +21447,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         `;
         const rgbPicker = document.createElement('div');
         rgbPicker.className = 'md-rgb-picker';
-        rgbPicker.innerHTML = `<input class="md-color-input" type="color" value="${editor.__htmlToolFontColor || '#2DC26B'}" title="${rgbPickerTitle}" />`;
+        rgbPicker.innerHTML = `<input name="editor-tool-font-color" class="md-color-input" type="color" value="${editor.__htmlToolFontColor || '#2DC26B'}" title="${rgbPickerTitle}" />`;
         pop.appendChild(rgbPicker);
         const colorInput = rgbPicker.querySelector('.md-color-input');
         const recentChip = pop.querySelector('.md-fontcolor-recent-chip');
@@ -21922,6 +21928,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                 wrapper.className = 'md-task-item';
                 const cb = document.createElement('input');
                 cb.type = 'checkbox';
+                cb.name = 'markdown-task-checkbox';
                 cb.className = 'md-task-checkbox';
                 wrapper.appendChild(cb);
                 wrapper.appendChild(document.createTextNode(' ' + insertText));
@@ -22292,6 +22299,7 @@ function __renderTempNodeImpl(section, options = {}) {
 
     const titleInput = document.createElement('input');
     titleInput.type = 'text';
+    titleInput.name = 'temp-node-title-input';
     titleInput.className = 'temp-node-title temp-node-title-input';
     titleInput.value = getTempSectionDisplayTitle(section);
     titleInput.placeholder = '临时栏目';
@@ -22326,6 +22334,7 @@ function __renderTempNodeImpl(section, options = {}) {
 
     const colorInput = document.createElement('input');
     colorInput.type = 'color';
+    colorInput.name = 'section-node-color';
     colorInput.className = 'temp-node-color-input md-color-input';
     colorInput.value = section.color || getTempSectionDefaultColor(section);
     colorInput.title = colorLabel;
@@ -31945,7 +31954,7 @@ function ensureEdgeColorPopover(toolbar, edge) {
     const rgbPicker = document.createElement('div');
     rgbPicker.className = 'md-rgb-picker';
     rgbPicker.innerHTML = `
-        <input class="md-color-input" type="color" value="${edge.colorHex || getEdgeDefaultColor()}" title="${customColorTitle}" />
+        <input name="edge-color" class="md-color-input" type="color" value="${edge.colorHex || getEdgeDefaultColor()}" title="${customColorTitle}" />
     `;
     pop.appendChild(rgbPicker);
 
@@ -32311,6 +32320,7 @@ function openEdgeLabelPopover(edgeId, options = {}) {
 
     const input = document.createElement('input');
     input.type = 'text';
+    input.name = 'edge-label-rename-input';
     input.className = 'temp-section-rename-popover-input edge-label-rename-popover-input';
     input.value = edge.label || '';
     input.placeholder = (getCanvasLanguage() === 'en') ? 'Edit label' : '编辑标签';
@@ -32386,6 +32396,7 @@ function openTempSectionRename(sectionId, options = {}) {
         popover.className = 'temp-section-rename-popover';
         const input = document.createElement('input');
         input.type = 'text';
+        input.name = 'temp-section-rename-input';
         input.className = 'temp-section-rename-popover-input';
         input.value = getTempSectionDisplayTitle(section);
         input.placeholder = (getCanvasLanguage() === 'en') ? 'Rename section' : '重命名栏目';
@@ -40809,6 +40820,7 @@ function __createLayoutZoomControls(buttonClass, lang, defaultPercent = null) {
 
     const zoomValue = document.createElement('input');
     zoomValue.type = 'text';
+    zoomValue.name = 'canvas-layout-zoom-value';
     zoomValue.inputMode = 'numeric';
     zoomValue.className = 'canvas-layout-zoom-value canvas-layout-zoom-input';
     zoomValue.setAttribute('data-layout-zoom-value', 'true');

@@ -2883,6 +2883,7 @@ async function showWindowNameEditor(item, windowId, currentName, lang) {
     // 创建输入框
     const input = document.createElement('input');
     input.type = 'text';
+    input.name = 'manual-selector-item-input';
     input.className = 'manual-selector-item-input';
     input.value = currentName;
     input.placeholder = lang === 'zh_CN' ? '输入自定义名称' : 'Enter custom name';
@@ -7955,7 +7956,7 @@ function renderInfoSubmenu(context) {
                     </div>
                 </div>
                 <div class="info-note-editor note-color-${escapeHtml(safeColor)}">
-                    <textarea class="info-note-textarea" rows="3" data-note-color="${escapeHtml(safeColor)}" placeholder="${escapeHtml(placeholder)}">${escapeHtml(safeNote)}</textarea>
+                    <textarea name="info-note-content" class="info-note-textarea" rows="3" data-note-color="${escapeHtml(safeColor)}" placeholder="${escapeHtml(placeholder)}">${escapeHtml(safeNote)}</textarea>
                 </div>
             </div>
         `;
@@ -8489,7 +8490,7 @@ function renderTagSubmenu(context) {
 
     contextSubmenu.innerHTML = `
         <div class="tag-popover-top" style="padding: 6px 12px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-            <input type="text" class="tag-popover-input" data-role="input" placeholder="${t('inputPlaceholder')}" style="flex: 1;" />
+            <input name="tag-popover-input" type="text" class="tag-popover-input" data-role="input" placeholder="${t('inputPlaceholder')}" style="flex: 1;" />
             <button class="tag-popover-confirm" data-role="confirm" type="button" title="${t('confirmAriaLabel')}" style="width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;">
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M6.2 11.4 2.6 7.8l1.4-1.4 2.2 2.2 5.8-5.8 1.4 1.4z"/></svg>
             </button>
@@ -10209,7 +10210,7 @@ function showBatchNoteEditModal(targets) {
                         </div>
                     </div>
                     <div class="info-note-editor note-color-${escapeHtml(selectedInitial)}">
-                        <textarea class="info-note-textarea" rows="5" placeholder="${escapeHtml(lang === 'zh_CN' ? '添加笔记...' : 'Add note...')}">${escapeHtml(initial.note)}</textarea>
+                        <textarea name="info-note-content" class="info-note-textarea" rows="5" placeholder="${escapeHtml(lang === 'zh_CN' ? '添加笔记...' : 'Add note...')}">${escapeHtml(initial.note)}</textarea>
                     </div>
                 </div>
             </div>
@@ -11686,7 +11687,7 @@ function __renderBookmarkAddActionOptions(container, lang, actionType, windowAsF
             <span class="bookmark-add-secondary-choice-label">
                 <span class="bookmark-add-secondary-choice-main"><i class="fas fa-${option.icon}"></i><span>${option.label}</span></span>
                 <span class="bookmark-add-secondary-window-option">
-                    <input type="checkbox" class="bookmark-add-secondary-window-folder-checkbox" ${checked ? 'checked' : ''}>
+                    <input name="bookmark-add-secondary-window-folder" type="checkbox" class="bookmark-add-secondary-window-folder-checkbox" ${checked ? 'checked' : ''}>
                     <span>${folderLabel}</span>
                 </span>
             </span>
@@ -19266,6 +19267,7 @@ async function __copyBookmarkTreeObjectText(text) {
         return true;
     }
     const textarea = document.createElement('textarea');
+    textarea.name = 'clipboard-copy-helper';
     textarea.value = value;
     textarea.setAttribute('readonly', 'readonly');
     textarea.style.position = 'fixed';

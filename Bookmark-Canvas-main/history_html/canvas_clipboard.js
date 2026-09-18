@@ -494,7 +494,7 @@
             const singleStructured = entry.kind === 'structured' && Array.isArray(presentation.items) && presentation.items.length === 1;
             const selected = selectedIds.has(entry.id);
             return `<div class="canvas-clipboard-entry${current ? ' is-current' : ''}${selected ? ' is-selected' : ''}" data-clipboard-id="${entry.id}">
-                <input class="canvas-clipboard-check" type="checkbox" data-clipboard-check="${entry.id}" ${selected ? 'checked' : ''} aria-label="${text('选择记录', 'Select record')}">
+                <input name="canvas-clipboard-check" class="canvas-clipboard-check" type="checkbox" data-clipboard-check="${entry.id}" ${selected ? 'checked' : ''} aria-label="${text('选择记录', 'Select record')}">
                 <div class="canvas-clipboard-entry-main"><div class="canvas-clipboard-entry-meta"><time>${formatEntryTime(entry.createdAt)}</time></div><div class="canvas-clipboard-entry-summary"><span class="canvas-clipboard-entry-preview${singleStructured ? ' is-single-structured' : ''}">${entry.kind === 'structured' ? renderStructuredPreview(presentation) : escapeHtml(presentation.preview)}</span><span class="canvas-clipboard-entry-counts">${escapeHtml(presentation.counts)}</span></div>${current ? `<div class="canvas-clipboard-current-row"><span class="canvas-clipboard-current-badge">${text('当前', 'Current')}</span></div>` : ''}</div>
                 <button class="canvas-clipboard-delete" type="button" data-clipboard-delete="${entry.id}" aria-label="${text('删除记录', 'Delete record')}" title="${text('删除', 'Delete')}"><i class="fas fa-trash-alt"></i></button>
             </div>`;

@@ -92,7 +92,7 @@
                 </div>
                 <div class="search-input-wrapper">
                     <!-- Chip 将插入在这里 -->
-                    <input type="text" id="searchInput" />
+                    <input type="text" id="searchInput" name="searchInput" />
                     <div id="searchAreaIndicator" class="search-area-indicator" style="display: none;">
                         <span class="search-area-indicator-label" data-i18n-key="searchAreaLabel">区域</span>
                         <button id="searchAreaExitBtn" class="search-area-exit-btn"
@@ -207,7 +207,7 @@
                                         <span class="fullscreen-history-limit-help-popover" id="fullscreenHistoryLimitHelpPopover" role="tooltip"></span>
                                     </button>
                                 </div>
-                                <input id="fullscreenHistoryLimitInput" class="fullscreen-history-limit-input" type="number" min="1" max="20" step="1" inputmode="numeric">
+                                <input id="fullscreenHistoryLimitInput" name="fullscreenHistoryLimitInput" class="fullscreen-history-limit-input" type="number" min="1" max="20" step="1" inputmode="numeric">
                             </div>
                         </div>
                     </div>
@@ -941,7 +941,7 @@
                             <div class="canvas-manage-modal-body canvas-clipboard-modal-body">
                                 <div class="canvas-clipboard-settings" id="canvasClipboardSettings" hidden>
                                     <label id="canvasClipboardLimitLabel" for="canvasClipboardLimitInput">最多保存</label>
-                                    <input id="canvasClipboardLimitInput" type="number" min="1" max="50" inputmode="numeric" />
+                                    <input id="canvasClipboardLimitInput" name="canvasClipboardLimitInput" type="number" min="1" max="50" inputmode="numeric" />
                                     <span id="canvasClipboardLimitUnit">条</span>
                                     <button id="canvasClipboardSaveSettingsBtn" type="button">保存</button>
                                 </div>
@@ -1126,7 +1126,8 @@
                                         title="缩小排版" aria-label="缩小排版">
                                         <i class="fas fa-minus"></i>
                                     </button>
-                                    <input class="canvas-layout-zoom-value canvas-layout-zoom-input"
+                                    <input id="canvasPermanentLayoutZoomInput" name="canvas-permanent-layout-zoom"
+                                        class="canvas-layout-zoom-value canvas-layout-zoom-input"
                                         data-layout-zoom-value data-i18n-title="permanentSectionLayoutZoomValueTitle"
                                         title="排版比例" aria-label="排版比例" value="125%" />
                                     <button class="permanent-section-action-btn canvas-layout-zoom-btn" type="button"
@@ -1181,7 +1182,7 @@
                                     </button>
                                 </div>
                             </div>
-                            <textarea class="permanent-section-tip-editor" id="permanentSectionTipEditor"
+                            <textarea class="permanent-section-tip-editor" id="permanentSectionTipEditor" name="permanentSectionTipEditor"
                                 style="display: none;" placeholder=""></textarea>
                         </div>
                     </div>
@@ -1235,11 +1236,11 @@
                 <div class="edit-bookmark-form">
                     <div class="edit-bookmark-field">
                         <label for="editBookmarkTitle" id="editBookmarkTitleLabel">名称</label>
-                        <input type="text" id="editBookmarkTitle" class="edit-bookmark-input" placeholder="输入名称...">
+                        <input type="text" id="editBookmarkTitle" name="editBookmarkTitle" class="edit-bookmark-input" placeholder="输入名称...">
                     </div>
                     <div class="edit-bookmark-field" id="editBookmarkUrlField">
                         <label for="editBookmarkUrl" id="editBookmarkUrlLabel">地址</label>
-                        <input type="text" id="editBookmarkUrl" class="edit-bookmark-input" placeholder="https://...">
+                        <input type="text" id="editBookmarkUrl" name="editBookmarkUrl" class="edit-bookmark-input" placeholder="https://...">
                     </div>
                 </div>
                 <div class="edit-bookmark-actions">
