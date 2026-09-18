@@ -100,6 +100,12 @@ function createCardGroupNode(payload) {
         }
     } catch (_) { }
 
+    try {
+        if (window.__BCSCardGroup && typeof window.__BCSCardGroup.updateHierarchy === 'function') {
+            window.__BCSCardGroup.updateHierarchy();
+        }
+    } catch (_) { }
+
     try { if (typeof selectMdNode === 'function') selectMdNode(node.id); } catch (_) { }
     __saveCardGroupCanvasManifest();
     try { if (typeof renderEdges === 'function') renderEdges(); } catch (_) { }

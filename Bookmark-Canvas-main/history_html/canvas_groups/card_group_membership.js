@@ -203,6 +203,73 @@ function collectCardGroupChildElementsRecursive(group) {
     return childElements;
 }
 
+function getCardGroupNestingDepth(groupNode) {
+    if (!isCardGroupNode(groupNode)) return 0;
+    const state = (typeof CanvasState !== 'undefined') ? CanvasState : null;
+    if (!state || !Array.isArray(state.mdNodes)) return 0;
+
+    const gx = Number(groupNode.x);
+    const gy = Number(groupNode.y);
+    const gw = Number(groupNode.width);
+    const gh = Number(groupNode.height);
+    if (![gx, gy, gw, gh].every(Number.isFinite)) return 0;
+
+    let depth = 0;
+    for (const other of state.mdNodes) {
+        if (!other || other.id === groupNode.id || !isCardGroupNode(other)) continue;
+        const ox = Number(other.x);
+        const oy = Number(other.y);
+        const ow = Number(other.width);
+        const oh = Number(other.height);
+        if (![ox, oy, ow, oh].every(Number.isFinite)) continue;
+        if (gx >= ox - 0.5 && gy >= oy - 0.5 && (gx + gw) <= (ox + ow + 0.5) && (gy + gh) <= (oy + oh + 0.5)) {
+            if (ow * oh > gw * gh) {
+                depth++;
+            }
+        }
+    }
+    return depth;
+}
+
+function updateCardGroupNestingHierarchy() {
+    const state = (typeof CanvasState !== 'undefined') ? CanvasState : null;
+    if (!state || !Array.isArray(state.mdNodes)) return;
+
+    const cardGroupNodes = state.mdNodes.filter(isCardGroupNode);
+    if (!cardGroupNodes.length) return;
+
+    const depths = new Map();
+    cardGroupNodes.forEach((node) => {
+        const depth = getCardGroupNestingDepth(node);
+        depths.set(node.id, depth);
+        node.nestingDepth = depth;
+    });
+
+    cardGroupNodes.forEach((node) => {
+        const el = (typeof document !== 'undefined') ? document.getElementById(node.id) : null;
+        if (!el) return;
+        const depth = depths.get(node.id) || 0;
+        el.dataset.nestingDepth = String(depth);
+        el.style.setProperty('--card-group-nesting-depth', String(depth));
+
+        // If currently dragging, maintain high drag z-index
+        if (el.classList.contains('dragging')) return;
+
+        // If selected, ensure top layer
+        if (el.classList.contains('selected')) {
+            el.style.zIndex = '300';
+            return;
+        }
+
+        // Resting z-index: outer group (depth 0) is higher, inner nested group is lower
+        if (node.pinned) {
+            el.style.zIndex = String(Math.max(150, 200 - depth));
+        } else {
+            el.style.zIndex = String(Math.max(1, 6 - depth));
+        }
+    });
+}
+
 if (typeof window !== 'undefined') {
     window.__BCSCardGroup = window.__BCSCardGroup || {};
     window.__BCSCardGroup.isCardGroupNode = isCardGroupNode;
@@ -212,4 +279,6 @@ if (typeof window !== 'undefined') {
     window.__BCSCardGroup.getRecursiveGeometricMembers = getRecursiveGeometricMembers;
     window.__BCSCardGroup.collectCardGroupChildElementsRecursive = collectCardGroupChildElementsRecursive;
     window.__BCSCardGroup.setTransientMemberHint = setCardGroupTransientMemberHint;
+    window.__BCSCardGroup.getNestingDepth = getCardGroupNestingDepth;
+    window.__BCSCardGroup.updateHierarchy = updateCardGroupNestingHierarchy;
 }

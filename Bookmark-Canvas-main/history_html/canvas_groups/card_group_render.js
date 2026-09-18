@@ -345,7 +345,21 @@ function __cardGroupFallbackLabel() {
 
 function __cardGroupApplyZIndex(element, node) {
     if (!element || !node) return;
-    element.style.zIndex = node.pinned ? '200' : '5';
+    if (element.classList && element.classList.contains('selected')) {
+        element.style.zIndex = '300';
+        element.classList.toggle('pinned', !!node.pinned);
+        return;
+    }
+    const depth = (window.__BCSCardGroup && typeof window.__BCSCardGroup.getNestingDepth === 'function')
+        ? window.__BCSCardGroup.getNestingDepth(node)
+        : (Number(node.nestingDepth) || 0);
+    element.dataset.nestingDepth = String(depth);
+    element.style.setProperty('--card-group-nesting-depth', String(depth));
+    if (node.pinned) {
+        element.style.zIndex = String(Math.max(150, 200 - depth));
+    } else {
+        element.style.zIndex = String(Math.max(1, 6 - depth));
+    }
     element.classList.toggle('pinned', !!node.pinned);
 }
 
@@ -494,6 +508,12 @@ function renderCardGroup(node) {
     if (isNew) {
         try { scheduleBoundsUpdate && scheduleBoundsUpdate(); } catch (_) { }
     }
+
+    try {
+        if (window.__BCSCardGroup && typeof window.__BCSCardGroup.updateHierarchy === 'function') {
+            window.__BCSCardGroup.updateHierarchy();
+        }
+    } catch (_) { }
 
     return el;
 }

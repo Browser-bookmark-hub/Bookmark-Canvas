@@ -3329,14 +3329,14 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
 }
 
 .card-group-canvas-node.selected {
-    z-index: 240 !important;
+    z-index: 300 !important;
     border-color: var(--card-group-highlight-color);
     outline: 2px solid color-mix(in srgb, var(--card-group-highlight-color) 45%, transparent);
     outline-offset: 1px;
 }
 
 .card-group-canvas-node.pinned.selected {
-    z-index: 240 !important;
+    z-index: 300 !important;
 }
 
 .card-group-canvas-node.selected-member,
@@ -3545,11 +3545,22 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     z-index: 3;
     transform: scale(var(--card-group-pill-scale-effective));
     transform-origin: top left;
-    transition: filter 0.12s ease;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    transition: filter 0.12s ease, box-shadow 0.15s ease;
+}
+
+[data-theme="dark"] .card-group-header-pill {
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45);
 }
 
 .card-group-header-pill:hover {
     filter: brightness(1.1);
+}
+
+.card-group-canvas-node.selected .card-group-header-pill {
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35), 0 0 0 1.5px var(--card-group-highlight-color);
 }
 
 .card-group-canvas-node.dragging .card-group-header-pill {

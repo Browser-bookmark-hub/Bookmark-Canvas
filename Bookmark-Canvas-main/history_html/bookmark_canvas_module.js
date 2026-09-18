@@ -12571,6 +12571,7 @@ function makeTempNodeResizable(element, node) {
                     element.classList.remove('resizing');
                     saveCanvasManifestOnly();
                     try { __scheduleCardGroupMembershipRefreshForNodeIds(node.id, { forceAll: true }); } catch (_) { }
+                    try { if (window.__BCSCardGroup?.updateHierarchy) window.__BCSCardGroup.updateHierarchy(); } catch (_) { }
                     updateCanvasScrollBounds();
                     updateScrollbarThumbs();
                     if (CanvasState.lowDetailActive) {
@@ -13164,6 +13165,11 @@ function clearMdSelection() {
         });
     } catch (_) { }
     CanvasState.selectedMdNodeId = null;
+    try {
+        if (window.__BCSCardGroup && typeof window.__BCSCardGroup.updateHierarchy === 'function') {
+            window.__BCSCardGroup.updateHierarchy();
+        }
+    } catch (_) { }
 }
 
 function selectMdNode(nodeId) {
@@ -13172,6 +13178,9 @@ function selectMdNode(nodeId) {
         const el = document.getElementById(nodeId);
         if (el && !el.classList.contains('selected')) {
             el.classList.add('selected');
+        }
+        if (el && el.classList.contains('card-group-canvas-node')) {
+            el.style.zIndex = '300';
         }
         return;
     }
@@ -13182,6 +13191,9 @@ function selectMdNode(nodeId) {
     if (el) {
         el.classList.add('selected');
         CanvasState.selectedMdNodeId = nodeId;
+        if (el.classList.contains('card-group-canvas-node')) {
+            el.style.zIndex = '300';
+        }
 
         try {
             if (typeof window.__BCSCardGroup !== 'undefined' && typeof window.__BCSCardGroup.getRecursiveGeometricMembers === 'function') {
@@ -13696,11 +13708,20 @@ function __renderMdNodeImpl(node, options = {}) {
         el.style.cssText += node.style;
     }
 
-    // 强制层级管理：Container(5) < TempSection(10) < MdNode(15) < Maximized(10000)
+    // 强制层级管理：Container(6-depth) < Edges(7) < TempSection(10) < MdNode(15) < Selected(300) < Maximized(10000)
     if (isMax) {
         el.style.zIndex = '10000';
     } else if (node.subtype === 'card-group') {
-        el.style.zIndex = node.pinned ? '200' : '5';
+        if (el.classList && el.classList.contains('selected')) {
+            el.style.zIndex = '300';
+        } else {
+            const depth = (window.__BCSCardGroup && typeof window.__BCSCardGroup.getNestingDepth === 'function')
+                ? window.__BCSCardGroup.getNestingDepth(node)
+                : (Number(node.nestingDepth) || 0);
+            el.dataset.nestingDepth = String(depth);
+            el.style.setProperty('--card-group-nesting-depth', String(depth));
+            el.style.zIndex = node.pinned ? String(Math.max(150, 200 - depth)) : String(Math.max(1, 6 - depth));
+        }
     } else {
         // 普通 Markdown 卡片默认在书签栏目之上
         // 如果自定义样式里没有指定 z-index，才应用默认值 (这里简单起见强制应用，保证层级正确)
@@ -18354,6 +18375,7 @@ function removeMdNode(id, deleteChildren = false, options = {}) {
         else saveCanvasManifestOnly({ immediate });
     }
     try { __scheduleCardGroupMembershipRefreshForNodeIds(id, { forceAll: true }); } catch (_) { }
+    try { if (window.__BCSCardGroup?.updateHierarchy) window.__BCSCardGroup.updateHierarchy(); } catch (_) { }
     scheduleBoundsUpdate();
 }
 
@@ -29481,6 +29503,7 @@ function __finalizeTempNodesLoad({ loadedFromStorage }) {
     ;
 
     loadPermanentSectionPosition();
+    try { if (window.__BCSCardGroup?.updateHierarchy) window.__BCSCardGroup.updateHierarchy(); } catch (_) { }
     try { setTimeout(() => loadCanvasNodeUiState(), 0); } catch (_) { }
     updateCanvasScrollBounds();
     updateScrollbarThumbs();
@@ -30219,6 +30242,11 @@ function __refreshCardGroupMembershipForNodeIds(nodeIds, options = {}) {
     if (opts.renderEdges) {
         try { renderEdges(); } catch (_) { }
     }
+    try {
+        if (window.__BCSCardGroup && typeof window.__BCSCardGroup.updateHierarchy === 'function') {
+            window.__BCSCardGroup.updateHierarchy();
+        }
+    } catch (_) { }
 }
 
 function __scheduleCardGroupMembershipRefreshForNodeIds(nodeIds, options = {}) {
@@ -32455,10 +32483,17 @@ function __applyMdNodePinnedStateToElement(node) {
     if (!node || !node.id) return;
     const el = document.getElementById(node.id);
     if (el) {
-        if (node.pinned) {
-            el.style.zIndex = '200';
+        if (el.classList && el.classList.contains('selected')) {
+            el.style.zIndex = '300';
         } else if (node.subtype === 'card-group') {
-            el.style.zIndex = '5';
+            const depth = (window.__BCSCardGroup && typeof window.__BCSCardGroup.getNestingDepth === 'function')
+                ? window.__BCSCardGroup.getNestingDepth(node)
+                : (Number(node.nestingDepth) || 0);
+            el.dataset.nestingDepth = String(depth);
+            el.style.setProperty('--card-group-nesting-depth', String(depth));
+            el.style.zIndex = node.pinned ? String(Math.max(150, 200 - depth)) : String(Math.max(1, 6 - depth));
+        } else if (node.pinned) {
+            el.style.zIndex = '200';
         } else if (typeof node.z === 'number') {
             el.style.zIndex = String(node.z);
         } else {
@@ -42953,6 +42988,7 @@ function finalizeTempNodeDrag() {
             });
         }
         __scheduleCardGroupMembershipRefreshForNodeIds(changedIds);
+        try { if (window.__BCSCardGroup?.updateHierarchy) window.__BCSCardGroup.updateHierarchy(); } catch (_) { }
     } catch (_) { }
     try { __cancelCanvasDragEdgeFollow(meta); } catch (_) { }
     CanvasState.dragState.meta = null;
