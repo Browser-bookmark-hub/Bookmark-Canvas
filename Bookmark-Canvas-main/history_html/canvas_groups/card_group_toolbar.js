@@ -53,6 +53,7 @@ function __cardGroupToolbarBuild(node, opts) {
         locate: isEn ? 'Locate and zoom' : '定位并放大',
         pin: isEn ? 'Pin' : '置顶',
         unpin: isEn ? 'Unpin' : '取消置顶',
+        export: isEn ? 'Export' : '导出',
         deleteFrame: isEn ? 'Delete Frame Only' : '仅删除框体',
         deleteAll: isEn ? 'Delete Frame and Members' : '删除框体与成员'
     };
@@ -76,6 +77,7 @@ function __cardGroupToolbarBuild(node, opts) {
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-search" data-tooltip="${t.search}"><i class="fas fa-search"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-locate" data-tooltip="${t.locate}"><i class="fas fa-search-plus"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn${memberPinState.allPinned ? ' pinned' : ''}" data-action="card-group-pin" data-tooltip="${pinTitle}">${pinIcon}</button>
+        <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-export" data-tooltip="${t.export}" title="${t.export}"><i class="fas fa-file-export"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-delete-frame" data-tooltip="${t.deleteFrame}">
             <span class="icon-frame-delete">
                 <i class="far fa-square"></i>
@@ -279,21 +281,30 @@ function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
             } catch (err) {
                 console.error('[CardGroup] failed to trigger area search:', err);
             }
+            try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
         } else if (action === 'card-group-locate') {
             try { if (typeof locateAndZoomToMdNode === 'function') locateAndZoomToMdNode(node.id, 'fit'); } catch (_) { }
+            try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
         } else if (action === 'card-group-pin') {
             try {
                 if (typeof toggleCardGroupMembersPin === 'function') {
-                    const pinned = toggleCardGroupMembersPin(node.id);
-                    const title = pinned ? labels.unpin : labels.pin;
-                    btn.classList.toggle('pinned', !!pinned);
-                    btn.setAttribute('data-tooltip', title);
-                    btn.title = title;
-                    btn.innerHTML = pinned
-                        ? '<i class="fas fa-thumbtack"></i>'
-                        : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+                    toggleCardGroupMembersPin(node.id);
                 }
             } catch (_) { }
+            try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
+        } else if (action === 'card-group-export') {
+            closeColorPop();
+            try {
+                if (typeof window !== 'undefined' && typeof window.exportCanvasCardGroupPackage === 'function') {
+                    window.exportCanvasCardGroupPackage(node).catch((error) => {
+                        console.error('[CardGroup] export failed:', error);
+                        alert(((typeof currentLang !== 'undefined' && currentLang === 'zh_CN') ? '导出失败: ' : 'Export failed: ') + (error && error.message ? error.message : error));
+                    });
+                }
+            } catch (error) {
+                console.error('[CardGroup] export failed:', error);
+            }
+            try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
         } else if (action === 'card-group-delete-frame') {
             try {
                 if (typeof removeMdNode === 'function') removeMdNode(node.id, false);
@@ -491,10 +502,13 @@ function __cardGroupHandleContextMenuAction(action, node, options = {}) {
         } catch (err) {
             console.error('[CardGroup] failed to trigger area search from context menu:', err);
         }
+        try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
     } else if (action === 'card-group-context-locate') {
         try { if (typeof locateAndZoomToMdNode === 'function') locateAndZoomToMdNode(node.id, 'fit'); } catch (_) { }
+        try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
     } else if (action === 'card-group-context-pin') {
         try { if (typeof toggleCardGroupMembersPin === 'function') toggleCardGroupMembersPin(node.id); } catch (_) { }
+        try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
     } else if (action === 'card-group-context-delete') {
         try {
             if (typeof removeMdNode === 'function') removeMdNode(node.id, false);
@@ -516,6 +530,7 @@ function __cardGroupHandleContextMenuAction(action, node, options = {}) {
         } catch (error) {
             console.error('[CardGroup] export failed:', error);
         }
+        try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
     }
 }
 

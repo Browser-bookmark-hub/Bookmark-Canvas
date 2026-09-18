@@ -3978,6 +3978,19 @@ async function exportCanvasTempGroupPackage(members, options = {}) {
     });
 }
 
+async function exportCanvasMdNodePackage(mdNode, options = {}) {
+    const { isEn } = __getLang();
+    const node = mdNode && typeof mdNode === 'object' ? mdNode : null;
+    if (!node || !node.id) {
+        throw new Error(isEn ? 'Card not found.' : '未找到空白栏目卡片。');
+    }
+    const label = String(node.title || (options && options.label) || '').trim() || (isEn ? 'card' : '空白卡片');
+    return __exportCanvasSubsetPackage([{ type: 'md-node', id: node.id, data: node }], {
+        includeMdId: node.id,
+        label
+    });
+}
+
 function showExportModeDialog(options = {}) {
     const { isEn } = __getLang();
     const fullscreenTarget = (options && options.fullscreenTarget && typeof options.fullscreenTarget === 'object')
@@ -5786,6 +5799,7 @@ if (typeof window !== 'undefined') {
     window.showImportDialog = showImportDialog;
     window.exportCanvasCardGroupPackage = exportCanvasCardGroupPackage;
     window.exportCanvasTempGroupPackage = exportCanvasTempGroupPackage;
+    window.exportCanvasMdNodePackage = exportCanvasMdNodePackage;
     window.buildCanvasGithubPackageFiles = buildFullCanvasPackageFromCurrent;
     window.importCanvasGithubFolderPackage = importCanvasGithubFolderPackage;
     window.BookmarkCanvasPackageTransferBridge = Object.assign(window.BookmarkCanvasPackageTransferBridge || {}, {

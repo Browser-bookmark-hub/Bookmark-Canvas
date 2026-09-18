@@ -321,6 +321,11 @@ function __cardGroupStartRenamePill(pill, node) {
         if (save) {
             __saveCardGroupRenderCanvasManifest();
         }
+        try {
+            if (typeof clearMdSelection === 'function') {
+                clearMdSelection();
+            }
+        } catch (_) { }
     };
 
     input.addEventListener('keydown', (e) => {

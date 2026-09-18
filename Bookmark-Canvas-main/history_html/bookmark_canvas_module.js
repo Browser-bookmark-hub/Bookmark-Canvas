@@ -13763,6 +13763,7 @@ function __renderMdNodeImpl(node, options = {}) {
     const formatTitle = lang === 'en' ? 'Format toolbar' : '格式工具栏';
     const pinTitle = lang === 'en' ? 'Pin' : '置顶';
     const unpinTitle = lang === 'en' ? 'Unpin' : '取消置顶';
+    const copyContentTitle = lang === 'en' ? 'Copy content' : '复制内容';
     const mdPinBtnTitle = node.pinned ? unpinTitle : pinTitle;
     const mdPinBtnIcon = node.pinned
         ? '<i class="fas fa-thumbtack"></i>'
@@ -13792,6 +13793,7 @@ function __renderMdNodeImpl(node, options = {}) {
         <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}"><i class="fas fa-search-plus"></i></button>
         <button class="md-node-toolbar-btn" data-action="md-color-toggle" data-tooltip="${colorTitle}"><i class="fas fa-palette"></i></button>
         <button class="md-node-toolbar-btn${node.pinned ? ' pinned' : ''}" data-action="md-pin" data-tooltip="${mdPinBtnTitle}">${mdPinBtnIcon}</button>
+        <button class="md-node-toolbar-btn" data-action="md-copy-content" data-tooltip="${copyContentTitle}" title="${copyContentTitle}"><i class="fas fa-copy"></i></button>
         <button class="md-node-toolbar-btn md-delete-danger-btn" data-action="md-delete" data-tooltip="${deleteTitle}"><i class="far fa-trash-alt"></i></button>
         <button class="md-node-toolbar-btn canvas-node-fullscreen-btn" data-action="md-fullscreen" data-tooltip="${fullscreenTitle}"><i class="fas fa-expand"></i></button>
     `;
@@ -17709,18 +17711,54 @@ function __renderMdNodeImpl(node, options = {}) {
                     memberIds: [node.id]
                 });
             }
+            clearMdSelection();
         } else if (action === 'md-focus') {
-            selectMdNode(node.id);
             locateAndZoomToMdNode(node.id);
+            clearMdSelection();
         } else if (action === 'md-pin') {
-            const pinned = toggleMdNodePin(node.id);
-            const title = pinned ? unpinTitle : pinTitle;
-            btn.classList.toggle('pinned', !!pinned);
-            btn.setAttribute('data-tooltip', title);
-            btn.title = title;
-            btn.innerHTML = pinned
-                ? '<i class="fas fa-thumbtack"></i>'
-                : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+            toggleMdNodePin(node.id);
+            clearMdSelection();
+        } else if (action === 'md-copy-content') {
+            try {
+                let text = '';
+                if (isInEditMode && editor) {
+                    text = editor.value != null ? editor.value : (editor.innerText || '');
+                }
+                if (!text && typeof __deriveMdNodeMarkdownSource === 'function') {
+                    text = __deriveMdNodeMarkdownSource(node);
+                }
+                if (!text) {
+                    text = node.markdownSource || node.text || '';
+                }
+                const value = String(text == null ? '' : text).replace(/\u200B/g, '');
+                const copySuccess = () => {
+                    const msg = (lang === 'en' || (typeof currentLang !== 'undefined' && currentLang === 'en'))
+                        ? 'Current section text copied.'
+                        : '已复制当前栏目文字。';
+                    if (typeof showCanvasToast === 'function') {
+                        showCanvasToast(msg, 'success');
+                    } else if (typeof showToast === 'function') {
+                        showToast(msg);
+                    }
+                };
+                if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    navigator.clipboard.writeText(value).then(copySuccess).catch(() => {});
+                } else {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = value;
+                    textarea.setAttribute('readonly', 'readonly');
+                    textarea.style.position = 'fixed';
+                    textarea.style.left = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    textarea.remove();
+                    copySuccess();
+                }
+            } catch (err) {
+                console.error('[MdNode] copy content failed:', err);
+            }
+            clearMdSelection();
         } else if (action === 'md-fullscreen') {
             toggleElementFullscreen(el);
         } else if (action === 'md-format-toggle') {
@@ -43485,6 +43523,7 @@ window.CanvasModule = {
     toggleMdNodePin,
     openMdNodeColorPicker,
     removeMdNode,
+    clearMdSelection,
     removePermanentSectionCopy,
     createPermanentSectionCopy,
     getEdge: getEdgeById,

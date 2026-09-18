@@ -19589,7 +19589,11 @@ function __handleBookmarkTreeObjectMenuAction(action, target, options = {}) {
     if (action === 'fullscreen' && canvas.toggleElementFullscreen) return canvas.toggleElementFullscreen(sectionEl);
     if (action === 'locate') {
         if (type === 'temporary' && canvas.locateSection) return canvas.locateSection(target.sectionId);
-        if (sectionEl && canvas.locateElement) return canvas.locateElement(sectionEl);
+        if (sectionEl && canvas.locateElement) {
+            const res = canvas.locateElement(sectionEl);
+            if (type === 'md-node' && canvas.clearMdSelection) canvas.clearMdSelection();
+            return res;
+        }
         if (canvas.locatePermanent) return canvas.locatePermanent();
     }
     if (action === 'rename') {
@@ -19599,7 +19603,11 @@ function __handleBookmarkTreeObjectMenuAction(action, target, options = {}) {
     }
     if (action === 'pin') {
         if (type === 'temporary' && canvas.toggleTempSectionPin) return canvas.toggleTempSectionPin(target.sectionId);
-        if (type === 'md-node' && canvas.toggleMdNodePin) return canvas.toggleMdNodePin(target.nodeId);
+        if (type === 'md-node' && canvas.toggleMdNodePin) {
+            const res = canvas.toggleMdNodePin(target.nodeId);
+            if (canvas.clearMdSelection) canvas.clearMdSelection();
+            return res;
+        }
         if (canvas.togglePermanentSectionPin) return canvas.togglePermanentSectionPin(sectionEl);
     }
     if (action === 'duplicate' && canvas.createPermanentSectionCopy) return canvas.createPermanentSectionCopy(sectionEl);
@@ -19620,6 +19628,7 @@ function __handleBookmarkTreeObjectMenuAction(action, target, options = {}) {
         const text = __buildMdNodeSourceText(target);
         return __copyBookmarkTreeObjectText(text).then(() => {
             __showBookmarkTreeObjectToast((currentLang || 'zh_CN') === 'zh_CN' ? '已复制当前栏目文字。' : 'Current section text copied.');
+            if (canvas.clearMdSelection) canvas.clearMdSelection();
         });
     }
     if (action === 'edge-color' && canvas.openEdgeColorPicker) return canvas.openEdgeColorPicker(target.edgeId, {
@@ -19675,6 +19684,7 @@ function __handleBookmarkTreeObjectMenuAction(action, target, options = {}) {
                     memberIds: [target.nodeId]
                 });
             }
+            if (canvas.clearMdSelection) canvas.clearMdSelection();
         }
         return Promise.resolve();
     }
