@@ -5,6 +5,16 @@
  * 文件位置：history_html/search/search.css
  */
 
+:root {
+    --search-candidate-divider: rgba(0, 0, 0, 0.18);
+    --border-color-light: rgba(0, 0, 0, 0.18);
+}
+
+[data-theme="dark"] {
+    --search-candidate-divider: rgba(255, 255, 255, 0.22);
+    --border-color-light: rgba(255, 255, 255, 0.22);
+}
+
 /* ==================== 搜索结果面板容器 ==================== */
 .search-results-panel {
     position: absolute;
@@ -15,7 +25,7 @@
     border: 1px solid var(--border-color);
     border-radius: 12px;
     box-shadow: var(--shadow-md);
-    max-height: 360px;
+    max-height: min(var(--search-panel-height, 450px), var(--search-panel-max-allowed, calc(100vh - 80px)));
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable both-edges;
@@ -33,6 +43,98 @@
 body.header-dock-bottom:not(.header-compact) .search-results-panel {
     top: auto;
     bottom: calc(100% + 10px);
+    max-height: min(var(--search-panel-height, 450px), var(--search-panel-max-allowed, calc(100vh - 80px)));
+}
+
+/* 搜索候选结果面板的卡片风格高度调整把手（边缘上下都有，支持双向拖拽） */
+.search-panel-resize-handle {
+    position: sticky;
+    left: 0;
+    right: 0;
+    height: 12px;
+    min-height: 12px;
+    cursor: ns-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent; /* 默认未悬浮时透明，只留下小白条 */
+    z-index: 60;
+    user-select: none;
+    pointer-events: auto;
+    flex-shrink: 0;
+    transition: background 0.15s ease;
+}
+
+.search-panel-resize-handle.handle-top {
+    display: none;
+    top: 0;
+    border-top-left-radius: 11px;
+    border-top-right-radius: 11px;
+}
+
+.search-panel-resize-handle.handle-bottom {
+    display: flex;
+    bottom: 0;
+    border-bottom-left-radius: 11px;
+    border-bottom-right-radius: 11px;
+}
+
+/* 底部停靠模式（标题栏在下方）：候选面板向上展开，只显示顶部的调节把手，杜绝出现两个把手 */
+body.header-dock-bottom .search-panel-resize-handle.handle-top {
+    display: flex;
+}
+
+body.header-dock-bottom .search-panel-resize-handle.handle-bottom {
+    display: none !important;
+}
+
+/* 中心的横条：浅色模式下为深色条（深灰胶囊条），深色模式下为半透明小白条，始终呈现极简优雅 */
+.search-panel-resize-handle::before {
+    content: '';
+    width: 36px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(0, 0, 0, 0.28); /* 浅色模式：深色胶囊条，对比清晰舒适 */
+    opacity: 1; /* 始终出现 */
+    transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+/* 浅色模式下：悬浮上面或拖动时手柄区域呈现淡底色，中心深色条加深加亮 */
+.search-panel-resize-handle:hover,
+.search-results-panel.resizing .search-panel-resize-handle {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.search-panel-resize-handle:hover::before,
+.search-results-panel.resizing .search-panel-resize-handle::before {
+    background: rgba(0, 0, 0, 0.58);
+}
+
+/* 深色模式下的表现：中心横条为纯净半透明小白条，悬浮上面时出现透明浅色背景 */
+[data-theme="dark"] .search-panel-resize-handle {
+    background: transparent;
+}
+
+[data-theme="dark"] .search-panel-resize-handle::before {
+    background: rgba(255, 255, 255, 0.72);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] .search-panel-resize-handle:hover,
+[data-theme="dark"] .search-results-panel.resizing .search-panel-resize-handle {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .search-panel-resize-handle:hover::before,
+[data-theme="dark"] .search-results-panel.resizing .search-panel-resize-handle::before {
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+.search-results-panel.resizing {
+    user-select: none !important;
+    transition: none !important;
+    will-change: max-height;
 }
 
 /* [User Request] Fix scrollbar corner transition by adding track margin */
@@ -107,22 +209,43 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 6px 10px;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0;
     border-radius: 8px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
+    border: 1px solid rgba(128, 128, 128, 0.28);
+    background: transparent;
+    color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f));
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.15s ease;
+    flex-shrink: 0;
+    user-select: none;
+    box-sizing: border-box;
 }
 
 .canvas-bookmark-to-temp-btn:hover {
-    color: var(--accent-primary);
-    border-color: var(--accent-primary);
-    background: var(--accent-primary-light, rgba(37, 99, 235, 0.08));
+    border-color: color-mix(in srgb, var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f)) 50%, rgba(128, 128, 128, 0.28));
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f)) 14%, transparent);
+}
+
+.canvas-bookmark-to-temp-btn-compact {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 6px;
+}
+
+.canvas-bookmark-to-temp-btn .canvas-dir-icon-badge {
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    color: inherit;
+    pointer-events: none;
+}
+
+.canvas-bookmark-to-temp-btn-compact .canvas-dir-icon-badge {
+    font-size: 12px;
 }
 
 .canvas-bookmark-domain-granularity-btn {
@@ -153,6 +276,80 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     background: rgba(14, 165, 233, 0.14);
 }
 
+.canvas-bookmark-domain-granularity-btn.active:hover {
+    background: rgba(14, 165, 233, 0.2);
+}
+
+.canvas-bookmark-type-btn,
+.canvas-structure-type-btn {
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.canvas-bookmark-type-btn:hover {
+    border-color: rgba(128, 128, 128, 0.45) !important;
+    background: rgba(128, 128, 128, 0.08) !important;
+}
+
+.canvas-bookmark-type-btn[data-type="bookmark"]:not(.active):hover {
+    border-color: rgba(245, 158, 11, 0.45) !important;
+    background: rgba(245, 158, 11, 0.1) !important;
+    color: #f59e0b !important;
+}
+
+.canvas-bookmark-type-btn[data-type="folder"]:not(.active):hover {
+    border-color: rgba(37, 99, 235, 0.45) !important;
+    background: rgba(37, 99, 235, 0.1) !important;
+    color: #2563eb !important;
+}
+
+.canvas-bookmark-type-btn[data-type="domain"]:not(.active):hover {
+    border-color: rgba(14, 165, 233, 0.45) !important;
+    background: rgba(14, 165, 233, 0.1) !important;
+    color: #0ea5e9 !important;
+}
+
+.canvas-bookmark-type-btn[data-type="bookmark"].active:hover {
+    border-color: rgba(245, 158, 11, 0.65) !important;
+    background: rgba(245, 158, 11, 0.22) !important;
+}
+
+.canvas-bookmark-type-btn[data-type="folder"].active:hover {
+    border-color: rgba(37, 99, 235, 0.65) !important;
+    background: rgba(37, 99, 235, 0.22) !important;
+}
+
+.canvas-bookmark-type-btn[data-type="domain"].active:hover {
+    border-color: rgba(14, 165, 233, 0.65) !important;
+    background: rgba(14, 165, 233, 0.22) !important;
+}
+
+.canvas-structure-type-btn:hover {
+    border-color: rgba(128, 128, 128, 0.45) !important;
+    background: rgba(128, 128, 128, 0.08) !important;
+}
+
+.canvas-structure-type-btn[data-type="card"]:not(.active):hover {
+    border-color: rgba(249, 115, 22, 0.45) !important;
+    background: rgba(249, 115, 22, 0.1) !important;
+    color: #f97316 !important;
+}
+
+.canvas-structure-type-btn[data-type="group"]:not(.active):hover {
+    border-color: rgba(124, 58, 237, 0.45) !important;
+    background: rgba(124, 58, 237, 0.1) !important;
+    color: #7c3aed !important;
+}
+
+.canvas-structure-type-btn[data-type="card"].active:hover {
+    border-color: rgba(249, 115, 22, 0.65) !important;
+    background: rgba(249, 115, 22, 0.22) !important;
+}
+
+.canvas-structure-type-btn[data-type="group"].active:hover {
+    border-color: rgba(124, 58, 237, 0.65) !important;
+    background: rgba(124, 58, 237, 0.22) !important;
+}
+
 .canvas-bookmark-domain-control-group {
     display: inline-flex;
     align-items: center;
@@ -160,12 +357,18 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 }
 
 /* Keep bookmark/domain mode strip fixed at top while result list scrolls. */
-.canvas-bookmark-type-toggle {
+.canvas-bookmark-type-toggle,
+.canvas-structure-type-toggle {
     position: sticky;
     top: 0;
     z-index: 8;
     background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18));
+}
+
+[data-theme="dark"] .canvas-bookmark-type-toggle,
+[data-theme="dark"] .canvas-structure-type-toggle {
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(255, 255, 255, 0.22));
 }
 
 .canvas-tag-browse-detail-header {
@@ -173,11 +376,15 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     align-items: center;
     gap: 8px;
     padding: 8px 12px 6px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18));
     position: sticky;
     top: 0;
     z-index: 9;
     background: var(--bg-elevated);
+}
+
+[data-theme="dark"] .canvas-tag-browse-detail-header {
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(255, 255, 255, 0.22));
 }
 
 .canvas-tag-browse-detail-header-empty {
@@ -482,15 +689,19 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 .search-result-item {
     position: relative;
     /* Tighter vertical rhythm for candidates */
-    padding: 8px 12px;
-    margin: 2px 0;
-    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 0;
+    border-radius: 0;
     cursor: default;
-    /* Changed from pointer to default to imply mixed content */
-    border: 1px solid transparent;
-    /* user-select: none; -> Removed to allow copying text */
+    border: none;
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18)); /* 浅色模式：清晰明显的候选条目上下分界线 */
     content-visibility: auto;
     contain-intrinsic-size: auto 48px;
+    transition: background 0.12s ease;
+}
+
+[data-theme="dark"] .search-result-item {
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(255, 255, 255, 0.22)); /* 深色模式：清晰明显的候选条目上下分界线 */
 }
 
 /* Allow text selection on specific content areas */
@@ -509,14 +720,54 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     user-select: none;
 }
 
+.search-result-item:last-child,
+.search-result-item.is-color-card {
+    border-bottom: none !important;
+}
+
 .search-result-item:last-child {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
+}
+
+.search-results-load-more-row {
+    padding: 10px 12px 14px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-anchor: none;
+}
+
+.search-load-more-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-normal);
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    user-select: none;
+    overflow-anchor: none;
+}
+
+.search-load-more-btn:hover {
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-hover, var(--border-color)) !important;
+    color: var(--text-primary) !important;
+}
+
+.search-load-more-btn:active {
+    transform: scale(0.97);
 }
 
 .search-result-item:hover,
 .search-result-item.selected:not(.is-color-card):not(.is-tag-row) {
     background: var(--bg-tertiary);
-    border-color: var(--border-color);
 }
 
 /* ==================== Canvas Bookmark Mode: Group by Section ==================== */
@@ -617,7 +868,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 .search-result-item.bookmark-group .search-result-title,
 .search-result-item[data-type="bookmark-item"] .search-result-title {
     align-items: center;
-    white-space: normal;
+    white-space: nowrap;
     gap: 6px;
 }
 
@@ -627,6 +878,11 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 
 .search-result-item.bookmark-group .search-result-title {
     padding-right: 0;
+}
+
+.search-result-item.bookmark-group.has-group-actions .search-result-title,
+.search-result-item.bookmark-group:has(.canvas-bookmark-group-actions) .search-result-title {
+    padding-right: 64px;
 }
 
 .canvas-bookmark-group-actions {
@@ -657,24 +913,16 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     gap: 6px;
 }
 
-.search-result-item.domain-group .search-result-title.search-result-title-multiline,
 .search-result-item.domain-child .search-result-title {
-    align-items: flex-start;
-}
-
-.search-result-item.bookmark-group .search-result-title.search-result-title-multiline,
-.search-result-item[data-type="bookmark-item"] .search-result-title.search-result-title-multiline {
-    align-items: flex-start;
+    align-items: center;
 }
 
 .search-result-domain-title-text {
     min-width: 0;
     flex: 1 1 auto;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    display: block;
     overflow: hidden;
-    white-space: normal;
+    white-space: nowrap;
     text-overflow: ellipsis;
     line-height: 1.32;
     font-size: 12px;
@@ -685,11 +933,9 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 .search-result-bookmark-title-text {
     min-width: 0;
     flex: 1 1 auto;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    display: block;
     overflow: hidden;
-    white-space: normal;
+    white-space: nowrap;
     text-overflow: ellipsis;
     line-height: 1.32;
     font-size: 12px;
@@ -699,7 +945,6 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 
 .search-result-item.bookmark-group .search-result-bookmark-title-text {
     display: block;
-    -webkit-line-clamp: unset;
     white-space: nowrap;
 }
 
@@ -1069,11 +1314,15 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     min-width: 0;
     padding: 6px 8px;
     border-radius: 8px;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--search-candidate-divider, var(--border-color));
     background: var(--bg-secondary);
     cursor: pointer;
     user-select: text;
     transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+[data-theme="dark"] .canvas-bookmark-group-child-item {
+    border-color: var(--search-candidate-divider, rgba(255, 255, 255, 0.22));
 }
 
 .canvas-bookmark-group-child-item:hover {
@@ -2143,9 +2392,11 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     justify-content: center;
     border-radius: 4px;
     font-size: 11px;
+    line-height: 1.2;
     transition: all 0.15s ease-in-out;
     opacity: 0.6;
     margin-left: 4px;
+    flex-shrink: 0;
 }
 
 .canvas-bookmark-details-toggle:hover {
@@ -2162,11 +2413,15 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 
 .canvas-bookmark-details-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     margin-top: 4px;
     gap: 8px;
     min-width: 0;
     width: 100%;
+}
+
+.canvas-bookmark-details-row:has(.search-result-details-preview-context:not(.is-single-line)) {
+    align-items: flex-start;
 }
 
 .canvas-bookmark-details-toggle span {
@@ -2184,13 +2439,14 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     flex: 1;
     overflow: hidden;
     opacity: 0.85;
-    padding-top: 1px;
 }
 
 .search-result-details-preview-context.is-single-line {
     justify-content: center;
-    align-self: stretch;
+    align-self: center;
     padding-top: 0;
+    position: relative;
+    top: -1px; /* 稍微抬高 1px，完美对准左侧“信息”按钮与文字的水平基准线 */
 }
 
 .canvas-bookmark-browse-match-context {
@@ -2233,11 +2489,14 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 }
 
 .search-result-details-preview-line {
+    display: flex;
+    align-items: center;
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    line-height: 1.2;
 }
 
 /* Ensure child preview tags/notes/paths render compactly in each preview line */
@@ -2245,6 +2504,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 .search-result-details-preview-context .canvas-bookmark-tags-row,
 .search-result-details-preview-context .canvas-bookmark-child-tags-row,
 .search-result-details-preview-context .search-result-path-hint,
+.search-result-details-preview-context .canvas-bookmark-location-row,
 .search-result-details-preview-context .search-result-link-row {
     margin: 0 !important;
     padding: 0 !important;
@@ -2254,6 +2514,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     align-items: center !important;
     gap: 4px !important;
     max-width: 100% !important;
+    line-height: 1.2 !important;
 }
 
 .search-result-details-preview-context .search-result-tag-strip {
@@ -2267,9 +2528,11 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    max-width: 250px;
+    max-width: 280px;
     display: inline-block;
     font-size: 11px;
+    line-height: 1.2;
+    vertical-align: middle;
 }
 
 .canvas-bookmark-browse-match-context .search-result-note-snippet {
@@ -2289,3 +2552,161 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     -webkit-line-clamp: 2 !important;
     -webkit-box-orient: vertical !important;
 }
+
+/* 搜索建议模式条目与全屏说明头部分界线 */
+.canvas-suggestion-mode-item {
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18)) !important;
+    border-radius: 0 !important;
+}
+
+[data-theme="dark"] .canvas-suggestion-mode-item {
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(255, 255, 255, 0.22)) !important;
+}
+
+.canvas-suggestion-mode-item:last-child {
+    border-bottom: none !important;
+}
+
+.canvas-description-fullscreen-header {
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18));
+}
+
+[data-theme="dark"] .canvas-description-fullscreen-header {
+    border-bottom: 1px solid var(--search-candidate-divider, rgba(255, 255, 255, 0.22));
+}
+
+/* 搜索结果完整标题浮层提示（悬停 0.7s，仅限有省略号的条目） */
+.search-result-title-tooltip {
+    position: fixed;
+    z-index: 100005;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 6px 11px;
+    background: var(--bg-elevated, #23272f);
+    color: var(--text-primary, #f3f4f6);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.16));
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    font-size: 12px;
+    line-height: 1.45;
+    font-weight: 500;
+    white-space: normal;
+    word-break: break-word;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.search-result-title-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+[data-theme="dark"] .search-result-title-tooltip {
+    background: var(--bg-elevated, #1e2025);
+    color: #f3f4f6;
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.search-result-title-tooltip mark {
+    background: #ffe566;
+    color: #3b2a00;
+    padding: 0 3px;
+    border-radius: 3px;
+    box-shadow: inset 0 -1px 0 rgba(181, 130, 0, 0.62);
+    font-weight: 700;
+}
+
+[data-theme="dark"] .search-result-title-tooltip mark {
+    background: #946c00;
+    color: #fff9db;
+    box-shadow: inset 0 -1px 0 rgba(244, 210, 92, 0.68);
+    font-weight: 700;
+}
+
+/* ==================== 候选右上角特殊临时栏目说明气泡 ==================== */
+.canvas-temp-section-bubble {
+    position: fixed;
+    z-index: 100010;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    background: var(--bg-elevated, #ffffff);
+    color: var(--text-primary, #1f2937);
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    font-size: 11.5px;
+    line-height: 1;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    box-sizing: border-box;
+}
+
+.canvas-temp-section-bubble.visible {
+    opacity: 1;
+}
+
+[data-theme="dark"] .canvas-temp-section-bubble {
+    background: var(--bg-elevated, #1e2025);
+    color: var(--text-primary, #f3f4f6);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-temp-section-bubble .canvas-temp-bubble-arrow {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: inherit;
+    border: inherit;
+    transform: rotate(45deg);
+    pointer-events: none;
+    left: var(--temp-bubble-arrow-left, calc(100% - 16px));
+    margin-left: -3px;
+}
+
+.canvas-temp-section-bubble.arrow-top .canvas-temp-bubble-arrow {
+    top: -4px;
+    border-right: none;
+    border-bottom: none;
+}
+
+.canvas-temp-section-bubble.arrow-bottom .canvas-temp-bubble-arrow {
+    bottom: -4px;
+    border-left: none;
+    border-top: none;
+}
+
+.canvas-temp-bubble-icon {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f));
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.canvas-temp-bubble-title {
+    font-weight: 600;
+    font-size: 11.5px;
+    color: inherit;
+    line-height: 1;
+}
+
+.canvas-temp-bubble-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f)) 18%, transparent);
+    color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f));
+    line-height: 1.2;
+}
+
+

@@ -15,6 +15,8 @@
 
     --border-color: #e4e4e7;
     --border-hover: #d4d4d8;
+    --border-color-light: rgba(0, 0, 0, 0.18);
+    --search-candidate-divider: rgba(0, 0, 0, 0.18);
 
     --accent-primary: #1877f2;
     --accent-hover: #166fe5;
@@ -77,6 +79,8 @@
 
     --border-color: #3a3b3c;
     --border-hover: #4e4f50;
+    --border-color-light: rgba(255, 255, 255, 0.22);
+    --search-candidate-divider: rgba(255, 255, 255, 0.22);
 
     --accent-primary: #2d88ff;
     --accent-hover: #4d9eff;

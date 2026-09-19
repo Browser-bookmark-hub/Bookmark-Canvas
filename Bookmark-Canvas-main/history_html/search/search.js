@@ -383,6 +383,373 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==================== DOM 操作辅助函数 ====================
 
 /**
+ * 搜索候选面板高度配置与常量
+ */
+const SEARCH_PANEL_HEIGHT_MIN = 200;
+const SEARCH_PANEL_HEIGHT_MAX = 1200;
+const SEARCH_PANEL_HEIGHT_DEFAULT = 450;
+const SEARCH_PANEL_HEIGHT_PREF_KEY = 'canvasSearchPanelHeight';
+
+function getSearchPanelHeight() {
+    try {
+        const saved = localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY);
+        if (saved !== null) {
+            const val = parseInt(saved, 10);
+            if (Number.isFinite(val) && val >= SEARCH_PANEL_HEIGHT_MIN && val <= SEARCH_PANEL_HEIGHT_MAX) {
+                return val;
+            }
+        }
+    } catch (_) { }
+    try {
+        if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
+            const other = window.CanvasState.otherSettings;
+            if (typeof other.searchPanelHeight === 'number' && Number.isFinite(other.searchPanelHeight)) {
+                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, other.searchPanelHeight));
+            }
+        }
+        const rawOther = localStorage.getItem('canvas_other_settings');
+        if (rawOther) {
+            const parsedOther = JSON.parse(rawOther);
+            if (parsedOther && typeof parsedOther.searchPanelHeight === 'number' && Number.isFinite(parsedOther.searchPanelHeight)) {
+                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, parsedOther.searchPanelHeight));
+            }
+        }
+    } catch (_) { }
+    return SEARCH_PANEL_HEIGHT_DEFAULT;
+}
+
+/**
+ * 计算搜索候选面板的动态临时上限 (Temporary Upper Limit)
+ * 严格受限于：
+ * 1. 当前视口 / 标签页可用高度 (window.innerHeight / documentElement.clientHeight)
+ * 2. 侧边栏实际高度 (#sidebar.clientHeight) 与侧边栏模式 (html.side-panel-mode)
+ * 3. 主工作区可用高度 (.main-container.clientHeight)
+ * 4. 搜索框相对于视口顶/底边缘的真实物理空间（留出安全距离，防止溢出屏幕或遮挡边缘）
+ * 确保面板高度绝不超出实际可见区域。
+ */
+function getSearchPanelTemporaryHeightLimit(panel) {
+    if (typeof window === 'undefined') return SEARCH_PANEL_HEIGHT_MAX;
+
+    const tabHeight = Math.max(0, window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 0);
+    const sidebarEl = document.getElementById('sidebar');
+    const sidebarHeight = (sidebarEl && sidebarEl.clientHeight > 0) ? sidebarEl.clientHeight : 0;
+    const mainContainerEl = document.querySelector('.main-container');
+    const mainContainerHeight = (mainContainerEl && mainContainerEl.clientHeight > 0) ? mainContainerEl.clientHeight : 0;
+
+    // 基础容器参考上限：以标签页/视口高度为基准；若侧边栏或主工作区有明确可见高度，亦作为硬性上限约束
+    let referenceLimit = tabHeight > 0 ? tabHeight : SEARCH_PANEL_HEIGHT_MAX;
+    if (sidebarHeight > 100 && sidebarHeight < referenceLimit) {
+        referenceLimit = sidebarHeight;
+    }
+    if (mainContainerHeight > 100 && mainContainerHeight < referenceLimit) {
+        referenceLimit = mainContainerHeight;
+    }
+
+    // 根据搜索容器相对于视口顶底边缘的真实物理可用空间进行动态收敛
+    const searchContainer = document.querySelector('.search-container') || (panel ? panel.parentElement : null);
+    const isBottomDock = !!(document.body && document.body.classList.contains('header-dock-bottom'));
+    const SAFETY_MARGIN = 20; // 呼吸边距与阴影区域
+
+    let availableSpace = referenceLimit;
+    if (searchContainer) {
+        const rect = searchContainer.getBoundingClientRect();
+        if (isBottomDock) {
+            // 底部停靠模式：向上延伸，上限不能超过搜索框上方到视口顶部的物理距离
+            const spaceAbove = Math.floor(rect.top - 10 - SAFETY_MARGIN);
+            if (spaceAbove > 0) {
+                availableSpace = Math.min(referenceLimit, spaceAbove);
+            }
+        } else {
+            // 顶部停靠模式：向下延伸，上限不能超过搜索框下方到视口底部的物理距离
+            const spaceBelow = Math.floor(tabHeight - rect.bottom - 10 - SAFETY_MARGIN);
+            if (spaceBelow > 0) {
+                availableSpace = Math.min(referenceLimit, spaceBelow);
+            }
+        }
+    } else {
+        availableSpace = Math.min(referenceLimit, Math.floor(tabHeight - 80));
+    }
+
+    // 最小保底高度（在极端窄小视口下自适应微调，但坚决不超可用空间）
+    const minFloor = Math.min(SEARCH_PANEL_HEIGHT_MIN, Math.max(120, availableSpace));
+    const temporaryMax = Math.max(minFloor, Math.min(SEARCH_PANEL_HEIGHT_MAX, availableSpace));
+
+    return temporaryMax;
+}
+
+function applySearchPanelHeight(height, panel) {
+    if (!panel) panel = getSearchResultsPanel();
+    const rawVal = (height !== undefined && height !== null) ? Number(height) : getSearchPanelHeight();
+    const preferred = Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, Math.round(rawVal || SEARCH_PANEL_HEIGHT_DEFAULT)));
+    const temporaryLimit = getSearchPanelTemporaryHeightLimit(panel);
+    const effective = Math.min(preferred, temporaryLimit);
+
+    try {
+        document.documentElement.style.setProperty('--search-panel-height', `${preferred}px`);
+        document.documentElement.style.setProperty('--search-panel-max-allowed', `${temporaryLimit}px`);
+        if (panel) {
+            panel.style.maxHeight = `${effective}px`;
+        }
+    } catch (_) { }
+    return effective;
+}
+
+function setSearchPanelHeight(height, options = {}) {
+    const rawVal = Math.round(Number(height) || SEARCH_PANEL_HEIGHT_DEFAULT);
+    const preferred = Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, rawVal));
+    const effective = applySearchPanelHeight(preferred);
+
+    if (options.save !== false) {
+        try {
+            localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY, String(preferred));
+        } catch (_) { }
+        try {
+            if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
+                window.CanvasState.otherSettings.searchPanelHeight = preferred;
+            }
+            const rawOther = localStorage.getItem('canvas_other_settings');
+            if (rawOther) {
+                const parsedOther = JSON.parse(rawOther);
+                if (parsedOther && typeof parsedOther === 'object') {
+                    parsedOther.searchPanelHeight = preferred;
+                    localStorage.setItem('canvas_other_settings', JSON.stringify(parsedOther));
+                }
+            }
+        } catch (_) { }
+    }
+
+    if (options.syncInput !== false) {
+        try {
+            const modalInput = document.getElementById('otherSearchPanelHeight');
+            if (modalInput && document.activeElement !== modalInput) {
+                modalInput.value = String(preferred);
+            }
+        } catch (_) { }
+    }
+
+    try {
+        window.dispatchEvent(new CustomEvent('search-panel-height-changed', {
+            detail: {
+                height: preferred,
+                effectiveHeight: effective,
+                temporaryLimit: getSearchPanelTemporaryHeightLimit()
+            }
+        }));
+    } catch (_) { }
+
+    return effective;
+}
+
+try {
+    applySearchPanelHeight(getSearchPanelHeight());
+    if (typeof window !== 'undefined') {
+        window.addEventListener('canvas-other-settings-updated', (e) => {
+            if (e && e.detail && typeof e.detail.searchPanelHeight === 'number') {
+                setSearchPanelHeight(e.detail.searchPanelHeight, { save: false, syncInput: true });
+            }
+        });
+        window.addEventListener('header-dock-side-changed', () => {
+            try {
+                const p = getSearchResultsPanel();
+                if (p) {
+                    ensureSearchPanelResizeHandles(p);
+                    applySearchPanelHeight(getSearchPanelHeight(), p);
+                }
+            } catch (_) { }
+        });
+        let resizeRaf = null;
+        window.addEventListener('resize', () => {
+            if (resizeRaf) return;
+            resizeRaf = requestAnimationFrame(() => {
+                resizeRaf = null;
+                try {
+                    const p = getSearchResultsPanel();
+                    if (p && (p.classList.contains('visible') || p.style.display !== 'none')) {
+                        applySearchPanelHeight(getSearchPanelHeight(), p);
+                    }
+                } catch (_) { }
+            });
+        }, { passive: true });
+    }
+} catch (_) { }
+
+function ensureSearchPanelResizeHandles(panel) {
+    if (!panel) panel = getSearchResultsPanel();
+    if (!panel) return null;
+
+    const isBottomDock = !!(document.body && document.body.classList.contains('header-dock-bottom'));
+    const isZh = (typeof currentLang !== 'undefined' && currentLang === 'zh_CN');
+    const titleText = isZh ? '上下拖拽调整搜索候选高度' : 'Drag to adjust search candidate height';
+
+    // Clean up any extra/stale handles
+    const allHandles = Array.from(panel.querySelectorAll('.search-panel-resize-handle'));
+    let handleTop = null;
+    let handleBottom = null;
+
+    allHandles.forEach(h => {
+        if (h.classList.contains('handle-top')) {
+            if (!handleTop) handleTop = h;
+            else h.remove();
+        } else if (h.classList.contains('handle-bottom')) {
+            if (!handleBottom) handleBottom = h;
+            else h.remove();
+        } else {
+            h.remove();
+        }
+    });
+
+    if (isBottomDock) {
+        // 标题栏在下方：候选面板向上延伸，仅保留顶端的调节把手，彻底杜绝出现两个把手
+        if (handleBottom) {
+            handleBottom.remove();
+            handleBottom = null;
+        }
+        if (!handleTop) {
+            handleTop = document.createElement('div');
+            handleTop.className = 'search-panel-resize-handle handle-top';
+            handleTop.setAttribute('role', 'separator');
+            handleTop.setAttribute('aria-orientation', 'horizontal');
+            handleTop.setAttribute('title', titleText);
+            panel.insertBefore(handleTop, panel.firstChild);
+        } else if (panel.firstChild !== handleTop) {
+            panel.insertBefore(handleTop, panel.firstChild);
+        }
+        bindSearchPanelResizeHandle(handleTop, panel, 'top');
+        return handleTop;
+    } else {
+        // 标题栏在上方：候选面板向下延伸，仅保留底部的调节把手
+        if (handleTop) {
+            handleTop.remove();
+            handleTop = null;
+        }
+        if (!handleBottom) {
+            handleBottom = document.createElement('div');
+            handleBottom.className = 'search-panel-resize-handle handle-bottom';
+            handleBottom.setAttribute('role', 'separator');
+            handleBottom.setAttribute('aria-orientation', 'horizontal');
+            handleBottom.setAttribute('title', titleText);
+            panel.appendChild(handleBottom);
+        } else if (panel.lastChild !== handleBottom) {
+            panel.appendChild(handleBottom);
+        }
+        bindSearchPanelResizeHandle(handleBottom, panel, 'bottom');
+        return handleBottom;
+    }
+}
+
+function ensureSearchPanelResizeHandle(panel) {
+    return ensureSearchPanelResizeHandles(panel);
+}
+
+function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
+    if (!handle || !panel || handle.hasAttribute('data-resize-bound')) return;
+    handle.setAttribute('data-resize-bound', 'true');
+
+    handle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+
+    const isTop = (direction === 'top');
+    const DRAG_THRESHOLD = 3;
+
+    const onPointerDown = (e) => {
+        if (e.button !== 0 && e.isPrimary === false) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const startY = e.clientY;
+        const rect = panel.getBoundingClientRect();
+        const startHeight = rect.height || getSearchPanelHeight();
+        // 性能关键优化：在拖拽开始瞬间单次计算并缓存可用物理高度上限，拖拽过程中零强制重排(0 layout reflow)
+        const cachedTemporaryLimit = getSearchPanelTemporaryHeightLimit(panel);
+        const cachedMinAllowed = Math.min(SEARCH_PANEL_HEIGHT_MIN, cachedTemporaryLimit);
+        let currentHeight = startHeight;
+        let hasStartedDrag = false;
+        let rafId = null;
+        let inputEl = null;
+
+        const pointerId = e.pointerId;
+        try {
+            if (typeof handle.setPointerCapture === 'function' && pointerId !== undefined) {
+                handle.setPointerCapture(pointerId);
+            }
+        } catch (_) { }
+
+        const onPointerMove = (moveEvent) => {
+            // Safety: if mouse button was released without pointerup, terminate
+            if (typeof moveEvent.buttons === 'number' && (moveEvent.buttons & 1) === 0) {
+                onPointerEnd();
+                return;
+            }
+
+            const dist = Math.abs(moveEvent.clientY - startY);
+            if (!hasStartedDrag) {
+                if (dist < DRAG_THRESHOLD) {
+                    return; // Ignore click / minor jitter
+                }
+                hasStartedDrag = true;
+                panel.classList.add('resizing');
+                document.body.style.cursor = 'ns-resize';
+                document.body.style.userSelect = 'none';
+            }
+
+            moveEvent.preventDefault();
+            const deltaY = isTop ? (startY - moveEvent.clientY) : (moveEvent.clientY - startY);
+            const newHeight = Math.max(cachedMinAllowed, Math.min(cachedTemporaryLimit, Math.round(startHeight + deltaY)));
+            currentHeight = newHeight;
+
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+                // 性能极致优化：直接更新当前面板样式，杜绝在拖拽高频帧中触发全局 :root 样式重算与持久化写入
+                panel.style.maxHeight = `${newHeight}px`;
+                if (!inputEl) inputEl = document.getElementById('otherSearchPanelHeight');
+                if (inputEl && document.activeElement !== inputEl) {
+                    inputEl.value = String(newHeight);
+                }
+            });
+        };
+
+        const onPointerEnd = () => {
+            if (rafId) cancelAnimationFrame(rafId);
+            try {
+                if (typeof handle.releasePointerCapture === 'function' && pointerId !== undefined) {
+                    handle.releasePointerCapture(pointerId);
+                }
+            } catch (_) { }
+
+            window.removeEventListener('pointermove', onPointerMove, true);
+            window.removeEventListener('pointerup', onPointerEnd, true);
+            window.removeEventListener('pointercancel', onPointerEnd, true);
+            window.removeEventListener('mousemove', onPointerMove, true);
+            window.removeEventListener('mouseup', onPointerEnd, true);
+            window.removeEventListener('blur', onPointerEnd);
+
+            if (hasStartedDrag) {
+                panel.classList.remove('resizing');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                // 拖拽释放时单次提交并持久化（写入 localStorage 并同步 CSS 变量与事件）
+                setSearchPanelHeight(currentHeight, { save: true, syncInput: true });
+            }
+        };
+
+        window.addEventListener('pointermove', onPointerMove, true);
+        window.addEventListener('pointerup', onPointerEnd, true);
+        window.addEventListener('pointercancel', onPointerEnd, true);
+        window.addEventListener('mousemove', onPointerMove, true);
+        window.addEventListener('mouseup', onPointerEnd, true);
+        window.addEventListener('blur', onPointerEnd);
+    };
+
+    handle.addEventListener('pointerdown', onPointerDown);
+    handle.addEventListener('mousedown', (e) => {
+        if (window.PointerEvent) return;
+        onPointerDown(e);
+    });
+}
+
+/**
  * 获取搜索结果面板元素
  */
 function getSearchResultsPanel() {
@@ -397,6 +764,10 @@ let searchPanelShowFrame = null;
 function showSearchResultsPanel() {
     const panel = getSearchResultsPanel();
     if (!panel) return;
+
+    applySearchPanelHeight(getSearchPanelHeight(), panel);
+    ensureSearchPanelResizeHandle(panel);
+
     if (panel.classList.contains('visible')) return;
 
     if (searchPanelShowFrame) {
@@ -407,6 +778,7 @@ function showSearchResultsPanel() {
     searchPanelShowFrame = requestAnimationFrame(() => {
         searchPanelShowFrame = null;
         panel.classList.add('visible');
+        ensureSearchPanelResizeHandle(panel);
     });
 }
 
@@ -414,6 +786,9 @@ function showSearchResultsPanel() {
  * 隐藏搜索结果面板
  */
 function hideSearchResultsPanel() {
+    if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
+    if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
+    if (typeof clearSearchPanelAutoInfiniteScroll === 'function') clearSearchPanelAutoInfiniteScroll();
     const panel = getSearchResultsPanel();
     if (panel) {
         if (searchPanelShowFrame) {
@@ -619,6 +994,19 @@ function updateSearchResultSelection(nextIndex, options = {}) {
         return;
     }
     const maxIdx = items.length - 1;
+
+    // 若键盘方向键超出当前已渲染条目且还有更多结果，自动追加下一页并平滑延续选中项
+    if (nextIndex > maxIdx && searchUiState.resultHasMore) {
+        if (typeof appendCanvasSearchResultsPage === 'function') {
+            appendCanvasSearchResultsPage();
+            const updatedItems = panel.querySelectorAll('.search-result-item');
+            const newMaxIdx = updatedItems.length - 1;
+            const newIndex = Math.min(newMaxIdx, nextIndex);
+            updateSearchResultSelection(newIndex, options);
+            return;
+        }
+    }
+
     const clamped = Math.max(0, Math.min(maxIdx, nextIndex));
 
     items.forEach(el => el.classList.remove('selected'));
@@ -785,6 +1173,8 @@ function handleSearchKeydown(e) {
     try {
         if (!e) return;
         if (e.isComposing) return;
+        if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
+        if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
 
         const panel = getSearchResultsPanel();
         const panelVisible = !!(panel && panel.classList.contains('visible'));
@@ -889,6 +1279,9 @@ function handleSearchKeydown(e) {
                     const trigger = document.getElementById('searchModeTrigger');
                     if (trigger) {
                         e.preventDefault();
+                        toggleSearchHelpMenu(false);
+                        hideSearchResultsPanel();
+                        toggleSearchModeMenu(true);
                         trigger.focus();
                     }
                     return;
@@ -929,6 +1322,11 @@ function handleSearchKeydown(e) {
         }
 
         if (e.key === 'Enter') {
+            if (searchUiState.isMenuOpen) {
+                e.preventDefault();
+                toggleSearchModeMenu(false);
+                return;
+            }
             if (panelVisible && panelType === 'results' && searchUiState.selectedIndex >= 0) {
                 e.preventDefault();
                 activateSearchResult(searchUiState.selectedIndex);
@@ -1357,6 +1755,7 @@ function handleSearchResultsPanelClick(e) {
     if (exportBtn) {
         e.preventDefault();
         e.stopPropagation();
+        if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
         try { createTempSectionFromSearchResults(); } catch (_) { }
         try { hideSearchResultsPanel(); } catch (_) { }
         return;
@@ -1368,11 +1767,12 @@ function handleSearchResultsPanelClick(e) {
             e.preventDefault();
             e.stopPropagation();
         } catch (_) { }
+        if (typeof isAppendingSearchPage !== 'undefined' && isAppendingSearchPage) return;
         appendCanvasSearchResultsPage();
         return;
     }
 
-    // 0. Canvas Bookmark Mode: type toggles (Bookmark / Folder)
+    // 0. Canvas Bookmark Mode: type toggles (Bookmark / Folder / Domain)
     const typeBtn = e.target.closest('.canvas-bookmark-type-btn');
     if (typeBtn) {
         try {
@@ -1382,6 +1782,7 @@ function handleSearchResultsPanelClick(e) {
 
         const type = String(typeBtn.dataset.type || '');
         if (type !== 'bookmark' && type !== 'folder' && type !== 'domain') return;
+        if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
 
         // Update filter and re-render (do NOT close panel)
         searchUiState.bookmarkTypeFilter = type;
@@ -1409,6 +1810,8 @@ function handleSearchResultsPanelClick(e) {
 
         const type = String(structureTypeBtn.dataset.type || '');
         if (type !== 'card' && type !== 'group') return;
+        if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
+
         searchUiState.structureTypeFilter = type;
         renderCanvasSearchResults(searchUiState.resultSource || [], {
             view: 'canvas',
@@ -1426,8 +1829,10 @@ function handleSearchResultsPanelClick(e) {
             e.stopPropagation();
         } catch (_) { }
 
-        const targetGroup = String(domainGranularityBtn.dataset.domainGroup || '');
-        const next = targetGroup === 'root' ? 'root' : 'host';
+        if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
+
+        const currentGroup = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
+        const next = currentGroup === 'host' ? 'root' : 'host';
         searchUiState.bookmarkTypeFilter = 'domain';
         searchUiState.domainGrouping = next;
         try { localStorage.setItem(DOMAIN_GROUP_PREF_KEY, next); } catch (_) { }
@@ -1585,13 +1990,306 @@ function handleSearchResultsPanelClick(e) {
     activateSearchResult(idx);
 }
 
+let searchResultTooltipTimer = null;
+let searchResultTooltipEl = null;
+let currentTooltipTarget = null;
+
+/**
+ * 隐藏搜索结果完整标题浮层提示
+ */
+function hideSearchTitleTooltip() {
+    if (searchResultTooltipTimer) {
+        clearTimeout(searchResultTooltipTimer);
+        searchResultTooltipTimer = null;
+    }
+    currentTooltipTarget = null;
+    if (searchResultTooltipEl) {
+        searchResultTooltipEl.classList.remove('visible');
+    }
+}
+
+/**
+ * 获取或创建搜索结果标题浮层 DOM
+ */
+function getOrCreateSearchTitleTooltip() {
+    if (!searchResultTooltipEl || !document.body.contains(searchResultTooltipEl)) {
+        let el = document.getElementById('searchResultTitleTooltip');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'searchResultTitleTooltip';
+            el.className = 'search-result-title-tooltip';
+            el.setAttribute('role', 'tooltip');
+            el.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(el);
+        }
+        searchResultTooltipEl = el;
+    }
+    return searchResultTooltipEl;
+}
+
+/**
+ * 高亮搜索关键词（支持多关键词、降序防复合词截断、特殊符号安全转义及单次正则联合替换）
+ * @param {string} text - 待高亮原始文本
+ * @param {string} query - 用户输入的搜索查询（支持空格分隔多关键词）
+ * @returns {string} - 转义并包裹 <mark> 标签的 HTML
+ */
+function highlightSearchKeywords(text, query) {
+    if (!text) return '';
+    const safeText = escapeHtml(text);
+    const q = String(query || '').trim();
+    if (!q) return safeText;
+
+    const rawTokens = q.toLowerCase().split(/\s+/).map(t => t.trim()).filter(Boolean);
+    if (!rawTokens.length) return safeText;
+
+    // 过滤去重，剔除独立特殊模式符号（如 #、*、.、..、...），允许 #tag 或 *note 高亮其实际词，避免纯点号错误高亮省略号
+    const uniqueTokens = Array.from(new Set(rawTokens))
+        .filter(t => !['#', '*'].includes(t) && !/^\.+$/.test(t))
+        .map(t => (t.startsWith('#') || t.startsWith('*')) ? t.slice(1) : t)
+        .filter(t => t && !/^\.+$/.test(t));
+
+    if (!uniqueTokens.length) return safeText;
+
+    // 按长度降序排序，防止短词破坏更长的复合词（如 Java 破坏 JavaScript）
+    uniqueTokens.sort((a, b) => b.length - a.length);
+
+    try {
+        const escapedTokens = uniqueTokens.map(t => escapeHtml(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const re = new RegExp(`(${escapedTokens.join('|')})`, 'gi');
+        return safeText.replace(re, '<mark>$1</mark>');
+    } catch (_) {
+        return safeText;
+    }
+}
+
+/**
+ * 展示搜索结果完整标题浮层（带对应关键词高亮）
+ */
+function showSearchTitleTooltip(targetEl, text) {
+    if (!targetEl || !text) return;
+    const tooltip = getOrCreateSearchTitleTooltip();
+    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) ? searchUiState.query : '';
+    tooltip.innerHTML = highlightSearchKeywords(text, query);
+    tooltip.classList.remove('visible');
+    tooltip.style.left = '-9999px';
+    tooltip.style.top = '-9999px';
+    tooltip.style.display = 'block';
+
+    const rect = targetEl.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth;
+    const tooltipHeight = tooltip.offsetHeight;
+
+    let left = rect.left + 8;
+    if (left + tooltipWidth > window.innerWidth - 12) {
+        left = Math.max(8, window.innerWidth - tooltipWidth - 12);
+    }
+    if (left < 8) left = 8;
+
+    let top = rect.top - tooltipHeight - 6;
+    if (top < 8) {
+        top = rect.bottom + 6;
+    }
+
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+    requestAnimationFrame(() => {
+        if (currentTooltipTarget === targetEl) {
+            tooltip.classList.add('visible');
+        }
+    });
+}
+
+/**
+ * 计划 0.7s 延迟展示完整标题浮层（仅限包含「...」的候选）
+ */
+function scheduleSearchTitleTooltip(targetEl, fullTitle) {
+    if (!targetEl || !fullTitle) {
+        hideSearchTitleTooltip();
+        return;
+    }
+    if (currentTooltipTarget === targetEl) {
+        return;
+    }
+    hideSearchTitleTooltip();
+    currentTooltipTarget = targetEl;
+
+    searchResultTooltipTimer = setTimeout(() => {
+        if (currentTooltipTarget === targetEl && document.body.contains(targetEl)) {
+            showSearchTitleTooltip(targetEl, fullTitle);
+        }
+    }, 700); // 严格满足用户需求：鼠标悬停 0.7s 后出现完整标题
+}
+
+let tempSectionBubbleTimer = null;
+let tempSectionBubbleEl = null;
+let currentTempSectionBtnTarget = null;
+
+/**
+ * 隐藏特殊临时栏目说明气泡
+ */
+function hideTempSectionBubble() {
+    if (tempSectionBubbleTimer) {
+        clearTimeout(tempSectionBubbleTimer);
+        tempSectionBubbleTimer = null;
+    }
+    currentTempSectionBtnTarget = null;
+    if (tempSectionBubbleEl) {
+        tempSectionBubbleEl.classList.remove('visible');
+    }
+}
+
+/**
+ * 获取或创建特殊临时栏目说明气泡 DOM
+ */
+function getOrCreateTempSectionBubble() {
+    if (!tempSectionBubbleEl || !document.body.contains(tempSectionBubbleEl)) {
+        let el = document.getElementById('searchTempSectionBubble');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'searchTempSectionBubble';
+            el.className = 'canvas-temp-section-bubble';
+            el.setAttribute('role', 'tooltip');
+            el.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(el);
+        }
+        tempSectionBubbleEl = el;
+    }
+    return tempSectionBubbleEl;
+}
+
+/**
+ * 显示特殊临时栏目说明气泡（仅右上角 ✦ 按钮）
+ */
+function showTempSectionBubble(targetBtn) {
+    if (!targetBtn || !document.body.contains(targetBtn)) return;
+    const bubble = getOrCreateTempSectionBubble();
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const countAttr = targetBtn.getAttribute('data-visible-count');
+    const countNum = countAttr ? parseInt(countAttr, 10) : 0;
+    const safeCount = Number.isFinite(countNum) ? countNum : 0;
+
+    const titleText = isZh ? '生成特殊临时栏目' : 'Create Special Temporary Section';
+    const countBadge = safeCount > 0
+        ? `<span class="canvas-temp-bubble-badge">${safeCount}</span>`
+        : '';
+
+    bubble.innerHTML = `
+        <span class="canvas-temp-bubble-icon" aria-hidden="true">✦</span>
+        <span class="canvas-temp-bubble-title">${escapeHtml(titleText)}</span>
+        ${countBadge}
+        <div class="canvas-temp-bubble-arrow"></div>
+    `;
+
+    bubble.classList.remove('visible');
+    bubble.classList.remove('arrow-top');
+    bubble.classList.remove('arrow-bottom');
+    bubble.style.left = '-9999px';
+    bubble.style.top = '-9999px';
+    bubble.style.display = 'inline-flex';
+
+    const btnRect = targetBtn.getBoundingClientRect();
+    const bubbleWidth = bubble.offsetWidth || 150;
+    const bubbleHeight = bubble.offsetHeight || 26;
+
+    // 水平对齐：贴齐右上角按钮右边缘
+    let left = btnRect.right - bubbleWidth + 2;
+    if (left + bubbleWidth > window.innerWidth - 12) {
+        left = Math.max(10, window.innerWidth - bubbleWidth - 12);
+    }
+    if (left < 10) left = 10;
+
+    // 垂直对齐：优先在按钮下方展示
+    const spaceBelow = window.innerHeight - btnRect.bottom;
+    const spaceAbove = btnRect.top;
+    let top = 0;
+    if (spaceBelow >= bubbleHeight + 8 || spaceBelow >= spaceAbove) {
+        top = btnRect.bottom + 6;
+        bubble.classList.add('arrow-top');
+    } else {
+        top = btnRect.top - bubbleHeight - 6;
+        bubble.classList.add('arrow-bottom');
+    }
+
+    const btnCenter = btnRect.left + btnRect.width / 2;
+    const arrowOffset = Math.max(10, Math.min(bubbleWidth - 12, btnCenter - left));
+    bubble.style.setProperty('--temp-bubble-arrow-left', `${Math.round(arrowOffset)}px`);
+
+    bubble.style.left = `${Math.round(left)}px`;
+    bubble.style.top = `${Math.round(top)}px`;
+
+    requestAnimationFrame(() => {
+        if (currentTempSectionBtnTarget === targetBtn) {
+            bubble.classList.add('visible');
+        }
+    });
+}
+
+/**
+ * 计划展示特殊临时栏目说明气泡（120ms 防抖）
+ */
+function scheduleTempSectionBubble(targetBtn) {
+    if (currentTempSectionBtnTarget === targetBtn && tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
+        return;
+    }
+    hideTempSectionBubble();
+    currentTempSectionBtnTarget = targetBtn;
+    tempSectionBubbleTimer = setTimeout(() => {
+        if (currentTempSectionBtnTarget === targetBtn && document.body.contains(targetBtn)) {
+            showTempSectionBubble(targetBtn);
+        }
+    }, 120);
+}
+
 /**
  * 悬停搜索结果
  */
 function handleSearchResultsPanelMouseOver(e) {
     const panel = getSearchResultsPanel();
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
-    if (panelType !== 'results') return;
+    if (panelType !== 'results') {
+        hideSearchTitleTooltip();
+        hideTempSectionBubble();
+        return;
+    }
+
+    // 0. 特殊临时栏目图标按钮说明气泡逻辑（仅右上角 ✦ 按钮）
+    const tempBtn = e && e.target ? e.target.closest('.canvas-bookmark-to-temp-btn') : null;
+    if (tempBtn) {
+        hideSearchTitleTooltip();
+        scheduleTempSectionBubble(tempBtn);
+        return;
+    } else {
+        hideTempSectionBubble();
+    }
+
+    // 1. 悬停 0.7s 浮层逻辑：仅限包含「...」的候选条目
+    let targetWithEllipsis = e && e.target ? e.target.closest('[data-has-ellipsis="true"]') : null;
+    if (!targetWithEllipsis && e && e.target) {
+        // 若标题未被视窗算法截断，但因搜索面板宽度收窄触发了 CSS 文本省略截断，仅在悬停该项时按需检测一次
+        const item = e.target.closest('.search-result-item, .canvas-bookmark-group-child-item');
+        if (item) {
+            const titleEl = item.querySelector('.search-result-bookmark-title-text, .search-result-domain-title-text, .canvas-bookmark-group-child-title, .search-result-title');
+            if (titleEl && titleEl.scrollWidth > titleEl.clientWidth + 2) {
+                const rawTitle = titleEl.getAttribute('data-raw-title') || item.getAttribute('data-full-title') || titleEl.textContent || '';
+                if (rawTitle) {
+                    item.setAttribute('data-has-ellipsis', 'true');
+                    item.setAttribute('data-full-title', rawTitle);
+                    targetWithEllipsis = item;
+                }
+            }
+        }
+    }
+
+    if (targetWithEllipsis) {
+        const fullTitle = targetWithEllipsis.getAttribute('data-full-title');
+        if (fullTitle) {
+            scheduleSearchTitleTooltip(targetWithEllipsis, fullTitle);
+        } else {
+            hideSearchTitleTooltip();
+        }
+    } else {
+        hideSearchTitleTooltip();
+    }
 
     const now = Date.now();
     if (now - lastSearchResultKeyboardNavTs < SEARCH_RESULT_HOVER_SUPPRESS_MS_AFTER_NAV) return;
@@ -1602,6 +2300,23 @@ function handleSearchResultsPanelMouseOver(e) {
     const idx = parseInt(item.getAttribute('data-index') || '-1', 10);
     if (Number.isNaN(idx)) return;
     updateSearchResultSelection(idx, { ensureVisible: false });
+}
+
+/**
+ * 鼠标移出搜索面板候选条目
+ */
+function handleSearchResultsPanelMouseOut(e) {
+    if (currentTempSectionBtnTarget) {
+        const related = e && e.relatedTarget ? e.relatedTarget : null;
+        if (!related || !currentTempSectionBtnTarget.contains(related)) {
+            hideTempSectionBubble();
+        }
+    }
+    if (!currentTooltipTarget) return;
+    const related = e && e.relatedTarget ? e.relatedTarget : null;
+    if (!related || !currentTooltipTarget.contains(related)) {
+        hideSearchTitleTooltip();
+    }
 }
 
 /**
@@ -2265,12 +2980,30 @@ function initSearchEvents() {
     if (searchResultsPanel && !searchResultsPanel.hasAttribute('data-search-bound')) {
         searchResultsPanel.addEventListener('click', handleSearchResultsPanelClick);
         searchResultsPanel.addEventListener('mouseover', handleSearchResultsPanelMouseOver);
+        searchResultsPanel.addEventListener('mouseout', handleSearchResultsPanelMouseOut);
+        searchResultsPanel.addEventListener('focusin', (e) => {
+            const tempBtn = e && e.target ? e.target.closest('.canvas-bookmark-to-temp-btn') : null;
+            if (tempBtn) scheduleTempSectionBubble(tempBtn);
+        });
+        searchResultsPanel.addEventListener('focusout', (e) => {
+            if (currentTempSectionBtnTarget) hideTempSectionBubble();
+        });
+        searchResultsPanel.addEventListener('mousedown', () => {
+            if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
+            if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
+        });
+        searchResultsPanel.addEventListener('scroll', () => {
+            if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
+            if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
+        }, { passive: true });
         searchResultsPanel.setAttribute('data-search-bound', 'true');
     }
 
     if (searchResultsPanel && !searchResultsPanel.hasAttribute('data-search-wheel-bound')) {
         searchResultsPanel.addEventListener('wheel', () => {
             lastSearchResultWheelTs = Date.now();
+            if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
+            if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
         }, { passive: true });
         searchResultsPanel.setAttribute('data-search-wheel-bound', 'true');
     }
@@ -2971,6 +3704,9 @@ async function setSearchMode(modeKey, options = {}) {
     searchUiState.showFullscreenDescriptionOthers = false;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
     renderSearchModeUI();
+    if (searchUiState.isMenuOpen) {
+        renderSearchModeMenu();
+    }
 
     // 确保异步加载目标模式的分片索引，加载完成后再触发搜索渲染，避免回退到同步内存构建
     if (typeof ensureIndexForModeLoaded === 'function' && !(options && options.skipIndexLoad === true)) {
@@ -3042,13 +3778,13 @@ async function setSearchMode(modeKey, options = {}) {
             }
         } catch (_) { }
 
-        // Refresh search if there is query (bookmark mode is skipped as it handles this async via ensurePermTagsLoaded)
+        // Refresh search if there is query
         let suppressSearchRerender = false;
         try {
             const pendingCount = Number(window.__canvasSearchSuppressFullscreenAutoModeCounter || 0);
             suppressSearchRerender = Number.isFinite(pendingCount) && pendingCount > 0;
         } catch (_) { }
-        if (input.value.trim() && modeKey !== 'bookmark' && !suppressSearchRerender) {
+        if (input.value.trim() && !suppressSearchRerender) {
             const q = input.value.trim();
             const isCanvas = getCurrentViewSafe() === 'canvas';
 
@@ -3534,41 +4270,18 @@ function initSearchModeUI() {
     const trigger = document.getElementById('searchModeTrigger');
     if (trigger && !trigger.hasAttribute('data-mode-ui-bound')) {
         trigger.setAttribute('data-mode-ui-bound', 'true');
-        let pointerInteraction = false;
-        let pointerInteractionResetTimer = null;
-        const markPointerInteraction = () => {
-            pointerInteraction = true;
-            if (pointerInteractionResetTimer) clearTimeout(pointerInteractionResetTimer);
-            pointerInteractionResetTimer = setTimeout(() => {
-                pointerInteraction = false;
-                pointerInteractionResetTimer = null;
-            }, 1000);
-        };
-        const clearPointerInteractionSoon = () => {
-            if (pointerInteractionResetTimer) clearTimeout(pointerInteractionResetTimer);
-            pointerInteractionResetTimer = setTimeout(() => {
-                pointerInteraction = false;
-                pointerInteractionResetTimer = null;
-            }, 0);
-        };
 
-        // A pointer click focuses the button before its click handler runs. Keep
-        // that focus transition from opening the menu before click toggles it.
-        trigger.addEventListener('pointerdown', markPointerInteraction);
-        trigger.addEventListener('mousedown', markPointerInteraction);
-        trigger.addEventListener('pointercancel', () => { pointerInteraction = false; });
-
-        // When users move focus to the left mode trigger (ArrowLeft),
-        // show the dedicated mode menu (NOT the empty-query suggestions panel).
+        // When users move focus to the left mode trigger via keyboard (e.g. Tab),
+        // show the dedicated mode menu. Pointer clicks are handled exclusively by click listener.
         trigger.addEventListener('focus', () => {
             try {
                 if (getCurrentViewSafe() !== 'canvas') return;
-                if (pointerInteraction) {
-                    // Consume the pointer-origin marker here so a missed
-                    // pointerup cannot affect a later keyboard focus.
-                    pointerInteraction = false;
-                    return;
-                }
+                let isKeyboard = false;
+                try {
+                    isKeyboard = trigger.matches(':focus-visible');
+                } catch (_) { }
+                if (!isKeyboard) return;
+
                 const input = document.getElementById('searchInput');
                 const hasQuery = !!(input && String(input.value || '').trim());
                 toggleSearchHelpMenu(false);
@@ -3594,15 +4307,11 @@ function initSearchModeUI() {
         trigger.addEventListener('click', (e) => {
             if (getCurrentViewSafe() !== 'canvas') return;
             e.stopPropagation();
-            clearPointerInteractionSoon();
 
             if (isSidePanelModeInSearch()) {
                 const input = document.getElementById('searchInput');
                 if (!isSidePanelSearchExpanded()) {
                     setSidePanelSearchExpanded(true);
-                    try {
-                        if (input) requestAnimationFrame(() => input.focus());
-                    } catch (_) { }
                     return;
                 }
             }
@@ -3617,12 +4326,6 @@ function initSearchModeUI() {
                 toggleSearchHelpMenu(false);
                 toggleSearchModeMenu(true);
             }
-
-            // Keep typing flow: return focus to input
-            try {
-                const input = document.getElementById('searchInput');
-                if (input) requestAnimationFrame(() => input.focus());
-            } catch (_) { }
         });
 
         // [Fixed] Allow cycling mode even when button has focus
@@ -3677,7 +4380,8 @@ function initSearchModeUI() {
 
     const menu = document.getElementById('searchModeMenu');
     if (menu) {
-        menu.addEventListener('mousedown', (e) => {
+        let lastModeSelectTs = 0;
+        const handleModeSelectAction = (e) => {
             // Only handle mode selection in Canvas/mode menu
             if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
 
@@ -3693,14 +4397,39 @@ function initSearchModeUI() {
             if (item) {
                 e.preventDefault();
                 e.stopPropagation();
+                const now = Date.now();
+                if (now - lastModeSelectTs < 120) return;
+                lastModeSelectTs = now;
+
                 const modeKey = item.getAttribute('data-mode-key');
                 if (modeKey) {
+                    const input = document.getElementById('searchInput');
+                    const hasQuery = !!(input && String(input.value || '').trim());
+
+                    if (hasQuery) {
+                        toggleSearchModeMenu(false);
+                    }
+
                     setSearchMode(modeKey, { source: 'user' });
-                    // Hide menu immediately on manual selection
-                    toggleSearchModeMenu(false);
+
+                    if (hasQuery) {
+                        try {
+                            if (input) {
+                                input.focus();
+                                const len = input.value.length;
+                                input.setSelectionRange(len, len);
+                            }
+                        } catch (_) { }
+                    } else {
+                        // Keep menu open and update active highlight so users can freely switch modes without reopening when input is empty
+                        renderSearchModeMenu();
+                    }
                 }
             }
-        });
+        };
+
+        menu.addEventListener('mousedown', handleModeSelectAction);
+        menu.addEventListener('click', handleModeSelectAction);
     }
 
     renderSearchModeUI();
@@ -6080,6 +6809,345 @@ function generateSearchSnippet(text, query) {
     return `${prefix}${highlightedSnippet}${suffix}`;
 }
 
+/**
+ * 获取单个字符的视觉宽度权重（半角 ASCII、数字、半角符号等为 1，中文及全角字符为 2）
+ */
+function getSearchTitleCharVisualWidth(ch) {
+    if (!ch) return 0;
+    const code = ch.charCodeAt(0);
+    if (code <= 0x007f || (code >= 0xff61 && code <= 0xffdc)) {
+        return 1;
+    }
+    return 2;
+}
+
+/**
+ * 获取字符串的视觉宽度总和
+ */
+function getSearchTitleStringVisualWidth(str) {
+    if (!str) return 0;
+    let w = 0;
+    for (let i = 0; i < str.length; i++) {
+        w += getSearchTitleCharVisualWidth(str[i]);
+    }
+    return w;
+}
+
+/**
+ * 从指定下标向前（往左）最多走 maxVisualWidth 视觉宽度，返回起始下标及已用宽度
+ */
+function walkBackwardSearchTitleByVisualWidth(str, fromIndex, maxVisualWidth) {
+    let currentWidth = 0;
+    let idx = fromIndex;
+    while (idx > 0) {
+        const w = getSearchTitleCharVisualWidth(str[idx - 1]);
+        if (currentWidth + w > maxVisualWidth) break;
+        currentWidth += w;
+        idx--;
+    }
+    return { index: idx, width: currentWidth };
+}
+
+/**
+ * 从指定下标向后（往右）最多走 maxVisualWidth 视觉宽度，返回截止下标及已用宽度
+ */
+function walkForwardSearchTitleByVisualWidth(str, fromIndex, maxVisualWidth) {
+    let currentWidth = 0;
+    let idx = fromIndex;
+    while (idx < str.length) {
+        const w = getSearchTitleCharVisualWidth(str[idx]);
+        if (currentWidth + w > maxVisualWidth) break;
+        currentWidth += w;
+        idx++;
+    }
+    return { index: idx, width: currentWidth };
+}
+
+/**
+ * 计算搜索候选标题的单行视觉宽度预算
+ * 针对书签模式/画布模式以及面板宽度动态调整，确保单行文字充分利用行宽
+ * @param {Object} [options]
+ * @param {string} [options.mode] - 'bookmark' | 'canvas' | 'domain'
+ * @param {boolean} [options.isBookmarkMode] - 是否为书签搜索模式
+ * @param {boolean} [options.hasRightActions] - 右侧是否有操作按钮（如多处匹配的“X处”按钮）
+ * @param {boolean} [options.isChild] - 是否为子项
+ * @param {number} [options.containerWidth] - 自定义容器宽度
+ * @returns {number} 视觉宽度预算（单位）
+ */
+function getSearchTitleVisualBudget(options = {}) {
+    const isBookmark = Boolean(
+        options.isBookmarkMode ||
+        options.mode === 'bookmark' ||
+        (typeof searchUiState !== 'undefined' && (searchUiState.mode === 'bookmark' || searchUiState.mode === 'tag'))
+    );
+    let containerWidth = Number(options.containerWidth || 0);
+
+    if (!containerWidth || containerWidth <= 0) {
+        try {
+            const panel = typeof getSearchResultsPanel === 'function' ? getSearchResultsPanel() : document.getElementById('searchResultsPanel');
+            const searchContainer = document.querySelector('.search-container');
+            if (panel && panel.clientWidth > 100) {
+                containerWidth = panel.clientWidth;
+            } else if (searchContainer && searchContainer.clientWidth > 100) {
+                containerWidth = searchContainer.clientWidth;
+            }
+        } catch (_) {}
+    }
+
+    if (!containerWidth || containerWidth <= 0) {
+        containerWidth = 420; // 默认常规基准宽度
+    }
+
+    // 基础内边距 (左右各 12px = 24px) + 滚动条/容器边框安全边距 (约 14px)
+    let availablePx = containerWidth - 38;
+
+    if (isBookmark) {
+        // 书签模式：左侧图标 18px + 6px 间距 = 24px (子项为 16px序号 + 13px图标 + 10px间距 = 39px)
+        availablePx -= (options.isChild ? 39 : 24);
+        // 如果右侧有“X处”聚合展开按钮等常驻操作控件
+        if (options.hasRightActions) {
+            availablePx -= 68;
+        }
+        // 如果右侧有类型徽章（如 bookmark-item 默认的 [书签]/[文件夹] 徽章，约 48px）
+        if (options.hasBadge) {
+            availablePx -= 48;
+        }
+        // 书签标题字号 12px，粗体 600。1个汉字(2单位)约 12.5px~13px，半角字符(1单位)约 6.5px~7.5px。
+        // 每视觉单位实测约 6.5px。严谨计算，留出右侧安全边界，确保末尾关键词绝不被 CSS 省略截断
+        const budget = Math.max(28, Math.floor(availablePx / 6.5));
+        return budget;
+    } else {
+        // 画布搜索模式：左侧有序号标签 (约 35-50px) + 右侧有类型徽章 (约 45-60px) + 间距 (约 16px)
+        availablePx -= 115;
+        const budget = Math.max(35, Math.floor(availablePx / 6.5));
+        return budget;
+    }
+}
+
+/**
+ * 格式化搜索候选标题（智能滑动视窗与关键词聚焦，充分利用单行展示空间）
+ * 规则：
+ * 1. 动态计算视觉宽度预算，书签模式下单行充分延展，彻底避免单行留白空间浪费
+ * 2. 标题超长且关键词偏后时，格式化为 「...」「丰富前置语境」「关键词」「后置语境」
+ * 3. 书签模式下关键词靠前（前 6 个汉字 / 12 视觉单位内）或未在标题中时，由 CSS text-overflow: ellipsis 占满整行精确截断，绝不提前打「...」留下大段空白
+ * 4. 关键词在中间或末尾时，以动态行宽预算充分回填前置/后置语境占满行宽
+ * 5. 产生截断的候选条目在鼠标悬停 0.7s 后出现完整标题浮层
+ * @param {string} rawTitle - 原始标题
+ * @param {string} queryText - 搜索查询文本
+ * @param {Object} [options] - 配置项 (isBookmarkMode, hasRightActions, isChild, targetVisualWidth 等)
+ * @returns {{ html: string, isTruncated: boolean, fullTitle: string }}
+ */
+function formatSearchTitleWithWindow(rawTitle, queryText, options = {}) {
+    const isZh = (typeof getCurrentLangSafe === 'function' ? getCurrentLangSafe() : 'zh_CN') === 'zh_CN';
+    const fallbackTitle = isZh ? '（无标题）' : '(Untitled)';
+    const fullTitle = String(rawTitle || '').trim() || fallbackTitle;
+    const q = String(queryText || '').trim();
+    const isBookmark = Boolean(
+        options.isBookmarkMode ||
+        options.mode === 'bookmark' ||
+        (typeof searchUiState !== 'undefined' && (searchUiState.mode === 'bookmark' || searchUiState.mode === 'tag'))
+    );
+
+    // 动态计算行宽视觉预算：充分利用搜索候选面板单行宽度
+    const targetBudget = (typeof options.targetVisualWidth === 'number' && options.targetVisualWidth > 0)
+        ? options.targetVisualWidth
+        : getSearchTitleVisualBudget(options);
+
+    const totalVisualWidth = getSearchTitleStringVisualWidth(fullTitle);
+
+    if (!q) {
+        if (isBookmark) {
+            // 书签模式无搜索词时，直接输出完整标题，依赖 CSS text-overflow: ellipsis 占满整行精确截断，绝不在行中间过早打「...」
+            return {
+                html: escapeHtml(fullTitle),
+                isTruncated: totalVisualWidth > targetBudget,
+                fullTitle
+            };
+        }
+        if (totalVisualWidth > targetBudget) {
+            const fwd = walkForwardSearchTitleByVisualWidth(fullTitle, 0, targetBudget - 3);
+            return {
+                html: escapeHtml(fullTitle.substring(0, fwd.index)) + '...',
+                isTruncated: true,
+                fullTitle
+            };
+        }
+        return {
+            html: escapeHtml(fullTitle),
+            isTruncated: false,
+            fullTitle
+        };
+    }
+
+    const lowerTitle = fullTitle.toLowerCase();
+    const tokens = q.toLowerCase().split(/\s+/).map(t => t.trim()).filter(Boolean).sort((a, b) => b.length - a.length);
+
+    // 查找最早匹配的 token 位置
+    let matchStart = -1;
+    let matchedTokenLen = 0;
+    for (const token of tokens) {
+        const idx = lowerTitle.indexOf(token);
+        if (idx !== -1) {
+            if (matchStart === -1 || idx < matchStart) {
+                matchStart = idx;
+                matchedTokenLen = token.length;
+            }
+        }
+    }
+
+    // 1. 标题本身未命中搜索词（可能因 URL、备注、标签、说明匹配）
+    if (matchStart === -1) {
+        if (isBookmark) {
+            // 书签模式下标题未命中关键词时，从开头完整渲染，由 CSS 填满行宽至边缘省略
+            return {
+                html: escapeHtml(fullTitle),
+                isTruncated: totalVisualWidth > targetBudget,
+                fullTitle
+            };
+        }
+        if (totalVisualWidth > targetBudget) {
+            const fwd = walkForwardSearchTitleByVisualWidth(fullTitle, 0, targetBudget - 3);
+            return {
+                html: escapeHtml(fullTitle.substring(0, fwd.index)) + '...',
+                isTruncated: true,
+                fullTitle
+            };
+        }
+        return {
+            html: escapeHtml(fullTitle),
+            isTruncated: false,
+            fullTitle
+        };
+    }
+
+    // 2. 标题命中搜索词，且总视觉宽度未超过单行限制
+    if (totalVisualWidth <= targetBudget) {
+        return {
+            html: highlightSearchKeywords(fullTitle, q),
+            isTruncated: false,
+            fullTitle
+        };
+    }
+
+    // 扩展 matchEnd，若紧挨着还有匹配词一并纳入核心视窗
+    let matchEnd = matchStart + matchedTokenLen;
+    for (const token of tokens) {
+        const idx = lowerTitle.indexOf(token, matchStart);
+        if (idx !== -1 && idx <= matchEnd + 10) {
+            matchEnd = Math.max(matchEnd, idx + token.length);
+        }
+    }
+
+    const matchEndVisualWidth = getSearchTitleStringVisualWidth(fullTitle.substring(0, matchEnd));
+    const postW = getSearchTitleStringVisualWidth(fullTitle.substring(matchEnd));
+
+    let start = 0;
+    let end = fullTitle.length;
+    let prefix = '';
+    let suffix = '';
+
+    // 1. 如果从标题开头到关键词末尾的视觉宽度能够在当前单行内容纳（保留至少 4 单位缓冲），
+    // 必须从开头 start = 0 起始！绝不在前部打无意义的「...」，彻底消除“明明前面只有几个字却用...隐藏”的问题
+    if (matchEndVisualWidth <= targetBudget - 4) {
+        start = 0;
+        prefix = '';
+        if (isBookmark) {
+            // 书签模式下从开头起始时，直接输出完整安全文本，由 CSS text-overflow: ellipsis 填满整行至边缘截断
+            const safeMaxLen = walkForwardSearchTitleByVisualWidth(fullTitle, 0, targetBudget + 15).index;
+            const snippetText = fullTitle.substring(0, safeMaxLen);
+            const isTruncated = safeMaxLen < fullTitle.length || totalVisualWidth > targetBudget;
+            return {
+                html: highlightSearchKeywords(snippetText, q),
+                isTruncated,
+                fullTitle
+            };
+        }
+        const budgetForEnd = targetBudget - 3;
+        const fwd = walkForwardSearchTitleByVisualWidth(fullTitle, 0, budgetForEnd);
+        end = fwd.index;
+        suffix = (end < fullTitle.length) ? '...' : '';
+    } else if (postW <= 6 || matchEndVisualWidth + postW <= targetBudget + 4) {
+        // 2. 关键词靠后/居末：截断到末尾，绝对不加后置「...」，充分向前回填前置语境填满行空间
+        end = fullTitle.length;
+        suffix = '';
+        const budgetForStart = targetBudget - 3;
+        const bwd = walkBackwardSearchTitleByVisualWidth(fullTitle, end, budgetForStart);
+        start = bwd.index;
+        if (start > matchStart) {
+            start = Math.max(0, matchStart);
+        }
+
+        // 【黄金规则】：若前方被截掉的内容只有 1~3 个字（视觉宽度 <= 6 单位），绝不加「...」，直接从开头 0 完整展示！
+        // 因为「...」本身就占 3 单位，隐藏 1-2 个字却打上「...」毫无意义反而浪费行宽
+        if (getSearchTitleStringVisualWidth(fullTitle.substring(0, start)) <= 6) {
+            start = 0;
+            prefix = '';
+        } else {
+            prefix = '...';
+        }
+    } else {
+        // 3. 关键词在深层中间：前后均有文字，两端添加「...」，并将剩余行空间按比例分配
+        const totalAvailable = targetBudget - 6;
+        const matchW = getSearchTitleStringVisualWidth(fullTitle.substring(matchStart, matchEnd));
+        if (matchW >= totalAvailable) {
+            start = matchStart;
+            const fwd = walkForwardSearchTitleByVisualWidth(fullTitle, start, totalAvailable);
+            end = fwd.index;
+            prefix = '...';
+            suffix = (end < fullTitle.length) ? '...' : '';
+        } else {
+            const remainingBudget = totalAvailable - matchW;
+            const minPostBuffer = Math.min(6, postW);
+            const desiredPreBudget = Math.max(0, Math.min(
+                Math.round(remainingBudget * 0.45),
+                remainingBudget - minPostBuffer
+            ));
+
+            const bwd = walkBackwardSearchTitleByVisualWidth(fullTitle, matchStart, desiredPreBudget);
+            start = bwd.index;
+
+            // 【黄金规则】：前置如果极短（<= 6 视觉单位），绝不加「...」，直接从开头 0 完整展示！
+            if (getSearchTitleStringVisualWidth(fullTitle.substring(0, start)) <= 6) {
+                start = 0;
+                prefix = '';
+            } else {
+                prefix = '...';
+            }
+
+            const actualPreW = getSearchTitleStringVisualWidth(fullTitle.substring(start, matchStart));
+            const prefixCost = prefix ? 3 : 0;
+            const postBudget = targetBudget - prefixCost - actualPreW - matchW - 3;
+
+            const fwd = walkForwardSearchTitleByVisualWidth(fullTitle, matchEnd, postBudget);
+            end = fwd.index;
+            suffix = (end < fullTitle.length) ? '...' : '';
+
+            // 若后部到末尾，省下后缀「...」空间并反向回填给前置语境
+            if (end === fullTitle.length) {
+                suffix = '';
+                const leftover = (postBudget - fwd.width) + 3;
+                const extraBwd = walkBackwardSearchTitleByVisualWidth(fullTitle, start, leftover);
+                start = extraBwd.index;
+                if (start > matchStart) start = Math.max(0, matchStart);
+                if (getSearchTitleStringVisualWidth(fullTitle.substring(0, start)) <= 6) {
+                    start = 0;
+                    prefix = '';
+                }
+            }
+        }
+    }
+
+    const snippetText = fullTitle.substring(start, end);
+    const html = `${prefix}${highlightSearchKeywords(snippetText, q)}${suffix || '\u200B'}`;
+    const isTruncated = Boolean(prefix || suffix || start > 0 || end < fullTitle.length);
+
+    return {
+        html,
+        isTruncated,
+        fullTitle
+    };
+}
+
 function createCanvasSearchQueryContext(query, mode = '') {
     const rawQuery = String(query || '').trim();
     const lowerQuery = rawQuery.toLowerCase();
@@ -8072,7 +9140,7 @@ function renderCanvasSearchSuggestions() {
         const title = isZh ? mode.label : mode.labelEn;
         const desc = isZh ? mode.desc : mode.descEn;
         return `
-            <div class="search-mode-menu-item ${isActive ? 'active' : ''} canvas-suggestion-mode-item" data-mode-key="${escapeHtml(mode.key)}" style="border-bottom:1px solid var(--border-color-light); border-radius:0;">
+            <div class="search-mode-menu-item ${isActive ? 'active' : ''} canvas-suggestion-mode-item" data-mode-key="${escapeHtml(mode.key)}" style="border-bottom:1px solid var(--search-candidate-divider, var(--border-color-light, rgba(0, 0, 0, 0.18))); border-radius:0;">
                 <div class="mode-icon"><i class="fas ${escapeHtml(mode.icon)} ${escapeHtml(mode.color)}"></i></div>
                 <div class="mode-info">
                     <div class="mode-name">${escapeHtml(title)}</div>
@@ -8107,7 +9175,7 @@ function renderCanvasSearchSuggestions() {
     const hintHelp = getSearchHintHelpContent();
 
     panel.innerHTML = `
-        <div class="search-suggestions-header" style="position:relative; padding:6px 10px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:flex-end; gap:10px;">
+        <div class="search-suggestions-header" style="position:relative; padding:6px 10px; border-bottom:1px solid var(--search-candidate-divider, var(--border-color)); display:flex; align-items:center; justify-content:flex-end; gap:10px;">
             <div class="search-empty-suggestions-hint" style="position:absolute; left:16px; top:50%; transform:translateY(-50%);">
                 <span class="search-hint-icon" style="display:inline-flex; position:relative; top:-1px;">${arrowSvg}</span>
                 <span class="search-hint-text">${escapeHtml(hintText)}</span>
@@ -8145,10 +9213,8 @@ function renderCanvasSearchSuggestions() {
                     
                     // Do not automatically collapse the candidate panel, keep it open and re-render suggestions
                     try {
-                        if (shouldShowEmptyQuerySuggestions()) {
-                            renderCanvasSearchSuggestions();
-                            showSearchResultsPanel();
-                        }
+                        renderCanvasSearchSuggestions();
+                        showSearchResultsPanel();
                     } catch (_) { }
 
                     // Explicitly focus input to allow direct typing
@@ -8160,6 +9226,7 @@ function renderCanvasSearchSuggestions() {
             });
         });
         bindSearchHintHelpButton(panel.querySelector('.search-hint-help-btn'), hintHelp.html);
+        ensureSearchPanelResizeHandle(panel);
     } catch (_) { }
 
 }
@@ -8618,6 +9685,44 @@ async function buildDomainPayloadBySubdomain(items, domainKey, isZh) {
     return payloadItems;
 }
 
+let searchInfiniteScrollObserver = null;
+
+function clearSearchPanelAutoInfiniteScroll() {
+    if (searchInfiniteScrollObserver) {
+        searchInfiniteScrollObserver.disconnect();
+        searchInfiniteScrollObserver = null;
+    }
+}
+
+function setupSearchPanelAutoInfiniteScroll(panel) {
+    if (!panel) return;
+    clearSearchPanelAutoInfiniteScroll();
+
+    const loadMoreRow = panel.querySelector('.search-results-load-more-row');
+    if (!loadMoreRow) return;
+
+    // 当已展示条数达到 100 条（5 页）以上时，暂停自动滚动触发，保持手动点击按钮，防止超大列表无休止膨胀
+    if (Number(searchUiState.resultVisibleCount || 0) >= 100) return;
+
+    if (typeof IntersectionObserver === 'function') {
+        searchInfiniteScrollObserver = new IntersectionObserver((entries) => {
+            const entry = entries && entries[0];
+            if (entry && entry.isIntersecting) {
+                if (typeof isAppendingSearchPage !== 'undefined' && isAppendingSearchPage) return;
+                clearSearchPanelAutoInfiniteScroll();
+                if (typeof appendCanvasSearchResultsPage === 'function') {
+                    appendCanvasSearchResultsPage();
+                }
+            }
+        }, {
+            root: panel,
+            rootMargin: '60px 0px',
+            threshold: 0
+        });
+        searchInfiniteScrollObserver.observe(loadMoreRow);
+    }
+}
+
 /**
  * 渲染画布搜索结果
  */
@@ -8720,18 +9825,6 @@ function renderCanvasSearchResults(results, options = {}) {
         } else if (effectiveFilter === 'group') {
             displayResults = sourceResults.filter(r => r && r.type === 'group');
         }
-    }
-
-    // [Tweak] Add style block for result item border
-    // Ensure .search-result-item has stronger border
-    if (!document.getElementById('search-result-tweaks')) {
-        const style = document.createElement('style');
-        style.id = 'search-result-tweaks';
-        style.textContent = `
-            .search-result-item { border-bottom: 1px solid rgba(128, 128, 128, 0.15) !important; }
-            .search-result-item:last-child { border-bottom: none !important; }
-        `;
-        document.head.appendChild(style);
     }
 
     const renderQuery = String(options.query || '');
@@ -8880,9 +9973,14 @@ function renderCanvasSearchResults(results, options = {}) {
     ].join('|');
     const appendPage = options && options.append === true;
     const prevVisibleCount = Number(searchUiState.resultVisibleCount || 0);
-    const nextVisibleCount = appendPage && searchUiState.resultPagingKey === pagingKey
-        ? Math.min(displayResults.length, prevVisibleCount + pageSize)
-        : Math.min(displayResults.length, pageSize);
+    let nextVisibleCount;
+    if (appendPage && searchUiState.resultPagingKey === pagingKey) {
+        nextVisibleCount = Math.min(displayResults.length, prevVisibleCount + pageSize);
+    } else if (options && options.preserveVisibleCount && searchUiState.resultPagingKey === pagingKey && prevVisibleCount > pageSize) {
+        nextVisibleCount = Math.min(displayResults.length, prevVisibleCount);
+    } else {
+        nextVisibleCount = Math.min(displayResults.length, pageSize);
+    }
     const visibleResults = displayResults.slice(0, nextVisibleCount);
     const hasMoreResults = nextVisibleCount < displayResults.length;
 
@@ -9331,7 +10429,12 @@ function renderCanvasSearchResults(results, options = {}) {
         if (!child) return '';
         const groupId = String(groupItem && groupItem.id || '').trim();
         const childKey = String(child.locationKey || getCanvasBookmarkLocationKeyForSearch(child));
-        const titleHtml = markQueryInText(child.title || (isZh ? '（无标题）' : '(Untitled)'));
+        const rawChildTitle = child.title || (isZh ? '（无标题）' : '(Untitled)');
+        const formattedChild = formatSearchTitleWithWindow(rawChildTitle, queryText, { isBookmarkMode: true, isChild: true });
+        const titleHtml = formattedChild.html;
+        const childTruncatedAttr = formattedChild.isTruncated
+            ? ` data-has-ellipsis="true" data-full-title="${escapeHtml(formattedChild.fullTitle)}"`
+            : '';
         const rootLabel = isZh ? '根目录' : 'Root';
         const parentPath = getBookmarkItemParentPathForSearchScope(child, fullscreenScope);
         const pathList = parentPath ? [parentPath] : [];
@@ -9389,11 +10492,11 @@ function renderCanvasSearchResults(results, options = {}) {
             <div class="canvas-bookmark-group-child-item ${child.nodeType === 'folder' ? 'is-folder' : 'is-bookmark'}" role="button" tabindex="0"
                 data-bookmark-group-id="${escapeHtml(groupId)}"
                 data-bookmark-child-id="${escapeHtml(child.id || '')}"
-                data-bookmark-child-key="${escapeHtml(childKey)}">
+                data-bookmark-child-key="${escapeHtml(childKey)}"${childTruncatedAttr}>
                 <div class="canvas-bookmark-group-child-topline">
                     <span class="canvas-bookmark-group-child-index">${childIndex + 1}</span>
                     ${renderBookmarkChildIconHtml(child)}
-                    <span class="canvas-bookmark-group-child-title">${titleHtml}</span>
+                    <span class="canvas-bookmark-group-child-title" data-raw-title="${escapeHtml(formattedChild.fullTitle)}">${titleHtml}</span>
                     ${childNoteMarkerHtml ? `<span class="canvas-bookmark-group-child-note">${childNoteMarkerHtml}</span>` : ''}
                 </div>
                 <div class="canvas-bookmark-group-child-meta">
@@ -9466,7 +10569,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
                 const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
                 const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
-                return `<button class="canvas-bookmark-type-btn${compactBookmarkToolbar ? ' canvas-bookmark-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
+                return `<button class="canvas-bookmark-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
                         <i class="fas ${icon}" style="color:${color};"></i>
                         <span>${count}</span>
                     </button>`;
@@ -9497,13 +10600,13 @@ function renderCanvasSearchResults(results, options = {}) {
                 : '';
 
             const visibleCount = displayResults.filter(r => r && (r.type === 'bookmark-group' || r.type === 'bookmark-item')).length;
-            const exportLabel = isZh
-                ? `生成临时栏目${visibleCount ? ` (${visibleCount})` : ''}`
-                : `To Temp${visibleCount ? ` (${visibleCount})` : ''}`;
+            const exportAriaLabel = isZh
+                ? `生成特殊临时栏目${visibleCount ? ` (${visibleCount}项)` : ''}`
+                : `Create special temporary section${visibleCount ? ` (${visibleCount} items)` : ''}`;
 
-            const showExportBtn = (active !== 'domain') && (!compactBookmarkToolbar || isBrowseSecondary);
+            const showExportBtn = (active !== 'domain');
             const exportBtnHtml = showExportBtn
-                ? `<button class="canvas-bookmark-to-temp-btn${compactBookmarkToolbar ? ' canvas-bookmark-to-temp-btn-compact' : ''}" type="button"${compactBookmarkToolbar ? ' style="padding:5px 8px; font-size:11px; border-radius:7px;"' : ''}>${escapeHtml(exportLabel)}</button>`
+                ? `<button class="canvas-bookmark-to-temp-btn${compactBookmarkToolbar ? ' canvas-bookmark-to-temp-btn-compact' : ''}" type="button" data-visible-count="${visibleCount}" aria-label="${escapeHtml(exportAriaLabel)}"><span class="canvas-dir-icon-badge canvas-dir-icon-badge-special" aria-hidden="true">✦</span></button>`
                 : '';
             const justifyStyle = showExportBtn ? 'space-between' : 'flex-start';
             const toolbarGap = compactBookmarkToolbar ? 6 : 8;
@@ -9533,7 +10636,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
                 const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
                 const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
-                return `<button class="canvas-structure-type-btn${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
+                return `<button class="canvas-structure-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
                         <i class="fas ${icon}" style="color:${color};"></i>
                         <span>${escapeHtml(label)}</span>
                         <span>${count}</span>
@@ -9564,7 +10667,7 @@ function renderCanvasSearchResults(results, options = {}) {
         if (othersCount > 0 && !showingOthers) {
             const otherBtnLabel = isZh ? '其他' : 'Other';
 
-            html += `<div class="canvas-description-fullscreen-header" style="display:flex; align-items:center; justify-content:flex-start; padding:6px 8px 6px 8px; border-bottom:1px solid rgba(128, 128, 128, 0.15);">
+            html += `<div class="canvas-description-fullscreen-header" style="display:flex; align-items:center; justify-content:flex-start; padding:6px 8px 6px 8px; border-bottom:1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18));">
                 <button class="canvas-description-others-btn" type="button" style="border:1px solid var(--border-color); background:var(--bg-secondary); padding:4px 10px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; font-weight:600; white-space:nowrap;">
                     ${escapeHtml(otherBtnLabel)} (${othersCount})
                 </button>
@@ -9572,12 +10675,18 @@ function renderCanvasSearchResults(results, options = {}) {
         }
     }
 
-    visibleResults.forEach((item, index) => {
+    const itemsToRender = appendPage ? displayResults.slice(prevVisibleCount, nextVisibleCount) : visibleResults;
+    const startIndex = appendPage ? prevVisibleCount : 0;
+    let itemsHtml = '';
+
+    itemsToRender.forEach((item, localIdx) => {
+        const index = startIndex + localIdx;
         const isSelected = index === searchUiState.selectedIndex ? 'selected' : '';
         let title = '';
         let badge = '';
         let indexLabel = '';
         let descHtml = '';
+        let extraItemAttrs = '';
 
         const hideAggregateTags = (item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || '')))
             || (item.type === 'domain-group' && item.isExpanded === true);
@@ -9594,39 +10703,65 @@ function renderCanvasSearchResults(results, options = {}) {
             `<span class="search-result-badge ${extraClass}" style="${colorStyle} border:1px solid ${itemColor}30;">${escapeHtml(text)}</span>`;
 
         switch (item.type) {
-            case 'group-result':
+            case 'group-result': {
                 // Group Aggregation Display
                 indexLabel = `<span class="search-result-index group" style="background:rgba(139, 92, 246, 0.15);color:#7c3aed;border-color:rgba(139, 92, 246, 0.3);width:auto;padding:0 6px;">GROUP</span>`;
-                title = escapeHtml(item.title);
+                const formatted = formatSearchTitleWithWindow(item.title, searchUiState.query);
+                title = formatted.html;
+                if (formatted.isTruncated) {
+                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                }
                 badge = `<span class="search-result-badge container" style="cursor:pointer;" title="${isZh ? '点击高亮全部' : 'Click to highlight all'}">${isZh ? '聚合' : 'Agg'}</span>`;
                 break;
+            }
 
-            case 'temp-section':
+            case 'temp-section': {
                 // 1. 标签：A-1
                 if (item.label) {
                     // Use item color for the label
                     indexLabel += makeColoredSpan(item.label, 'group');
                 }
                 // [Modified] 按照用户需求，临时栏目的来源序号（如 #A 等）不再显示，直接屏蔽不渲染
-
-                title = escapeHtml(item.title || (isZh ? '临时栏目' : 'Temp Section'));
+                const rawTitle = item.title || (isZh ? '临时栏目' : 'Temp Section');
+                const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
+                title = formatted.html;
+                if (formatted.isTruncated) {
+                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                }
                 // [Modified] Restore badge with dynamic color
                 badge = makeColoredBadge(isZh ? '临时' : 'Temp', 'temp');
                 break;
+            }
 
-            case 'md-node':
+            case 'md-node': {
                 // MD 卡片
-                title = escapeHtml(item.title || (item.text ? item.text.substring(0, 30) + '...' : (isZh ? 'MD卡片' : 'MD Card')));
+                const rawTitle = item.title || (item.text ? item.text.substring(0, 50) : (isZh ? 'MD卡片' : 'MD Card'));
+                const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
+                title = formatted.html;
+                if (formatted.isTruncated) {
+                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                }
                 badge = makeColoredBadge(isZh ? '卡片' : 'Card', 'md');
                 break;
+            }
 
-            case 'edge':
-                title = escapeHtml(item.label);
+            case 'edge': {
+                const formatted = formatSearchTitleWithWindow(item.label, searchUiState.query);
+                title = formatted.html;
+                if (formatted.isTruncated) {
+                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                }
                 badge = makeColoredBadge(isZh ? '连线' : 'Edge', 'edge');
                 break;
+            }
 
             case 'group': {
-                title = escapeHtml(item.title || item.label || (isZh ? '组' : 'Group'));
+                const rawTitle = item.title || item.label || (isZh ? '组' : 'Group');
+                const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
+                title = formatted.html;
+                if (formatted.isTruncated) {
+                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                }
                 badge = makeColoredBadge(
                     isZh ? '组' : 'Group',
                     'md'
@@ -9634,7 +10769,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 break;
             }
 
-            case 'permanent-section':
+            case 'permanent-section': {
                 // 显示序号 #A, #B, ...
                 const alpha = toAlpha(item.displayIndex);
                 // Permanent color usually static Green, but we use what's in DB
@@ -9649,14 +10784,28 @@ function renderCanvasSearchResults(results, options = {}) {
                     indexLabel = makeColoredSpan(`#${alpha}`, 'permanent');
                 }
 
-                title = item.displayIndex === 1
+                const rawTitle = item.displayIndex === 1
                     ? (isZh ? '永久栏目' : 'Permanent')
                     : (isZh ? '永久栏目副本' : 'Permanent Copy');
+                const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
+                title = formatted.html;
+                if (formatted.isTruncated) {
+                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                }
                 badge = makeColoredBadge(isZh ? '永久' : 'Perm', 'permanent');
                 break;
+            }
 
             case 'domain-group': {
-                const domainText = markQueryInText(item.domain || item.title || '');
+                const rawTitle = item.domain || item.title || '';
+                const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query, {
+                    isBookmarkMode: true,
+                    hasRightActions: true
+                });
+                const domainText = formatted.html;
+                if (formatted.isTruncated) {
+                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                }
                 const count = Number(item.count || 0);
                 const subdomainCount = Number(item.subdomainCount || 0);
                 const isRootGroup = String(item.groupLevel || '') === 'root';
@@ -9686,7 +10835,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     </span>
                     <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(domainUrl)}" style="display:${hasRealFavicon ? '' : 'none'}; width:16px; height:16px; object-fit:contain; border-radius:3px;" alt="">
                 </div>`;
-                title = `<div class="search-result-domain-title-text">${domainText}</div>${renderBookmarkResultNoteMarker(item)}`;
+                title = `<div class="search-result-domain-title-text" data-raw-title="${escapeHtml(formatted.fullTitle)}">${domainText}</div>${renderBookmarkResultNoteMarker(item)}`;
                 descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:11px;">${escapeHtml(countLabel)}</div>${tagsRowHtml}${renderBookmarkResultNoteSnippet(item)}`;
                 badge = `<div class="search-domain-actions">
                     ${makeColoredBadge(isZh ? '域名' : 'Domain', 'domain')}
@@ -9747,12 +10896,21 @@ function renderCanvasSearchResults(results, options = {}) {
                 indexLabel = iconHtml;
 
                 // 2. Title & URL
-                const titleText = markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'));
                 const groupId = String(item.id || '').trim();
                 const targetItems = Array.isArray(item.targetItems) ? item.targetItems : [];
                 const matchCount = Number(item.matchesCount || targetItems.length || 0);
                 const canExpandGroup = groupId && targetItems.length > 1;
                 const isGroupExpanded = canExpandGroup && isBookmarkGroupExpanded(groupId);
+
+                const raw = item.title || (isZh ? '（无标题）' : '(Untitled)');
+                const formatted = formatSearchTitleWithWindow(raw, searchUiState.query, {
+                    isBookmarkMode: true,
+                    hasRightActions: canExpandGroup
+                });
+                const titleText = formatted.html;
+                if (formatted.isTruncated) {
+                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                }
                 const countHtml = canExpandGroup
                     ? `<button class="canvas-bookmark-match-count canvas-bookmark-group-count" type="button" data-bookmark-group-id="${escapeHtml(groupId)}" aria-expanded="${isGroupExpanded ? 'true' : 'false'}">${isZh ? `${matchCount}处` : `${matchCount} locations`}</button>`
                     : '';
@@ -9763,7 +10921,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const groupActionsHtml = countHtml || toggleHtml
                     ? `<div class="canvas-bookmark-group-actions">${countHtml}${toggleHtml}</div>`
                     : '';
-                title = `<div class="search-result-bookmark-title-text">${titleText}</div>${noteMarkerHtml}${groupActionsHtml}`;
+                title = `<div class="search-result-bookmark-title-text" data-raw-title="${escapeHtml(formatted.fullTitle)}">${titleText}</div>${noteMarkerHtml}${groupActionsHtml}`;
                 const rootLabel = isZh ? '根目录' : 'Root';
                 const parentPathListRaw = Array.isArray(item.parentPaths) ? item.parentPaths : [];
                 const parentPathList = parentPathListRaw.length
@@ -9988,7 +11146,15 @@ function renderCanvasSearchResults(results, options = {}) {
 
                 const itemNoteMarkerHtml = renderBookmarkResultNoteMarker(item);
                 const itemNoteSnippetHtml = renderBookmarkResultNoteSnippet(item);
-                title = `<span class="search-result-bookmark-title-text">${markQueryInText(item.title || (isZh ? '（无标题）' : '(Untitled)'))}</span>${itemNoteMarkerHtml}`;
+                const rawItemTitle = item.title || (isZh ? '（无标题）' : '(Untitled)');
+                const formattedItemTitle = formatSearchTitleWithWindow(rawItemTitle, searchUiState.query, {
+                    isBookmarkMode: true,
+                    hasBadge: !item.isChild
+                });
+                if (formattedItemTitle.isTruncated) {
+                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formattedItemTitle.fullTitle)}"`;
+                }
+                title = `<span class="search-result-bookmark-title-text" data-raw-title="${escapeHtml(formattedItemTitle.fullTitle)}">${formattedItemTitle.html}</span>${itemNoteMarkerHtml}`;
                 if (item.domainChild) {
                     const hostText = String(item.domainHost || '').trim().toLowerCase();
                     const showHost = hostText && (String(item.groupLevel || '') === 'root' || hostText !== String(item.domain || '').trim().toLowerCase());
@@ -10233,7 +11399,11 @@ function renderCanvasSearchResults(results, options = {}) {
         }
 
         const extraClasses = [];
-        if (item.type === 'bookmark-group') extraClasses.push('bookmark-group');
+        if (item.type === 'bookmark-group') {
+            extraClasses.push('bookmark-group');
+            const canExpand = String(item.id || '').trim() && Array.isArray(item.targetItems) && item.targetItems.length > 1;
+            if (canExpand) extraClasses.push('has-group-actions');
+        }
         if (item.type === 'bookmark-group-more') extraClasses.push('bookmark-more');
         if (item.type === 'domain-group') extraClasses.push('domain-group');
         if (item.isChild) extraClasses.push('bookmark-child');
@@ -10243,8 +11413,8 @@ function renderCanvasSearchResults(results, options = {}) {
             ? ' data-expanded="true"'
             : '';
 
-        html += `
-            <div class="${rowClassName}" data-index="${index}" data-id="${item.id}" data-type="${item.type}"${bookmarkGroupExpandedAttr}>
+        itemsHtml += `
+            <div class="${rowClassName}" data-index="${index}" data-id="${item.id}" data-type="${item.type}"${bookmarkGroupExpandedAttr}${extraItemAttrs}>
                 <div class="search-result-content">
                     <div class="search-result-title">${indexLabel}${title}</div>
                     ${descHtml}
@@ -10254,56 +11424,52 @@ function renderCanvasSearchResults(results, options = {}) {
         `;
     });
 
+    let loadMoreHtml = '';
     if (hasMoreResults) {
         const remain = Math.max(0, displayResults.length - visibleResults.length);
         const loadMoreText = isZh
             ? `继续加载（剩余 ${remain}）`
             : `Load More (${remain} left)`;
-        html += `
-            <div class="search-results-load-more-row" style="padding:10px 12px 12px; display:flex; justify-content:center;">
-                <button class="search-load-more-btn" type="button" style="border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-normal); padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;">
+        loadMoreHtml = `
+            <div class="search-results-load-more-row">
+                <button class="search-load-more-btn" type="button">
                     ${escapeHtml(loadMoreText)}
                 </button>
             </div>
         `;
     }
 
+    if (appendPage && panel.querySelector('.search-result-item')) {
+        // 增量平滑展开：绝不重绘已有 DOM，保持现有候选元素绝对静止，仅垂直滚动条平滑变动
+        const existingLoadMore = panel.querySelector('.search-results-load-more-row');
+        if (existingLoadMore) {
+            existingLoadMore.insertAdjacentHTML('beforebegin', itemsHtml);
+            if (hasMoreResults) {
+                existingLoadMore.outerHTML = loadMoreHtml;
+            } else {
+                existingLoadMore.remove();
+            }
+        } else {
+            const handleBottom = panel.querySelector('.search-panel-resize-handle.handle-bottom');
+            if (handleBottom) {
+                handleBottom.insertAdjacentHTML('beforebegin', itemsHtml + loadMoreHtml);
+            } else {
+                panel.insertAdjacentHTML('beforeend', itemsHtml + loadMoreHtml);
+            }
+        }
+
+        updateSearchResultSelection(searchUiState.selectedIndex, { ensureVisible: false });
+        setupSearchPanelAutoInfiniteScroll(panel);
+        return;
+    }
+
+    html += itemsHtml + loadMoreHtml;
     panel.innerHTML = html;
 
-    const syncBookmarkResultTitleLayout = () => {
-        if (!panel || typeof panel.querySelectorAll !== 'function') return;
-        const titleEls = panel.querySelectorAll('.search-result-bookmark-title-text, .search-result-domain-title-text');
-        titleEls.forEach((el) => {
-            const row = el.closest('.search-result-title');
-            if (!row) return;
-
-            let lineHeight = 15.84;
-            try {
-                const computed = window.getComputedStyle ? window.getComputedStyle(el) : null;
-                const rawLineHeight = computed ? parseFloat(computed.lineHeight) : 0;
-                if (Number.isFinite(rawLineHeight) && rawLineHeight > 0) {
-                    lineHeight = rawLineHeight;
-                } else {
-                    const fontSize = computed ? parseFloat(computed.fontSize) : 12;
-                    if (Number.isFinite(fontSize) && fontSize > 0) {
-                        lineHeight = fontSize * 1.32;
-                    }
-                }
-            } catch (_) { }
-
-            const measuredHeight = Math.max(
-                Number(el.scrollHeight || 0),
-                Number(el.getBoundingClientRect ? el.getBoundingClientRect().height : 0)
-            );
-            const isMultiline = measuredHeight > (lineHeight * 1.5);
-            row.classList.toggle('search-result-title-multiline', isMultiline);
-        });
-    };
-
-    syncBookmarkResultTitleLayout();
     showSearchResultsPanel();
-    requestAnimationFrame(syncBookmarkResultTitleLayout);
+    ensureSearchPanelResizeHandle(panel);
     updateSearchResultSelection(searchUiState.selectedIndex, { ensureVisible: !options.skipEnsureVisible });
+    setupSearchPanelAutoInfiniteScroll(panel);
 
 }
 
@@ -10378,26 +11544,37 @@ function rerenderCanvasBookmarkResults(selectedIndex = 0) {
             view: 'canvas',
             query,
             selectedIndex: Number.isFinite(selectedIndex) ? selectedIndex : 0,
-            skipEnsureVisible: true
+            skipEnsureVisible: true,
+            preserveVisibleCount: true
         });
         return;
     }
     searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
 }
 
+let isAppendingSearchPage = false;
 function appendCanvasSearchResultsPage() {
-    const sourceResults = Array.isArray(searchUiState.resultSource) ? searchUiState.resultSource : [];
-    const query = String(searchUiState && searchUiState.query || '').trim();
-    if (!sourceResults.length) {
-        searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
-        return;
+    if (isAppendingSearchPage) return;
+    isAppendingSearchPage = true;
+    try {
+        const sourceResults = Array.isArray(searchUiState.resultSource) ? searchUiState.resultSource : [];
+        const query = String(searchUiState && searchUiState.query || '').trim();
+        if (!sourceResults.length) {
+            searchCanvasAndRender(query, { source: 'system', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+            return;
+        }
+        renderCanvasSearchResults(sourceResults, {
+            view: 'canvas',
+            query,
+            append: true,
+            selectedIndex: searchUiState.selectedIndex,
+            skipEnsureVisible: true
+        });
+    } finally {
+        setTimeout(() => {
+            isAppendingSearchPage = false;
+        }, 50);
     }
-    renderCanvasSearchResults(sourceResults, {
-        view: 'canvas',
-        query,
-        append: true,
-        selectedIndex: searchUiState.selectedIndex
-    });
 }
 
 function openSearchResultExternalUrl(url) {
@@ -13096,6 +14273,7 @@ if (typeof window !== 'undefined') {
     window.handleSearchResultsPanelClick = handleSearchResultsPanelClick;
     window.handleSearchResultsPanelMouseOver = handleSearchResultsPanelMouseOver;
     window.handleSearchOutsideClick = handleSearchOutsideClick;
+    window.hideTempSectionBubble = hideTempSectionBubble;
 
     // Phase 3.5 Export
     window.setSearchMode = setSearchMode;
@@ -13120,8 +14298,17 @@ if (typeof window !== 'undefined') {
         searchCanvas: searchCanvasAndRender,
         resetCanvas: resetCanvasSearchDb,
         locateCanvasElement: locateCanvasElement,
-        clearCanvasHighlight: clearCanvasSearchHighlight
+        clearCanvasHighlight: clearCanvasSearchHighlight,
+        getPanelHeight: getSearchPanelHeight,
+        setPanelHeight: setSearchPanelHeight
     };
+
+    window.getSearchPanelHeight = getSearchPanelHeight;
+    window.setSearchPanelHeight = setSearchPanelHeight;
+    window.getSearchPanelTemporaryHeightLimit = getSearchPanelTemporaryHeightLimit;
+    window.SEARCH_PANEL_HEIGHT_DEFAULT = SEARCH_PANEL_HEIGHT_DEFAULT;
+    window.SEARCH_PANEL_HEIGHT_MIN = SEARCH_PANEL_HEIGHT_MIN;
+    window.SEARCH_PANEL_HEIGHT_MAX = SEARCH_PANEL_HEIGHT_MAX;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
