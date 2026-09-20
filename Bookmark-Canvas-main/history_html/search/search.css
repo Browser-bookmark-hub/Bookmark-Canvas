@@ -19,8 +19,10 @@
 .search-results-panel {
     position: absolute;
     top: calc(100% + 10px);
-    left: 0;
-    right: 0;
+    left: var(--search-panel-left, 0);
+    width: var(--search-panel-width, 100%);
+    max-width: var(--search-panel-max-width, calc(100vw - 32px));
+    min-width: 320px;
     background: var(--bg-elevated);
     border: 1px solid var(--border-color);
     border-radius: 12px;
@@ -46,23 +48,25 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
     max-height: min(var(--search-panel-height, 450px), var(--search-panel-max-allowed, calc(100vh - 80px)));
 }
 
-/* 搜索候选结果面板的卡片风格高度调整把手（边缘上下都有，支持双向拖拽） */
+/* 搜索候选结果面板的调整把手（完全位于面板内部边缘，背景纯透明，无模糊层，仅放置小白条） */
 .search-panel-resize-handle {
     position: sticky;
     left: 0;
     right: 0;
-    height: 12px;
-    min-height: 12px;
+    height: 14px;
+    min-height: 14px;
     cursor: ns-resize;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: transparent; /* 默认未悬浮时透明，只留下小白条 */
+    background: transparent !important;
     z-index: 60;
     user-select: none;
     pointer-events: auto;
     flex-shrink: 0;
-    transition: background 0.15s ease;
+    transition: none;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
 }
 
 .search-panel-resize-handle.handle-top {
@@ -88,53 +92,156 @@ body.header-dock-bottom .search-panel-resize-handle.handle-bottom {
     display: none !important;
 }
 
-/* 中心的横条：浅色模式下为深色条（深灰胶囊条），深色模式下为半透明小白条，始终呈现极简优雅 */
+/* 当搜索面板为搜索模式建议/推荐模式（含“下次不再出现”按钮）时，下方/内部不需要小白条把手 */
+.search-results-panel[data-panel-type="canvas-suggestions"] .search-panel-resize-handle,
+.search-results-panel:has(.canvas-suggestions-hide-btn) .search-panel-resize-handle,
+.search-results-panel:has(.search-empty-suggestions-hide-btn) .search-panel-resize-handle {
+    display: none !important;
+}
+
+/* 中心的横条（上下把手）：极简胶囊小白条/深色条，纯透明背景，醒目可见 */
 .search-panel-resize-handle::before {
     content: '';
     width: 36px;
-    height: 3px;
+    height: 4px;
     border-radius: 2px;
-    background: rgba(0, 0, 0, 0.28); /* 浅色模式：深色胶囊条，对比清晰舒适 */
-    opacity: 1; /* 始终出现 */
-    transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-/* 浅色模式下：悬浮上面或拖动时手柄区域呈现淡底色，中心深色条加深加亮 */
-.search-panel-resize-handle:hover,
-.search-results-panel.resizing .search-panel-resize-handle {
-    background: rgba(0, 0, 0, 0.04);
+    background: rgba(0, 0, 0, 0.38);
+    opacity: 1;
+    transition: background-color 0.15s ease;
+    box-shadow: none !important;
 }
 
 .search-panel-resize-handle:hover::before,
 .search-results-panel.resizing .search-panel-resize-handle::before {
-    background: rgba(0, 0, 0, 0.58);
+    background: rgba(0, 0, 0, 0.75);
 }
 
-/* 深色模式下的表现：中心横条为纯净半透明小白条，悬浮上面时出现透明浅色背景 */
-[data-theme="dark"] .search-panel-resize-handle {
-    background: transparent;
-}
-
+/* 深色模式下的横条：清晰小白条 */
 [data-theme="dark"] .search-panel-resize-handle::before {
-    background: rgba(255, 255, 255, 0.72);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-}
-
-[data-theme="dark"] .search-panel-resize-handle:hover,
-[data-theme="dark"] .search-results-panel.resizing .search-panel-resize-handle {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.7);
 }
 
 [data-theme="dark"] .search-panel-resize-handle:hover::before,
 [data-theme="dark"] .search-results-panel.resizing .search-panel-resize-handle::before {
     background: #ffffff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
 }
 
 .search-results-panel.resizing {
     user-select: none !important;
     transition: none !important;
     will-change: max-height;
+}
+
+/* 搜索候选结果面板的宽度调整把手（完全处于面板内部左右边缘，层级高于面板以确保100%可见） */
+.search-panel-resize-handle.handle-left,
+.search-panel-resize-handle.handle-right {
+    position: absolute;
+    top: calc(100% + 10px);
+    height: min(var(--search-panel-height, 450px), var(--search-panel-max-allowed, calc(100vh - 80px)));
+    width: 14px;
+    min-height: 40px;
+    cursor: ew-resize;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: transparent !important;
+    z-index: 215; /* 确保高于面板 z-index: 200，在面板内侧上层清晰可见 */
+    user-select: none;
+    pointer-events: auto;
+    flex-shrink: 0;
+    transition: none;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+body.header-dock-bottom:not(.header-compact) .search-panel-resize-handle.handle-left,
+body.header-dock-bottom:not(.header-compact) .search-panel-resize-handle.handle-right {
+    top: auto;
+    bottom: calc(100% + 10px);
+}
+
+.search-panel-resize-handle.handle-left {
+    left: var(--search-panel-left, 0px);
+    transform: none;
+    border-top-left-radius: 11px;
+    border-bottom-left-radius: 11px;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.search-panel-resize-handle.handle-right {
+    left: calc(var(--search-panel-left, 0px) + var(--search-panel-width, 100%) - 14px);
+    transform: none;
+    border-top-right-radius: 11px;
+    border-bottom-right-radius: 11px;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+/* 候选面板打开时显示左右调节把手容器 */
+.search-results-panel.visible ~ .search-panel-resize-handle.handle-left,
+.search-results-panel.visible ~ .search-panel-resize-handle.handle-right {
+    display: flex;
+}
+
+/* 搜索建议面板（含“下次不再出现”按钮）时不显示左右把手 */
+.search-results-panel[data-panel-type="canvas-suggestions"].visible ~ .search-panel-resize-handle.handle-left,
+.search-results-panel[data-panel-type="canvas-suggestions"].visible ~ .search-panel-resize-handle.handle-right,
+.search-results-panel:has(.canvas-suggestions-hide-btn).visible ~ .search-panel-resize-handle.handle-left,
+.search-results-panel:has(.canvas-suggestions-hide-btn).visible ~ .search-panel-resize-handle.handle-right,
+.search-results-panel:has(.search-empty-suggestions-hide-btn).visible ~ .search-panel-resize-handle.handle-left,
+.search-results-panel:has(.search-empty-suggestions-hide-btn).visible ~ .search-panel-resize-handle.handle-right {
+    display: none !important;
+}
+
+/* 左右两边的小白条：
+   1. 平时默认隐形（不打扰阅读列表内容）
+   2. 切换视图（网格 <-> 列表）时自动出现数秒后淡出 (.view-switch-active)
+   3. 鼠标悬浮到边缘或拖动时立刻显现并高亮
+*/
+.search-panel-resize-handle.handle-left::before,
+.search-panel-resize-handle.handle-right::before {
+    content: '';
+    width: 4px;
+    height: 36px;
+    border-radius: 2px;
+    background: rgba(0, 0, 0, 0.38);
+    opacity: 0;
+    transition: opacity 0.35s ease, background-color 0.15s ease;
+    box-shadow: none !important;
+}
+
+/* 切换视图时出现几秒 */
+.search-panel-resize-handle.view-switch-active.handle-left::before,
+.search-panel-resize-handle.view-switch-active.handle-right::before {
+    opacity: 1 !important;
+}
+
+/* 鼠标悬浮边缘或正在拖拽时立即可见 */
+.search-panel-resize-handle.handle-left:hover::before,
+.search-panel-resize-handle.handle-right:hover::before,
+.search-results-panel.resizing-x ~ .search-panel-resize-handle.handle-left::before,
+.search-results-panel.resizing-x ~ .search-panel-resize-handle.handle-right::before {
+    opacity: 1 !important;
+    background: rgba(0, 0, 0, 0.75);
+}
+
+[data-theme="dark"] .search-panel-resize-handle.handle-left::before,
+[data-theme="dark"] .search-panel-resize-handle.handle-right::before {
+    background: rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="dark"] .search-panel-resize-handle.handle-left:hover::before,
+[data-theme="dark"] .search-panel-resize-handle.handle-right:hover::before,
+[data-theme="dark"] .search-results-panel.resizing-x ~ .search-panel-resize-handle.handle-left::before,
+[data-theme="dark"] .search-results-panel.resizing-x ~ .search-panel-resize-handle.handle-right::before {
+    background: #ffffff;
+}
+
+.search-results-panel.resizing-x {
+    user-select: none !important;
+    transition: none !important;
+    will-change: width, left;
 }
 
 /* [User Request] Fix scrollbar corner transition by adding track margin */
@@ -246,6 +353,57 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 
 .canvas-bookmark-to-temp-btn-compact .canvas-dir-icon-badge {
     font-size: 12px;
+}
+
+/* 网格视图切换按钮（位于生成特殊临时栏目按钮右侧） */
+.canvas-bookmark-view-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid rgba(128, 128, 128, 0.28);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    user-select: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.canvas-bookmark-view-toggle-btn i {
+    font-size: 13px;
+    color: inherit;
+    pointer-events: none;
+}
+
+.canvas-bookmark-view-toggle-btn:hover {
+    border-color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+    color: var(--accent-primary);
+}
+
+.canvas-bookmark-view-toggle-btn.active {
+    border-color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+    color: var(--accent-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.canvas-bookmark-view-toggle-btn-compact {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 6px;
+}
+
+.canvas-bookmark-view-toggle-btn-compact i {
+    font-size: 11px;
 }
 
 .canvas-bookmark-domain-granularity-btn {
@@ -768,6 +926,1096 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 .search-result-item:hover,
 .search-result-item.selected:not(.is-color-card):not(.is-tag-row) {
     background: var(--bg-tertiary);
+}
+
+/* ==================== 候选条目网格视图 (Grid View - 严格对齐关联记录) ==================== */
+.search-results-items-container {
+    width: 100%;
+}
+
+.search-results-items-container.view-grid,
+.search-results-panel.view-grid .search-results-items-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    grid-auto-rows: 96px; /* 严格固定为 96px 三行卡片 (1行标题 + 2行信息) */
+    gap: 10px;
+    padding: 12px;
+    box-sizing: border-box;
+    align-items: stretch;
+}
+
+/* 网格卡片：整体三行结构 (一行图标+标题，两行信息) */
+.search-results-panel.view-grid .search-result-item {
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px !important;
+    padding: 9px 12px !important;
+    margin: 0 !important;
+    transition: all 0.18s ease;
+    cursor: pointer;
+    position: relative;
+    box-sizing: border-box;
+    width: 100% !important;
+    height: 96px !important;
+    max-height: 96px !important;
+    min-height: 96px !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    align-items: stretch !important;
+    contain: layout paint;
+}
+
+.search-results-panel.view-grid .search-result-item:hover {
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), var(--shadow-sm) !important;
+    transform: translateY(-1px);
+    background: var(--bg-secondary) !important;
+}
+
+.search-results-panel.view-grid .search-result-item.selected {
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 32%, transparent 68%), var(--shadow-sm) !important;
+    background: var(--bg-secondary) !important;
+}
+
+/* 彻底移除右上角绿点、左上角序号等一切多余装饰 */
+.search-results-panel.view-grid .search-result-item::before,
+.search-results-panel.view-grid .search-result-item::after,
+.search-results-panel.view-grid .related-history-number,
+.search-results-panel.view-grid .search-grid-item-number {
+    display: none !important;
+    content: none !important;
+}
+
+/* 第一行：图标与标题及右侧操作栏 (同一水平基准线) */
+.search-results-panel.view-grid .search-result-content {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+}
+
+.search-results-panel.view-grid .search-result-title,
+.search-results-panel.view-grid .canvas-grid-card-header {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 22px !important;
+    line-height: 22px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: var(--text-primary) !important;
+    padding-right: 0 !important;
+}
+
+.search-results-panel.view-grid .search-result-title .search-result-bookmark-title-text,
+.search-results-panel.view-grid .search-result-title .search-result-domain-title-text,
+.search-results-panel.view-grid .canvas-grid-card-title {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    line-height: 22px !important;
+    display: block !important;
+}
+
+.search-results-panel.view-grid .search-result-title mark,
+.search-results-panel.view-grid .canvas-grid-card-title mark {
+    background: #fff0b3;
+    color: #4a3b00;
+    padding: 0 3px;
+    border-radius: 3px;
+    font-weight: 600;
+    box-shadow: inset 0 -1px 0 rgba(181, 130, 0, 0.62);
+}
+
+[data-theme="dark"] .search-results-panel.view-grid .search-result-title mark,
+[data-theme="dark"] .search-results-panel.view-grid .canvas-grid-card-title mark {
+    background: #705900;
+    color: #fff4c2;
+    box-shadow: inset 0 -1px 0 rgba(244, 210, 92, 0.68);
+}
+
+.search-results-panel.view-grid .search-result-title img,
+.search-results-panel.view-grid .search-result-title .search-result-favicon,
+.search-results-panel.view-grid .search-result-title .search-result-icon-box-inline,
+.search-results-panel.view-grid .search-result-title .search-domain-group-icon,
+.search-results-panel.view-grid .canvas-grid-card-icon {
+    width: 16px !important;
+    height: 16px !important;
+    min-width: 16px !important;
+    min-height: 16px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+    box-sizing: border-box !important;
+    line-height: 1 !important;
+}
+
+.search-results-panel.view-grid .search-result-title i,
+.search-results-panel.view-grid .canvas-grid-card-icon i {
+    font-size: 14px !important;
+    line-height: 1 !important;
+    display: inline-block !important;
+}
+
+/* 第一行右侧多处匹配操作栏 (网格视图：纳入 header 弹性盒模型，消除列表模式绝对定位 top: 8px; right: 10px 偏移，保持与左侧图标水平对齐) */
+.search-results-panel.view-grid .canvas-bookmark-group-actions,
+.search-results-panel.view-grid .search-domain-actions,
+.search-results-panel.view-grid .canvas-grid-group-actions {
+    position: static !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 4px !important;
+    flex-shrink: 0 !important;
+    margin-left: auto !important;
+    height: 18px !important;
+    line-height: 18px !important;
+    z-index: 1 !important;
+    box-sizing: border-box !important;
+    vertical-align: middle !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-match-count,
+.search-results-panel.view-grid .canvas-grid-card-count {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    max-height: 18px !important;
+    line-height: 16px !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    padding: 0 5px !important;
+    border-radius: 999px !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    vertical-align: middle !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-group-toggle {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+    max-width: 18px !important;
+    max-height: 18px !important;
+    font-size: 9px !important;
+    line-height: 1 !important;
+    border-radius: 999px !important;
+    box-sizing: border-box !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    vertical-align: middle !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-group-toggle i {
+    font-size: 9px !important;
+    line-height: 1 !important;
+    display: inline-block !important;
+}
+
+.canvas-bookmark-group-toggle.popover-active,
+.search-result-item.bookmark-group .canvas-bookmark-group-toggle.popover-active {
+    color: var(--accent-primary);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.12);
+}
+
+/* 栏目/卡片类型 Badge 悬挂于网格卡片右上角 */
+.search-results-panel.view-grid .search-result-item > .search-result-badge {
+    position: absolute !important;
+    top: 9px !important;
+    right: 12px !important;
+    margin: 0 !important;
+    z-index: 2 !important;
+}
+
+.search-results-panel.view-grid .search-result-item:has(> .search-result-badge) .search-result-title {
+    padding-right: 46px !important;
+}
+
+/* 第二行：网格卡片单行栏目位置摘要行 (最多一行，超出由省略号承载) */
+.canvas-grid-card-locations-row {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    height: 18px;
+    line-height: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+    box-sizing: border-box;
+    margin: 2px 0;
+}
+
+.search-results-panel.view-grid .canvas-grid-card-locations-row {
+    display: flex !important;
+}
+
+.canvas-grid-details-bubble .canvas-grid-card-locations-row {
+    display: none !important;
+}
+
+.search-results-panel.view-grid .canvas-grid-card-locations-row .canvas-bookmark-location-chip {
+    max-width: calc(100% - 28px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 1;
+    font-size: 10.5px;
+    height: 18px;
+    line-height: 16px;
+    padding: 0 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.search-results-panel.view-grid .canvas-grid-card-locations-row .canvas-bookmark-location-chip-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    max-width: 100%;
+}
+
+.canvas-grid-location-more-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-mono, monospace);
+    line-height: 1;
+    color: var(--text-tertiary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+}
+
+.canvas-grid-location-more-btn:hover {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+    transform: scale(1.05);
+}
+
+/* 当网格卡片存在位置行时，信息栏高度适配为单行 20px，完美吻合 96px 三行排版 */
+.search-results-panel.view-grid .search-result-item[data-has-locations="true"] .canvas-bookmark-details-row,
+.search-results-panel.view-grid .search-result-item:has(.canvas-grid-card-locations-row) .canvas-bookmark-details-row {
+    height: 20px !important;
+}
+
+.search-results-panel.view-grid .search-result-item[data-has-locations="true"] .search-result-details-preview-context,
+.search-results-panel.view-grid .search-result-item:has(.canvas-grid-card-locations-row) .search-result-details-preview-context {
+    height: 20px !important;
+}
+
+/* 第三行：信息栏 (整体卡片为三行，100% 对齐列表模式信息栏高亮) */
+.search-results-panel.view-grid .canvas-bookmark-details-row,
+.search-results-panel.view-grid .canvas-grid-card-info-row {
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 42px !important;
+    margin-top: auto !important;
+    overflow: hidden !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .canvas-bookmark-details-toggle,
+.search-results-panel.view-grid .canvas-grid-card-info-row .canvas-bookmark-details-toggle {
+    margin-left: 0 !important;
+    margin-top: 2px !important;
+    flex-shrink: 0 !important;
+    height: 18px !important;
+    line-height: 16px !important;
+    padding: 1px 6px !important;
+    font-size: 10.5px !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .canvas-bookmark-details-toggle.bubble-active,
+.search-results-panel.view-grid .canvas-bookmark-details-row .canvas-bookmark-details-toggle[aria-expanded="true"],
+.search-results-panel.view-grid .canvas-grid-card-info-row .canvas-bookmark-details-toggle.bubble-active,
+.search-results-panel.view-grid .canvas-grid-card-info-row .canvas-bookmark-details-toggle[aria-expanded="true"] {
+    opacity: 1 !important;
+    color: var(--accent-primary) !important;
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-color) !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-context,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-context {
+    flex: 1 !important;
+    min-width: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+    gap: 2px !important;
+    height: 42px !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 2px 0 0 0 !important;
+    position: relative !important;
+    top: 0 !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-context.is-single-line,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-context.is-single-line {
+    justify-content: flex-start !important;
+    align-self: flex-start !important;
+    padding-top: 2px !important;
+    position: relative !important;
+    top: 0 !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line {
+    display: flex !important;
+    align-items: center !important;
+    height: 18px !important;
+    line-height: 18px !important;
+    font-size: 11px !important;
+    color: var(--text-tertiary) !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+    opacity: 0.88 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line > *,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line > * {
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+    max-width: 100% !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .search-result-link-row,
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .search-result-link,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .search-result-link-row,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .search-result-link {
+    display: inline-flex !important;
+    align-items: center !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+    font-size: 11px !important;
+    height: 18px !important;
+    line-height: 18px !important;
+    color: var(--text-tertiary) !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .search-result-link:hover,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .search-result-link:hover {
+    color: var(--accent-primary) !important;
+    text-decoration: underline !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .canvas-bookmark-tags-row,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .canvas-bookmark-tags-row {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    margin: 0 !important;
+    height: 18px !important;
+    line-height: 18px !important;
+    overflow: hidden !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .search-result-tag-chip,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .search-result-tag-chip {
+    height: 18px !important;
+    line-height: 16px !important;
+    padding: 0 6px 0 4px !important;
+    box-sizing: border-box !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .search-result-path-hint,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .search-result-path-hint {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    margin: 0 !important;
+    height: 18px !important;
+    line-height: 18px !important;
+    overflow: hidden !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .search-result-path-text,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .search-result-path-text {
+    height: 18px !important;
+    line-height: 18px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .search-result-note-snippet,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .search-result-note-snippet {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    margin: 0 !important;
+    height: 18px !important;
+    line-height: 18px !important;
+    overflow: hidden !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .search-result-note-snippet > i,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .search-result-note-snippet > i {
+    margin-top: 0 !important;
+    line-height: 18px !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line .search-result-note-text,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line .search-result-note-text {
+    height: 18px !important;
+    line-height: 18px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    -webkit-line-clamp: 1 !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-browse-match-pill {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    height: 18px !important;
+    line-height: 16px !important;
+    font-size: 10px !important;
+    padding: 0 6px !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line mark,
+.search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line mark,
+.canvas-grid-details-bubble mark,
+.canvas-grid-group-popover mark {
+    background: #fff0b3;
+    color: #4a3b00;
+    padding: 0 2px;
+    border-radius: 2px;
+    font-weight: 600;
+    box-shadow: inset 0 -1px 0 rgba(181, 130, 0, 0.62);
+}
+
+[data-theme="dark"] .search-results-panel.view-grid .canvas-bookmark-details-row .search-result-details-preview-line mark,
+[data-theme="dark"] .search-results-panel.view-grid .canvas-grid-card-info-row .search-result-details-preview-line mark,
+[data-theme="dark"] .canvas-grid-details-bubble mark,
+[data-theme="dark"] .canvas-grid-group-popover mark {
+    background: #705900;
+    color: #fff4c2;
+    box-shadow: inset 0 -1px 0 rgba(244, 210, 92, 0.68);
+}
+
+/* 非书签条目的摘要展示 (如 md 卡片、临时栏目等) */
+.search-results-panel.view-grid .search-result-content > .search-result-match:not(.canvas-bookmark-group-summary) {
+    height: 42px !important;
+    max-height: 42px !important;
+    overflow: hidden !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    color: var(--text-muted) !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    margin-top: auto !important;
+}
+
+/* 严禁网格内就地展开详情与子条目、位置标签，全部由说明气泡承载，杜绝撑开网格单元 */
+.search-results-panel.view-grid .canvas-bookmark-details-collapsible,
+.search-results-panel.view-grid .canvas-bookmark-group-children,
+.search-results-panel.view-grid .canvas-bookmark-location-row {
+    display: none !important;
+}
+
+/* 加载更多行与空状态在网格中跨越全部列 */
+.search-results-panel.view-grid .search-results-load-more-row,
+.search-results-panel.view-grid .search-results-empty,
+.search-results-panel.view-grid .search-result-empty {
+    grid-column: 1 / -1;
+    width: 100%;
+}
+
+/* ==================== 网格视图信息说明气泡 UI ==================== */
+.canvas-grid-details-bubble {
+    position: fixed;
+    z-index: 100000;
+    width: 350px;
+    max-width: calc(100vw - 28px);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22), 0 3px 8px rgba(0, 0, 0, 0.1);
+    padding: 12px 14px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.45;
+    box-sizing: border-box;
+    pointer-events: auto;
+    opacity: 0;
+    transform: scale(0.97);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.canvas-grid-details-bubble.visible {
+    opacity: 1;
+    transform: scale(1);
+    display: flex;
+}
+
+[data-theme="dark"] .canvas-grid-details-bubble {
+    background: var(--bg-elevated);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* 气泡指示小箭头 */
+.canvas-grid-details-bubble .canvas-grid-bubble-arrow {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: inherit;
+    border: inherit;
+    transform: rotate(45deg);
+    pointer-events: none;
+    left: var(--grid-bubble-arrow-left, 50%);
+    margin-left: -4px;
+}
+
+.canvas-grid-details-bubble.arrow-top .canvas-grid-bubble-arrow {
+    top: -5px;
+    border-right: none;
+    border-bottom: none;
+}
+
+.canvas-grid-details-bubble.arrow-bottom .canvas-grid-bubble-arrow {
+    bottom: -5px;
+    border-left: none;
+    border-top: none;
+}
+
+/* 气泡头部 */
+.canvas-grid-bubble-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.canvas-grid-bubble-title-group {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: 1;
+    min-width: 0;
+}
+
+.canvas-grid-bubble-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.canvas-grid-bubble-icon img {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    object-fit: contain;
+}
+
+.canvas-grid-bubble-icon i {
+    font-size: 14px;
+}
+
+.canvas-grid-bubble-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+}
+
+.canvas-grid-bubble-title mark {
+    background: #fff0b3;
+    color: #4a3b00;
+    padding: 0 3px;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+[data-theme="dark"] .canvas-grid-bubble-title mark {
+    background: #705900;
+    color: #fff4c2;
+}
+
+.canvas-grid-bubble-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.canvas-grid-bubble-close-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+/* 气泡内容体：完全按照列表模式的展开项格式排版（位置、路径、链接、标签、便签） */
+.canvas-grid-bubble-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-top: 2px;
+    padding-right: 2px;
+}
+
+.canvas-grid-bubble-body .canvas-bookmark-location-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 0;
+}
+
+.canvas-grid-bubble-body .canvas-bookmark-location-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    margin-right: 2px;
+}
+
+.canvas-grid-bubble-body .canvas-bookmark-location-chip-row {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+/* ==================== 网格视图多处匹配展开浮层 UI ==================== */
+.canvas-grid-group-popover {
+    position: fixed;
+    z-index: 100000;
+    display: none;
+    flex-direction: column;
+    width: 360px;
+    max-width: calc(100vw - 24px);
+    max-height: 420px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+    transition: opacity 0.16s ease, transform 0.16s ease;
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+.canvas-grid-group-popover.visible {
+    display: flex;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+[data-theme="dark"] .canvas-grid-group-popover {
+    background: var(--bg-elevated);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.canvas-grid-group-popover-arrow {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: inherit;
+    border: inherit;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.canvas-grid-group-popover.arrow-top .canvas-grid-group-popover-arrow {
+    top: -6px;
+    border-right: none;
+    border-bottom: none;
+}
+
+.canvas-grid-group-popover.arrow-bottom .canvas-grid-group-popover-arrow {
+    bottom: -6px;
+    border-left: none;
+    border-top: none;
+}
+
+.canvas-grid-group-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border-top-left-radius: 11px;
+    border-top-right-radius: 11px;
+    flex-shrink: 0;
+}
+
+.canvas-grid-group-popover-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.canvas-grid-group-popover-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.canvas-grid-group-popover-icon img {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    object-fit: contain;
+}
+
+.canvas-grid-group-popover-icon i {
+    font-size: 13px;
+}
+
+.canvas-grid-group-popover-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.canvas-grid-group-popover-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: rgba(14, 165, 233, 0.12);
+    color: #0284c7;
+    border: 1px solid rgba(14, 165, 233, 0.25);
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.canvas-grid-group-popover-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.canvas-grid-group-popover-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.canvas-grid-group-popover-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    overflow-y: auto;
+    max-height: 320px;
+}
+
+.canvas-grid-group-child-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+}
+
+.canvas-grid-group-child-row:hover {
+    background: var(--bg-tertiary);
+    border-color: rgba(14, 165, 233, 0.45);
+    transform: translateX(2px);
+}
+
+.canvas-grid-group-child-topline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.canvas-grid-group-child-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.canvas-grid-group-child-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.canvas-grid-group-child-icon img {
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    object-fit: contain;
+}
+
+.canvas-grid-group-child-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.canvas-grid-group-child-jump-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #0284c7;
+    opacity: 0;
+    transform: translateX(-4px);
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.canvas-grid-group-child-row:hover .canvas-grid-group-child-jump-badge {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.canvas-grid-group-child-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-left: 22px;
+}
+
+.canvas-grid-group-child-meta .canvas-bookmark-location-row {
+    margin: 0;
+    padding: 0;
+}
+
+.canvas-grid-group-child-path {
+    font-size: 11px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.canvas-grid-group-child-path.is-expanded {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    display: block;
+}
+
+.canvas-grid-group-child-note {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 加载更多行与空状态在网格中跨越全部列 */
+.search-results-panel.view-grid .search-results-load-more-row,
+.search-results-panel.view-grid .search-results-empty,
+.search-results-panel.view-grid .search-result-empty {
+    grid-column: 1 / -1;
+    width: 100%;
+}
+
+.canvas-grid-bubble-body .search-result-path-hint {
+    margin-top: 1px;
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.canvas-grid-bubble-body .search-result-path-hint.is-expanded {
+    display: block;
+}
+
+.canvas-grid-bubble-body .search-result-path-text {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1;
+}
+
+.canvas-grid-bubble-body .search-result-path-hint.is-expanded .search-result-path-text {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.canvas-grid-bubble-body .search-result-path-text mark {
+    background: #fff0b3;
+    color: #4a3b00;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+[data-theme="dark"] .canvas-grid-bubble-body .search-result-path-text mark {
+    background: #705900;
+    color: #fff4c2;
+}
+
+.canvas-grid-bubble-body .search-result-link-row {
+    margin-top: 1px;
+    display: flex;
+    align-items: center;
+}
+
+.canvas-grid-bubble-body .search-result-external-link {
+    font-size: 11.5px;
+    color: var(--accent-primary);
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.canvas-grid-bubble-body .search-result-external-link:hover {
+    text-decoration: underline;
+}
+
+.canvas-grid-bubble-body .canvas-bookmark-child-tags-row {
+    margin-top: 2px;
+}
+
+.canvas-grid-bubble-body .canvas-bookmark-note-snippet {
+    margin-top: 2px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+}
+
+/* 加载更多行与空状态在网格中跨越全部列 */
+.search-results-panel.view-grid .search-results-load-more-row,
+.search-results-panel.view-grid .search-results-empty,
+.search-results-panel.view-grid .search-result-empty {
+    grid-column: 1 / -1;
+    width: 100%;
 }
 
 /* ==================== Canvas Bookmark Mode: Group by Section ==================== */
@@ -1593,6 +2841,13 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     text-decoration: underline;
     text-underline-offset: 2px;
     text-decoration-color: currentColor;
+    cursor: pointer;
+    transition: color 0.12s ease, text-decoration-color 0.12s ease;
+}
+
+.search-result-path-part:hover {
+    color: var(--accent-primary);
+    text-decoration-color: var(--accent-primary);
 }
 
 .search-result-path-sep {

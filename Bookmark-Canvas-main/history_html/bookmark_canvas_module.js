@@ -2527,6 +2527,8 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     sidepanelDirectoryCollapseMode: 'auto', // 侧边栏目录栏折叠模式：auto / manual
     sidepanelDirectoryAutoCollapseWidth: 600, // 侧边栏目录栏自动折叠阈值（px）
     searchPanelHeight: 450, // 搜索栏候选列表高度 (px)
+    searchPanelGridWidth: 920, // 搜索栏网格视图默认宽度 (px)
+    searchPanelGridHeight: 520, // 搜索栏网格视图默认高度 (px)
     tempColorFollow: true, // 临时栏目颜色跟随
     tempColorUnlockSync: false, // 解锁后立即继承父色
     tempColorAutoLockAfterSplit: true, // 分裂继承颜色后自动上锁
@@ -2999,6 +3001,20 @@ function normalizeCanvasOtherSettings(input) {
         out.searchPanelHeight || 450
     );
 
+    out.searchPanelGridWidth = __clampNumber(
+        input.searchPanelGridWidth,
+        360,
+        1800,
+        out.searchPanelGridWidth || 920
+    );
+
+    out.searchPanelGridHeight = __clampNumber(
+        input.searchPanelGridHeight,
+        200,
+        1200,
+        out.searchPanelGridHeight || 520
+    );
+
     out.menuColorSync = !!out.menuLocatableColorSync;
     if (typeof input.tempColorFollow === 'boolean') out.tempColorFollow = input.tempColorFollow;
     if (typeof input.tempColorUnlockSync === 'boolean') out.tempColorUnlockSync = input.tempColorUnlockSync;
@@ -3191,11 +3207,25 @@ function loadCanvasOtherSettings() {
     } catch (_) { }
     CanvasState.otherSettings = normalizeCanvasOtherSettings(saved);
     try {
-        const directHeight = localStorage.getItem('canvasSearchPanelHeight') || localStorage.getItem('canvas_search_panel_height');
+        const directHeight = localStorage.getItem('canvasSearchPanelHeight_list') || localStorage.getItem('canvasSearchPanelHeight') || localStorage.getItem('canvas_search_panel_height');
         if (directHeight !== null) {
             const parsedH = parseInt(directHeight, 10);
             if (Number.isFinite(parsedH)) {
                 CanvasState.otherSettings.searchPanelHeight = __clampNumber(parsedH, 200, 1200, 450);
+            }
+        }
+        const directGridW = localStorage.getItem('canvasSearchPanelWidth_grid');
+        if (directGridW !== null) {
+            const parsedGW = parseInt(directGridW, 10);
+            if (Number.isFinite(parsedGW)) {
+                CanvasState.otherSettings.searchPanelGridWidth = __clampNumber(parsedGW, 360, 1800, 920);
+            }
+        }
+        const directGridH = localStorage.getItem('canvasSearchPanelHeight_grid');
+        if (directGridH !== null) {
+            const parsedGH = parseInt(directGridH, 10);
+            if (Number.isFinite(parsedGH)) {
+                CanvasState.otherSettings.searchPanelGridHeight = __clampNumber(parsedGH, 200, 1200, 520);
             }
         }
     } catch (_) { }
@@ -43755,9 +43785,25 @@ function openCanvasAppearanceSettingsModal() {
     const otherSearchPanelHeightInput = modal.querySelector('#otherSearchPanelHeight');
     if (otherSearchPanelHeightInput) {
         const currentH = (typeof window.getSearchPanelHeight === 'function')
-            ? window.getSearchPanelHeight()
+            ? window.getSearchPanelHeight('list')
             : (otherSettings.searchPanelHeight || 450);
         otherSearchPanelHeightInput.value = String(__clampNumber(currentH, 200, 1200, 450));
+    }
+
+    const otherSearchPanelGridWidthInput = modal.querySelector('#otherSearchPanelGridWidth');
+    if (otherSearchPanelGridWidthInput) {
+        const currentGW = (typeof window.getSearchPanelWidth === 'function')
+            ? window.getSearchPanelWidth('grid')
+            : (otherSettings.searchPanelGridWidth || 920);
+        otherSearchPanelGridWidthInput.value = String(__clampNumber(currentGW, 360, 1800, 920));
+    }
+
+    const otherSearchPanelGridHeightInput = modal.querySelector('#otherSearchPanelGridHeight');
+    if (otherSearchPanelGridHeightInput) {
+        const currentGH = (typeof window.getSearchPanelHeight === 'function')
+            ? window.getSearchPanelHeight('grid')
+            : (otherSettings.searchPanelGridHeight || 520);
+        otherSearchPanelGridHeightInput.value = String(__clampNumber(currentGH, 200, 1200, 520));
     }
 
     __updateOtherTempColorFollowLock(modal, otherColorFollow && otherColorFollow.checked);
@@ -44145,17 +44191,38 @@ function createCanvasAppearanceSettingsModal() {
                     <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
                     <div class="appearance-row">
                         <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Search candidate list height' : '搜索栏候选高度'}</span>
+                            <span>${isEn ? 'Search bar list view height' : '搜索栏列表视图高度'}</span>
                             <button class="perf-help-btn" id="otherSearchPanelHeightHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
                         </div>
                         <div class="appearance-row-content appearance-row-content-inline">
                             <div class="appearance-size-inputs">
-                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelHeightReset" title="${isEn ? 'Restore default (450px)' : '还原默认值（450px）'}" aria-label="${isEn ? 'Restore default search candidate height' : '还原默认搜索栏候选高度'}">
+                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelHeightReset" title="${isEn ? 'Restore default (450px)' : '还原默认值（450px）'}" aria-label="${isEn ? 'Restore default search bar list view height' : '还原默认搜索栏列表视图高度'}">
                                     <i class="fas fa-undo"></i>
                                 </button>
                                 <input type="number" id="otherSearchPanelHeight" min="200" max="1200" step="10">
+                                <span>px</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row" id="otherSearchPanelGridSizeRow">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? 'Grid view default size' : '网格视图默认长宽'}</span>
+                            <button class="perf-help-btn" id="otherSearchPanelGridSizeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content appearance-row-content-inline">
+                            <div class="appearance-size-inputs">
+                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelGridSizeReset" title="${isEn ? 'Restore default (920 × 520px)' : '还原默认值（920 × 520px）'}" aria-label="${isEn ? 'Restore default grid size' : '还原网格视图默认长宽'}">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
+                                <input type="number" id="otherSearchPanelGridWidth" min="360" max="1800" step="10" style="width: 72px;">
+                                <span style="margin-right: 6px;">px</span>
+                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
+                                <input type="number" id="otherSearchPanelGridHeight" min="200" max="1200" step="10" style="width: 72px;">
                                 <span>px</span>
                             </div>
                         </div>
@@ -44365,8 +44432,15 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="otherSearchPanelHeightHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Search candidate height</b>: Adjusts the maximum height of the search candidate dropdown panel. Supports direct manual input or dragging the edge handle to resize. Automatically applies a temporary ceiling in smaller windows, sidebars, or tabs so it never exceeds the actual visible area.'
-            : '<b>搜索栏候选高度</b>：设置搜索下拉候选面板的最大高度。支持在此直接手动输入，也可以在搜索候选面板外侧边缘拖拽把手实时调整大小。在窗口/侧边栏/标签页空间有限时会自动启用临时上限，确保绝不超出实际可见高度。'}
+            ? '<b>Search bar list view height</b>: Adjusts the maximum height of the search candidate dropdown panel in list view mode. Supports direct manual input or dragging the edge handle to resize. Automatically applies a temporary ceiling in smaller windows, sidebars, or tabs so it never exceeds the actual visible area.'
+            : '<b>搜索栏列表视图高度</b>：设置搜索下拉候选面板在列表视图模式下的最大高度。支持在此直接手动输入，也可以在搜索候选面板外侧边缘拖拽把手实时调整大小。在窗口/侧边栏/标签页空间有限时会自动启用临时上限，确保绝不超出实际可见高度。'}
+            </div>
+        </div>
+        <div class="perf-help-popover" id="otherSearchPanelGridSizeHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Grid view default size</b>: Sets the default width and height of the search candidate panel in Grid view mode. Grid mode and List mode maintain completely independent sizes. You can also drag the edge handles directly in the search panel to adjust them.'
+            : '<b>网格视图默认长宽</b>：设置搜索候选面板在网格视图模式下的默认宽度和高度。网格模式与列表模式的尺寸完全独立、互不影响。亦可在网格模式下直接拖拽面板左右和底部的把手实时调整。'}
             </div>
         </div>
 
@@ -44462,11 +44536,14 @@ function createCanvasAppearanceSettingsModal() {
     const otherBookmarkNoteHighlightHelpPopover = modal.querySelector('#otherBookmarkNoteHighlightHelpPopover');
     const otherSearchPanelHeightHelpBtn = modal.querySelector('#otherSearchPanelHeightHelpBtn');
     const otherSearchPanelHeightHelpPopover = modal.querySelector('#otherSearchPanelHeightHelpPopover');
+    const otherSearchPanelGridSizeHelpBtn = modal.querySelector('#otherSearchPanelGridSizeHelpBtn');
+    const otherSearchPanelGridSizeHelpPopover = modal.querySelector('#otherSearchPanelGridSizeHelpPopover');
     bindClickHelpPopover(otherTempHelpBtn, otherTempHelpPopover);
     bindClickHelpPopover(otherMenuDefaultColorSyncHelpBtn, otherMenuDefaultColorSyncHelpPopover);
     bindClickHelpPopover(otherMenuLocatableColorSyncHelpBtn, otherMenuLocatableColorSyncHelpPopover);
     bindClickHelpPopover(otherSidebarCollapseModeHelpBtn, otherSidebarCollapseModeHelpPopover);
     bindClickHelpPopover(otherSearchPanelHeightHelpBtn, otherSearchPanelHeightHelpPopover);
+    bindClickHelpPopover(otherSearchPanelGridSizeHelpBtn, otherSearchPanelGridSizeHelpPopover);
     bindClickHelpPopover(otherTempUnlockHelpBtn, otherTempUnlockHelpPopover);
     bindClickHelpPopover(otherTempAutoLockHelpBtn, otherTempAutoLockHelpPopover);
     bindClickHelpPopover(otherBookmarkNoteHighlightHelpBtn, otherBookmarkNoteHighlightHelpPopover);
@@ -44516,14 +44593,14 @@ function createCanvasAppearanceSettingsModal() {
         otherSearchPanelHeightInput.addEventListener('input', () => {
             const val = parseInt(otherSearchPanelHeightInput.value, 10);
             if (Number.isFinite(val) && typeof window.setSearchPanelHeight === 'function') {
-                window.setSearchPanelHeight(val, { syncInput: false });
+                window.setSearchPanelHeight(val, { syncInput: false, mode: 'list' });
             }
             scheduleOtherSave();
         });
         otherSearchPanelHeightInput.addEventListener('change', () => {
             const minH = window.SEARCH_PANEL_HEIGHT_MIN || 200;
             const maxH = window.SEARCH_PANEL_HEIGHT_MAX || 1200;
-            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT || 450;
+            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT_LIST || window.SEARCH_PANEL_HEIGHT_DEFAULT || 450;
             const clamped = __clampNumber(
                 parseInt(otherSearchPanelHeightInput.value, 10),
                 minH,
@@ -44532,17 +44609,89 @@ function createCanvasAppearanceSettingsModal() {
             );
             otherSearchPanelHeightInput.value = String(clamped);
             if (typeof window.setSearchPanelHeight === 'function') {
-                window.setSearchPanelHeight(clamped, { syncInput: false });
+                window.setSearchPanelHeight(clamped, { syncInput: false, mode: 'list' });
             }
             scheduleOtherSave();
         });
     }
     if (otherSearchPanelHeightResetBtn && otherSearchPanelHeightInput) {
         otherSearchPanelHeightResetBtn.addEventListener('click', () => {
-            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT || 450;
+            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT_LIST || window.SEARCH_PANEL_HEIGHT_DEFAULT || 450;
             otherSearchPanelHeightInput.value = String(defH);
             if (typeof window.setSearchPanelHeight === 'function') {
-                window.setSearchPanelHeight(defH, { syncInput: false });
+                window.setSearchPanelHeight(defH, { syncInput: false, mode: 'list' });
+            }
+            saveCanvasOtherSettings({ close: false, modal });
+        });
+    }
+
+    const otherSearchPanelGridWidthInput = modal.querySelector('#otherSearchPanelGridWidth');
+    const otherSearchPanelGridHeightInput = modal.querySelector('#otherSearchPanelGridHeight');
+    const otherSearchPanelGridSizeResetBtn = modal.querySelector('#otherSearchPanelGridSizeReset');
+
+    if (otherSearchPanelGridWidthInput) {
+        otherSearchPanelGridWidthInput.addEventListener('input', () => {
+            const val = parseInt(otherSearchPanelGridWidthInput.value, 10);
+            if (Number.isFinite(val) && typeof window.setSearchPanelWidth === 'function') {
+                window.setSearchPanelWidth(val, { save: true, mode: 'grid' });
+            }
+            scheduleOtherSave();
+        });
+        otherSearchPanelGridWidthInput.addEventListener('change', () => {
+            const minW = window.SEARCH_PANEL_WIDTH_MIN || 360;
+            const maxW = window.SEARCH_PANEL_WIDTH_MAX || 1800;
+            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_GRID || 920;
+            const clamped = __clampNumber(
+                parseInt(otherSearchPanelGridWidthInput.value, 10),
+                minW,
+                maxW,
+                defW
+            );
+            otherSearchPanelGridWidthInput.value = String(clamped);
+            if (typeof window.setSearchPanelWidth === 'function') {
+                window.setSearchPanelWidth(clamped, { save: true, mode: 'grid' });
+            }
+            scheduleOtherSave();
+        });
+    }
+
+    if (otherSearchPanelGridHeightInput) {
+        otherSearchPanelGridHeightInput.addEventListener('input', () => {
+            const val = parseInt(otherSearchPanelGridHeightInput.value, 10);
+            if (Number.isFinite(val) && typeof window.setSearchPanelHeight === 'function') {
+                window.setSearchPanelHeight(val, { syncInput: false, mode: 'grid' });
+            }
+            scheduleOtherSave();
+        });
+        otherSearchPanelGridHeightInput.addEventListener('change', () => {
+            const minH = window.SEARCH_PANEL_HEIGHT_MIN || 200;
+            const maxH = window.SEARCH_PANEL_HEIGHT_MAX || 1200;
+            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT_GRID || 520;
+            const clamped = __clampNumber(
+                parseInt(otherSearchPanelGridHeightInput.value, 10),
+                minH,
+                maxH,
+                defH
+            );
+            otherSearchPanelGridHeightInput.value = String(clamped);
+            if (typeof window.setSearchPanelHeight === 'function') {
+                window.setSearchPanelHeight(clamped, { syncInput: false, mode: 'grid' });
+            }
+            scheduleOtherSave();
+        });
+    }
+
+    if (otherSearchPanelGridSizeResetBtn) {
+        otherSearchPanelGridSizeResetBtn.addEventListener('click', () => {
+            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_GRID || 920;
+            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT_GRID || 520;
+            if (otherSearchPanelGridWidthInput) otherSearchPanelGridWidthInput.value = String(defW);
+            if (otherSearchPanelGridHeightInput) otherSearchPanelGridHeightInput.value = String(defH);
+            if (typeof window.setSearchPanelWidth === 'function') {
+                window.setSearchPanelWidth(defW, { save: true, mode: 'grid' });
+            }
+            if (typeof window.setSearchPanelHeight === 'function') {
+                window.setSearchPanelHeight(defH, { syncInput: false, mode: 'grid' });
             }
             saveCanvasOtherSettings({ close: false, modal });
         });
@@ -45264,7 +45413,7 @@ function saveCanvasOtherSettings(options = {}) {
     const searchPanelHeightInput = modal.querySelector('#otherSearchPanelHeight');
     const searchPanelHeightRaw = searchPanelHeightInput
         ? parseInt(searchPanelHeightInput.value, 10)
-        : (typeof window.getSearchPanelHeight === 'function' ? window.getSearchPanelHeight() : (prevSettings.searchPanelHeight || 450));
+        : (typeof window.getSearchPanelHeight === 'function' ? window.getSearchPanelHeight('list') : (prevSettings.searchPanelHeight || 450));
     const searchPanelHeight = __clampNumber(
         searchPanelHeightRaw,
         200,
@@ -45275,12 +45424,48 @@ function saveCanvasOtherSettings(options = {}) {
         searchPanelHeightInput.value = String(searchPanelHeight);
     }
     if (typeof window.setSearchPanelHeight === 'function') {
-        window.setSearchPanelHeight(searchPanelHeight, { syncInput: false });
+        window.setSearchPanelHeight(searchPanelHeight, { syncInput: false, mode: 'list' });
+    }
+
+    const searchPanelGridWidthInput = modal.querySelector('#otherSearchPanelGridWidth');
+    const searchPanelGridWidthRaw = searchPanelGridWidthInput
+        ? parseInt(searchPanelGridWidthInput.value, 10)
+        : (typeof window.getSearchPanelWidth === 'function' ? window.getSearchPanelWidth('grid') : (prevSettings.searchPanelGridWidth || 920));
+    const searchPanelGridWidth = __clampNumber(
+        searchPanelGridWidthRaw,
+        360,
+        1800,
+        920
+    );
+    if (searchPanelGridWidthInput && document.activeElement !== searchPanelGridWidthInput) {
+        searchPanelGridWidthInput.value = String(searchPanelGridWidth);
+    }
+    if (typeof window.setSearchPanelWidth === 'function') {
+        window.setSearchPanelWidth(searchPanelGridWidth, { save: true, mode: 'grid' });
+    }
+
+    const searchPanelGridHeightInput = modal.querySelector('#otherSearchPanelGridHeight');
+    const searchPanelGridHeightRaw = searchPanelGridHeightInput
+        ? parseInt(searchPanelGridHeightInput.value, 10)
+        : (typeof window.getSearchPanelHeight === 'function' ? window.getSearchPanelHeight('grid') : (prevSettings.searchPanelGridHeight || 520));
+    const searchPanelGridHeight = __clampNumber(
+        searchPanelGridHeightRaw,
+        200,
+        1200,
+        520
+    );
+    if (searchPanelGridHeightInput && document.activeElement !== searchPanelGridHeightInput) {
+        searchPanelGridHeightInput.value = String(searchPanelGridHeight);
+    }
+    if (typeof window.setSearchPanelHeight === 'function') {
+        window.setSearchPanelHeight(searchPanelGridHeight, { syncInput: false, mode: 'grid' });
     }
 
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
         searchPanelHeight: searchPanelHeight,
+        searchPanelGridWidth: searchPanelGridWidth,
+        searchPanelGridHeight: searchPanelGridHeight,
         gridSnapEnabled: gridSnapEnabled ? !!gridSnapEnabled.checked : prevSettings.gridSnapEnabled !== false,
         gridSnapContinuous: gridSnapContinuous ? !!gridSnapContinuous.checked : !!prevSettings.gridSnapContinuous,
         gridPointSpacing: gridPointSpacing,
