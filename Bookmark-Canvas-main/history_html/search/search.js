@@ -36,11 +36,12 @@ const searchUiState = {
     isMenuOpen: false,
     canvasSuggestionsVisible: false,
 
-    // Candidate items view mode: 'list' | 'grid'
+    // Candidate items view mode: 'grid' | 'table'
     viewMode: (() => {
         try {
             const saved = localStorage.getItem('canvasSearchPanelViewMode');
-            if (saved === 'grid' || saved === 'list') return saved;
+            if (saved === 'table') return 'table';
+            return 'grid';
         } catch (_) { }
         return 'grid';
     })(),
@@ -392,10 +393,14 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==================== DOM 操作辅助函数 ====================
 
 /**
- * 搜索候选面板视图模式辅助函数 (List / Grid)
+ * 搜索候选面板视图模式辅助函数 (List / Grid / Table)
  */
 function isSearchPanelGridView() {
-    return !!(searchUiState && searchUiState.viewMode === 'grid');
+    return !!(searchUiState && searchUiState.viewMode !== 'table');
+}
+
+function isSearchPanelTableView() {
+    return !!(searchUiState && searchUiState.viewMode === 'table');
 }
 
 let _handlesFlashTimer = null;
@@ -419,7 +424,7 @@ function triggerWidthHandlesViewSwitchFlash(panel) {
 }
 
 function setSearchPanelViewMode(mode, options = {}) {
-    const nextMode = (mode === 'grid') ? 'grid' : 'list';
+    const nextMode = (mode === 'table') ? 'table' : 'grid';
     if (!searchUiState) return;
     const prevMode = searchUiState.viewMode;
     searchUiState.viewMode = nextMode;
@@ -429,10 +434,20 @@ function setSearchPanelViewMode(mode, options = {}) {
     if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
 
+    if (prevMode === 'table' && nextMode !== 'table') {
+        if (typeof destroyCanvasSearchTabulator === 'function') {
+            destroyCanvasSearchTabulator();
+        }
+    }
+
     const panel = getSearchResultsPanel();
     if (panel) {
         panel.classList.toggle('view-grid', nextMode === 'grid');
-        // 应用目标模式独立的长宽（网格模式与列表模式完全不共享）
+        panel.classList.toggle('view-table', nextMode === 'table');
+        if (nextMode !== 'grid') {
+            panel.classList.remove('is-single-column');
+        }
+        // 应用目标模式独立的长宽（网格卡片模式与表格模式独立记忆）
         applySearchPanelWidth(getSearchPanelWidth(nextMode), panel, nextMode);
         applySearchPanelHeight(getSearchPanelHeight(nextMode), panel, nextMode);
         ensureSearchPanelResizeHandles(panel);
@@ -452,26 +467,29 @@ function setSearchPanelViewMode(mode, options = {}) {
 }
 
 function toggleSearchPanelViewMode() {
-    const current = isSearchPanelGridView() ? 'grid' : 'list';
-    const next = current === 'grid' ? 'list' : 'grid';
+    if (!searchUiState) return;
+    const current = (searchUiState && searchUiState.viewMode) || 'grid';
+    const next = (current === 'table') ? 'grid' : 'table';
     setSearchPanelViewMode(next, { rerender: true });
 }
 
 /**
- * 搜索候选面板宽度配置与常量（网格与列表完全独立不共享）
+ * 搜索候选面板宽度配置与常量（网格、列表与表格模式完全独立记忆）
  */
 const SEARCH_PANEL_WIDTH_MIN = 360;
 const SEARCH_PANEL_WIDTH_MAX = 1800;
 const SEARCH_PANEL_WIDTH_DEFAULT_GRID = 920;
+const SEARCH_PANEL_WIDTH_DEFAULT_TABLE = 1080;
 const SEARCH_PANEL_WIDTH_PREF_KEY_LIST = 'canvasSearchPanelWidth_list';
 const SEARCH_PANEL_WIDTH_PREF_KEY_GRID = 'canvasSearchPanelWidth_grid';
+const SEARCH_PANEL_WIDTH_PREF_KEY_TABLE = 'canvasSearchPanelWidth_table';
 const SEARCH_PANEL_WIDTH_PREF_KEY_LEGACY = 'canvasSearchPanelWidth';
 
 function getSearchPanelWidth(mode) {
-    const targetMode = mode || (isSearchPanelGridView() ? 'grid' : 'list');
-    if (targetMode === 'grid') {
+    const targetMode = mode || (searchUiState ? searchUiState.viewMode : (isSearchPanelTableView() ? 'table' : 'grid'));
+    if (targetMode === 'table') {
         try {
-            const saved = localStorage.getItem(SEARCH_PANEL_WIDTH_PREF_KEY_GRID);
+            const saved = localStorage.getItem(SEARCH_PANEL_WIDTH_PREF_KEY_TABLE);
             if (saved !== null) {
                 const val = parseInt(saved, 10);
                 if (Number.isFinite(val) && val >= SEARCH_PANEL_WIDTH_MIN && val <= SEARCH_PANEL_WIDTH_MAX) {
@@ -482,24 +500,24 @@ function getSearchPanelWidth(mode) {
         try {
             if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
                 const other = window.CanvasState.otherSettings;
-                if (typeof other.searchPanelGridWidth === 'number' && Number.isFinite(other.searchPanelGridWidth)) {
-                    return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, other.searchPanelGridWidth));
+                if (typeof other.searchPanelTableWidth === 'number' && Number.isFinite(other.searchPanelTableWidth)) {
+                    return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, other.searchPanelTableWidth));
                 }
             }
             const rawOther = localStorage.getItem('canvas_other_settings');
             if (rawOther) {
                 const parsedOther = JSON.parse(rawOther);
-                if (parsedOther && typeof parsedOther.searchPanelGridWidth === 'number' && Number.isFinite(parsedOther.searchPanelGridWidth)) {
-                    return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, parsedOther.searchPanelGridWidth));
+                if (parsedOther && typeof parsedOther.searchPanelTableWidth === 'number' && Number.isFinite(parsedOther.searchPanelTableWidth)) {
+                    return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, parsedOther.searchPanelTableWidth));
                 }
             }
         } catch (_) { }
-        return SEARCH_PANEL_WIDTH_DEFAULT_GRID;
+        return SEARCH_PANEL_WIDTH_DEFAULT_TABLE;
     }
 
-    // 列表模式
+    // 卡片网格模式（回退支持 legacy 与 list 键）
     try {
-        const saved = localStorage.getItem(SEARCH_PANEL_WIDTH_PREF_KEY_LIST) || localStorage.getItem(SEARCH_PANEL_WIDTH_PREF_KEY_LEGACY);
+        const saved = localStorage.getItem(SEARCH_PANEL_WIDTH_PREF_KEY_GRID) || localStorage.getItem(SEARCH_PANEL_WIDTH_PREF_KEY_LEGACY) || localStorage.getItem(SEARCH_PANEL_WIDTH_PREF_KEY_LIST);
         if (saved !== null) {
             const val = parseInt(saved, 10);
             if (Number.isFinite(val) && val >= SEARCH_PANEL_WIDTH_MIN && val <= SEARCH_PANEL_WIDTH_MAX) {
@@ -510,6 +528,9 @@ function getSearchPanelWidth(mode) {
     try {
         if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
             const other = window.CanvasState.otherSettings;
+            if (typeof other.searchPanelGridWidth === 'number' && Number.isFinite(other.searchPanelGridWidth)) {
+                return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, other.searchPanelGridWidth));
+            }
             if (typeof other.searchPanelWidth === 'number' && Number.isFinite(other.searchPanelWidth)) {
                 return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, other.searchPanelWidth));
             }
@@ -517,12 +538,15 @@ function getSearchPanelWidth(mode) {
         const rawOther = localStorage.getItem('canvas_other_settings');
         if (rawOther) {
             const parsedOther = JSON.parse(rawOther);
+            if (parsedOther && typeof parsedOther.searchPanelGridWidth === 'number' && Number.isFinite(parsedOther.searchPanelGridWidth)) {
+                return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, parsedOther.searchPanelGridWidth));
+            }
             if (parsedOther && typeof parsedOther.searchPanelWidth === 'number' && Number.isFinite(parsedOther.searchPanelWidth)) {
                 return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, parsedOther.searchPanelWidth));
             }
         }
     } catch (_) { }
-    return null;
+    return SEARCH_PANEL_WIDTH_DEFAULT_GRID;
 }
 
 function getSearchPanelTemporaryWidthLimit(panel) {
@@ -557,21 +581,25 @@ function syncSearchPanelHandlesLayout(panel) {
     const relTop = pRect.top - cRect.top;
     const width = pRect.width;
     const height = pRect.height;
-    const HANDLE_WIDTH = 14;
+    const HANDLE_WIDTH = 10;
 
     if (handleLeft) {
         handleLeft.style.display = 'flex';
-        handleLeft.style.left = `${Math.round(relLeft)}px`;
+        handleLeft.style.left = `${Math.round(relLeft - 4)}px`;
         handleLeft.style.top = `${Math.round(relTop)}px`;
         handleLeft.style.height = `${Math.round(height)}px`;
         handleLeft.style.width = `${HANDLE_WIDTH}px`;
     }
     if (handleRight) {
         handleRight.style.display = 'flex';
-        handleRight.style.left = `${Math.round(relLeft + width - HANDLE_WIDTH)}px`;
+        handleRight.style.left = `${Math.round(relLeft + width - 3)}px`;
         handleRight.style.top = `${Math.round(relTop)}px`;
         handleRight.style.height = `${Math.round(height)}px`;
         handleRight.style.width = `${HANDLE_WIDTH}px`;
+    }
+    if (panel.classList.contains('view-table')) {
+        if (typeof syncCanvasTabulatorTopScrollbar === 'function') syncCanvasTabulatorTopScrollbar();
+        if (typeof syncCanvasTabulatorRightScrollbar === 'function') syncCanvasTabulatorRightScrollbar();
     }
 }
 
@@ -588,7 +616,7 @@ if (typeof window !== 'undefined' && !window._searchPanelHandlesWindowResizeBoun
 function applySearchPanelWidth(width, panel, mode) {
     if (!panel) panel = getSearchResultsPanel();
     if (!panel) return null;
-    const targetMode = mode || (isSearchPanelGridView() ? 'grid' : 'list');
+    const targetMode = mode || (searchUiState ? searchUiState.viewMode : 'grid');
     const rawVal = (width !== undefined && width !== null) ? Number(width) : getSearchPanelWidth(targetMode);
     const temporaryLimit = getSearchPanelTemporaryWidthLimit(panel);
 
@@ -639,7 +667,7 @@ function applySearchPanelWidth(width, panel, mode) {
 }
 
 function setSearchPanelWidth(width, options = {}) {
-    const targetMode = options.mode || (isSearchPanelGridView() ? 'grid' : 'list');
+    const targetMode = options.mode || (searchUiState ? searchUiState.viewMode : (isSearchPanelTableView() ? 'table' : 'grid'));
     const rawVal = width !== null ? Math.round(Number(width)) : null;
     const preferred = (rawVal !== null && Number.isFinite(rawVal))
         ? Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, rawVal))
@@ -648,25 +676,25 @@ function setSearchPanelWidth(width, options = {}) {
 
     if (options.save !== false) {
         try {
-            if (targetMode === 'grid') {
+            if (targetMode === 'table') {
                 if (preferred !== null) {
-                    localStorage.setItem(SEARCH_PANEL_WIDTH_PREF_KEY_GRID, String(preferred));
+                    localStorage.setItem(SEARCH_PANEL_WIDTH_PREF_KEY_TABLE, String(preferred));
                 } else {
-                    localStorage.removeItem(SEARCH_PANEL_WIDTH_PREF_KEY_GRID);
+                    localStorage.removeItem(SEARCH_PANEL_WIDTH_PREF_KEY_TABLE);
                 }
                 if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
-                    window.CanvasState.otherSettings.searchPanelGridWidth = preferred;
+                    window.CanvasState.otherSettings.searchPanelTableWidth = preferred;
                 }
             } else {
                 if (preferred !== null) {
-                    localStorage.setItem(SEARCH_PANEL_WIDTH_PREF_KEY_LIST, String(preferred));
+                    localStorage.setItem(SEARCH_PANEL_WIDTH_PREF_KEY_GRID, String(preferred));
                     localStorage.setItem(SEARCH_PANEL_WIDTH_PREF_KEY_LEGACY, String(preferred));
                 } else {
-                    localStorage.removeItem(SEARCH_PANEL_WIDTH_PREF_KEY_LIST);
+                    localStorage.removeItem(SEARCH_PANEL_WIDTH_PREF_KEY_GRID);
                     localStorage.removeItem(SEARCH_PANEL_WIDTH_PREF_KEY_LEGACY);
                 }
                 if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
-                    window.CanvasState.otherSettings.searchPanelWidth = preferred;
+                    window.CanvasState.otherSettings.searchPanelGridWidth = preferred;
                 }
             }
         } catch (_) { }
@@ -687,33 +715,35 @@ function setSearchPanelWidth(width, options = {}) {
 }
 
 function resetSearchPanelWidth(mode) {
-    const targetMode = mode || (isSearchPanelGridView() ? 'grid' : 'list');
-    if (targetMode === 'grid') {
-        setSearchPanelWidth(SEARCH_PANEL_WIDTH_DEFAULT_GRID, { save: true, mode: 'grid' });
+    const targetMode = mode || (searchUiState ? searchUiState.viewMode : (isSearchPanelTableView() ? 'table' : 'grid'));
+    if (targetMode === 'table') {
+        setSearchPanelWidth(SEARCH_PANEL_WIDTH_DEFAULT_TABLE, { save: true, mode: 'table' });
     } else {
-        setSearchPanelWidth(null, { save: true, mode: 'list' });
+        setSearchPanelWidth(SEARCH_PANEL_WIDTH_DEFAULT_GRID, { save: true, mode: 'grid' });
     }
     const p = getSearchResultsPanel();
     if (p) applySearchPanelWidth(getSearchPanelWidth(targetMode), p, targetMode);
 }
 
 /**
- * 搜索候选面板高度配置与常量（网格与列表完全独立不共享）
+ * 搜索候选面板高度配置与常量（网格、列表与表格模式完全独立记忆）
  */
 const SEARCH_PANEL_HEIGHT_MIN = 200;
 const SEARCH_PANEL_HEIGHT_MAX = 1200;
 const SEARCH_PANEL_HEIGHT_DEFAULT = 450;
 const SEARCH_PANEL_HEIGHT_DEFAULT_LIST = 450;
 const SEARCH_PANEL_HEIGHT_DEFAULT_GRID = 520;
+const SEARCH_PANEL_HEIGHT_DEFAULT_TABLE = 520;
 const SEARCH_PANEL_HEIGHT_PREF_KEY_LIST = 'canvasSearchPanelHeight_list';
 const SEARCH_PANEL_HEIGHT_PREF_KEY_GRID = 'canvasSearchPanelHeight_grid';
+const SEARCH_PANEL_HEIGHT_PREF_KEY_TABLE = 'canvasSearchPanelHeight_table';
 const SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY = 'canvasSearchPanelHeight';
 
 function getSearchPanelHeight(mode) {
-    const targetMode = mode || (isSearchPanelGridView() ? 'grid' : 'list');
-    if (targetMode === 'grid') {
+    const targetMode = mode || (searchUiState ? searchUiState.viewMode : 'grid');
+    if (targetMode === 'table') {
         try {
-            const saved = localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_GRID);
+            const saved = localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_TABLE);
             if (saved !== null) {
                 const val = parseInt(saved, 10);
                 if (Number.isFinite(val) && val >= SEARCH_PANEL_HEIGHT_MIN && val <= SEARCH_PANEL_HEIGHT_MAX) {
@@ -724,24 +754,24 @@ function getSearchPanelHeight(mode) {
         try {
             if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
                 const other = window.CanvasState.otherSettings;
-                if (typeof other.searchPanelGridHeight === 'number' && Number.isFinite(other.searchPanelGridHeight)) {
-                    return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, other.searchPanelGridHeight));
+                if (typeof other.searchPanelTableHeight === 'number' && Number.isFinite(other.searchPanelTableHeight)) {
+                    return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, other.searchPanelTableHeight));
                 }
             }
             const rawOther = localStorage.getItem('canvas_other_settings');
             if (rawOther) {
                 const parsedOther = JSON.parse(rawOther);
-                if (parsedOther && typeof parsedOther.searchPanelGridHeight === 'number' && Number.isFinite(parsedOther.searchPanelGridHeight)) {
-                    return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, parsedOther.searchPanelGridHeight));
+                if (parsedOther && typeof parsedOther.searchPanelTableHeight === 'number' && Number.isFinite(parsedOther.searchPanelTableHeight)) {
+                    return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, parsedOther.searchPanelTableHeight));
                 }
             }
         } catch (_) { }
-        return SEARCH_PANEL_HEIGHT_DEFAULT_GRID;
+        return SEARCH_PANEL_HEIGHT_DEFAULT_TABLE;
     }
 
-    // 列表模式
+    // 网格/卡片视图（包括单纵行卡片与多纵行网格，兼容旧列表高度记忆）
     try {
-        const saved = localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LIST) || localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY);
+        const saved = localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_GRID) || localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY);
         if (saved !== null) {
             const val = parseInt(saved, 10);
             if (Number.isFinite(val) && val >= SEARCH_PANEL_HEIGHT_MIN && val <= SEARCH_PANEL_HEIGHT_MAX) {
@@ -752,6 +782,9 @@ function getSearchPanelHeight(mode) {
     try {
         if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
             const other = window.CanvasState.otherSettings;
+            if (typeof other.searchPanelGridHeight === 'number' && Number.isFinite(other.searchPanelGridHeight)) {
+                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, other.searchPanelGridHeight));
+            }
             if (typeof other.searchPanelHeight === 'number' && Number.isFinite(other.searchPanelHeight)) {
                 return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, other.searchPanelHeight));
             }
@@ -759,12 +792,15 @@ function getSearchPanelHeight(mode) {
         const rawOther = localStorage.getItem('canvas_other_settings');
         if (rawOther) {
             const parsedOther = JSON.parse(rawOther);
+            if (parsedOther && typeof parsedOther.searchPanelGridHeight === 'number' && Number.isFinite(parsedOther.searchPanelGridHeight)) {
+                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, parsedOther.searchPanelGridHeight));
+            }
             if (parsedOther && typeof parsedOther.searchPanelHeight === 'number' && Number.isFinite(parsedOther.searchPanelHeight)) {
                 return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, parsedOther.searchPanelHeight));
             }
         }
     } catch (_) { }
-    return SEARCH_PANEL_HEIGHT_DEFAULT_LIST;
+    return SEARCH_PANEL_HEIGHT_DEFAULT_GRID;
 }
 
 /**
@@ -828,9 +864,9 @@ function getSearchPanelTemporaryHeightLimit(panel) {
 
 function applySearchPanelHeight(height, panel, mode) {
     if (!panel) panel = getSearchResultsPanel();
-    const targetMode = mode || (isSearchPanelGridView() ? 'grid' : 'list');
+    const targetMode = mode || (searchUiState ? searchUiState.viewMode : (isSearchPanelTableView() ? 'table' : 'grid'));
     const rawVal = (height !== undefined && height !== null) ? Number(height) : getSearchPanelHeight(targetMode);
-    const defH = (targetMode === 'grid') ? SEARCH_PANEL_HEIGHT_DEFAULT_GRID : SEARCH_PANEL_HEIGHT_DEFAULT_LIST;
+    const defH = (targetMode === 'table') ? SEARCH_PANEL_HEIGHT_DEFAULT_TABLE : SEARCH_PANEL_HEIGHT_DEFAULT_GRID;
     const preferred = Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, Math.round(rawVal || defH)));
     const temporaryLimit = getSearchPanelTemporaryHeightLimit(panel);
     const effective = Math.min(preferred, temporaryLimit);
@@ -846,16 +882,30 @@ function applySearchPanelHeight(height, panel, mode) {
 }
 
 function setSearchPanelHeight(height, options = {}) {
-    const targetMode = options.mode || (isSearchPanelGridView() ? 'grid' : 'list');
-    const defH = (targetMode === 'grid') ? SEARCH_PANEL_HEIGHT_DEFAULT_GRID : SEARCH_PANEL_HEIGHT_DEFAULT_LIST;
+    const targetMode = options.mode || (searchUiState ? searchUiState.viewMode : (isSearchPanelTableView() ? 'table' : 'grid'));
+    const defH = (targetMode === 'table') ? SEARCH_PANEL_HEIGHT_DEFAULT_TABLE : SEARCH_PANEL_HEIGHT_DEFAULT_GRID;
     const rawVal = Math.round(Number(height) || defH);
     const preferred = Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, rawVal));
     const effective = applySearchPanelHeight(preferred, null, targetMode);
 
     if (options.save !== false) {
         try {
-            if (targetMode === 'grid') {
+            if (targetMode === 'table') {
+                localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_TABLE, String(preferred));
+                if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
+                    window.CanvasState.otherSettings.searchPanelTableHeight = preferred;
+                }
+                const rawOther = localStorage.getItem('canvas_other_settings');
+                if (rawOther) {
+                    const parsedOther = JSON.parse(rawOther);
+                    if (parsedOther && typeof parsedOther === 'object') {
+                        parsedOther.searchPanelTableHeight = preferred;
+                        localStorage.setItem('canvas_other_settings', JSON.stringify(parsedOther));
+                    }
+                }
+            } else {
                 localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_GRID, String(preferred));
+                localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY, String(preferred));
                 if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
                     window.CanvasState.otherSettings.searchPanelGridHeight = preferred;
                 }
@@ -864,20 +914,6 @@ function setSearchPanelHeight(height, options = {}) {
                     const parsedOther = JSON.parse(rawOther);
                     if (parsedOther && typeof parsedOther === 'object') {
                         parsedOther.searchPanelGridHeight = preferred;
-                        localStorage.setItem('canvas_other_settings', JSON.stringify(parsedOther));
-                    }
-                }
-            } else {
-                localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LIST, String(preferred));
-                localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY, String(preferred));
-                if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
-                    window.CanvasState.otherSettings.searchPanelHeight = preferred;
-                }
-                const rawOther = localStorage.getItem('canvas_other_settings');
-                if (rawOther) {
-                    const parsedOther = JSON.parse(rawOther);
-                    if (parsedOther && typeof parsedOther === 'object') {
-                        parsedOther.searchPanelHeight = preferred;
                         localStorage.setItem('canvas_other_settings', JSON.stringify(parsedOther));
                     }
                 }
@@ -916,8 +952,8 @@ function setSearchPanelHeight(height, options = {}) {
 }
 
 function resetSearchPanelHeight(mode) {
-    const targetMode = mode || (isSearchPanelGridView() ? 'grid' : 'list');
-    const defH = (targetMode === 'grid') ? SEARCH_PANEL_HEIGHT_DEFAULT_GRID : SEARCH_PANEL_HEIGHT_DEFAULT_LIST;
+    const targetMode = mode || (searchUiState ? searchUiState.viewMode : (isSearchPanelTableView() ? 'table' : 'grid'));
+    const defH = (targetMode === 'table') ? SEARCH_PANEL_HEIGHT_DEFAULT_TABLE : SEARCH_PANEL_HEIGHT_DEFAULT_GRID;
     setSearchPanelHeight(defH, { save: true, syncInput: true, mode: targetMode });
     const p = getSearchResultsPanel();
     if (p) applySearchPanelHeight(getSearchPanelHeight(targetMode), p, targetMode);
@@ -1086,8 +1122,11 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
     handle.addEventListener('dblclick', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const currentMode = isSearchPanelGridView() ? 'grid' : 'list';
+        const currentMode = (searchUiState && searchUiState.viewMode) || 'grid';
         resetSearchPanelHeight(currentMode);
+        if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+            canvasSearchTabulatorInstance.redraw(true);
+        }
         try {
             const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
             showCanvasToastSafe(isZh ? '已恢复默认搜索面板高度' : 'Reset search panel height', 'info', 1000);
@@ -1176,8 +1215,11 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
                 // 拖拽释放时单次提交并持久化（写入 localStorage 并同步 CSS 变量与事件）
-                const currentMode = isSearchPanelGridView() ? 'grid' : 'list';
+                const currentMode = (searchUiState && searchUiState.viewMode) || 'grid';
                 setSearchPanelHeight(currentHeight, { save: true, syncInput: true, mode: currentMode });
+                if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+                    canvasSearchTabulatorInstance.redraw(true);
+                }
             }
         };
 
@@ -1208,8 +1250,11 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
     handle.addEventListener('dblclick', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const currentMode = isSearchPanelGridView() ? 'grid' : 'list';
+        const currentMode = (searchUiState && searchUiState.viewMode) || 'grid';
         resetSearchPanelWidth(currentMode);
+        if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+            canvasSearchTabulatorInstance.redraw(true);
+        }
         try {
             const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
             showCanvasToastSafe(isZh ? '已恢复默认搜索面板宽度' : 'Reset search panel width', 'info', 1000);
@@ -1225,6 +1270,7 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
         e.stopPropagation();
 
         const startX = e.clientX;
+        const startY = e.clientY;
         const rect = panel.getBoundingClientRect();
         const startWidth = rect.width;
         const currentLeft = parseFloat(panel.style.left) || 0;
@@ -1251,9 +1297,11 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
                 return;
             }
 
-            const dist = Math.abs(moveEvent.clientX - startX);
+            const distX = Math.abs(moveEvent.clientX - startX);
+            const distY = Math.abs(moveEvent.clientY - startY);
             if (!hasStartedDrag) {
-                if (dist < DRAG_THRESHOLD) return;
+                // 防误触保护：若位移未达标或纵向位移主导（用户实际意图为上下滚动或点击），坚决不激活横向宽度调整
+                if (distX < DRAG_THRESHOLD || distX < distY * 1.2) return;
                 hasStartedDrag = true;
                 panel.classList.add('resizing-x');
                 document.body.style.cursor = 'ew-resize';
@@ -1328,9 +1376,15 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
                 panel.classList.remove('resizing-x');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
-                const currentMode = isSearchPanelGridView() ? 'grid' : 'list';
+                const currentMode = (searchUiState && searchUiState.viewMode) || 'grid';
                 setSearchPanelWidth(currentWidth, { save: true, mode: currentMode });
                 applySearchPanelWidth(currentWidth, panel, currentMode);
+                if (typeof updateSearchPanelColumnState === 'function') {
+                    updateSearchPanelColumnState(panel);
+                }
+                if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+                    canvasSearchTabulatorInstance.redraw(true);
+                }
             }
         };
 
@@ -1405,6 +1459,7 @@ function hideSearchResultsPanel() {
     if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
     if (typeof clearSearchPanelAutoInfiniteScroll === 'function') clearSearchPanelAutoInfiniteScroll();
+    if (typeof destroyCanvasSearchTabulator === 'function') destroyCanvasSearchTabulator();
     const panel = getSearchResultsPanel();
     if (panel) {
         if (searchPanelShowFrame) {
@@ -1604,6 +1659,30 @@ function updateSearchResultSelection(nextIndex, options = {}) {
     const panel = getSearchResultsPanel();
     if (!panel) return;
     const ensureVisible = options.ensureVisible !== false;
+
+    if (isSearchPanelTableView() && typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+        try {
+            if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
+                flushRemainingCanvasSearchTableChunks();
+            }
+            const rows = canvasSearchTabulatorInstance.getRows();
+            if (!rows || !rows.length) {
+                searchUiState.selectedIndex = -1;
+                return;
+            }
+            const maxIdx = rows.length - 1;
+            const clamped = Math.max(0, Math.min(maxIdx, nextIndex));
+            canvasSearchTabulatorInstance.deselectRow();
+            if (rows[clamped]) {
+                rows[clamped].select();
+                if (ensureVisible && typeof rows[clamped].scrollTo === 'function') {
+                    rows[clamped].scrollTo();
+                }
+            }
+            searchUiState.selectedIndex = clamped;
+            return;
+        } catch (_) { }
+    }
 
     const items = panel.querySelectorAll('.search-result-item');
     if (!items.length) {
@@ -2432,7 +2511,12 @@ function handleSearchResultsPanelClick(e) {
     if (viewToggleBtn) {
         e.preventDefault();
         e.stopPropagation();
-        toggleSearchPanelViewMode();
+        const targetMode = viewToggleBtn.dataset.viewMode;
+        if (targetMode && (targetMode === 'grid' || targetMode === 'table')) {
+            setSearchPanelViewMode(targetMode, { rerender: true });
+        } else {
+            toggleSearchPanelViewMode();
+        }
         return;
     }
 
@@ -11622,14 +11706,15 @@ function renderCanvasBookmarkLocationsHtml(item, options = {}) {
         return `<button type="button" class="${chipClass}${compactClass}" ${chipAttr} ${extraAttrs} style="${chipCursor} --loc-color:${safeColor}; border-color:${safeColor}; color:${safeColor}; background:${safeColor}18; ${extraStyle}" title="${escapeHtml(safeTitle)}"><span class="canvas-bookmark-location-chip-text">${text}</span></button>`;
     };
 
-    const renderLocationChipRow = (chips, limit = 5) => {
+    const renderLocationChipRow = (chips, limit = 5, options = {}) => {
         const list = Array.isArray(chips) ? chips.filter(Boolean) : [];
         const compactClass = compact ? ' canvas-bookmark-location-chip-row-compact' : '';
+        const breakEvery = Number(options.breakEvery || 2);
         const renderChipWithBreaks = (sourceList, opts = {}) => sourceList.map((chipHtml, localIndex) => {
             const index = Number(opts.startIndex || 0) + localIndex;
             const hiddenAttr = opts.hidden ? 'hidden data-location-chip-extra="true" ' : '';
             const chip = hiddenAttr ? chipHtml.replace('<button ', `<button ${hiddenAttr}`) : chipHtml;
-            const shouldBreak = (index + 1) % 3 === 0 && (index + 1) < list.length;
+            const shouldBreak = breakEvery > 0 && (index + 1) % breakEvery === 0 && (index + 1) < list.length;
             const breakHiddenAttr = (opts.hidden || (index + 1) === limit) ? 'hidden data-location-chip-extra="true" ' : '';
             const breakHtml = shouldBreak ? `<span class="canvas-bookmark-location-chip-row-break" ${breakHiddenAttr}></span>` : '';
             return `${chip}${breakHtml}`;
@@ -11682,7 +11767,7 @@ function renderCanvasBookmarkLocationsHtml(item, options = {}) {
 
         locationsHtml += `<div class="canvas-bookmark-location-row canvas-bookmark-location-row-permanent${compact ? ' canvas-bookmark-location-row-compact' : ''}">
             ${permLabel}
-            ${renderLocationChipRow(copyBadges)}
+            ${renderLocationChipRow(copyBadges, 6, { breakEvery: 3 })}
         </div>`;
     }
 
@@ -11709,9 +11794,12 @@ function renderCanvasBookmarkLocationsHtml(item, options = {}) {
 
         allBadges.push(...tempBadges);
 
+        const hasLongTempTitles = temps.some(loc => loc && loc.title && loc.title !== loc.label);
+        const tempBreakEvery = hasLongTempTitles ? 1 : 2;
+
         locationsHtml += `<div class="canvas-bookmark-location-row canvas-bookmark-location-row-temp${compact ? ' canvas-bookmark-location-row-compact' : ''}">
             ${tempLabel}
-            ${renderLocationChipRow(tempBadges, 3)}
+            ${renderLocationChipRow(tempBadges, 4, { breakEvery: tempBreakEvery })}
         </div>`;
     }
 
@@ -11725,6 +11813,1006 @@ function renderCanvasBookmarkLocationsHtml(item, options = {}) {
     const gridSummaryHtml = `<div class="canvas-grid-card-locations-row">${firstBadge}${moreBtnHtml}</div>`;
 
     return `${gridSummaryHtml}${locationsHtml}`;
+}
+
+// ==================== Tabulator 表格视图控制器与适配器 ====================
+
+let canvasSearchTabulatorInstance = null;
+let canvasSearchTabulatorChunkTimer = null;
+const CANVAS_TABULATOR_INITIAL_CHUNK_SIZE = 50;
+const CANVAS_TABULATOR_STREAM_CHUNK_SIZE = 100;
+
+// 缓存当前搜索注入状态，以便在用户开始拖动或滚动时立即同步冲刷全部剩余数据
+let canvasSearchTabulatorPendingState = {
+    totalResults: [],
+    currentOffset: 0,
+    renderQuery: '',
+    isZh: true
+};
+
+function cancelCanvasSearchTabulatorLazyLoad() {
+    if (canvasSearchTabulatorChunkTimer) {
+        clearTimeout(canvasSearchTabulatorChunkTimer);
+        canvasSearchTabulatorChunkTimer = null;
+    }
+}
+
+/**
+ * 当用户开始拖拽垂直滑块、在滑块上点击跳转或键盘方向键导航时，
+ * 立即同步将所有尚未注入的剩余数据一次性灌入表格中，
+ * 使滚动条轨道与滑块所表示的数据总量瞬间 100% 稳定，彻底杜绝数据在滑动过程中动态增补引发的尺寸抖动或失控
+ */
+function flushRemainingCanvasSearchTableChunks() {
+    if (!canvasSearchTabulatorChunkTimer) return;
+    cancelCanvasSearchTabulatorLazyLoad();
+
+    if (!canvasSearchTabulatorInstance) return;
+    const { totalResults, currentOffset, renderQuery, isZh } = canvasSearchTabulatorPendingState;
+    if (!totalResults || currentOffset >= totalResults.length) return;
+
+    const remainingSlice = totalResults.slice(currentOffset);
+    if (!remainingSlice.length) return;
+
+    const remainingData = buildCanvasTabulatorData(remainingSlice, renderQuery, { isZh, startIndex: currentOffset });
+    canvasSearchTabulatorPendingState.currentOffset = totalResults.length;
+    try {
+        canvasSearchTabulatorInstance.addData(remainingData);
+        syncCanvasTabulatorTopScrollbar();
+        syncCanvasTabulatorRightScrollbar();
+    } catch (_) { }
+}
+
+function destroyCanvasSearchTabulator() {
+    cancelCanvasSearchTabulatorLazyLoad();
+    canvasSearchTabulatorPendingState.totalResults = [];
+    canvasSearchTabulatorPendingState.currentOffset = 0;
+
+    const topScroll = document.getElementById('canvasTabulatorTopScrollbar');
+    if (topScroll) {
+        topScroll._hasCustomScrollBinding = false;
+        topScroll.style.display = 'none';
+    }
+    const rightScroll = document.getElementById('canvasTabulatorRightScrollbar');
+    if (rightScroll) {
+        rightScroll._hasCustomScrollBinding = false;
+        rightScroll.style.display = 'none';
+    }
+    if (canvasSearchTabulatorInstance) {
+        try {
+            canvasSearchTabulatorInstance.destroy();
+        } catch (_) { }
+        canvasSearchTabulatorInstance = null;
+    }
+}
+
+/**
+ * 同步表头上方的水平滚动滑块与 Tabulator 内部真实滚动距离（单向驱动，解耦零卡顿）
+ */
+function syncCanvasTabulatorTopScrollbar() {
+    const topScroll = document.getElementById('canvasTabulatorTopScrollbar');
+    const thumb = document.getElementById('canvasTabulatorTopScrollbarThumb');
+    const tableContainer = document.getElementById('canvasSearchTabulatorTable');
+    if (!topScroll || !tableContainer) return;
+
+    const holder = tableContainer.querySelector('.tabulator-tableholder');
+    if (!holder) return;
+
+    const scrollW = holder.scrollWidth;
+    const clientW = holder.clientWidth;
+
+    if (scrollW > clientW + 2) {
+        topScroll.style.display = 'block';
+        if (thumb) {
+            const trackW = topScroll.clientWidth || clientW;
+            const thumbW = Math.max(32, Math.round((clientW / scrollW) * trackW));
+            const maxThumbLeft = Math.max(1, trackW - thumbW);
+            const maxScrollLeft = Math.max(1, scrollW - clientW);
+            const thumbLeft = Math.round((holder.scrollLeft / maxScrollLeft) * maxThumbLeft);
+
+            thumb.style.width = `${thumbW}px`;
+            thumb.style.left = `${thumbLeft}px`;
+        }
+    } else {
+        topScroll.style.display = 'none';
+    }
+}
+
+/**
+ * 绑定表头上方水平滚动条解耦事件（解耦自定义滑块架构，彻底模拟 Shift+滚轮一样的丝滑体验）
+ */
+function bindCanvasTabulatorTopScrollbarEvents() {
+    const topScroll = document.getElementById('canvasTabulatorTopScrollbar');
+    const thumb = document.getElementById('canvasTabulatorTopScrollbarThumb');
+    const tableContainer = document.getElementById('canvasSearchTabulatorTable');
+    if (!topScroll || !tableContainer) return;
+
+    const holder = tableContainer.querySelector('.tabulator-tableholder');
+    if (!holder) return;
+
+    if (topScroll._hasCustomScrollBinding) return;
+    topScroll._hasCustomScrollBinding = true;
+
+    // 1. 表格内部滚动（例如 Shift+滚轮、触控板横向滑动手势）实时驱动顶部滑块位置，单向数据流，极速无冲突
+    holder.addEventListener('scroll', () => {
+        if (topScroll._isDraggingThumb) return;
+        syncCanvasTabulatorTopScrollbar();
+    }, { passive: true });
+
+    // 2. 在顶部滑块条上直接滚轮滚动：直接模拟水平滚动
+    topScroll.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaX || e.deltaY;
+        if (delta) {
+            if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
+                flushRemainingCanvasSearchTableChunks();
+            }
+            holder.scrollLeft += delta;
+            syncCanvasTabulatorTopScrollbar();
+        }
+    }, { passive: false });
+
+    // 3. 点击顶部滑块条空白区域直接跳转到对应位置
+    topScroll.addEventListener('pointerdown', (e) => {
+        if (thumb && (e.target === thumb || thumb.contains(e.target))) return;
+        if (e.button !== 0) return;
+        e.preventDefault();
+
+        if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
+            flushRemainingCanvasSearchTableChunks();
+        }
+
+        const rect = topScroll.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const trackW = rect.width;
+        const thumbW = thumb ? thumb.offsetWidth : 32;
+        const maxThumbLeft = Math.max(1, trackW - thumbW);
+        const targetThumbLeft = Math.max(0, Math.min(maxThumbLeft, clickX - thumbW / 2));
+
+        const scrollW = holder.scrollWidth;
+        const clientW = holder.clientWidth;
+        const maxScrollLeft = Math.max(1, scrollW - clientW);
+
+        holder.scrollLeft = Math.round((targetThumbLeft / maxThumbLeft) * maxScrollLeft);
+        syncCanvasTabulatorTopScrollbar();
+    });
+
+    // 4. 手动抓取并拖拽 thumb 滑块：解耦驱动，rAF 更新，无原生双向事件死循环，零掉帧
+    if (thumb) {
+        thumb.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
+                flushRemainingCanvasSearchTableChunks();
+            }
+
+            topScroll._isDraggingThumb = true;
+            topScroll.classList.add('is-dragging');
+
+            const startClientX = e.clientX;
+            const startScrollLeft = holder.scrollLeft;
+            const scrollW = holder.scrollWidth;
+            const clientW = holder.clientWidth;
+            const trackW = topScroll.clientWidth;
+            const thumbW = thumb.offsetWidth;
+            const maxThumbLeft = Math.max(1, trackW - thumbW);
+            const maxScrollLeft = Math.max(1, scrollW - clientW);
+
+            const pointerId = e.pointerId;
+            try { thumb.setPointerCapture(pointerId); } catch (_) { }
+
+            let dragRaf = null;
+
+            const onPointerMove = (moveEvt) => {
+                moveEvt.preventDefault();
+                const deltaX = moveEvt.clientX - startClientX;
+                const scrollDelta = (deltaX / maxThumbLeft) * maxScrollLeft;
+                const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, startScrollLeft + scrollDelta));
+
+                if (!dragRaf) {
+                    dragRaf = requestAnimationFrame(() => {
+                        dragRaf = null;
+                        holder.scrollLeft = nextScrollLeft;
+                        // 同步更新滑块自身的位置
+                        const curThumbLeft = Math.round((nextScrollLeft / maxScrollLeft) * maxThumbLeft);
+                        thumb.style.left = `${curThumbLeft}px`;
+                    });
+                }
+            };
+
+            const onPointerUp = () => {
+                topScroll._isDraggingThumb = false;
+                topScroll.classList.remove('is-dragging');
+                if (dragRaf) {
+                    cancelAnimationFrame(dragRaf);
+                    dragRaf = null;
+                }
+                syncCanvasTabulatorTopScrollbar();
+
+                try {
+                    if (pointerId !== undefined && typeof thumb.releasePointerCapture === 'function') {
+                        thumb.releasePointerCapture(pointerId);
+                    }
+                } catch (_) { }
+
+                window.removeEventListener('pointermove', onPointerMove, true);
+                window.removeEventListener('pointerup', onPointerUp, true);
+                window.removeEventListener('pointercancel', onPointerUp, true);
+            };
+
+            window.addEventListener('pointermove', onPointerMove, true);
+            window.addEventListener('pointerup', onPointerUp, true);
+            window.addEventListener('pointercancel', onPointerUp, true);
+        });
+    }
+}
+
+/**
+ * 同步表格右侧的垂直滚动滑块与 Tabulator 内部真实滚动高度（单向驱动，解耦零卡顿）
+ */
+function syncCanvasTabulatorRightScrollbar() {
+    const rightScroll = document.getElementById('canvasTabulatorRightScrollbar');
+    const thumb = document.getElementById('canvasTabulatorRightScrollbarThumb');
+    const tableContainer = document.getElementById('canvasSearchTabulatorTable');
+    if (!rightScroll || !tableContainer) return;
+
+    const holder = tableContainer.querySelector('.tabulator-tableholder');
+    if (!holder) return;
+
+    const scrollH = holder.scrollHeight;
+    const clientH = holder.clientHeight;
+
+    if (scrollH > clientH + 2) {
+        // 定位右侧滑块条位置与高度（紧密贴合表格数据行区域，避免遮挡表头）
+        const wrapper = rightScroll.parentElement;
+        if (wrapper) {
+            const wrapperRect = wrapper.getBoundingClientRect();
+            const holderRect = holder.getBoundingClientRect();
+            const topOffset = Math.max(0, holderRect.top - wrapperRect.top);
+            rightScroll.style.top = `${topOffset}px`;
+            rightScroll.style.height = `${holderRect.height || clientH}px`;
+        }
+
+        rightScroll.style.display = 'block';
+        if (thumb) {
+            const trackH = rightScroll.clientHeight || clientH;
+            const thumbH = Math.max(28, Math.round((clientH / scrollH) * trackH));
+            const maxThumbTop = Math.max(1, trackH - thumbH);
+            const maxScrollTop = Math.max(1, scrollH - clientH);
+            const thumbTop = Math.round((holder.scrollTop / maxScrollTop) * maxThumbTop);
+
+            thumb.style.height = `${thumbH}px`;
+            thumb.style.top = `${thumbTop}px`;
+        }
+    } else {
+        rightScroll.style.display = 'none';
+    }
+}
+
+/**
+ * 绑定表格右侧垂直滚动条解耦事件（解耦自定义滑块架构，彻底模拟流畅滚轮体验，杜绝失控与掉帧）
+ */
+function bindCanvasTabulatorRightScrollbarEvents() {
+    const rightScroll = document.getElementById('canvasTabulatorRightScrollbar');
+    const thumb = document.getElementById('canvasTabulatorRightScrollbarThumb');
+    const tableContainer = document.getElementById('canvasSearchTabulatorTable');
+    if (!rightScroll || !tableContainer) return;
+
+    const holder = tableContainer.querySelector('.tabulator-tableholder');
+    if (!holder) return;
+
+    if (rightScroll._hasCustomScrollBinding) return;
+    rightScroll._hasCustomScrollBinding = true;
+
+    // 1. 表格内部滚动（滚轮、触控板垂直手势、键盘方向键）实时驱动右侧滑块位置，单向数据流
+    holder.addEventListener('scroll', () => {
+        if (rightScroll._isDraggingThumb) return;
+        syncCanvasTabulatorRightScrollbar();
+    }, { passive: true });
+
+    // 2. 在右侧滑块条上直接滚轮滚动：平滑驱动垂直滚动
+    rightScroll.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY || e.deltaX;
+        if (delta) {
+            if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
+                flushRemainingCanvasSearchTableChunks();
+            }
+            holder.scrollTop += delta;
+            syncCanvasTabulatorRightScrollbar();
+        }
+    }, { passive: false });
+
+    // 3. 点击右侧滑块条空白区域直接按比例跳转
+    rightScroll.addEventListener('pointerdown', (e) => {
+        if (thumb && (e.target === thumb || thumb.contains(e.target))) return;
+        if (e.button !== 0) return;
+        e.preventDefault();
+
+        if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
+            flushRemainingCanvasSearchTableChunks();
+        }
+
+        const rect = rightScroll.getBoundingClientRect();
+        const clickY = e.clientY - rect.top;
+        const trackH = rect.height;
+        const thumbH = thumb ? thumb.offsetHeight : 28;
+        const maxThumbTop = Math.max(1, trackH - thumbH);
+        const targetThumbTop = Math.max(0, Math.min(maxThumbTop, clickY - thumbH / 2));
+
+        const scrollH = holder.scrollHeight;
+        const clientH = holder.clientHeight;
+        const maxScrollTop = Math.max(1, scrollH - clientH);
+
+        holder.scrollTop = Math.round((targetThumbTop / maxThumbTop) * maxScrollTop);
+        syncCanvasTabulatorRightScrollbar();
+    });
+
+    // 4. 手动抓取并拖拽 thumb 滑块：解耦驱动，rAF 节流更新，零掉帧且绝不失控
+    if (thumb) {
+        thumb.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
+                flushRemainingCanvasSearchTableChunks();
+            }
+
+            rightScroll._isDraggingThumb = true;
+            rightScroll.classList.add('is-dragging');
+
+            const startClientY = e.clientY;
+            const startScrollTop = holder.scrollTop;
+            const scrollH = holder.scrollHeight;
+            const clientH = holder.clientHeight;
+            const trackH = rightScroll.clientHeight;
+            const thumbH = thumb.offsetHeight;
+            const maxThumbTop = Math.max(1, trackH - thumbH);
+            const maxScrollTop = Math.max(1, scrollH - clientH);
+
+            const pointerId = e.pointerId;
+            try { thumb.setPointerCapture(pointerId); } catch (_) { }
+
+            let dragRaf = null;
+
+            const onPointerMove = (moveEvt) => {
+                moveEvt.preventDefault();
+                const deltaY = moveEvt.clientY - startClientY;
+                const scrollDelta = (deltaY / maxThumbTop) * maxScrollTop;
+                const nextScrollTop = Math.max(0, Math.min(maxScrollTop, startScrollTop + scrollDelta));
+
+                if (!dragRaf) {
+                    dragRaf = requestAnimationFrame(() => {
+                        dragRaf = null;
+                        holder.scrollTop = nextScrollTop;
+                        // 同步更新滑块自身的位置
+                        const curThumbTop = Math.round((nextScrollTop / maxScrollTop) * maxThumbTop);
+                        thumb.style.top = `${curThumbTop}px`;
+                    });
+                }
+            };
+
+            const onPointerUp = () => {
+                rightScroll._isDraggingThumb = false;
+                rightScroll.classList.remove('is-dragging');
+                if (dragRaf) {
+                    cancelAnimationFrame(dragRaf);
+                    dragRaf = null;
+                }
+                syncCanvasTabulatorRightScrollbar();
+
+                try {
+                    if (pointerId !== undefined && typeof thumb.releasePointerCapture === 'function') {
+                        thumb.releasePointerCapture(pointerId);
+                    }
+                } catch (_) { }
+
+                window.removeEventListener('pointermove', onPointerMove, true);
+                window.removeEventListener('pointerup', onPointerUp, true);
+                window.removeEventListener('pointercancel', onPointerUp, true);
+            };
+
+            window.addEventListener('pointermove', onPointerMove, true);
+            window.addEventListener('pointerup', onPointerUp, true);
+            window.addEventListener('pointercancel', onPointerUp, true);
+        });
+    }
+}
+
+/**
+ * Tabulator 数据注入引擎（恢复原版分块流式加载，首批50条即时渲染，后台分块注入，彻底消除失控）
+ */
+function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery, isZh) {
+    cancelCanvasSearchTabulatorLazyLoad();
+
+    if (!containerEl) return;
+    const totalResults = Array.isArray(displayResults) ? displayResults : [];
+    const totalCount = totalResults.length;
+
+    canvasSearchTabulatorPendingState = {
+        totalResults,
+        currentOffset: 0,
+        renderQuery,
+        isZh
+    };
+
+    // 首批数据（50条）立即同步生成并注入，瞬间完成渲染
+    const initialSlice = totalResults.slice(0, CANVAS_TABULATOR_INITIAL_CHUNK_SIZE);
+    canvasSearchTabulatorPendingState.currentOffset = initialSlice.length;
+    const initialData = buildCanvasTabulatorData(initialSlice, renderQuery, { isZh, startIndex: 0 });
+
+    const hasTableholder = !!containerEl.querySelector('.tabulator-tableholder');
+    if (!canvasSearchTabulatorInstance || !hasTableholder) {
+        initCanvasSearchTabulator(containerEl, initialData, isZh);
+    } else {
+        try {
+            canvasSearchTabulatorInstance.replaceData(initialData);
+        } catch (err) {
+            initCanvasSearchTabulator(containerEl, initialData, isZh);
+        }
+    }
+
+    requestAnimationFrame(() => {
+        bindCanvasTabulatorTopScrollbarEvents();
+        syncCanvasTabulatorTopScrollbar();
+        bindCanvasTabulatorRightScrollbarEvents();
+        syncCanvasTabulatorRightScrollbar();
+    });
+
+    // 若数据超出首批数量，后台流式增量注入剩余条目（每 16ms 注入 100 条）
+    if (totalCount > CANVAS_TABULATOR_INITIAL_CHUNK_SIZE) {
+        function loadNextChunk() {
+            if (!canvasSearchTabulatorInstance) return;
+            const currentOffset = canvasSearchTabulatorPendingState.currentOffset;
+            const nextSlice = totalResults.slice(currentOffset, currentOffset + CANVAS_TABULATOR_STREAM_CHUNK_SIZE);
+            if (nextSlice.length === 0) {
+                canvasSearchTabulatorChunkTimer = null;
+                syncCanvasTabulatorTopScrollbar();
+                syncCanvasTabulatorRightScrollbar();
+                return;
+            }
+
+            const chunkData = buildCanvasTabulatorData(nextSlice, renderQuery, { isZh, startIndex: currentOffset });
+            try {
+                canvasSearchTabulatorInstance.addData(chunkData);
+                syncCanvasTabulatorTopScrollbar();
+                syncCanvasTabulatorRightScrollbar();
+            } catch (_) {
+                canvasSearchTabulatorChunkTimer = null;
+                return;
+            }
+
+            canvasSearchTabulatorPendingState.currentOffset += nextSlice.length;
+            if (canvasSearchTabulatorPendingState.currentOffset < totalCount) {
+                canvasSearchTabulatorChunkTimer = setTimeout(loadNextChunk, 16);
+            } else {
+                canvasSearchTabulatorChunkTimer = null;
+                syncCanvasTabulatorTopScrollbar();
+                syncCanvasTabulatorRightScrollbar();
+            }
+        }
+
+        canvasSearchTabulatorChunkTimer = setTimeout(loadNextChunk, 16);
+    }
+}
+
+/**
+ * 渲染表格单元格内的位置徽章
+ */
+function renderCanvasTableBookmarkLocationsHtml(locations, isZh) {
+    if (!Array.isArray(locations) || !locations.length) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+
+    const chips = [];
+    locations.forEach((loc) => {
+        if (!loc) return;
+        const isPerm = loc.source === 'permanent';
+        const color = loc.color || (isPerm ? '#059669' : '#2563eb');
+        let label = loc.label || (isPerm ? '#A' : '');
+        let title = loc.title || (isPerm ? (isZh ? '永久栏目' : 'Permanent') : (isZh ? '临时栏目' : 'Temp Section'));
+        if (!label) {
+            label = title || (isPerm ? '#A' : 'Temp');
+        }
+
+        const clickAttrBase = `data-loc-id="${escapeHtml(String(loc.id || ''))}" data-loc-source="${escapeHtml(String(loc.source || 'permanent'))}"`;
+        const extraAttr = isPerm ? `data-copy-id="${escapeHtml(String(loc.copyId || 'null'))}"` : `data-loc-section="${escapeHtml(String(loc.sectionId || ''))}"`;
+        const safeColor = escapeHtml(color);
+        const fullTitle = [label, title].filter(Boolean).join(' - ');
+
+        chips.push(`<button type="button" class="search-loc-chip canvas-bookmark-location-chip canvas-bookmark-location-chip-compact" ${clickAttrBase} ${extraAttr} style="cursor:pointer; --loc-color:${safeColor}; border-color:${safeColor}; color:${safeColor}; background:${safeColor}18; margin:0; flex-shrink:0;" title="${escapeHtml(fullTitle)}"><span class="canvas-bookmark-location-chip-text">${escapeHtml(label)}</span></button>`);
+    });
+
+    if (chips.length <= 3) {
+        return `<div class="canvas-table-locations-cell" style="display:flex; align-items:center; gap:4px; overflow:hidden;">${chips.join('')}</div>`;
+    }
+
+    const visibleChips = chips.slice(0, 2).join('');
+    const remainCount = chips.length - 2;
+    const allTitles = locations.map(l => l.label || l.title || '').filter(Boolean).join(', ');
+    const moreBadge = `<span class="canvas-table-loc-more" title="${escapeHtml(allTitles)}" style="font-size:10px; color:var(--text-muted); background:rgba(128,128,128,0.12); padding:1px 5px; border-radius:999px; flex-shrink:0;">+${remainCount}</span>`;
+
+    return `<div class="canvas-table-locations-cell" style="display:flex; align-items:center; gap:4px; overflow:hidden;">${visibleChips}${moreBadge}</div>`;
+}
+
+/**
+ * 将搜索结果适配为 Tabulator 识别的记录格式
+ */
+function buildCanvasTabulatorData(results, query, options = {}) {
+    const list = Array.isArray(results) ? results : [];
+    const isZh = options.isZh !== false;
+    const fullscreenScope = getActiveFullscreenSearchScopeForFiltering();
+
+    const data = [];
+    let rowIdx = Number(options.startIndex || 0) + 1;
+
+    list.forEach((item) => {
+        if (!item) return;
+        if (item.type === 'bookmark-group-more') return;
+
+        // 标题与图标
+        let rawTitle = item.title || '';
+        let iconUrl = item.favicon || item.favIconUrl || item.icon || '';
+        let isFolder = item.nodeType === 'folder';
+
+        if (!rawTitle) {
+            if (item.type === 'temp-section') rawTitle = isZh ? '临时栏目' : 'Temp Section';
+            else if (item.type === 'group-result') rawTitle = isZh ? '聚合组' : 'Group Aggregation';
+            else if (item.type === 'md-node') rawTitle = item.text ? item.text.substring(0, 50) : (isZh ? 'MD卡片' : 'MD Card');
+            else rawTitle = isFolder ? (isZh ? '未命名文件夹' : 'Unnamed Folder') : (isZh ? '未命名书签' : 'Unnamed Bookmark');
+        }
+
+        let formattedTitleHtml = escapeHtml(rawTitle);
+        if (query && query.trim()) {
+            try {
+                const formatted = formatSearchTitleWithWindow(rawTitle, query);
+                formattedTitleHtml = formatted.html || escapeHtml(rawTitle);
+            } catch (_) { }
+        }
+
+        // 规范位置数组（永久主栏目 -> 永久副本 -> 临时栏目）
+        let locations = (Array.isArray(item.locations) && item.locations.length) ? item.locations : [];
+        if (locations.length === 0) {
+            if (item.source === 'permanent' || item.copyId) {
+                locations = [{
+                    id: item.id,
+                    source: 'permanent',
+                    copyId: item.copyId || null,
+                    label: item.sectionLabel || '#A',
+                    title: isZh ? '永久栏目' : 'Permanent',
+                    color: '#059669'
+                }];
+            } else if (item.source === 'temporary' || item.sectionId) {
+                locations = [{
+                    id: item.id,
+                    source: 'temporary',
+                    sectionId: item.sectionId || null,
+                    label: item.sectionLabel || '',
+                    title: item.sectionTitle || '',
+                    color: item.color || '#2563eb'
+                }];
+            }
+        }
+
+        // 标签提取
+        let tags = [];
+        try {
+            if (typeof getCanvasBookmarkTagsForSearchCached === 'function') {
+                if (item.type === 'bookmark-group' && Array.isArray(item.targetItems) && item.targetItems.length) {
+                    const seen = new Set();
+                    item.targetItems.forEach(child => {
+                        const childTags = getCanvasBookmarkTagsForSearchCached(child);
+                        (Array.isArray(childTags) ? childTags : []).forEach(t => {
+                            if (!t || !t.color) return;
+                            const k = `${t.color}::${t.text || ''}`;
+                            if (!seen.has(k)) {
+                                seen.add(k);
+                                tags.push(t);
+                            }
+                        });
+                    });
+                } else {
+                    tags = getCanvasBookmarkTagsForSearchCached(item) || [];
+                }
+            } else if (Array.isArray(item.tags)) {
+                tags = item.tags;
+            }
+        } catch (_) { }
+
+        // 便签备注提取
+        let note = null;
+        try {
+            if (typeof getCanvasBookmarkNoteMetaForSearchCached === 'function') {
+                if (item.type === 'bookmark-group' && Array.isArray(item.targetItems) && item.targetItems.length) {
+                    for (const child of item.targetItems) {
+                        const meta = getCanvasBookmarkNoteMetaForSearchCached(child);
+                        if (meta && meta.note) {
+                            note = meta;
+                            break;
+                        }
+                    }
+                } else {
+                    const meta = getCanvasBookmarkNoteMetaForSearchCached(item);
+                    if (meta && meta.note) note = meta;
+                }
+            } else if (item.note) {
+                note = { note: item.note, color: item.noteColor || 'yellow' };
+            }
+        } catch (_) { }
+
+        // 文件夹路径提取
+        let parentPath = '';
+        try {
+            const targetChild = (item.type === 'bookmark-group' && Array.isArray(item.targetItems) && item.targetItems.length)
+                ? item.targetItems[0]
+                : item;
+            if (typeof getBookmarkItemParentPathForSearchScope === 'function') {
+                parentPath = getBookmarkItemParentPathForSearchScope(targetChild, fullscreenScope) || '';
+            } else if (item.path) {
+                parentPath = item.path;
+            }
+        } catch (_) { }
+
+        // 网址 URL 提取
+        let url = item.url || '';
+        if (!url && item.type === 'bookmark-group' && Array.isArray(item.targetItems) && item.targetItems.length) {
+            url = item.targetItems[0].url || '';
+        }
+        if (!iconUrl && item.type === 'bookmark-group' && Array.isArray(item.targetItems) && item.targetItems.length) {
+            iconUrl = item.targetItems[0].favicon || item.targetItems[0].favIconUrl || item.targetItems[0].icon || '';
+        }
+
+        data.push({
+            id: item.id || `row_${rowIdx}`,
+            index: rowIdx++,
+            title: rawTitle,
+            titleHtml: formattedTitleHtml,
+            favicon: iconUrl,
+            isFolder,
+            locations,
+            tags,
+            note,
+            path: parentPath,
+            url,
+            rawItem: item
+        });
+    });
+
+    return data;
+}
+
+/**
+ * 严格按照网格与书签树 FaviconCache 统一缓存系统渲染书签 Favicon 或其对应 Fallback 图标
+ */
+function renderCanvasTableBookmarkFaviconHtml(d) {
+    if (!d) return '';
+    const isFolder = !!(d.isFolder || (d.rawItem && d.rawItem.nodeType === 'folder'));
+    if (isFolder) {
+        return `<span class="search-result-icon-box-inline" style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:6px; flex-shrink:0;">
+            <i class="fas fa-folder" style="color:#2563eb; font-size:14px;"></i>
+        </span>`;
+    }
+
+    const bookmarkFallbackHtml = `<span class="search-result-icon-box-inline" style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:6px; flex-shrink:0;">
+        <i class="fas fa-bookmark" style="color:#f59e0b; font-size:13px;"></i>
+    </span>`;
+
+    const url = String(d.url || (d.rawItem && d.rawItem.url) || '').trim();
+    if (!url) {
+        const itemType = d.rawItem && d.rawItem.type;
+        if (itemType === 'temp-section' || itemType === 'permanent-section') {
+            return `<span class="search-result-icon-box-inline" style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:6px; flex-shrink:0;">
+                <i class="fas fa-layer-group" style="color:#059669; font-size:13px;"></i>
+            </span>`;
+        }
+        return bookmarkFallbackHtml;
+    }
+
+    if (typeof getFaviconUrl === 'function') {
+        const faviconSrc = getFaviconUrl(url);
+        if (faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml')) {
+            // 已缓存真实 Favicon
+            return `<span style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:6px; flex-shrink:0;">
+                <img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(url)}" alt="" style="width:16px; height:16px; object-fit:contain; border-radius:3px;">
+            </span>`;
+        }
+        // Fallback 状态：展示黄色书签并在后台埋点 data-bookmark-url 供 FaviconCache 回调自动替换
+        return `<span style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:6px; flex-shrink:0;">
+            <i class="fas fa-bookmark search-result-icon-box-inline" style="color:#f59e0b; font-size:13px;"></i>
+            <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(url)}" alt="" style="display:none; width:16px; height:16px; object-fit:contain; border-radius:3px; position:absolute; left:0; top:0;">
+        </span>`;
+    }
+
+    return bookmarkFallbackHtml;
+}
+
+/**
+ * 获取 Tabulator 列配置
+ */
+function getCanvasTabulatorColumns(isZh) {
+    return [
+        {
+            title: "#",
+            field: "index",
+            width: 36,
+            minWidth: 32,
+            maxWidth: 42,
+            hozAlign: "center",
+            headerHozAlign: "center",
+            resizable: false,
+            headerSort: false,
+            formatter: (cell) => `<span class="canvas-table-index-num">${cell.getValue()}</span>`
+        },
+        {
+            title: isZh ? "书签标题" : "Title",
+            field: "title",
+            minWidth: 180,
+            width: 240,
+            resizable: true,
+            headerSort: true,
+            formatter: (cell) => {
+                const d = cell.getData();
+                const iconHtml = renderCanvasTableBookmarkFaviconHtml(d);
+                return `<div class="canvas-table-cell-title" title="${escapeHtml(d.title)}" style="display:flex; align-items:center; width:100%; min-width:0; overflow:hidden;">${iconHtml}<span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${d.titleHtml || escapeHtml(d.title)}</span></div>`;
+            }
+        },
+        {
+            title: isZh ? "分布栏目" : "Locations",
+            field: "locations",
+            minWidth: 140,
+            width: 170,
+            resizable: true,
+            headerSort: false,
+            formatter: (cell) => {
+                const d = cell.getData();
+                return renderCanvasTableBookmarkLocationsHtml(d.locations, isZh);
+            }
+        },
+        {
+            title: isZh ? "标签" : "Tags",
+            field: "tags",
+            minWidth: 110,
+            width: 140,
+            resizable: true,
+            headerSort: false,
+            formatter: (cell) => {
+                const d = cell.getData();
+                const tags = d.tags || [];
+                if (!tags.length) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const limit = 2;
+                const chips = tags.slice(0, limit).map(t => {
+                    const color = escapeHtml(t.color || 'gray');
+                    const text = escapeHtml(t.text || t.color || '');
+                    return `<span class="search-result-tag-chip canvas-table-tag-chip" title="${text}" style="display:inline-flex; align-items:center; height:18px; padding:0 5px; border-radius:999px; font-size:10px; margin:0; flex-shrink:0;"><span class="tag-dot tag-dot-${color}" style="width:6px; height:6px; margin-right:3px;"></span><span class="search-result-tag-chip-text" style="max-width:55px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${text}</span></span>`;
+                }).join('');
+                const more = tags.length > limit ? `<span class="search-result-tag-more" style="font-size:10px; color:var(--text-muted); background:rgba(128,128,128,0.12); padding:1px 4px; border-radius:999px; flex-shrink:0;">+${tags.length - limit}</span>` : '';
+                return `<div class="canvas-table-tags-wrapper" style="display:flex; align-items:center; gap:3px; overflow:hidden; width:100%;">${chips}${more}</div>`;
+            }
+        },
+        {
+            title: isZh ? "便签备注" : "Note",
+            field: "note",
+            minWidth: 100,
+            width: 130,
+            resizable: true,
+            headerSort: false,
+            formatter: (cell) => {
+                const d = cell.getData();
+                if (!d.note || !d.note.note) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const color = escapeHtml(d.note.color || 'yellow');
+                const noteText = escapeHtml(d.note.note);
+                return `<div class="canvas-table-note-wrapper note-color-${color}" title="${noteText}" style="display:flex; align-items:center; gap:4px; font-size:11px; max-width:100%; overflow:hidden;"><i class="fas fa-pencil-alt" style="font-size:10px; flex-shrink:0; opacity:0.8;"></i><span class="canvas-table-note-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${noteText}</span></div>`;
+            }
+        },
+        {
+            title: isZh ? "路径" : "Path",
+            field: "path",
+            minWidth: 120,
+            width: 160,
+            resizable: true,
+            headerSort: true,
+            formatter: (cell) => {
+                const d = cell.getData();
+                if (!d.path) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const safePath = escapeHtml(d.path);
+                return `<span class="canvas-table-path-text" title="${safePath}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width:100%; font-size:11px; color:var(--text-secondary);">${safePath}</span>`;
+            }
+        },
+        {
+            title: isZh ? "网址链接" : "URL",
+            field: "url",
+            minWidth: 130,
+            width: 200,
+            resizable: true,
+            headerSort: true,
+            formatter: (cell) => {
+                const d = cell.getData();
+                if (!d.url) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const safeUrl = escapeHtml(d.url);
+                return `<div class="canvas-table-url-wrapper" style="display:flex; align-items:center; justify-content:space-between; width:100%; gap:6px; min-width:0;">
+                    <span class="canvas-table-url-text" title="${safeUrl}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; font-size:11px; color:var(--text-muted);">${safeUrl}</span>
+                    <button type="button" class="search-result-external-link canvas-table-external-link" data-url="${safeUrl}" title="${isZh ? '在外部打开' : 'Open link'}" style="flex-shrink:0; background:none; border:none; padding:2px; cursor:pointer; color:var(--text-muted); display:inline-flex; align-items:center;"><i class="fas fa-external-link-alt" style="font-size:10px;"></i></button>
+                </div>`;
+            }
+        }
+    ];
+}
+
+/**
+ * 表格行交互事件：
+ * 1. 若点击位置徽章，直达该位置（永久/临时）
+ * 2. 若点击外链图标，打开网页
+ * 3. 若点击整行，按规范顺序跳转至第一位位置（永久主栏目 -> 永久副本 -> 临时栏目）
+ */
+function handleCanvasTabulatorRowClick(e, row) {
+    const target = e.target;
+
+    // 1. 位置徽章独立点击跳转
+    const chip = target ? target.closest('.search-loc-chip') : null;
+    if (chip) {
+        if (chip.dataset && chip.dataset.searchNavDisabled === 'true') return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const locId = chip.dataset.locId;
+        const locSource = chip.dataset.locSource;
+        const locSection = chip.dataset.locSection;
+        const rawCopyId = chip.dataset.copyId;
+        const copyId = (!rawCopyId || rawCopyId === 'null') ? null : rawCopyId;
+
+        hideSearchResultsPanel();
+        const inputEl = document.getElementById('searchInput');
+        if (inputEl) inputEl.value = '';
+
+        const color = chip.style.getPropertyValue('--loc-color') || '#2563eb';
+        const targetObj = {
+            type: 'bookmark-item',
+            id: locId,
+            source: locSource || 'permanent',
+            sectionId: locSource === 'temporary' ? (locSection || '') : '',
+            copyId: copyId,
+            color: color
+        };
+        navigateToCanvasBookmarkSearchTarget(targetObj);
+        return;
+    }
+
+    // 2. 外链快捷打开按钮
+    const extBtn = target ? target.closest('.search-result-external-link') : null;
+    if (extBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const u = extBtn.dataset.url;
+        if (u) openSearchResultExternalUrl(u);
+        return;
+    }
+
+    if (target && target.closest('a')) {
+        return;
+    }
+
+    // 3. 点击表格行：跳转到第一位规范位置 (永久主栏目 -> 永久副本 -> 临时栏目)
+    const rowData = row ? row.getData() : null;
+    if (!rowData) return;
+    const rawItem = rowData.rawItem;
+    if (!rawItem) return;
+
+    hideSearchResultsPanel();
+    const inputEl = document.getElementById('searchInput');
+    if (inputEl) inputEl.value = '';
+
+    const locations = Array.isArray(rowData.locations) && rowData.locations.length ? rowData.locations : (rawItem.locations || []);
+    if (locations && locations.length > 0) {
+        const loc = pickBestBookmarkLocationByScope(locations, getActiveFullscreenSearchScopeForFiltering()) || locations[0];
+        const targetObj = {
+            type: 'bookmark-item',
+            id: loc.id,
+            source: loc.source || 'permanent',
+            sectionId: loc.source === 'temporary' ? (loc.sectionId || '') : '',
+            copyId: loc.source === 'permanent' ? (loc.copyId || null) : null,
+            color: loc.color || rawItem.color || '#2563eb',
+            expandTargetFolder: shouldExpandSearchLocateTargetFolder(loc || rawItem)
+        };
+        navigateToCanvasBookmarkSearchTarget(targetObj);
+    } else {
+        if (rawItem.type === 'bookmark-item') {
+            locateCanvasBookmarkItem(rawItem);
+        } else {
+            locateCanvasElement(rawItem.id, rawItem.type);
+        }
+    }
+}
+
+/**
+ * 初始化或更新 Tabulator 实例
+ */
+function initCanvasSearchTabulator(containerEl, tableData, isZh) {
+    if (!containerEl) return null;
+    if (typeof Tabulator === 'undefined') {
+        console.error('[Search Tabulator] Tabulator library not found');
+        return null;
+    }
+
+    if (canvasSearchTabulatorInstance) {
+        try {
+            canvasSearchTabulatorInstance.destroy();
+        } catch (_) { }
+        canvasSearchTabulatorInstance = null;
+    }
+
+    try {
+        canvasSearchTabulatorInstance = new Tabulator(containerEl, {
+            data: tableData,
+            layout: "fitDataFill",
+            renderVertical: "virtual",
+            renderVerticalBuffer: 10,
+            height: "100%",
+            rowHeight: 38,
+            placeholder: isZh ? "无匹配书签" : "No matching bookmarks",
+            columns: getCanvasTabulatorColumns(isZh),
+            rowClick: handleCanvasTabulatorRowClick
+        });
+
+        containerEl.classList.add('canvas-search-tabulator');
+
+        canvasSearchTabulatorInstance.on("tableBuilt", () => {
+            bindCanvasTabulatorTopScrollbarEvents();
+            syncCanvasTabulatorTopScrollbar();
+            bindCanvasTabulatorRightScrollbarEvents();
+            syncCanvasTabulatorRightScrollbar();
+        });
+
+        canvasSearchTabulatorInstance.on("renderComplete", () => {
+            syncCanvasTabulatorTopScrollbar();
+            syncCanvasTabulatorRightScrollbar();
+        });
+
+        return canvasSearchTabulatorInstance;
+    } catch (err) {
+        console.error('[Search Tabulator] Failed to initialize Tabulator:', err);
+        return null;
+    }
+}
+
+let searchPanelResizeObserver = null;
+
+function updateSearchPanelColumnState(panel) {
+    if (!panel) panel = getSearchResultsPanel();
+    if (!panel) return;
+    if (typeof isSearchPanelGridView === 'function' && !isSearchPanelGridView()) {
+        panel.classList.remove('is-single-column');
+        return;
+    }
+    const w = panel.clientWidth;
+    const isSingle = w > 0 && w < 554;
+    panel.classList.toggle('is-single-column', isSingle);
+}
+
+function observeSearchPanelColumns(panel) {
+    if (!panel || typeof ResizeObserver === 'undefined') return;
+    if (!searchPanelResizeObserver) {
+        searchPanelResizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                const target = entry.target;
+                if (target && target.classList.contains('view-table')) {
+                    if (typeof syncCanvasTabulatorTopScrollbar === 'function') {
+                        syncCanvasTabulatorTopScrollbar();
+                    }
+                    if (typeof syncCanvasTabulatorRightScrollbar === 'function') {
+                        syncCanvasTabulatorRightScrollbar();
+                    }
+                }
+                if (!target || !target.classList.contains('view-grid')) {
+                    target.classList.remove('is-single-column');
+                    continue;
+                }
+                const w = entry.contentRect.width;
+                const isSingle = w > 0 && w < 554;
+                target.classList.toggle('is-single-column', isSingle);
+            }
+        });
+    }
+    searchPanelResizeObserver.observe(panel);
 }
 
 /**
@@ -12010,6 +13098,8 @@ function renderCanvasSearchResults(results, options = {}) {
     }
 
     if (visibleResults.length === 0) {
+        if (typeof destroyCanvasSearchTabulator === 'function') destroyCanvasSearchTabulator();
+        panel.classList.remove('view-table');
         // [Modified] Customize empty message for Bookmark mode
         let msg = options.emptyText || (i18n.searchNoResults ? i18n.searchNoResults[currentLang] : '无结果');
         if (searchUiState.activeMode === 'bookmark') {
@@ -12614,16 +13704,17 @@ function renderCanvasSearchResults(results, options = {}) {
                 ? `<button class="canvas-bookmark-to-temp-btn${compactBookmarkToolbar ? ' canvas-bookmark-to-temp-btn-compact' : ''}" type="button" data-visible-count="${visibleCount}" aria-label="${escapeHtml(exportAriaLabel)}"><span class="canvas-dir-icon-badge canvas-dir-icon-badge-special" aria-hidden="true">✦</span></button>`
                 : '';
 
-            const isGridView = isSearchPanelGridView();
-            const gridViewTitle = isZh
-                ? (isGridView ? '切换为列表视图' : '切换为网格视图')
-                : (isGridView ? 'Switch to List View' : 'Switch to Grid View');
-            const gridViewIcon = isGridView ? 'fa-list' : 'fa-th-large';
-            const gridViewBtnHtml = `<button class="canvas-bookmark-view-toggle-btn${isGridView ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${escapeHtml(gridViewTitle)}" title="${escapeHtml(gridViewTitle)}" data-view-mode="${isGridView ? 'grid' : 'list'}"><i class="fas ${gridViewIcon}" aria-hidden="true"></i></button>`;
+            const currentViewMode = (searchUiState && searchUiState.viewMode) || 'grid';
+            const isTableActive = currentViewMode === 'table';
+            const isGridActive = !isTableActive;
+            const viewGroupHtml = `<div class="canvas-bookmark-view-group${compactBookmarkToolbar ? ' canvas-bookmark-view-group-compact' : ''}" role="group" aria-label="${isZh ? '视图模式' : 'View Mode'}">
+                <button class="canvas-bookmark-view-toggle-btn${isGridActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${isZh ? '卡片视图' : 'Card View'}" title="${isZh ? '卡片视图' : 'Card View'}" data-view-mode="grid"><i class="fas fa-th-large" aria-hidden="true"></i></button>
+                <button class="canvas-bookmark-view-toggle-btn${isTableActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${isZh ? '表格视图 (Tabulator)' : 'Table View (Tabulator)'}" title="${isZh ? '表格视图 (Tabulator)' : 'Table View (Tabulator)'}" data-view-mode="table"><i class="fas fa-table" aria-hidden="true"></i></button>
+            </div>`;
 
             const rightActionsHtml = `<div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px;">
                 ${exportBtnHtml}
-                ${gridViewBtnHtml}
+                ${viewGroupHtml}
             </div>`;
             const justifyStyle = 'space-between';
             const toolbarGap = compactBookmarkToolbar ? 6 : 8;
@@ -12692,10 +13783,68 @@ function renderCanvasSearchResults(results, options = {}) {
         }
     }
 
+    const isTableView = isSearchPanelTableView();
+    const isGridView = !isTableView && isSearchPanelGridView();
+
+    if (isTableView) {
+        searchUiState.results = displayResults;
+
+        panel.classList.remove('view-grid');
+        panel.classList.add('view-table');
+
+        const existingTableContainer = panel.querySelector('#canvasSearchTabulatorTable');
+        const existingWrapper = panel.querySelector('.search-results-table-view-wrapper');
+
+        if (!existingTableContainer || !existingWrapper || !canvasSearchTabulatorInstance) {
+            if (typeof destroyCanvasSearchTabulator === 'function') destroyCanvasSearchTabulator();
+            const tableWrapperHtml = `<div class="search-results-table-view-wrapper">
+                <div class="canvas-tabulator-top-scrollbar" id="canvasTabulatorTopScrollbar">
+                    <div class="canvas-tabulator-top-scrollbar-thumb" id="canvasTabulatorTopScrollbarThumb"></div>
+                </div>
+                <div id="canvasSearchTabulatorTable" class="canvas-search-tabulator-container"></div>
+                <div class="canvas-tabulator-right-scrollbar" id="canvasTabulatorRightScrollbar">
+                    <div class="canvas-tabulator-right-scrollbar-thumb" id="canvasTabulatorRightScrollbarThumb"></div>
+                </div>
+            </div>`;
+            panel.innerHTML = html + tableWrapperHtml;
+            feedCanvasSearchTabulatorData(panel.querySelector('#canvasSearchTabulatorTable'), displayResults, renderQuery, isZh);
+        } else {
+            // 已有表格容器与实例：不重建外层 DOM，仅更新顶部工具栏并流式更新数据
+            if (!existingWrapper.querySelector('#canvasTabulatorTopScrollbar')) {
+                const topBar = document.createElement('div');
+                topBar.className = 'canvas-tabulator-top-scrollbar';
+                topBar.id = 'canvasTabulatorTopScrollbar';
+                topBar.innerHTML = '<div class="canvas-tabulator-top-scrollbar-thumb" id="canvasTabulatorTopScrollbarThumb"></div>';
+                existingWrapper.insertBefore(topBar, existingTableContainer);
+            }
+            if (!existingWrapper.querySelector('#canvasTabulatorRightScrollbar')) {
+                const rightBar = document.createElement('div');
+                rightBar.className = 'canvas-tabulator-right-scrollbar';
+                rightBar.id = 'canvasTabulatorRightScrollbar';
+                rightBar.innerHTML = '<div class="canvas-tabulator-right-scrollbar-thumb" id="canvasTabulatorRightScrollbarThumb"></div>';
+                existingWrapper.appendChild(rightBar);
+            }
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            while (panel.firstChild && panel.firstChild !== existingWrapper) {
+                panel.removeChild(panel.firstChild);
+            }
+            while (tempDiv.firstChild) {
+                panel.insertBefore(tempDiv.firstChild, existingWrapper);
+            }
+
+            feedCanvasSearchTabulatorData(existingTableContainer, displayResults, renderQuery, isZh);
+        }
+
+        showSearchResultsPanel();
+        ensureSearchPanelResizeHandle(panel);
+        updateSearchResultSelection(searchUiState.selectedIndex, { ensureVisible: !options.skipEnsureVisible });
+        return;
+    }
+
     const itemsToRender = appendPage ? displayResults.slice(prevVisibleCount, nextVisibleCount) : visibleResults;
     const startIndex = appendPage ? prevVisibleCount : 0;
     let itemsHtml = '';
-    const isGridView = isSearchPanelGridView();
 
     itemsToRender.forEach((item, localIdx) => {
         const index = startIndex + localIdx;
@@ -13406,6 +14555,14 @@ function renderCanvasSearchResults(results, options = {}) {
     html += wrappedItemsHtml + loadMoreHtml;
     panel.innerHTML = html;
     panel.classList.toggle('view-grid', isGridView);
+    panel.classList.remove('view-table');
+
+    if (isGridView) {
+        updateSearchPanelColumnState(panel);
+        observeSearchPanelColumns(panel);
+    } else {
+        panel.classList.remove('is-single-column');
+    }
 
     showSearchResultsPanel();
     ensureSearchPanelResizeHandle(panel);

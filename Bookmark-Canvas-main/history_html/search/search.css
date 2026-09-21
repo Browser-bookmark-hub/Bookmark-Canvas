@@ -30,7 +30,7 @@
     max-height: min(var(--search-panel-height, 450px), var(--search-panel-max-allowed, calc(100vh - 80px)));
     overflow-y: auto;
     overflow-x: hidden;
-    scrollbar-gutter: stable both-edges;
+    scrollbar-gutter: auto;
     display: block;
     visibility: hidden;
     opacity: 0;
@@ -38,6 +38,8 @@
     transform: none;
     will-change: opacity;
     contain: layout paint;
+    container-type: inline-size;
+    container-name: search-panel;
     transition: opacity 0.16s ease, visibility 0s linear 0.16s;
     z-index: 200;
 }
@@ -138,7 +140,7 @@ body.header-dock-bottom .search-panel-resize-handle.handle-bottom {
     position: absolute;
     top: calc(100% + 10px);
     height: min(var(--search-panel-height, 450px), var(--search-panel-max-allowed, calc(100vh - 80px)));
-    width: 14px;
+    width: 10px;
     min-height: 40px;
     cursor: ew-resize;
     display: none;
@@ -161,19 +163,19 @@ body.header-dock-bottom:not(.header-compact) .search-panel-resize-handle.handle-
 }
 
 .search-panel-resize-handle.handle-left {
-    left: var(--search-panel-left, 0px);
+    left: calc(var(--search-panel-left, 0px) - 4px);
     transform: none;
-    border-top-left-radius: 11px;
-    border-bottom-left-radius: 11px;
+    border-top-left-radius: 6px;
+    border-bottom-left-radius: 6px;
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
 }
 
 .search-panel-resize-handle.handle-right {
-    left: calc(var(--search-panel-left, 0px) + var(--search-panel-width, 100%) - 14px);
+    left: calc(var(--search-panel-left, 0px) + var(--search-panel-width, 100%) - 3px);
     transform: none;
-    border-top-right-radius: 11px;
-    border-bottom-right-radius: 11px;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
     border-top-left-radius: 0;
     border-bottom-left-radius: 0;
 }
@@ -244,15 +246,23 @@ body.header-dock-bottom:not(.header-compact) .search-panel-resize-handle.handle-
     will-change: width, left;
 }
 
-/* [User Request] Fix scrollbar corner transition by adding track margin */
+/* [User Request] Fix scrollbar corner transition and ensure visible, slim thumb */
 .search-results-panel::-webkit-scrollbar {
-    width: 8px;
+    width: 6px;
 }
 
 .search-results-panel::-webkit-scrollbar-track {
     background: transparent;
     margin-block: 4px;
-    /* Crop top/bottom to avoid rounded corner overlap */
+}
+
+.search-results-panel::-webkit-scrollbar-thumb {
+    background: var(--border-color, rgba(0, 0, 0, 0.22));
+    border-radius: 4px;
+}
+
+.search-results-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary, #1a73e8);
 }
 
 .search-results-panel.visible {
@@ -404,6 +414,444 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 
 .canvas-bookmark-view-toggle-btn-compact i {
     font-size: 11px;
+}
+
+/* 视图切换按钮组（包含网格、列表、表格三种视图） */
+.canvas-bookmark-view-group {
+    display: inline-flex;
+    align-items: center;
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.04));
+    border: 1px solid rgba(128, 128, 128, 0.22);
+    border-radius: 8px;
+    padding: 2px;
+    gap: 2px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+.canvas-bookmark-view-group .canvas-bookmark-view-toggle-btn {
+    border: none;
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.canvas-bookmark-view-group .canvas-bookmark-view-toggle-btn:hover {
+    background: rgba(128, 128, 128, 0.12);
+    color: var(--text-primary);
+}
+
+.canvas-bookmark-view-group .canvas-bookmark-view-toggle-btn.active {
+    background: var(--bg-elevated, #fff);
+    color: var(--accent-primary, #2563eb);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.canvas-bookmark-view-group-compact {
+    border-radius: 6px;
+    padding: 1px;
+    gap: 1px;
+}
+
+.canvas-bookmark-view-group-compact .canvas-bookmark-view-toggle-btn {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    border-radius: 4px;
+}
+
+[data-theme="dark"] .canvas-bookmark-view-group {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .canvas-bookmark-view-group .canvas-bookmark-view-toggle-btn.active {
+    background: rgba(255, 255, 255, 0.16);
+    color: #60a5fa;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* ==================== 搜索结果表格视图 (Tabulator) ==================== */
+.search-results-panel.view-table {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: min(var(--search-panel-height, 520px), var(--search-panel-max-allowed, calc(100vh - 80px)));
+}
+
+.search-results-table-view-wrapper {
+    flex: 1;
+    width: 100%;
+    min-height: 200px;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.canvas-search-tabulator-container {
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    position: relative;
+    background: var(--bg-elevated, #fff);
+    outline: none;
+}
+
+/* ==================== 表头上方横向滚动条（解耦自定义滑块架构，丝滑无掉帧） ==================== */
+.canvas-tabulator-top-scrollbar {
+    display: none;
+    width: 100%;
+    height: 8px;
+    min-height: 8px;
+    position: relative;
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+    border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+    flex-shrink: 0;
+    z-index: 10;
+    user-select: none;
+    cursor: pointer;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.canvas-tabulator-top-scrollbar-thumb {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    height: 6px;
+    border-radius: 4px;
+    background: var(--border-color, rgba(0, 0, 0, 0.3));
+    cursor: grab;
+    transition: background-color 0.15s ease;
+    touch-action: none;
+    will-change: left, width;
+}
+
+.canvas-tabulator-top-scrollbar-thumb:hover,
+.canvas-tabulator-top-scrollbar.is-dragging .canvas-tabulator-top-scrollbar-thumb {
+    background: var(--accent-primary, #1a73e8);
+    cursor: grabbing;
+}
+
+[data-theme="dark"] .canvas-tabulator-top-scrollbar {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.03));
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .canvas-tabulator-top-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.28);
+}
+
+[data-theme="dark"] .canvas-tabulator-top-scrollbar-thumb:hover,
+[data-theme="dark"] .canvas-tabulator-top-scrollbar.is-dragging .canvas-tabulator-top-scrollbar-thumb {
+    background: #60a5fa;
+}
+
+/* 彻底隐藏 Tabulator 表格内置的原生水平与垂直滚动条（完全由解耦自定义滑块接管，消除掉帧与失控） */
+.canvas-search-tabulator .tabulator-tableholder {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+
+.canvas-search-tabulator .tabulator-tableholder::-webkit-scrollbar {
+    width: 0px !important;
+    height: 0px !important;
+    display: none !important;
+}
+
+.canvas-search-tabulator .tabulator-tableholder::-webkit-scrollbar:horizontal,
+.canvas-search-tabulator .tabulator-tableholder::-webkit-scrollbar:vertical {
+    width: 0px !important;
+    height: 0px !important;
+    display: none !important;
+}
+
+/* ==================== 表格右侧垂直滚动条（解耦自定义滑块架构，与水平滚动条架构统一，丝滑无掉帧） ==================== */
+.canvas-tabulator-right-scrollbar {
+    display: none;
+    position: absolute;
+    right: 3px;
+    top: 0;
+    width: 8px;
+    height: 100%;
+    background: transparent;
+    border-radius: 4px;
+    z-index: 15;
+    user-select: none;
+    cursor: pointer;
+    box-sizing: border-box;
+    overflow: hidden;
+    pointer-events: auto;
+    transition: background-color 0.15s ease;
+}
+
+.canvas-tabulator-right-scrollbar:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.canvas-tabulator-right-scrollbar-thumb {
+    position: absolute;
+    left: 1px;
+    right: 1px;
+    width: 6px;
+    border-radius: 4px;
+    background: var(--border-color, rgba(0, 0, 0, 0.3));
+    cursor: grab;
+    transition: background-color 0.15s ease;
+    touch-action: none;
+    will-change: top, height;
+}
+
+.canvas-tabulator-right-scrollbar-thumb:hover,
+.canvas-tabulator-right-scrollbar.is-dragging .canvas-tabulator-right-scrollbar-thumb {
+    background: var(--accent-primary, #1a73e8);
+    cursor: grabbing;
+}
+
+[data-theme="dark"] .canvas-tabulator-right-scrollbar:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .canvas-tabulator-right-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.28);
+}
+
+[data-theme="dark"] .canvas-tabulator-right-scrollbar-thumb:hover,
+[data-theme="dark"] .canvas-tabulator-right-scrollbar.is-dragging .canvas-tabulator-right-scrollbar-thumb {
+    background: #60a5fa;
+}
+
+/* Tabulator UI Overrides */
+.tabulator.canvas-search-tabulator {
+    background-color: transparent !important;
+    border: none !important;
+    font-family: inherit !important;
+    font-size: 12px !important;
+    color: var(--text-primary) !important;
+}
+
+/* Header */
+.tabulator.canvas-search-tabulator .tabulator-header {
+    background-color: var(--bg-secondary, #f8f9fa) !important;
+    border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1)) !important;
+    color: var(--text-secondary, #64748b) !important;
+    font-weight: 600 !important;
+    font-size: 11px !important;
+    user-select: none !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col {
+    background-color: transparent !important;
+    border-right: 1px solid var(--border-color, rgba(0, 0, 0, 0.08)) !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col:last-child {
+    border-right: none !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+    padding: 6px 10px !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover {
+    background-color: rgba(0, 0, 0, 0.04) !important;
+    color: var(--text-primary) !important;
+}
+
+/* 序号「#」表头专用精准居中与紧凑内边距 */
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col[tabulator-field="index"] .tabulator-col-content {
+    padding: 6px 2px !important;
+    text-align: center !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col[tabulator-field="index"] .tabulator-col-title-holder {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+    width: 100% !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col[tabulator-field="index"] .tabulator-col-title {
+    text-align: center !important;
+    width: 100% !important;
+}
+
+/* Rows and Cells */
+.tabulator.canvas-search-tabulator .tabulator-tableholder .tabulator-table {
+    background-color: transparent !important;
+    color: var(--text-primary) !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-row {
+    background-color: var(--bg-elevated, #ffffff) !important;
+    border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.06)) !important;
+    min-height: 38px !important;
+    height: 38px !important;
+    cursor: pointer !important;
+    transition: background-color 0.1s ease !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-row.tabulator-row-even {
+    background-color: var(--bg-primary, #ffffff) !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-row.tabulator-row-odd {
+    background-color: var(--bg-secondary, #fbfbfb) !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-row:hover {
+    background-color: rgba(37, 99, 235, 0.08) !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-row.tabulator-selected {
+    background-color: rgba(37, 99, 235, 0.14) !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-cell {
+    padding: 0 10px !important;
+    border-right: 1px solid var(--border-color, rgba(0, 0, 0, 0.05)) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+    font-size: 12px !important;
+    box-sizing: border-box !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-cell:last-child {
+    border-right: none !important;
+}
+
+/* 序号列单元格专用严格居中 */
+.tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="index"] {
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+    padding: 0 2px !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-placeholder {
+    color: var(--text-muted) !important;
+    font-size: 13px !important;
+    padding: 32px 0 !important;
+}
+
+/* Custom Table Cell Elements */
+.canvas-table-index-num {
+    display: inline-block !important;
+    text-align: center !important;
+    width: 100% !important;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.canvas-table-cell-title {
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.canvas-table-title-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.canvas-table-tag-chip {
+    font-size: 10px !important;
+    padding: 1px 6px !important;
+    height: 18px !important;
+    border-radius: 999px !important;
+    flex-shrink: 0 !important;
+}
+
+.canvas-table-path-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.canvas-table-url-text {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.canvas-table-external-link {
+    opacity: 0.6;
+    transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.canvas-table-external-link:hover {
+    opacity: 1;
+    color: var(--accent-primary) !important;
+}
+
+/* Dark Theme Overrides for Tabulator */
+[data-theme="dark"] .canvas-search-tabulator-container {
+    background: var(--bg-elevated, #242526);
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator {
+    color: var(--text-primary, #e4e6eb) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-header {
+    background-color: var(--bg-secondary, #18191a) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: var(--text-secondary, #94a3b8) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col {
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover {
+    background-color: rgba(255, 255, 255, 0.06) !important;
+    color: #fff !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row {
+    background-color: var(--bg-elevated, #242526) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.tabulator-row-even {
+    background-color: #242526 !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.tabulator-row-odd {
+    background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row:hover {
+    background-color: rgba(59, 130, 246, 0.18) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.tabulator-selected {
+    background-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-cell {
+    border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-sorter .tabulator-arrow {
+    border-bottom-color: #94a3b8 !important;
 }
 
 .canvas-bookmark-domain-granularity-btn {
@@ -1472,6 +1920,164 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 .search-results-panel.view-grid .search-result-empty {
     grid-column: 1 / -1;
     width: 100%;
+}
+
+/* ==================== 单纵行（单列）网格视图：全面展示永久与临时栏目 ==================== */
+/* 当网格处于单纵行时（宽度 < 554px 或挂载 .is-single-column），自动解除 96px 锁死，允许栏目多行换行，杜绝横向撑出 */
+.search-results-panel.view-grid.is-single-column .search-results-items-container {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-auto-rows: auto !important;
+    gap: 8px !important;
+    padding: 10px 14px 12px 14px !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+}
+
+.search-results-panel.view-grid.is-single-column .search-result-item {
+    height: auto !important;
+    min-height: 72px !important;
+    max-height: none !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+    gap: 5px !important;
+    padding: 10px 14px !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+}
+
+.search-results-panel.view-grid.is-single-column .canvas-grid-card-locations-row {
+    display: none !important;
+}
+
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    margin-top: 3px !important;
+    gap: 4px 6px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+}
+
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 4px 6px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+}
+
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    flex-shrink: 1 !important;
+    height: auto !important;
+    min-height: 18px !important;
+}
+
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-text {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-details-row,
+.search-results-panel.view-grid.is-single-column .canvas-grid-card-info-row {
+    height: auto !important;
+    min-height: 20px !important;
+    margin-top: 3px !important;
+}
+
+.search-results-panel.view-grid.is-single-column .search-result-details-preview-context {
+    height: auto !important;
+    min-height: 18px !important;
+}
+
+@container search-panel (max-width: 554px) {
+    .search-results-panel.view-grid .search-results-items-container {
+        grid-template-columns: minmax(0, 1fr) !important;
+        grid-auto-rows: auto !important;
+        gap: 8px !important;
+        padding: 10px 14px 12px 14px !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: hidden !important;
+    }
+    .search-results-panel.view-grid .search-result-item {
+        height: auto !important;
+        min-height: 72px !important;
+        max-height: none !important;
+        overflow: hidden !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: flex-start !important;
+        gap: 5px !important;
+        padding: 10px 14px !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        margin: 0 !important;
+    }
+    .search-results-panel.view-grid .canvas-grid-card-locations-row {
+        display: none !important;
+    }
+    .search-results-panel.view-grid .canvas-bookmark-location-row {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: flex-start !important;
+        margin-top: 3px !important;
+        gap: 4px 6px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+    }
+    .search-results-panel.view-grid .canvas-bookmark-location-chip-row {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        gap: 4px 6px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+    }
+    .search-results-panel.view-grid .canvas-bookmark-location-chip {
+        max-width: 100% !important;
+        min-width: 0 !important;
+        flex-shrink: 1 !important;
+        height: auto !important;
+        min-height: 18px !important;
+    }
+    .search-results-panel.view-grid .canvas-bookmark-location-chip-text {
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+    }
+    .search-results-panel.view-grid .canvas-bookmark-details-row,
+    .search-results-panel.view-grid .canvas-grid-card-info-row {
+        height: auto !important;
+        min-height: 20px !important;
+        margin-top: 3px !important;
+    }
+    .search-results-panel.view-grid .search-result-details-preview-context {
+        height: auto !important;
+        min-height: 18px !important;
+    }
 }
 
 /* ==================== 网格视图信息说明气泡 UI ==================== */
