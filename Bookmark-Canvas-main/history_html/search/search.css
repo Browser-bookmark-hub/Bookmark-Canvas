@@ -94,7 +94,37 @@ body.header-dock-bottom .search-panel-resize-handle.handle-bottom {
     display: none !important;
 }
 
-/* 当搜索面板为搜索模式建议/推荐模式（含“下次不再出现”按钮）时，下方/内部不需要小白条把手 */
+/* 当搜索面板为搜索模式建议/推荐模式（含“下次不再出现”按钮）时：
+   尺寸与定位严格参照点击输入框左侧按钮出现的模式菜单（.search-mode-menu）：
+   1. 宽度与位置：完全对齐搜索容器（left: 0; right: 0; width: auto），不受表格/网格 1080px/720px 或负向偏移影响
+   2. 高度：自适应包裹内容（height: auto），消除 520px/450px 强制高度导致的巨幅空白
+   3. 边框圆角、内边距与阴影与模式菜单保持完全一致
+*/
+.search-results-panel[data-panel-type="canvas-suggestions"],
+.search-results-panel:has(.canvas-suggestions-hide-btn),
+.search-results-panel:has(.search-empty-suggestions-hide-btn) {
+    top: calc(100% + 8px) !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: min(420px, calc(100vh - 80px)) !important;
+    border-radius: 8px !important;
+    box-shadow: var(--shadow-lg) !important;
+    padding: 3px !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+}
+
+body.header-dock-bottom:not(.header-compact) .search-results-panel[data-panel-type="canvas-suggestions"],
+body.header-dock-bottom:not(.header-compact) .search-results-panel:has(.canvas-suggestions-hide-btn),
+body.header-dock-bottom:not(.header-compact) .search-results-panel:has(.search-empty-suggestions-hide-btn) {
+    top: auto !important;
+    bottom: calc(100% + 8px) !important;
+}
+
 .search-results-panel[data-panel-type="canvas-suggestions"] .search-panel-resize-handle,
 .search-results-panel:has(.canvas-suggestions-hide-btn) .search-panel-resize-handle,
 .search-results-panel:has(.search-empty-suggestions-hide-btn) .search-panel-resize-handle {
@@ -302,7 +332,8 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     display: flex;
     align-items: center;
     gap: 6px;
-    max-width: calc(100% - 140px);
+    min-width: 0;
+    flex: 1 1 auto;
     font-size: 11px;
     line-height: 1.2;
     color: var(--text-tertiary);
@@ -541,6 +572,16 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     flex-direction: column;
 }
 
+/* 双视图瞬时切换支持：网格与表格容器常驻 DOM，视图切换通过 display 控制，杜绝卡顿与掉帧 */
+.search-results-panel.view-grid .search-results-table-view-wrapper {
+    display: none !important;
+}
+
+.search-results-panel.view-table .search-results-items-container,
+.search-results-panel.view-table .search-results-load-more-row {
+    display: none !important;
+}
+
 .canvas-search-tabulator-container {
     width: 100%;
     height: 100%;
@@ -548,6 +589,86 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     position: relative;
     background: var(--bg-elevated, #fff);
     outline: none;
+}
+
+/* ==================== 表格内部数据行末尾加载更多行（独立两行高度居中，无缝懒加载） ==================== */
+.canvas-tabulator-load-more-row {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    height: 76px;
+    min-height: 76px;
+    max-height: 76px;
+    flex-shrink: 0;
+    width: 100%;
+    min-width: 100%;
+    background: var(--bg-elevated, #ffffff);
+    border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
+    border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
+    box-sizing: border-box;
+    user-select: none;
+    z-index: 5;
+    position: relative;
+    margin: 0;
+}
+
+[data-theme="dark"] .canvas-tabulator-load-more-row {
+    background: var(--bg-elevated, #1e1e1e);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.canvas-tabulator-load-more-inner {
+    position: sticky;
+    left: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    padding: 0 16px;
+}
+
+.canvas-tabulator-load-more-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 24px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.15));
+    background: var(--bg-secondary, #f3f4f6);
+    color: var(--text-normal, #1f2937);
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    user-select: none;
+    overflow-anchor: none;
+}
+
+.canvas-tabulator-load-more-btn:hover {
+    background: var(--bg-hover, #e5e7eb);
+    border-color: var(--accent-primary, #2563eb);
+    color: var(--accent-primary, #2563eb);
+    transform: translateY(-1px);
+}
+
+.canvas-tabulator-load-more-btn:active {
+    transform: translateY(0);
+}
+
+[data-theme="dark"] .canvas-tabulator-load-more-btn {
+    background: var(--bg-secondary, #2a2a2a);
+    color: var(--text-normal, #e5e7eb);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .canvas-tabulator-load-more-btn:hover {
+    background: #333333;
+    border-color: #60a5fa;
+    color: #60a5fa;
 }
 
 /* ==================== 表头上方横向滚动条（解耦自定义滑块架构，丝滑无掉帧） ==================== */
@@ -870,19 +991,47 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 }
 
 .canvas-table-cell-title {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    gap: 6px;
     width: 100%;
     min-width: 0;
     overflow: hidden;
+    cursor: pointer;
 }
 
 .canvas-table-title-text {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 500;
     color: var(--text-primary);
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.canvas-table-title-text:hover {
+    color: var(--primary, #2563eb);
+}
+
+.canvas-table-cell-title .search-loc-chip {
+    flex-shrink: 0;
+    margin: 0;
+}
+
+.canvas-table-loc-chip-neutral {
+    color: var(--text-secondary, #64748b) !important;
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.04)) !important;
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12)) !important;
+    font-weight: 500 !important;
+}
+
+[data-theme="dark"] .canvas-table-loc-chip-neutral {
+    color: var(--text-secondary, #94a3b8) !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
 }
 
 .canvas-table-tag-chip {
@@ -1659,14 +1808,30 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 .search-results-panel.view-grid .search-results-items-container {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    grid-auto-rows: 96px; /* 严格固定为 96px 三行卡片 (1行标题 + 2行信息) */
+    grid-auto-rows: 96px; /* 书签模式：固定为 96px 三行卡片 (1行标题 + 2行信息) */
     gap: 10px;
     padding: 12px;
     box-sizing: border-box;
     align-items: stretch;
 }
 
-/* 网格卡片：整体三行结构 (一行图标+标题，两行信息) */
+/* 卡片模式与说明模式网格视图：两行单元格布局 (1行标题 + 1行信息/摘要，高度64px) */
+.search-results-panel.view-grid.mode-structure .search-results-items-container,
+.search-results-panel.view-grid.mode-description .search-results-items-container,
+.search-results-panel.view-grid[data-search-mode="structure"] .search-results-items-container,
+.search-results-panel.view-grid[data-search-mode="description"] .search-results-items-container,
+.search-results-items-container.view-grid[data-search-mode="structure"],
+.search-results-items-container.view-grid[data-search-mode="description"],
+.search-results-panel.view-grid:has(.search-result-item[data-type="temp-section"]) .search-results-items-container,
+.search-results-panel.view-grid:has(.search-result-item[data-type="permanent-section"]) .search-results-items-container,
+.search-results-panel.view-grid:has(.search-result-item[data-type="md-node"]) .search-results-items-container,
+.search-results-panel.view-grid:has(.search-result-item[data-type="edge"]) .search-results-items-container,
+.search-results-panel.view-grid:has(.search-result-item[data-type="group"]) .search-results-items-container,
+.search-results-panel.view-grid:has(.search-result-item[data-type="card-group"]) .search-results-items-container {
+    grid-auto-rows: 64px !important;
+}
+
+/* 网格卡片：书签模式默认三行结构 (一行图标+标题，两行信息) */
 .search-results-panel.view-grid .search-result-item {
     background: var(--bg-elevated) !important;
     border: 1px solid var(--border-color) !important;
@@ -1684,11 +1849,31 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     overflow: hidden !important;
     display: flex !important;
     flex-direction: column !important;
-    justify-content: space-between !important;
+    justify-content: flex-start !important;
     align-items: stretch !important;
     content-visibility: auto;
     contain-intrinsic-size: 260px 96px;
     contain: layout paint;
+}
+
+/* 卡片模式与说明模式网格卡片：严格两行单元格高度 (64px) */
+.search-results-panel.view-grid.mode-structure .search-result-item,
+.search-results-panel.view-grid.mode-description .search-result-item,
+.search-results-panel.view-grid[data-search-mode="structure"] .search-result-item,
+.search-results-panel.view-grid[data-search-mode="description"] .search-result-item,
+.search-results-panel.view-grid .search-results-items-container[data-search-mode="structure"] .search-result-item,
+.search-results-panel.view-grid .search-results-items-container[data-search-mode="description"] .search-result-item,
+.search-results-panel.view-grid .search-result-item[data-type="temp-section"],
+.search-results-panel.view-grid .search-result-item[data-type="permanent-section"],
+.search-results-panel.view-grid .search-result-item[data-type="md-node"],
+.search-results-panel.view-grid .search-result-item[data-type="edge"],
+.search-results-panel.view-grid .search-result-item[data-type="group"],
+.search-results-panel.view-grid .search-result-item[data-type="card-group"] {
+    height: 64px !important;
+    max-height: 64px !important;
+    min-height: 64px !important;
+    padding: 8px 12px !important;
+    contain-intrinsic-size: 260px 64px !important;
 }
 
 .search-results-panel.view-grid .search-result-item:hover {
@@ -1717,11 +1902,18 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 .search-results-panel.view-grid .search-result-content {
     display: flex !important;
     flex-direction: column !important;
-    justify-content: space-between !important;
+    justify-content: flex-start !important;
+    gap: 4px !important;
     width: 100% !important;
     height: 100% !important;
     min-width: 0 !important;
     overflow: hidden !important;
+}
+
+/* 单行文字在卡片高度内（高度的一半）居中显示 */
+.search-results-panel.view-grid .search-result-item[data-single-line="true"] .search-result-content,
+.search-results-panel.view-grid .search-result-content:has(> .search-result-title:only-child) {
+    justify-content: center !important;
 }
 
 .search-results-panel.view-grid .search-result-title,
@@ -1876,6 +2068,20 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     z-index: 2 !important;
 }
 
+.search-results-panel.view-grid.mode-structure .search-result-item > .search-result-badge,
+.search-results-panel.view-grid.mode-description .search-result-item > .search-result-badge,
+.search-results-panel.view-grid[data-search-mode="structure"] .search-result-item > .search-result-badge,
+.search-results-panel.view-grid[data-search-mode="description"] .search-result-item > .search-result-badge,
+.search-results-panel.view-grid .search-result-item[data-type="temp-section"] > .search-result-badge,
+.search-results-panel.view-grid .search-result-item[data-type="permanent-section"] > .search-result-badge,
+.search-results-panel.view-grid .search-result-item[data-type="md-node"] > .search-result-badge,
+.search-results-panel.view-grid .search-result-item[data-type="edge"] > .search-result-badge,
+.search-results-panel.view-grid .search-result-item[data-type="group"] > .search-result-badge,
+.search-results-panel.view-grid .search-result-item[data-type="card-group"] > .search-result-badge {
+    top: 8px !important;
+    right: 12px !important;
+}
+
 .search-results-panel.view-grid .search-result-item:has(> .search-result-badge) .search-result-title {
     padding-right: 46px !important;
 }
@@ -1958,13 +2164,170 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 
 /* 当网格卡片存在位置行时，信息栏高度适配为单行 20px，完美吻合 96px 三行排版 */
 .search-results-panel.view-grid .search-result-item[data-has-locations="true"] .canvas-bookmark-details-row,
-.search-results-panel.view-grid .search-result-item:has(.canvas-grid-card-locations-row) .canvas-bookmark-details-row {
+.search-results-panel.view-grid .search-result-item[data-has-locations="true"] .canvas-grid-card-info-row,
+.search-results-panel.view-grid .search-result-item:has(.canvas-grid-card-locations-row) .canvas-bookmark-details-row,
+.search-results-panel.view-grid .search-result-item:has(.canvas-grid-card-locations-row) .canvas-grid-card-info-row {
     height: 20px !important;
 }
 
 .search-results-panel.view-grid .search-result-item[data-has-locations="true"] .search-result-details-preview-context,
 .search-results-panel.view-grid .search-result-item:has(.canvas-grid-card-locations-row) .search-result-details-preview-context {
     height: 20px !important;
+}
+
+.canvas-list-card-locations-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 2px 0;
+}
+
+.search-results-panel.view-grid .canvas-list-card-locations-row {
+    display: none !important;
+}
+
+.canvas-list-card-locations-row .canvas-bookmark-location-chip {
+    font-size: 11px;
+    height: 18px;
+    line-height: 16px;
+    padding: 0 6px;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+/* 卡片/说明模式网格视图摘要行：字号与单行高度 */
+.canvas-grid-card-snippet-row {
+    font-size: 11.5px;
+    line-height: 20px;
+    color: var(--text-muted);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    display: block;
+    box-sizing: border-box;
+    margin: 0;
+}
+
+/* 卡片/说明模式网格视图下，摘要行限制为单行，高度 20px，完美吻合 64px 两行单元格结构 */
+.search-results-panel.view-grid .canvas-grid-card-snippet-row {
+    height: 20px !important;
+    max-height: 20px !important;
+    line-height: 20px !important;
+    -webkit-line-clamp: 1 !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+    overflow: hidden !important;
+    display: block !important;
+    margin: 0 !important;
+}
+
+.search-results-panel.view-grid .canvas-item-summary {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 6px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 20px !important;
+    max-height: 20px !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+}
+
+.search-results-panel.view-grid .canvas-item-summary .canvas-grid-card-locations-row {
+    display: inline-flex !important;
+    align-items: center !important;
+    flex-shrink: 0 !important;
+    max-width: 100% !important;
+    height: 20px !important;
+    line-height: 20px !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+}
+
+/* 同时存在位置 Chip 和正文摘要时，位置 Chip 宽度限制为最多 60%，为摘要留出空间 */
+.search-results-panel.view-grid .canvas-item-summary:has(.canvas-grid-card-snippet-row:not(:empty)) .canvas-grid-card-locations-row {
+    max-width: 60% !important;
+}
+
+.canvas-grid-card-snippet-row mark {
+    background-color: rgba(254, 240, 138, 0.45);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+[data-theme="dark"] .canvas-grid-card-snippet-row mark {
+    background-color: rgba(234, 179, 8, 0.35);
+    color: #fff4c2;
+}
+
+/* 列表模式下的摘要行自适应高度 */
+.search-results-panel:not(.view-grid) .canvas-grid-card-snippet-row {
+    height: auto;
+    max-height: none;
+    -webkit-line-clamp: 3;
+    margin-top: 3px;
+}
+
+
+
+/* 确保网格与表格中的目录图标在标题栏内完美对齐且不被压缩 */
+.search-result-title .canvas-dir-icon,
+.canvas-grid-type-prefix .canvas-dir-icon,
+.canvas-table-cell-type .canvas-dir-icon,
+.canvas-table-cell-title .canvas-dir-icon {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+    vertical-align: middle !important;
+    margin-right: 0 !important;
+}
+
+/* 网格视图左上角类型前缀与图标 (临时栏目/永久栏目/卡片/卡片组/连线) */
+.canvas-grid-type-prefix {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    flex-shrink: 0 !important;
+    line-height: 1 !important;
+}
+
+.canvas-grid-type-name {
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    white-space: nowrap !important;
+    line-height: 1 !important;
+    letter-spacing: 0.1px;
+}
+
+.canvas-grid-card-title-sep {
+    color: var(--text-muted, #94a3b8) !important;
+    opacity: 0.55 !important;
+    margin: 0 2px !important;
+    flex-shrink: 0 !important;
+    font-weight: 400 !important;
+    font-size: 12px !important;
+}
+
+/* 表格模式类型单元格：图标与类型互通 */
+.canvas-table-cell-type {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    line-height: 1 !important;
+}
+
+/* 列表模式下的标题截断支持 */
+.search-results-panel:not(.view-grid) .canvas-grid-card-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* 第三行：信息栏 (整体卡片为三行，100% 对齐列表模式信息栏高亮) */
@@ -2171,8 +2534,8 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     box-shadow: inset 0 -1px 0 rgba(244, 210, 92, 0.68);
 }
 
-/* 非书签条目的摘要展示 (如 md 卡片、临时栏目等) */
-.search-results-panel.view-grid .search-result-content > .search-result-match:not(.canvas-bookmark-group-summary) {
+/* 非书签条目的通用匹配摘要展示 (排除卡片专用结构容器与书签组容器) */
+.search-results-panel.view-grid .search-result-content > .search-result-match:not(.canvas-bookmark-group-summary):not(.canvas-item-summary) {
     height: 42px !important;
     max-height: 42px !important;
     overflow: hidden !important;
@@ -2228,6 +2591,13 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     max-width: 100% !important;
     min-width: 0 !important;
     margin: 0 !important;
+}
+
+.search-results-panel.view-grid.is-single-column.mode-structure .search-result-item,
+.search-results-panel.view-grid.is-single-column.mode-description .search-result-item,
+.search-results-panel.view-grid.is-single-column[data-search-mode="structure"] .search-result-item,
+.search-results-panel.view-grid.is-single-column[data-search-mode="description"] .search-result-item {
+    min-height: 52px !important;
 }
 
 .search-results-panel.view-grid.is-single-column .canvas-grid-card-locations-row {
@@ -4725,14 +5095,14 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     -webkit-box-orient: vertical !important;
 }
 
-/* 搜索建议模式条目与全屏说明头部分界线 */
+/* 搜索建议模式条目（参照输入框左侧按钮弹出的模式菜单项风格：圆角6px，紧凑整洁） */
 .canvas-suggestion-mode-item {
-    border-bottom: 1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18)) !important;
-    border-radius: 0 !important;
+    border-bottom: none !important;
+    border-radius: 6px !important;
 }
 
 [data-theme="dark"] .canvas-suggestion-mode-item {
-    border-bottom: 1px solid var(--search-candidate-divider, rgba(255, 255, 255, 0.22)) !important;
+    border-bottom: none !important;
 }
 
 .canvas-suggestion-mode-item:last-child {

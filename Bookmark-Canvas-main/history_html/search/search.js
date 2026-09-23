@@ -6,7 +6,7 @@
  *
  * Canvas 搜索：
  * - 搜索范围：`history.html` 的 `view=canvas`（书签画布视图）
- * - 说明搜索：MD卡片文本、连接线标签、临时栏目说明、永久栏目说明
+ * - 说明搜索：空白卡片文本、连接线标签、临时栏目说明、永久栏目说明
  * - 卡片（组）搜索：#N序号定位、A-群组搜索、卡片组名字、标题匹配
  * - 行为：点击/回车选择结果后，画布平移到目标位置 + 高亮脉冲动画
  *
@@ -491,6 +491,7 @@ function setSearchPanelViewMode(mode, options = {}) {
     const nextMode = (mode === 'table') ? 'table' : 'grid';
     if (!searchUiState) return;
     const prevMode = searchUiState.viewMode;
+    if (prevMode === nextMode && options.force !== true) return;
     searchUiState.viewMode = nextMode;
     try {
         localStorage.setItem('canvasSearchPanelViewMode', nextMode);
@@ -498,29 +499,98 @@ function setSearchPanelViewMode(mode, options = {}) {
     if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
 
-    if (prevMode === 'table' && nextMode !== 'table') {
-        if (typeof destroyCanvasSearchTabulator === 'function') {
-            destroyCanvasSearchTabulator();
-        }
-    }
-
     const panel = getSearchResultsPanel();
-    if (panel) {
-        panel.classList.toggle('view-grid', nextMode === 'grid');
-        panel.classList.toggle('view-table', nextMode === 'table');
-        if (nextMode !== 'grid') {
-            panel.classList.remove('is-single-column');
-        }
-        // 应用目标模式独立的长宽（网格卡片模式与表格模式独立记忆）
-        applySearchPanelWidth(getSearchPanelWidth(nextMode), panel, nextMode);
-        applySearchPanelHeight(getSearchPanelHeight(nextMode), panel, nextMode);
+    if (!panel) return;
+
+    const existingTableWrapper = panel.querySelector('.search-results-table-view-wrapper');
+    const existingGridContainer = panel.querySelector('.search-results-items-container');
+    const existingGridLoadMore = panel.querySelector('.search-results-load-more-row');
+    const searchContainer = panel.parentElement || document.querySelector('.search-container');
+    const gridScroll = searchContainer ? searchContainer.querySelector('#canvasGridRightScrollbar') : null;
+
+    const currentActiveMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    const canFastSwitchToTable = (nextMode === 'table'
+        && existingTableWrapper
+        && canvasSearchTabulatorInstance
+        && canvasSearchTabulatorActiveMode === currentActiveMode
+    );
+    const canFastSwitchToGrid = (nextMode === 'grid' && existingGridContainer);
+
+    if (canFastSwitchToTable) {
+        if (existingGridContainer) existingGridContainer.style.display = 'none';
+        if (existingGridLoadMore) existingGridLoadMore.style.display = 'none';
+        if (gridScroll) gridScroll.style.display = 'none';
+        existingTableWrapper.style.display = 'flex';
+
+        panel.classList.remove('view-grid');
+        panel.classList.add('view-table');
+        panel.classList.remove('is-single-column');
+
+        panel.querySelectorAll('.canvas-bookmark-view-toggle-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.viewMode === 'table');
+        });
+
+        applySearchPanelWidth(getSearchPanelWidth('table'), panel, 'table', { skipHandlesSync: true });
+        applySearchPanelHeight(getSearchPanelHeight('table'), panel, 'table');
         ensureSearchPanelResizeHandles(panel);
         syncSearchPanelHandlesLayout(panel);
 
-        // 切换视图时左右小白条出现数秒提示
         if (prevMode !== nextMode) {
             triggerWidthHandlesViewSwitchFlash(panel);
         }
+
+        requestAnimationFrame(() => {
+            safeRedrawCanvasSearchTabulator(false);
+            if (typeof syncCanvasTabulatorTopScrollbar === 'function') syncCanvasTabulatorTopScrollbar();
+            if (typeof syncCanvasTabulatorRightScrollbar === 'function') syncCanvasTabulatorRightScrollbar(true);
+            updateSearchResultSelection(searchUiState.selectedIndex >= 0 ? searchUiState.selectedIndex : 0, { ensureVisible: false });
+        });
+        return;
+    }
+
+    if (canFastSwitchToGrid) {
+        if (existingTableWrapper) existingTableWrapper.style.display = 'none';
+        existingGridContainer.style.display = '';
+        if (existingGridLoadMore) existingGridLoadMore.style.display = '';
+
+        panel.classList.remove('view-table');
+        panel.classList.add('view-grid');
+
+        panel.querySelectorAll('.canvas-bookmark-view-toggle-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.viewMode === 'grid');
+        });
+
+        applySearchPanelWidth(getSearchPanelWidth('grid'), panel, 'grid', { skipHandlesSync: true });
+        applySearchPanelHeight(getSearchPanelHeight('grid'), panel, 'grid');
+        ensureSearchPanelResizeHandles(panel);
+        syncSearchPanelHandlesLayout(panel);
+
+        if (prevMode !== nextMode) {
+            triggerWidthHandlesViewSwitchFlash(panel);
+        }
+
+        requestAnimationFrame(() => {
+            updateSearchPanelColumnState(panel);
+            ensureCanvasGridRightScrollbar(panel);
+            syncCanvasGridRightScrollbar(panel);
+            updateSearchResultSelection(searchUiState.selectedIndex >= 0 ? searchUiState.selectedIndex : 0, { ensureVisible: false });
+        });
+        return;
+    }
+
+    // 若目标容器尚未在 DOM 中构建，则应用尺寸并执行首次渲染
+    panel.classList.toggle('view-grid', nextMode === 'grid');
+    panel.classList.toggle('view-table', nextMode === 'table');
+    if (nextMode !== 'grid') {
+        panel.classList.remove('is-single-column');
+    }
+    applySearchPanelWidth(getSearchPanelWidth(nextMode), panel, nextMode, { skipHandlesSync: true });
+    applySearchPanelHeight(getSearchPanelHeight(nextMode), panel, nextMode);
+    ensureSearchPanelResizeHandles(panel);
+    syncSearchPanelHandlesLayout(panel);
+
+    if (prevMode !== nextMode) {
+        triggerWidthHandlesViewSwitchFlash(panel);
     }
 
     if (options.rerender !== false) {
@@ -716,9 +786,21 @@ if (typeof window !== 'undefined' && !window._searchPanelHandlesWindowResizeBoun
     }, { passive: true });
 }
 
-function applySearchPanelWidth(width, panel, mode) {
+function applySearchPanelWidth(width, panel, mode, options = {}) {
     if (!panel) panel = getSearchResultsPanel();
     if (!panel) return null;
+
+    // 当面板为“画布搜索模式建议/推荐”时，宽度严格参照输入框左侧按钮的模式菜单（由 CSS left:0; right:0; width:auto 自适应容器），跳过任何宽度计算与内联样式覆写
+    const isSuggestions = (panel.dataset && panel.dataset.panelType === 'canvas-suggestions') ||
+        !!panel.querySelector('.canvas-suggestions-hide-btn') ||
+        !!panel.querySelector('.search-empty-suggestions-hide-btn');
+    if (isSuggestions) {
+        panel.style.width = '';
+        panel.style.left = '';
+        panel.style.right = '';
+        return null;
+    }
+
     const targetMode = mode || getSearchPanelMode(panel);
     const rawVal = (width !== undefined && width !== null) ? Number(width) : getSearchPanelWidth(targetMode);
     const temporaryLimit = getSearchPanelTemporaryWidthLimit(panel);
@@ -766,8 +848,10 @@ function applySearchPanelWidth(width, panel, mode) {
             document.documentElement.style.removeProperty('--search-panel-left');
         }
 
-        // 同步左右把手的位置与尺寸
-        syncSearchPanelHandlesLayout(panel);
+        // 同步左右把手的位置与尺寸（支持可选跳过，由调用方批量处理）
+        if (!options || options.skipHandlesSync !== true) {
+            syncSearchPanelHandlesLayout(panel);
+        }
     } catch (_) { }
 
     return effectiveWidth;
@@ -1048,6 +1132,18 @@ function getSearchPanelTemporaryHeightLimit(panel) {
 
 function applySearchPanelHeight(height, panel, mode) {
     if (!panel) panel = getSearchResultsPanel();
+    if (!panel) return null;
+
+    // 当面板为“画布搜索模式建议/推荐”时，高度严格自适应包裹内容（height: auto），彻底杜绝大段无用空白
+    const isSuggestions = (panel.dataset && panel.dataset.panelType === 'canvas-suggestions') ||
+        !!panel.querySelector('.canvas-suggestions-hide-btn') ||
+        !!panel.querySelector('.search-empty-suggestions-hide-btn');
+    if (isSuggestions) {
+        panel.style.height = '';
+        panel.style.maxHeight = '';
+        return null;
+    }
+
     const targetMode = mode || getSearchPanelMode(panel);
     const rawVal = (height !== undefined && height !== null) ? Number(height) : getSearchPanelHeight(targetMode);
     const defH = (targetMode === 'root')
@@ -1355,9 +1451,7 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
         e.stopPropagation();
         const currentMode = getSearchPanelMode(panel);
         resetSearchPanelHeight(currentMode);
-        if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
-            canvasSearchTabulatorInstance.redraw(true);
-        }
+        safeRedrawCanvasSearchTabulator(true);
         try {
             const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
             showCanvasToastSafe(isZh ? '已恢复默认搜索面板高度' : 'Reset search panel height', 'info', 1000);
@@ -1466,9 +1560,7 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
                 const currentMode = getSearchPanelMode(panel);
                 setSearchPanelHeight(currentHeight, { save: true, syncInput: true, mode: currentMode });
                 applySearchPanelHeight(currentHeight, panel, currentMode);
-                if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
-                    canvasSearchTabulatorInstance.redraw(true);
-                }
+                safeRedrawCanvasSearchTabulator(true);
                 if (typeof syncCanvasTabulatorRightScrollbar === 'function') {
                     syncCanvasTabulatorRightScrollbar(true);
                 }
@@ -1504,9 +1596,7 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
         e.stopPropagation();
         const currentMode = getSearchPanelMode(panel);
         resetSearchPanelWidth(currentMode);
-        if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
-            canvasSearchTabulatorInstance.redraw(true);
-        }
+        safeRedrawCanvasSearchTabulator(true);
         try {
             const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
             showCanvasToastSafe(isZh ? '已恢复默认搜索面板宽度' : 'Reset search panel width', 'info', 1000);
@@ -1608,6 +1698,11 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
                 if (inputEl && document.activeElement !== inputEl) {
                     inputEl.value = String(newWidth);
                 }
+                if (panel.classList.contains('view-table')) {
+                    safeRedrawCanvasSearchTabulator(true);
+                    if (typeof syncCanvasTabulatorTopScrollbar === 'function') syncCanvasTabulatorTopScrollbar();
+                    if (typeof syncCanvasTabulatorRightScrollbar === 'function') syncCanvasTabulatorRightScrollbar(true);
+                }
             });
         };
 
@@ -1636,9 +1731,7 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
                 if (typeof updateSearchPanelColumnState === 'function') {
                     updateSearchPanelColumnState(panel);
                 }
-                if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
-                    canvasSearchTabulatorInstance.redraw(true);
-                }
+                safeRedrawCanvasSearchTabulator(true);
             }
         };
 
@@ -1673,9 +1766,21 @@ function showSearchResultsPanel() {
     const panel = getSearchResultsPanel();
     if (!panel) return;
 
-    applySearchPanelHeight(getSearchPanelHeight(), panel);
-    applySearchPanelWidth(getSearchPanelWidth(), panel);
-    ensureSearchPanelResizeHandle(panel);
+    const isSuggestions = (panel.dataset && panel.dataset.panelType === 'canvas-suggestions') ||
+        !!panel.querySelector('.canvas-suggestions-hide-btn') ||
+        !!panel.querySelector('.search-empty-suggestions-hide-btn');
+
+    if (!isSuggestions) {
+        applySearchPanelHeight(getSearchPanelHeight(), panel);
+        applySearchPanelWidth(getSearchPanelWidth(), panel);
+        ensureSearchPanelResizeHandle(panel);
+    } else {
+        panel.style.width = '';
+        panel.style.left = '';
+        panel.style.right = '';
+        panel.style.height = '';
+        panel.style.maxHeight = '';
+    }
 
     if (panel.classList.contains('visible')) return;
 
@@ -1687,9 +1792,17 @@ function showSearchResultsPanel() {
     searchPanelShowFrame = requestAnimationFrame(() => {
         searchPanelShowFrame = null;
         panel.classList.add('visible');
-        ensureSearchPanelResizeHandle(panel);
-        applySearchPanelWidth(getSearchPanelWidth(), panel);
-        syncSearchPanelHandlesLayout(panel);
+        if (!isSuggestions) {
+            ensureSearchPanelResizeHandle(panel);
+            applySearchPanelWidth(getSearchPanelWidth(), panel);
+            syncSearchPanelHandlesLayout(panel);
+        } else {
+            panel.style.width = '';
+            panel.style.left = '';
+            panel.style.right = '';
+            panel.style.height = '';
+            panel.style.maxHeight = '';
+        }
         if (!panel._gridBubbleScrollBound) {
             panel._gridBubbleScrollBound = true;
             panel.addEventListener('scroll', () => {
@@ -1914,23 +2027,24 @@ function updateSearchResultSelection(nextIndex, options = {}) {
     if (!panel) return;
     const ensureVisible = options.ensureVisible !== false;
 
-    if (isSearchPanelTableView() && typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+    if (isSearchPanelTableView() && isCanvasSearchTabulatorReady()) {
         try {
-            if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
-                flushRemainingCanvasSearchTableChunks();
-            }
             const rows = canvasSearchTabulatorInstance.getRows();
             if (!rows || !rows.length) {
                 searchUiState.selectedIndex = -1;
                 return;
             }
-            const maxIdx = rows.length - 1;
+            if (nextIndex >= rows.length && typeof loadNextCanvasSearchTabulatorChunk === 'function' && canvasSearchTabulatorPendingState && canvasSearchTabulatorPendingState.loadedCount < canvasSearchTabulatorPendingState.totalResults.length) {
+                loadNextCanvasSearchTabulatorChunk();
+            }
+            const updatedRows = canvasSearchTabulatorInstance.getRows();
+            const maxIdx = (updatedRows && updatedRows.length) ? (updatedRows.length - 1) : 0;
             const clamped = Math.max(0, Math.min(maxIdx, nextIndex));
             canvasSearchTabulatorInstance.deselectRow();
-            if (rows[clamped]) {
-                rows[clamped].select();
-                if (ensureVisible && typeof rows[clamped].scrollTo === 'function') {
-                    rows[clamped].scrollTo();
+            if (updatedRows && updatedRows[clamped]) {
+                updatedRows[clamped].select();
+                if (ensureVisible && typeof updatedRows[clamped].scrollTo === 'function') {
+                    updatedRows[clamped].scrollTo();
                 }
             }
             searchUiState.selectedIndex = clamped;
@@ -2872,6 +2986,18 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
+    const tabLoadMoreBtn = e.target.closest('.canvas-tabulator-load-more-btn, #canvasTabulatorLoadMoreBtn');
+    if (tabLoadMoreBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        if (typeof loadNextCanvasSearchTabulatorChunk === 'function') {
+            loadNextCanvasSearchTabulatorChunk();
+        }
+        return;
+    }
+
     const loadMoreBtn = e.target.closest('.search-load-more-btn');
     if (loadMoreBtn) {
         try {
@@ -3049,6 +3175,29 @@ function handleSearchResultsPanelClick(e) {
         }
 
         if (copyId) opts.copyId = copyId;
+
+        // Priority 0: Non-bookmark canvas elements (Group, Temp Section, Permanent Section, MD Node, Edge)
+        if (locSource === 'group' || (item && item.type === 'group')) {
+            locateCanvasGroupSearchResult(item || { id: locId });
+            return;
+        }
+        if (locSource === 'temp-section' || (item && item.type === 'temp-section')) {
+            locateCanvasElement(locSection || locId || (item && item.id), 'temp-section', { color: opts.color });
+            return;
+        }
+        if (locSource === 'permanent-section' || (item && item.type === 'permanent-section')) {
+            const pid = copyId || (item && item.copyId) || locId || 'permanentSection';
+            locateCanvasElement(pid, 'permanent-section', { color: opts.color || '#059669' });
+            return;
+        }
+        if (locSource === 'md-node' || (item && item.type === 'md-node')) {
+            locateCanvasElement(locId || (item && item.id), 'md-node');
+            return;
+        }
+        if (locSource === 'edge' || (item && item.type === 'edge')) {
+            locateCanvasElement(locId || (item && item.id), 'edge');
+            return;
+        }
 
         // Priority 1: Location Chip specific ID
         if (locId) {
@@ -4012,13 +4161,34 @@ function getOrCreateGridDetailsBubble() {
                         const inputEl = document.getElementById('searchInput');
                         if (inputEl) inputEl.value = '';
                     } catch (_) { }
+                    const chipColor = locChip.style.getPropertyValue('--loc-color') || '#2563eb';
+                    if (locSource === 'group') {
+                        locateCanvasGroupSearchResult({ id: locId });
+                        return;
+                    }
+                    if (locSource === 'temporary' || locSource === 'temp-section') {
+                        locateCanvasElement(locSection || locId, 'temp-section', { color: chipColor });
+                        return;
+                    }
+                    if (locSource === 'permanent' || locSource === 'permanent-section') {
+                        locateCanvasElement(copyId || locId || 'permanentSection', 'permanent-section', { color: chipColor });
+                        return;
+                    }
+                    if (locSource === 'md-node') {
+                        locateCanvasElement(locId, 'md-node');
+                        return;
+                    }
+                    if (locSource === 'edge') {
+                        locateCanvasElement(locId, 'edge');
+                        return;
+                    }
                     const target = {
                         type: 'bookmark-item',
                         id: locId,
                         source: locSource || 'permanent',
                         sectionId: locSource === 'temporary' ? (locSection || '') : '',
                         copyId: locSource === 'permanent' ? copyId : null,
-                        color: locChip.style.getPropertyValue('--loc-color') || '#2563eb'
+                        color: chipColor
                     };
                     navigateToCanvasBookmarkSearchTarget(target);
                     return;
@@ -5434,8 +5604,8 @@ const SEARCH_MODES = [
         labelEn: 'Description',
         icon: 'fa-align-left',
         color: 'mode-color-green',
-        desc: '栏目说明、卡片文本、连接线标签',
-        descEn: 'Section Notes, Card Text, Edge Labels'
+        desc: '栏目说明、空白卡片文本、连接线标签',
+        descEn: 'Section Notes, Blank Card Text, Edge Labels'
     }
 ];
 
@@ -6070,6 +6240,13 @@ async function setSearchMode(modeKey, options = {}) {
     searchUiState.activeMode = modeKey;
     searchUiState.showFullscreenDescriptionOthers = false;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
+    const panel = getSearchResultsPanel();
+    if (panel) {
+        panel.classList.toggle('mode-structure', modeKey === 'structure');
+        panel.classList.toggle('mode-description', modeKey === 'description');
+        panel.classList.toggle('mode-bookmark', modeKey === 'bookmark');
+        panel.setAttribute('data-search-mode', modeKey);
+    }
     renderSearchModeUI();
     if (searchUiState.isMenuOpen) {
         renderSearchModeMenu();
@@ -7473,6 +7650,7 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
         w: metrics.w,
         h: metrics.h,
         color: color,
+        bookmarkCount: Array.isArray(section.items) ? section.items.length : 0,
         __title: title.toLowerCase(),
         __label: label.toLowerCase(),
         __description: description.toLowerCase(),
@@ -7711,8 +7889,9 @@ function parsePermanentSectionSlice(db, coords, isMultiColumnMode) {
         displayIndex: 1,
         hasCopies: hasCopies,
         color: permColor,
-        __title: (currentLang === 'en' ? 'permanent column' : '永久栏目'),
+        __title: ((currentLang === 'en' ? 'permanent column' : '永久栏目') + ' #a a').toLowerCase(),
         __label: '#a',
+        __alpha: 'a',
         __description: permanentDescription.toLowerCase(),
         isMultiColumnMode: isMultiColumnMode
     };
@@ -7765,8 +7944,9 @@ function parsePermanentCopySlice(copy, idx, db, coords, isMultiColumnMode) {
         hasCopies: true,
         isMultiColumnMode: isMultiColumnMode,
         color: permColor,
-        __title: (currentLang === 'en' ? `permanent copy #${idxLabel}` : `永久栏目副本 #${idxLabel}`).toLowerCase(),
+        __title: ((currentLang === 'en' ? `permanent copy #${idxLabel}` : `永久栏目副本 #${idxLabel}`) + ` #${idxLabel.toLowerCase()} ${idxLabel.toLowerCase()}`).toLowerCase(),
         __label: `#${idxLabel.toLowerCase()}`,
+        __alpha: idxLabel.toLowerCase(),
         __description: copyDescription.toLowerCase()
     };
 
@@ -9600,8 +9780,13 @@ function scoreCanvasSearchItem(item, query, options = {}) {
     // 0. Mode-specific scoring check (Optional, as we partition indices now)
     // But helpful for mixed logic if any.
 
-    // 1. 特殊语法：#N 序号定位 (Only for Permanent)
+    // 1. 特殊语法：#N 序号定位或 A/B 序号匹配 (Only for Permanent)
     if (item.type === 'permanent-section') {
+        const itemAlpha = toAlpha(item.displayIndex || 1).toLowerCase();
+        const cleanQ = q.replace(/^#/, '');
+        if (cleanQ === itemAlpha || q === `#${itemAlpha}`) {
+            return 300; // 精确匹配 A, #A, B, #B 等
+        }
         const sectionQuery = queryContext.permanentQuery;
         if (sectionQuery) {
             if (sectionQuery.displayIndex === item.displayIndex) {
@@ -9711,15 +9896,30 @@ function scoreCanvasSearchItem(item, query, options = {}) {
             }
             break;
 
-        case 'permanent-section':
+        case 'permanent-section': {
+            const itemAlpha = toAlpha(item.displayIndex || 1).toLowerCase();
+            const cleanQ = q.replace(/^#/, '');
+            if (cleanQ === itemAlpha || q === `#${itemAlpha}`) {
+                score = Math.max(score, 300);
+            }
+            if (item.__label) {
+                if (item.__label === q || item.__label === `#${q}`) score = Math.max(score, 250);
+                else if (item.__label.startsWith(q) || item.__label.startsWith(`#${q}`)) score = Math.max(score, 180);
+            }
+            if (item.__alpha) {
+                if (item.__alpha === cleanQ) score = Math.max(score, 300);
+                else if (item.__alpha.startsWith(cleanQ)) score = Math.max(score, 180);
+            }
             // 标题匹配
             if (item.__title) {
-                if (item.__title.startsWith(q)) score = Math.max(score, 130);
+                if (item.__title.startsWith(q)) score = Math.max(score, 150);
                 else if (!isSingleChar && item.__title.includes(q)) score = Math.max(score, 130);
+                else if (isSingleChar && item.__title.includes(q)) score = Math.max(score, 100);
             }
             // 说明匹配 (Only if in Description Mode or index contains it)
             if (item.__description && !isSingleChar && item.__description.includes(q)) score = Math.max(score, 70);
             break;
+        }
 
         case 'group':
             // 卡片组：按 label/title 命中（#7）
@@ -11509,31 +11709,7 @@ function searchCanvasAndRender(query, options = {}) {
         return false;
     };
 
-    // Aggregation buckets
-    const groupAggregation = {
-        ids: [],
-        type: null, // 'permanent-group' | 'temp-group'
-        label: '',
-        count: 0
-    };
 
-    // 1. Detect Aggregation Intent
-    let isAggregationIntent = false;
-
-    // 1a. Permanent Group Intent: "#", "永久", "permanent"
-    const lowerQ = trimmedQuery.toLowerCase();
-    if (trimmedQuery === '#' || lowerQ === '永久' || lowerQ === 'permanent') {
-        isAggregationIntent = true;
-        groupAggregation.type = 'permanent-group';
-        groupAggregation.label = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'All Permanent Sections' : '所有永久栏目';
-    }
-    // 1b. Temp Group Intent: "A", "Job"... (Prefix match)
-    // Only if it looks like a prefix (alphanumeric/hanzi) and isn't a widely generic term unless it matches a specific label prefix logic
-    else if (/^[a-zA-Z0-9\u4e00-\u9fa5]+$/.test(trimmedQuery)) {
-        // Potential temp group
-        // Check if multiple items actually start with this prefix plus dash
-        // Logic will be done during iteration
-    }
     for (const item of sourceIndex) {
         if (searchUiState.areaSearchScope) {
             if (!isItemInAreaSearchScope(item, searchUiState.areaSearchScope)) {
@@ -11656,34 +11832,6 @@ function searchCanvasAndRender(query, options = {}) {
             } else {
                 scored.push(scoredItem);
             }
-
-            // Collect for Aggregation
-            if (groupAggregation.type === 'permanent-group') {
-                if (item.type === 'permanent-section') {
-                    groupAggregation.ids.push(item.id);
-                    groupAggregation.count++;
-                }
-            } else {
-                // Check Temp Group Prefix aggregation (Dynamic)
-                if (item.type === 'temp-section' && item.label) {
-                    // Startswith query + "-"
-                    // e.g. Query "A" -> matches "A-1", "A-2"
-                    // Case insensitive
-                    const prefix = trimmedQuery.toLowerCase();
-                    const cleanPrefix = prefix.replace(/-$/, '');
-                    const lbl = item.label.toLowerCase();
-                    if (lbl === cleanPrefix || lbl.startsWith(cleanPrefix + '-')) {
-                        if (!groupAggregation.type) {
-                            groupAggregation.type = 'temp-group';
-                            groupAggregation.label = (typeof currentLang !== 'undefined' && currentLang === 'en') ? `Group: ${trimmedQuery.toUpperCase()}` : `群组: ${trimmedQuery.toUpperCase()}`;
-                        }
-                        if (groupAggregation.type === 'temp-group') {
-                            groupAggregation.ids.push(item.id);
-                            groupAggregation.count++;
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -11730,19 +11878,6 @@ function searchCanvasAndRender(query, options = {}) {
 
     const MAX_RESULTS = 20;
     const finalResults = scored.slice(0, MAX_RESULTS).map(x => x.item);
-
-    // Insert Group Result if applicable
-    if (groupAggregation.count > 1) { // Only show group if > 1 items
-        const groupItem = {
-            id: 'group-aggregation-result', // unique phantom ID
-            type: 'group-result',
-            title: `${groupAggregation.label} (${groupAggregation.count})`,
-            itemsCount: groupAggregation.count,
-            targetIds: groupAggregation.ids,
-            groupType: groupAggregation.type
-        };
-        finalResults.unshift(groupItem);
-    }
 
     // 渲染结果（使用画布专用渲染）
     searchUiState.bookmarkGroupModel = null;
@@ -11794,6 +11929,11 @@ function renderCanvasSearchSuggestions() {
     try {
         searchUiState.canvasSuggestionsVisible = true;
         panel.dataset.panelType = 'canvas-suggestions';
+        panel.style.width = '';
+        panel.style.left = '';
+        panel.style.right = '';
+        panel.style.height = '';
+        panel.style.maxHeight = '';
     } catch (_) { }
 
     const listHtml = modesToShow.map((mode) => {
@@ -11801,7 +11941,7 @@ function renderCanvasSearchSuggestions() {
         const title = isZh ? mode.label : mode.labelEn;
         const desc = isZh ? mode.desc : mode.descEn;
         return `
-            <div class="search-mode-menu-item ${isActive ? 'active' : ''} canvas-suggestion-mode-item" data-mode-key="${escapeHtml(mode.key)}" style="border-bottom:1px solid var(--search-candidate-divider, var(--border-color-light, rgba(0, 0, 0, 0.18))); border-radius:0;">
+            <div class="search-mode-menu-item ${isActive ? 'active' : ''} canvas-suggestion-mode-item" data-mode-key="${escapeHtml(mode.key)}">
                 <div class="mode-icon"><i class="fas ${escapeHtml(mode.icon)} ${escapeHtml(mode.color)}"></i></div>
                 <div class="mode-info">
                     <div class="mode-name">${escapeHtml(title)}</div>
@@ -11836,19 +11976,19 @@ function renderCanvasSearchSuggestions() {
     const hintHelp = getSearchHintHelpContent();
 
     panel.innerHTML = `
-        <div class="search-suggestions-header" style="position:relative; padding:6px 10px; border-bottom:1px solid var(--search-candidate-divider, var(--border-color)); display:flex; align-items:center; justify-content:flex-end; gap:10px;">
-            <div class="search-empty-suggestions-hint" style="position:absolute; left:16px; top:50%; transform:translateY(-50%);">
-                <span class="search-hint-icon" style="display:inline-flex; position:relative; top:-1px;">${arrowSvg}</span>
-                <span class="search-hint-text">${escapeHtml(hintText)}</span>
-                <button type="button" class="search-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}">
+        <div class="search-suggestions-header" style="position:relative; padding:5px 8px; border-bottom:1px solid var(--search-candidate-divider, var(--border-color)); margin-bottom:2px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+            <div class="search-empty-suggestions-hint" style="display:inline-flex; align-items:center; gap:4px; min-width:0; flex:1 1 auto; font-size:11px; color:var(--text-tertiary);">
+                <span class="search-hint-icon" style="display:inline-flex; position:relative; top:-1px; flex:0 0 auto;">${arrowSvg}</span>
+                <span class="search-hint-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(hintText)}</span>
+                <button type="button" class="search-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}" style="flex:0 0 auto; margin-left:0;">
                     <i class="fas fa-question-circle"></i>
                 </button>
             </div>
-            <button type="button" class="search-empty-suggestions-hide-btn canvas-suggestions-hide-btn" style="border:1px solid var(--border-color); background:var(--bg-secondary); padding:3px 10px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; white-space:nowrap;">
+            <button type="button" class="search-empty-suggestions-hide-btn canvas-suggestions-hide-btn" style="flex:0 0 auto; border:1px solid var(--border-color); background:var(--bg-secondary); padding:2px 8px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; white-space:nowrap;">
                 ${escapeHtml(hideLabel)}
             </button>
         </div>
-        <div style="padding:4px 0;">
+        <div style="padding:2px 0;">
             ${listHtml}
         </div>
     `;
@@ -12738,49 +12878,146 @@ function bindCanvasGridRightScrollbarEvents() {
 // ==================== Tabulator 表格视图控制器与适配器 ====================
 
 let canvasSearchTabulatorInstance = null;
-let canvasSearchTabulatorChunkTimer = null;
+let canvasSearchTabulatorActiveMode = '';
+let isAppendingTableChunk = false;
 
-// 缓存当前搜索注入状态
+/**
+ * 判断 Tabulator 表格实例是否真正完成构建并就绪
+ */
+function isCanvasSearchTabulatorReady() {
+    return !!(
+        canvasSearchTabulatorInstance &&
+        canvasSearchTabulatorInstance.initialized &&
+        !canvasSearchTabulatorInstance.destroyed
+    );
+}
+
+/**
+ * 安全触发 Tabulator 重绘，严禁在未就绪或 0 尺寸时调用，彻底杜绝强制同步重排与警告
+ */
+function safeRedrawCanvasSearchTabulator(full = false) {
+    if (!isCanvasSearchTabulatorReady()) return;
+    const tableContainer = document.getElementById('canvasSearchTabulatorTable');
+    if (!tableContainer || tableContainer.offsetWidth === 0 || tableContainer.offsetHeight === 0) return;
+    try {
+        canvasSearchTabulatorInstance.redraw(full);
+    } catch (_) {}
+}
+
+// 缓存当前搜索注入状态（支持懒加载分批加载与剩余项提示）
 let canvasSearchTabulatorPendingState = {
     totalResults: [],
-    currentOffset: 0,
+    loadedCount: 0,
     renderQuery: '',
     isZh: true
 };
 
 function cancelCanvasSearchTabulatorLazyLoad() {
-    if (canvasSearchTabulatorChunkTimer) {
-        clearTimeout(canvasSearchTabulatorChunkTimer);
-        canvasSearchTabulatorChunkTimer = null;
+    isAppendingTableChunk = false;
+}
+
+/**
+ * 更新表格底部的两行高度居中“继续加载”控制栏
+ * @param {number} remain - 剩余未加载的条目数量
+ * @param {boolean} isZh - 是否中文
+ */
+/**
+ * 更新表格内部（位于数据行末尾）的两行高度居中“继续加载”控制栏
+ * @param {number} remain - 剩余未加载的条目数量
+ * @param {boolean} isZh - 是否中文
+ */
+function updateCanvasTabulatorLoadMoreRow(remain, isZh = true) {
+    const tableContainer = document.getElementById('canvasSearchTabulatorTable');
+    if (!tableContainer) return;
+    const holder = tableContainer.querySelector('.tabulator-tableholder');
+    if (!holder) return;
+
+    let row = holder.querySelector('#canvasTabulatorLoadMoreRow');
+    if (remain > 0) {
+        if (!row) {
+            row = document.createElement('div');
+            row.className = 'canvas-tabulator-load-more-row';
+            row.id = 'canvasTabulatorLoadMoreRow';
+            row.innerHTML = `<div class="canvas-tabulator-load-more-inner"><button class="search-load-more-btn canvas-tabulator-load-more-btn" id="canvasTabulatorLoadMoreBtn" type="button"></button></div>`;
+            holder.appendChild(row);
+        } else if (row.parentElement !== holder || holder.lastElementChild !== row) {
+            holder.appendChild(row);
+        }
+        row.style.display = 'flex';
+        const btn = row.querySelector('#canvasTabulatorLoadMoreBtn') || row.querySelector('button');
+        if (btn) {
+            const loadMoreText = isZh ? `继续加载（剩余 ${remain}）` : `Load More (${remain} left)`;
+            btn.textContent = loadMoreText;
+            btn.title = loadMoreText;
+            btn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                loadNextCanvasSearchTabulatorChunk();
+            };
+        }
+    } else if (row) {
+        row.style.display = 'none';
+    }
+    syncCanvasTabulatorRightScrollbar(true);
+}
+
+/**
+ * 加载 Tabulator 表格的下一批数据（默认 50 条）
+ */
+function loadNextCanvasSearchTabulatorChunk() {
+    if (isAppendingTableChunk) return;
+    if (!canvasSearchTabulatorInstance || !canvasSearchTabulatorPendingState) return;
+
+    const { totalResults, loadedCount, renderQuery, isZh } = canvasSearchTabulatorPendingState;
+    if (!totalResults || loadedCount >= totalResults.length) {
+        updateCanvasTabulatorLoadMoreRow(0, isZh);
+        return;
+    }
+
+    isAppendingTableChunk = true;
+    try {
+        const nextLimit = Math.min(totalResults.length, loadedCount + 50);
+        const nextSlice = totalResults.slice(loadedCount, nextLimit);
+        if (nextSlice.length) {
+            const nextData = buildCanvasTabulatorData(nextSlice, renderQuery, { isZh, startIndex: loadedCount });
+            canvasSearchTabulatorPendingState.loadedCount = nextLimit;
+            if (searchUiState) {
+                searchUiState.resultVisibleCount = nextLimit;
+                searchUiState.resultHasMore = nextLimit < totalResults.length;
+            }
+            canvasSearchTabulatorInstance.addData(nextData);
+
+            requestAnimationFrame(() => {
+                syncCanvasTabulatorTopScrollbar();
+                syncCanvasTabulatorRightScrollbar(true);
+            });
+
+            const remain = totalResults.length - nextLimit;
+            updateCanvasTabulatorLoadMoreRow(remain, isZh);
+        }
+    } finally {
+        setTimeout(() => {
+            isAppendingTableChunk = false;
+        }, 80);
     }
 }
 
 /**
- * 冲刷未完成的分块数据（全量直灌架构下所有数据首帧即注入完成，保持此函数以兼容旧调用点）
+ * 保持此函数以兼容旧调用点，避免阻塞主线程
  */
 function flushRemainingCanvasSearchTableChunks() {
-    cancelCanvasSearchTabulatorLazyLoad();
-    if (!canvasSearchTabulatorInstance || !canvasSearchTabulatorPendingState) return;
-
-    const { totalResults, currentOffset, renderQuery, isZh } = canvasSearchTabulatorPendingState;
-    if (!totalResults || currentOffset >= totalResults.length) return;
-
-    const remainingSlice = totalResults.slice(currentOffset);
-    if (!remainingSlice.length) return;
-
-    const remainingData = buildCanvasTabulatorData(remainingSlice, renderQuery, { isZh, startIndex: currentOffset });
-    canvasSearchTabulatorPendingState.currentOffset = totalResults.length;
-    try {
-        canvasSearchTabulatorInstance.addData(remainingData);
-        syncCanvasTabulatorTopScrollbar();
-        syncCanvasTabulatorRightScrollbar(true);
-    } catch (_) { }
+    // 惰性架构下不全量阻塞冲刷
 }
 
 function destroyCanvasSearchTabulator() {
     cancelCanvasSearchTabulatorLazyLoad();
+    if (canvasTabulatorRightScrollRaf) {
+        cancelAnimationFrame(canvasTabulatorRightScrollRaf);
+        canvasTabulatorRightScrollRaf = null;
+    }
     canvasSearchTabulatorPendingState.totalResults = [];
-    canvasSearchTabulatorPendingState.currentOffset = 0;
+    canvasSearchTabulatorPendingState.loadedCount = 0;
+    canvasSearchTabulatorActiveMode = '';
 
     const topScroll = document.getElementById('canvasTabulatorTopScrollbar');
     if (topScroll) {
@@ -12792,11 +13029,19 @@ function destroyCanvasSearchTabulator() {
         rightScroll._hasCustomScrollBinding = false;
         rightScroll.style.display = 'none';
     }
+    const loadMoreRow = document.getElementById('canvasTabulatorLoadMoreRow');
+    if (loadMoreRow) {
+        loadMoreRow.remove();
+    }
     if (canvasSearchTabulatorInstance) {
         try {
             canvasSearchTabulatorInstance.destroy();
         } catch (_) { }
         canvasSearchTabulatorInstance = null;
+    }
+    const tableWrapper = document.querySelector('.search-results-table-view-wrapper');
+    if (tableWrapper) {
+        tableWrapper.remove();
     }
 }
 
@@ -12816,9 +13061,11 @@ function syncCanvasTabulatorTopScrollbar() {
     const clientW = holder.clientWidth;
 
     if (scrollW > clientW + 2) {
-        topScroll.style.display = 'block';
+        if (topScroll.style.display !== 'block') {
+            topScroll.style.display = 'block';
+        }
         if (thumb) {
-            const trackW = topScroll.clientWidth || clientW;
+            const trackW = clientW;
             const thumbW = Math.max(32, Math.round((clientW / scrollW) * trackW));
             const maxThumbLeft = Math.max(1, trackW - thumbW);
             const maxScrollLeft = Math.max(1, scrollW - clientW);
@@ -12828,7 +13075,9 @@ function syncCanvasTabulatorTopScrollbar() {
             thumb.style.left = `${thumbLeft}px`;
         }
     } else {
-        topScroll.style.display = 'none';
+        if (topScroll.style.display !== 'none') {
+            topScroll.style.display = 'none';
+        }
     }
 }
 
@@ -12858,9 +13107,6 @@ function bindCanvasTabulatorTopScrollbarEvents() {
         e.preventDefault();
         const delta = e.deltaX || e.deltaY;
         if (delta) {
-            if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
-                flushRemainingCanvasSearchTableChunks();
-            }
             holder.scrollLeft += delta;
             syncCanvasTabulatorTopScrollbar();
         }
@@ -12871,10 +13117,6 @@ function bindCanvasTabulatorTopScrollbarEvents() {
         if (thumb && (e.target === thumb || thumb.contains(e.target))) return;
         if (e.button !== 0) return;
         e.preventDefault();
-
-        if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
-            flushRemainingCanvasSearchTableChunks();
-        }
 
         const rect = topScroll.getBoundingClientRect();
         const clickX = e.clientX - rect.left;
@@ -12897,10 +13139,6 @@ function bindCanvasTabulatorTopScrollbarEvents() {
             if (e.button !== 0) return;
             e.preventDefault();
             e.stopPropagation();
-
-            if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
-                flushRemainingCanvasSearchTableChunks();
-            }
 
             topScroll._isDraggingThumb = true;
             topScroll.classList.add('is-dragging');
@@ -13003,12 +13241,14 @@ function syncCanvasTabulatorRightScrollbar(immediate = false) {
     const clientH = holder.clientHeight;
 
     if (scrollH > clientH + 2) {
-        rightScroll.style.display = 'block';
+        if (rightScroll.style.display !== 'block') {
+            rightScroll.style.display = 'block';
+        }
 
         const updateThumb = () => {
             canvasTabulatorRightScrollRaf = null;
             if (!thumb) return;
-            const trackH = rightScroll.clientHeight || clientH;
+            const trackH = clientH;
             const thumbH = Math.max(28, Math.round((clientH / scrollH) * trackH));
             const maxThumbTop = Math.max(1, trackH - thumbH);
             const maxScrollTop = Math.max(1, scrollH - clientH);
@@ -13033,7 +13273,9 @@ function syncCanvasTabulatorRightScrollbar(immediate = false) {
             cancelAnimationFrame(canvasTabulatorRightScrollRaf);
             canvasTabulatorRightScrollRaf = null;
         }
-        rightScroll.style.display = 'none';
+        if (rightScroll.style.display !== 'none') {
+            rightScroll.style.display = 'none';
+        }
     }
 }
 
@@ -13067,10 +13309,6 @@ function bindCanvasTabulatorRightScrollbarEvents() {
             if (e.button !== 0) return;
             e.preventDefault();
             e.stopPropagation();
-
-            if (typeof flushRemainingCanvasSearchTableChunks === 'function') {
-                flushRemainingCanvasSearchTableChunks();
-            }
 
             rightScroll._isDraggingThumb = true;
             rightScroll.classList.add('is-dragging');
@@ -13134,7 +13372,7 @@ function bindCanvasTabulatorRightScrollbarEvents() {
 }
 
 /**
- * Tabulator 数据注入引擎（全量数据直灌虚拟渲染，杜绝分批追加导致的触底硬刹停与段落顿感）
+ * Tabulator 数据注入引擎（按需懒加载分片注入，首屏仅加载 50 条，配独立两行居中继续加载按钮）
  */
 function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery, isZh) {
     cancelCanvasSearchTabulatorLazyLoad();
@@ -13143,33 +13381,62 @@ function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery,
     const totalResults = Array.isArray(displayResults) ? displayResults : [];
     const totalCount = totalResults.length;
 
+    // 确定本次初始渲染的数据量（如果外部通过 preserveVisibleCount 传递了此前已展示数量，则平滑延续；否则默认初始一页 50 条）
+    const defaultChunkSize = 50;
+    let initialCount = defaultChunkSize;
+    if (searchUiState && typeof searchUiState.resultVisibleCount === 'number' && searchUiState.resultVisibleCount > defaultChunkSize) {
+        initialCount = Math.min(totalCount, searchUiState.resultVisibleCount);
+    } else {
+        initialCount = Math.min(totalCount, defaultChunkSize);
+    }
+
     canvasSearchTabulatorPendingState = {
         totalResults,
-        currentOffset: totalCount,
+        loadedCount: initialCount,
         renderQuery,
         isZh
     };
 
-    // 一次性构建全量数据并由 Tabulator 虚拟 DOM 引擎按需渲染
-    // 使得首帧即具备完整稳定的 scrollHeight，拥有 100% 连贯流畅的原生滑动手感与完整惯性
-    const fullData = buildCanvasTabulatorData(totalResults, renderQuery, { isZh, startIndex: 0 });
+    if (searchUiState) {
+        searchUiState.resultVisibleCount = initialCount;
+        searchUiState.resultHasMore = initialCount < totalCount;
+    }
+
+    const initialSlice = totalResults.slice(0, initialCount);
+    const initialData = buildCanvasTabulatorData(initialSlice, renderQuery, { isZh, startIndex: 0 });
 
     const hasTableholder = !!containerEl.querySelector('.tabulator-tableholder');
-    if (!canvasSearchTabulatorInstance || !hasTableholder) {
-        initCanvasSearchTabulator(containerEl, fullData, isZh);
+    const activeMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    const isFitColumnsMode = (activeMode === 'structure' || activeMode === 'description');
+    const expectedLayout = isFitColumnsMode ? "fitColumns" : "fitDataFill";
+
+    const isReady = isCanvasSearchTabulatorReady();
+    if (!canvasSearchTabulatorInstance || !isReady || !hasTableholder || canvasSearchTabulatorActiveMode !== activeMode || (canvasSearchTabulatorInstance.options && canvasSearchTabulatorInstance.options.layout !== expectedLayout)) {
+        initCanvasSearchTabulator(containerEl, initialData, isZh);
     } else {
         try {
-            canvasSearchTabulatorInstance.replaceData(fullData);
+            canvasSearchTabulatorInstance.setColumns(getCanvasTabulatorColumns(isZh, activeMode, initialData));
+            canvasSearchTabulatorInstance.replaceData(initialData);
+            safeRedrawCanvasSearchTabulator(false);
         } catch (err) {
-            initCanvasSearchTabulator(containerEl, fullData, isZh);
+            initCanvasSearchTabulator(containerEl, initialData, isZh);
         }
     }
 
+    const remain = Math.max(0, totalCount - initialCount);
+    if (isCanvasSearchTabulatorReady()) {
+        updateCanvasTabulatorLoadMoreRow(remain, isZh);
+    }
+
     requestAnimationFrame(() => {
-        bindCanvasTabulatorTopScrollbarEvents();
-        syncCanvasTabulatorTopScrollbar();
-        bindCanvasTabulatorRightScrollbarEvents();
-        syncCanvasTabulatorRightScrollbar(true);
+        if (isCanvasSearchTabulatorReady()) {
+            safeRedrawCanvasSearchTabulator(false);
+            updateCanvasTabulatorLoadMoreRow(remain, isZh);
+            bindCanvasTabulatorTopScrollbarEvents();
+            syncCanvasTabulatorTopScrollbar();
+            bindCanvasTabulatorRightScrollbarEvents();
+            syncCanvasTabulatorRightScrollbar(true);
+        }
     });
 }
 
@@ -13277,7 +13544,7 @@ function buildCanvasTabulatorData(results, query, options = {}) {
 
         if (!rawTitle) {
             if (item.type === 'temp-section') rawTitle = isZh ? '临时栏目' : 'Temp Section';
-            else if (item.type === 'group-result') rawTitle = isZh ? '聚合组' : 'Group Aggregation';
+            else if (item.type === 'group' || item.type === 'card-group' || item.type === 'group-result' || String(item.id || '') === 'group-aggregation-result') rawTitle = isZh ? '卡片组' : 'Card Group';
             else if (item.type === 'md-node') rawTitle = item.text ? item.text.substring(0, 50) : (isZh ? 'MD卡片' : 'MD Card');
             else rawTitle = isFolder ? (isZh ? '未命名文件夹' : 'Unnamed Folder') : (isZh ? '未命名书签' : 'Unnamed Bookmark');
         }
@@ -13402,6 +13669,56 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             iconUrl = item.targetItems[0].favicon || item.targetItems[0].favIconUrl || item.targetItems[0].icon || '';
         }
 
+        let typeLabel = '';
+        let locationLabel = '';
+        let summaryText = '';
+        let descText = '';
+
+        const isBookmarkType = item.type === 'bookmark-group' || item.type === 'bookmark-item' || item.type === 'bookmark-group-more' || item.type === 'domain-group';
+        const isCardGroup = !isBookmarkType && (
+            item.type === 'group' || item.type === 'card-group' ||
+            item.type === 'group-result' ||
+            item.subtype === 'card-group' || item.variant === 'card-group-item' ||
+            item.directoryVariant === 'card-group' ||
+            item.isGroup === true ||
+            item.groupType === 'card-group' || item.groupType === 'permanent-group' ||
+            String(item.id || '').startsWith('card-group-') ||
+            String(item.id || '') === 'group-aggregation-result'
+        );
+
+        if (isCardGroup) {
+            typeLabel = isZh ? '卡片组' : 'Card Group';
+            locationLabel = item.parentGroupTitle || '';
+            summaryText = item.description || '';
+            descText = item.description || '';
+        } else if (item.type === 'temp-section') {
+            typeLabel = isZh ? '临时栏目' : 'Temp Section';
+            locationLabel = item.label || (isZh ? '临时' : 'Temp');
+            summaryText = item.description || '';
+            descText = item.description || '';
+        } else if (item.type === 'permanent-section') {
+            const isCopy = item.displayIndex > 1;
+            typeLabel = isCopy ? (isZh ? '永久栏目副本' : 'Permanent Copy') : (isZh ? '永久栏目' : 'Permanent Column');
+            locationLabel = `#${toAlpha(item.displayIndex || 1)}`;
+            summaryText = item.description || '';
+            descText = item.description || '';
+        } else if (item.type === 'md-node') {
+            typeLabel = isZh ? '卡片' : 'Card';
+            locationLabel = item.parentGroupTitle || '';
+            summaryText = item.text ? item.text.replace(/[\r\n]+/g, ' ').substring(0, 100) : (item.description || '');
+            descText = item.text || item.description || '';
+        } else if (item.type === 'edge') {
+            typeLabel = isZh ? '连接线' : 'Edge';
+            const fromName = typeof getCanvasSearchNodeDisplayName === 'function' ? getCanvasSearchNodeDisplayName(item.fromId, isZh) : (item.fromId || '');
+            const toName = typeof getCanvasSearchNodeDisplayName === 'function' ? getCanvasSearchNodeDisplayName(item.toId, isZh) : (item.toId || '');
+            locationLabel = (fromName && toName) ? `${fromName} → ${toName}` : (isZh ? '连接线' : 'Edge');
+            summaryText = item.label || '';
+            descText = item.label || '';
+        } else {
+            typeLabel = isFolder ? (isZh ? '文件夹' : 'Folder') : (isZh ? '书签' : 'Bookmark');
+            locationLabel = locations.map(l => l.label || l.title).filter(Boolean).join(', ');
+        }
+
         data.push({
             id: item.id || `row_${rowIdx}`,
             index: rowIdx++,
@@ -13414,11 +13731,71 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             note,
             path: parentPath,
             url,
-            rawItem: item
+            type: isCardGroup ? 'group' : item.type,
+            rawItem: item,
+            typeLabel,
+            locationLabel,
+            summary: summaryText,
+            descriptionText: descText,
+            color: isCardGroup ? (item.color || '#7c3aed') : (item.color || '#2563eb')
         });
     });
 
     return data;
+}
+
+/**
+ * 按照侧边栏目录册统一标准（canvas_sidebar_directory.js）渲染元素分类专属图标与徽标
+ */
+function getCanvasDirectoryItemIconHtml(type, item = {}) {
+    let rawType = String(type || (item && item.type) || '').trim();
+    const isBookmarkType = rawType === 'bookmark-group' || rawType === 'bookmark-item' || rawType === 'bookmark-group-more' || rawType === 'domain-group' ||
+        Boolean(item && (item.type === 'bookmark-group' || item.type === 'bookmark-item' || item.type === 'domain-group'));
+    const isCardGroup = !isBookmarkType && (
+        rawType === 'group' || rawType === 'card-group' || rawType === 'group-result' ||
+        Boolean(item && (item.subtype === 'card-group' || item.variant === 'card-group-item' || item.directoryVariant === 'card-group' || item.isGroup === true || item.groupType === 'card-group' || item.groupType === 'permanent-group' || String(item.id || '').startsWith('card-group-') || String(item.id || '') === 'group-aggregation-result'))
+    );
+    if (isCardGroup) {
+        rawType = 'group';
+    }
+    const color = item.color || (rawType === 'group' ? '#7c3aed' : '#2563eb');
+    switch (rawType) {
+        case 'md-node':
+        case 'card': {
+            return `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:18px; margin-right:0; flex-shrink:0;">
+                <span class="canvas-dir-icon-badge canvas-dir-icon-badge-md" style="font-size:9px; font-weight:700; color:${color}; border-color:${color}55; background:${color}18;">md</span>
+            </span>`;
+        }
+        case 'group':
+        case 'card-group': {
+            return `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-right:0; flex-shrink:0;">
+                <i class="fas fa-object-group" style="color:${color || '#7c3aed'}; font-size:13px;"></i>
+            </span>`;
+        }
+        case 'temp-section': {
+            const isSpecial = item.isSpecial || (item.label && String(item.label).includes('✦')) || (item.source === 'special');
+            if (isSpecial) {
+                return `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:18px; margin-right:0; flex-shrink:0;">
+                    <span class="canvas-dir-icon-badge canvas-dir-icon-badge-special" style="font-size:13px; color:${color};">✦</span>
+                </span>`;
+            }
+            return `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-right:0; flex-shrink:0;">
+                <i class="fas fa-code-branch" style="color:${color}; font-size:13px;"></i>
+            </span>`;
+        }
+        case 'permanent-section': {
+            return `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:18px; margin-right:0; flex-shrink:0;">
+                <span class="canvas-dir-icon-badge canvas-dir-icon-badge-hash" style="font-size:14px; font-weight:bold; color:#10b981;">#</span>
+            </span>`;
+        }
+        case 'edge': {
+            return `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-right:0; flex-shrink:0;">
+                <i class="fas fa-link" style="color:${color || '#64748b'}; font-size:13px;"></i>
+            </span>`;
+        }
+        default:
+            return '';
+    }
 }
 
 /**
@@ -13439,12 +13816,9 @@ function renderCanvasTableBookmarkFaviconHtml(d) {
 
     const url = String(d.url || (d.rawItem && d.rawItem.url) || '').trim();
     if (!url) {
-        const itemType = d.rawItem && d.rawItem.type;
-        if (itemType === 'temp-section' || itemType === 'permanent-section') {
-            return `<span class="search-result-icon-box-inline" style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:6px; flex-shrink:0;">
-                <i class="fas fa-layer-group" style="color:#059669; font-size:13px;"></i>
-            </span>`;
-        }
+        const itemType = (d.rawItem && d.rawItem.type) || d.type;
+        const dirIcon = getCanvasDirectoryItemIconHtml(itemType, d.rawItem || d);
+        if (dirIcon) return dirIcon;
         return bookmarkFallbackHtml;
     }
 
@@ -13509,9 +13883,365 @@ function getResolvedBookmarkTargetItem(d) {
 }
 
 /**
+ * 渲染表格单元格内的序号/位置 Chip（置于标题左侧，无多余彩色背景，点击可直接定位到画布实体）
+ */
+function renderCanvasTableItemLocationChipHtml(d) {
+    if (!d || !d.locationLabel) return '';
+    const rawLoc = String(d.locationLabel).trim();
+    const rawTitle = String(d.title || '').trim();
+    if (rawLoc && rawTitle && rawLoc.toLowerCase() === rawTitle.toLowerCase()) {
+        return '';
+    }
+    const locText = escapeHtml(rawLoc);
+    const item = d.rawItem || d;
+    const isBookmarkType = item.type === 'bookmark-group' || item.type === 'bookmark-item' || item.type === 'bookmark-group-more' || item.type === 'domain-group';
+    const isCardGroup = !isBookmarkType && (
+        item.type === 'group' || item.type === 'card-group' || item.type === 'group-result' ||
+        item.subtype === 'card-group' || item.isGroup === true || item.groupType === 'card-group' || item.groupType === 'permanent-group' || String(item.id || '').startsWith('card-group-') || String(item.id || '') === 'group-aggregation-result'
+    );
+    const type = isCardGroup ? 'group' : item.type;
+    let attr = '';
+    if (type === 'temp-section') {
+        attr = `data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="temporary" data-loc-section="${escapeHtml(String(item.sectionId || item.id))}"`;
+    } else if (type === 'permanent-section') {
+        const isCopy = (item.displayIndex > 1) || !!item.copyId;
+        const cid = isCopy ? (item.copyId || item.id) : '';
+        attr = `data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="permanent" data-copy-id="${escapeHtml(String(cid || 'null'))}" data-display-index="${item.displayIndex || 1}"`;
+    } else if (type === 'md-node') {
+        attr = `data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="md-node"`;
+    } else if (type === 'group') {
+        attr = `data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="group"`;
+    } else if (type === 'edge') {
+        attr = `data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="edge"`;
+    }
+    const iconPrefix = isCardGroup ? '<i class="fas fa-object-group" style="margin-right:3px;"></i>' : '';
+    return `<button type="button" class="search-loc-chip canvas-bookmark-location-chip canvas-bookmark-location-chip-compact canvas-table-loc-chip-neutral" ${attr} style="font-size:10.5px; height:18px; line-height:16px; padding:0 5px; border-radius:4px; flex-shrink:0; cursor:pointer; margin:0;" title="${locText}"><span class="canvas-bookmark-location-chip-text"><b>${iconPrefix}${locText}</b></span></button>`;
+}
+
+/**
+ * 卡片模式及说明模式表格行/标题点击时，跳转定位到画布对应实体并高亮
+ */
+async function navigateToCanvasStructureOrDescriptionTarget(item) {
+    if (!item) return false;
+
+    const navigateModeAtStart = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    const shouldDismissSearchAfterGlobalFullscreenNavigate = typeof isFullscreenGlobalSearchActive === 'function'
+        && isFullscreenGlobalSearchActive()
+        && (navigateModeAtStart === 'structure' || navigateModeAtStart === 'description');
+
+    const isInFullscreen = typeof isCanvasFullscreenActive === 'function' && isCanvasFullscreenActive();
+    let fullscreenScope = typeof getCanvasFullscreenSearchScope === 'function' ? getCanvasFullscreenSearchScope() : null;
+
+    // 清空输入框并收起搜索面板
+    const isGroupResult = item.type === 'group-result' || item.id === 'group-aggregation-result';
+    if (!isGroupResult) {
+        if (typeof prepareSearchInputBeforeCanvasNavigate === 'function') {
+            prepareSearchInputBeforeCanvasNavigate();
+        } else {
+            if (typeof hideSearchResultsPanel === 'function') hideSearchResultsPanel();
+            try {
+                const inputEl = document.getElementById('searchInput');
+                if (inputEl) inputEl.value = '';
+            } catch (_) { }
+        }
+    } else {
+        if (typeof hideSearchResultsPanel === 'function') hideSearchResultsPanel();
+    }
+
+    // 1. 全屏状态处理：若当前处于全屏，而目标需要退出全屏（如连接线、组，或者结构模式下的独立卡片）
+    const shouldExitFullscreenForSearchLocate = isInFullscreen
+        && (
+            item.type === 'edge'
+            || item.type === 'group'
+            || (navigateModeAtStart === 'structure' && item.type === 'md-node')
+        );
+    if (shouldExitFullscreenForSearchLocate && typeof exitCanvasNodeFullscreenForSearchLocate === 'function') {
+        try {
+            await exitCanvasNodeFullscreenForSearchLocate();
+        } catch (_) { }
+        fullscreenScope = typeof getCanvasFullscreenSearchScope === 'function' ? getCanvasFullscreenSearchScope() : null;
+    }
+
+    // 2. 全屏目标切换：若当前处于全屏，而目标也是栏目或卡片，切换全屏目标
+    const shouldSwitchFullscreenTarget = !!fullscreenScope
+        && navigateModeAtStart !== 'bookmark'
+        && (item.type === 'temp-section' || item.type === 'md-node' || item.type === 'permanent-section');
+    if (shouldSwitchFullscreenTarget && typeof ensureCanvasSearchResultTargetFullscreen === 'function') {
+        try {
+            await ensureCanvasSearchResultTargetFullscreen(item);
+        } catch (_) { }
+    }
+
+    // 3. 群组结果 (Aggregation Item 或带 targetIds 的群组)
+    if (item.type === 'group-result' || item.id === 'group-aggregation-result' || (item.type === 'group' && Array.isArray(item.targetIds) && item.targetIds.length > 0)) {
+        if (typeof searchUiState !== 'undefined' && Array.isArray(searchUiState.results)) {
+            const itemIdx = searchUiState.results.indexOf(item);
+            if (itemIdx >= 0 && typeof activateCanvasSearchResultAtIndex === 'function') {
+                await activateCanvasSearchResultAtIndex(itemIdx);
+                return true;
+            }
+        }
+    }
+
+    // 4. 定位与高亮
+    let located = false;
+    const isCardGroup = item.type === 'group' || item.type === 'card-group' || item.subtype === 'card-group' || String(item.id || '').startsWith('card-group-');
+    if (isCardGroup && typeof locateCanvasGroupSearchResult === 'function') {
+        located = await locateCanvasGroupSearchResult(item);
+    } else if (typeof locateCanvasElement === 'function') {
+        const disableAnimation = !!fullscreenScope && (navigateModeAtStart === 'structure' || navigateModeAtStart === 'description');
+        let targetId = item.id;
+        if (item.type === 'permanent-section') {
+            targetId = (item.copyId && item.copyId !== 'null') ? item.copyId : (item.id || 'permanentSection');
+        } else if (item.type === 'temp-section') {
+            targetId = item.sectionId || item.id;
+        }
+        const targetColor = item.color || (item.type === 'permanent-section' ? '#059669' : (item.type === 'edge' ? '#f59e0b' : '#2563eb'));
+        located = await locateCanvasElement(targetId, item.type, {
+            color: targetColor,
+            disableAnimation
+        });
+    }
+
+    if (shouldDismissSearchAfterGlobalFullscreenNavigate && typeof dismissMainSearchAfterCanvasNavigate === 'function') {
+        dismissMainSearchAfterCanvasNavigate();
+    }
+    return located;
+}
+
+/**
+ * 书签模式表格标题/行点击时，跳转到第一位位置（与网格视图点击卡片逻辑完全一致）
+ */
+async function navigateToCanvasTableBookmarkTarget(d) {
+    if (!d) return false;
+    const rawItem = d.rawItem || (d.id ? findSearchResultItemById(d.id, (d.index !== undefined ? d.index - 1 : -1)) : null) || d;
+    const locations = (Array.isArray(d.locations) && d.locations.length)
+        ? d.locations
+        : ((rawItem && Array.isArray(rawItem.locations) && rawItem.locations.length) ? rawItem.locations : []);
+
+    hideSearchResultsPanel();
+    try {
+        const inputEl = document.getElementById('searchInput');
+        if (inputEl) inputEl.value = '';
+    } catch (_) { }
+
+    if (locations && locations.length > 0) {
+        const loc = (typeof pickBestBookmarkLocationByScope === 'function' ? pickBestBookmarkLocationByScope(locations, getActiveFullscreenSearchScopeForFiltering()) : null) || locations[0];
+        const targetObj = {
+            type: 'bookmark-item',
+            id: loc.id || (rawItem && rawItem.id) || d.id,
+            source: loc.source || 'permanent',
+            sectionId: loc.source === 'temporary' ? (loc.sectionId || '') : '',
+            copyId: loc.source === 'permanent' ? (loc.copyId || null) : null,
+            color: loc.color || (rawItem && rawItem.color) || '#2563eb',
+            expandTargetFolder: typeof shouldExpandSearchLocateTargetFolder === 'function' ? shouldExpandSearchLocateTargetFolder(loc || rawItem) : false
+        };
+        return await navigateToCanvasBookmarkSearchTarget(targetObj);
+    } else if (rawItem) {
+        if (rawItem.type === 'bookmark-item') {
+            return await locateCanvasBookmarkItem(rawItem);
+        } else {
+            const targetObj = {
+                type: 'bookmark-item',
+                id: rawItem.id || d.id,
+                source: rawItem.source || 'permanent',
+                sectionId: rawItem.sectionId || '',
+                copyId: rawItem.copyId || null,
+                color: rawItem.color || '#2563eb',
+                expandTargetFolder: typeof shouldExpandSearchLocateTargetFolder === 'function' ? shouldExpandSearchLocateTargetFolder(rawItem) : false
+            };
+            return await navigateToCanvasBookmarkSearchTarget(targetObj);
+        }
+    }
+    return false;
+}
+
+/**
  * 获取 Tabulator 列配置
  */
-function getCanvasTabulatorColumns(isZh) {
+function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
+    if (mode === 'structure') {
+        const hasContent = Array.isArray(tableData) && tableData.some(d => {
+            const txt = d && d.summary;
+            return txt && String(txt).trim() !== '' && String(txt).trim() !== '-';
+        });
+        const typeCol = {
+            title: isZh ? "类型" : "Type",
+            field: "typeLabel",
+            minWidth: 85,
+            width: 110,
+            resizable: true,
+            headerSort: true,
+            formatter: (cell) => {
+                const d = cell.getData();
+                const color = d.color || '#2563eb';
+                const itemType = (d.rawItem && d.rawItem.type) || d.type;
+                const iconHtml = getCanvasDirectoryItemIconHtml(itemType, d.rawItem || d);
+                return `<div class="canvas-table-cell-type canvas-grid-type-prefix" style="display:inline-flex; align-items:center; gap:4px; overflow:hidden;">
+                    ${iconHtml}
+                    <span class="canvas-grid-type-name" style="color:${color}; font-weight:600; font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(d.typeLabel || '-')}</span>
+                </div>`;
+            }
+        };
+        const cols = [
+            {
+                title: "#",
+                field: "index",
+                width: 38,
+                minWidth: 32,
+                maxWidth: 46,
+                hozAlign: "center",
+                headerHozAlign: "center",
+                resizable: false,
+                headerSort: false,
+                formatter: (cell) => `<span class="canvas-table-index-num">${cell.getValue()}</span>`
+            },
+            {
+                title: isZh ? "卡片(组)" : "Card(Group)",
+                field: "title",
+                minWidth: 160,
+                ...(hasContent ? { width: 220 } : { widthGrow: 1 }),
+                resizable: true,
+                headerSort: true,
+                cellClick: async (e, cell) => {
+                    if (e.target.closest('.search-loc-chip, .canvas-table-loc-more-btn, .canvas-grid-location-more-btn, a, button')) return;
+                    const d = cell.getData();
+                    if (!d || !d.rawItem) return;
+                    e._canvasHandled = true;
+                    try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                    await navigateToCanvasStructureOrDescriptionTarget(d.rawItem);
+                },
+                formatter: (cell) => {
+                    const d = cell.getData();
+                    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                    const titleHtml = (typeof highlightSearchKeywords === 'function' && query)
+                        ? highlightSearchKeywords(d.title, query)
+                        : (d.titleHtml || escapeHtml(d.title));
+                    const locChipHtml = renderCanvasTableItemLocationChipHtml(d);
+                    return `<div class="canvas-table-cell-title" title="${escapeHtml(d.title)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden; cursor:pointer;">
+                        ${locChipHtml}
+                        <span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; font-weight:600; cursor:pointer;">${titleHtml}</span>
+                    </div>`;
+                }
+            }
+        ];
+
+        if (hasContent) {
+            cols.push({
+                title: isZh ? "内容" : "Content",
+                field: "summary",
+                minWidth: 200,
+                widthGrow: 1,
+                resizable: true,
+                headerSort: false,
+                formatter: (cell) => {
+                    const d = cell.getData();
+                    if (!d.summary) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                    const highlighted = (typeof highlightSearchKeywords === 'function' && query)
+                        ? highlightSearchKeywords(d.summary, query)
+                        : escapeHtml(d.summary);
+                    return `<span style="font-size:11.5px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; width:100%;" title="${escapeHtml(d.summary)}">${highlighted}</span>`;
+                }
+            });
+        }
+
+        // 卡片组的类型纵栏放在内容右侧
+        cols.push(typeCol);
+        return cols;
+    }
+
+    if (mode === 'description') {
+        const hasContent = Array.isArray(tableData) && tableData.some(d => {
+            const txt = d && (d.descriptionText || d.summary);
+            return txt && String(txt).trim() !== '' && String(txt).trim() !== '-';
+        });
+        const descTypeCol = {
+            title: isZh ? "说明类型" : "Type",
+            field: "typeLabel",
+            minWidth: 75,
+            width: 95,
+            resizable: true,
+            headerSort: true,
+            formatter: (cell) => {
+                const d = cell.getData();
+                const color = d.color || '#10b981';
+                const itemType = (d.rawItem && d.rawItem.type) || d.type;
+                const iconHtml = getCanvasDirectoryItemIconHtml(itemType, d.rawItem || d);
+                return `<div class="canvas-table-cell-type canvas-grid-type-prefix" style="display:inline-flex; align-items:center; gap:4px; overflow:hidden;">
+                    ${iconHtml}
+                    <span class="canvas-grid-type-name" style="color:${color}; font-weight:600; font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(d.typeLabel || '-')}</span>
+                </div>`;
+            }
+        };
+        const cols = [
+            {
+                title: "#",
+                field: "index",
+                width: 38,
+                minWidth: 32,
+                maxWidth: 46,
+                hozAlign: "center",
+                headerHozAlign: "center",
+                resizable: false,
+                headerSort: false,
+                formatter: (cell) => `<span class="canvas-table-index-num">${cell.getValue()}</span>`
+            },
+            {
+                title: isZh ? "目标名称" : "Target Name",
+                field: "title",
+                minWidth: 160,
+                ...(hasContent ? { width: 220 } : { widthGrow: 1 }),
+                resizable: true,
+                headerSort: true,
+                cellClick: async (e, cell) => {
+                    if (e.target.closest('.search-loc-chip, .canvas-table-loc-more-btn, .canvas-grid-location-more-btn, a, button')) return;
+                    const d = cell.getData();
+                    if (!d || !d.rawItem) return;
+                    e._canvasHandled = true;
+                    try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                    await navigateToCanvasStructureOrDescriptionTarget(d.rawItem);
+                },
+                formatter: (cell) => {
+                    const d = cell.getData();
+                    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                    const titleHtml = (typeof highlightSearchKeywords === 'function' && query)
+                        ? highlightSearchKeywords(d.title, query)
+                        : (d.titleHtml || escapeHtml(d.title));
+                    const locChipHtml = renderCanvasTableItemLocationChipHtml(d);
+                    return `<div class="canvas-table-cell-title" title="${escapeHtml(d.title)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden; cursor:pointer;">
+                        ${locChipHtml}
+                        <span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; font-weight:600; cursor:pointer;">${titleHtml}</span>
+                    </div>`;
+                }
+            }
+        ];
+
+        if (hasContent) {
+            cols.push({
+                title: isZh ? "内容" : "Content",
+                field: "descriptionText",
+                minWidth: 220,
+                widthGrow: 1,
+                resizable: true,
+                headerSort: false,
+                formatter: (cell) => {
+                    const d = cell.getData();
+                    const txt = d.descriptionText || d.summary || '';
+                    if (!txt) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                    const highlighted = (typeof highlightSearchKeywords === 'function' && query)
+                        ? highlightSearchKeywords(txt, query)
+                        : escapeHtml(txt);
+                    return `<span style="font-size:11.5px; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; width:100%;" title="${escapeHtml(txt)}">${highlighted}</span>`;
+                }
+            });
+        }
+
+        // 说明类型放在内容右侧，且宽度更紧凑 (95px)
+        cols.push(descTypeCol);
+        return cols;
+    }
     return [
         {
             title: "#",
@@ -13526,12 +14256,20 @@ function getCanvasTabulatorColumns(isZh) {
             formatter: (cell) => `<span class="canvas-table-index-num">${cell.getValue()}</span>`
         },
         {
-            title: isZh ? "书签标题" : "Title",
+            title: isZh ? "标题" : "Title",
             field: "title",
             minWidth: 180,
             width: 240,
             resizable: true,
             headerSort: true,
+            cellClick: async (e, cell) => {
+                if (e.target.closest('.search-loc-chip, .canvas-table-loc-more-btn, .canvas-grid-location-more-btn, a, button')) return;
+                const d = cell.getData();
+                if (!d) return;
+                e._canvasHandled = true;
+                try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                await navigateToCanvasTableBookmarkTarget(d);
+            },
             formatter: (cell) => {
                 const d = cell.getData();
                 const iconHtml = renderCanvasTableBookmarkFaviconHtml(d);
@@ -13539,7 +14277,7 @@ function getCanvasTabulatorColumns(isZh) {
                 const titleHtml = (typeof highlightSearchKeywords === 'function' && query)
                     ? highlightSearchKeywords(d.title, query)
                     : (d.titleHtml || escapeHtml(d.title));
-                return `<div class="canvas-table-cell-title" title="${escapeHtml(d.title)}" style="display:flex; align-items:center; width:100%; min-width:0; overflow:hidden;">${iconHtml}<span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${titleHtml}</span></div>`;
+                return `<div class="canvas-table-cell-title" title="${escapeHtml(d.title)}" style="display:flex; align-items:center; width:100%; min-width:0; overflow:hidden; cursor:pointer;">${iconHtml}<span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; cursor:pointer;">${titleHtml}</span></div>`;
             }
         },
         {
@@ -13604,101 +14342,6 @@ function getCanvasTabulatorColumns(isZh) {
                         color: color
                     };
                     navigateToCanvasBookmarkSearchTarget(target);
-                    return;
-                }
-            }
-        },
-        {
-            title: isZh ? "标签" : "Tags",
-            field: "tags",
-            minWidth: 110,
-            width: 140,
-            resizable: true,
-            headerSort: false,
-            formatter: (cell) => {
-                const d = cell.getData();
-                const tags = d.tags || [];
-                if (!tags.length) return '<span class="text-muted" style="opacity:0.4;">-</span>';
-                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
-                const limit = 2;
-                const allTagsTitle = tags.map(t => t.text || t.color).filter(Boolean).join(', ');
-                let moreHtml = '';
-                let visibleTags = tags;
-
-                if (tags.length > limit) {
-                    const remainCount = tags.length - limit;
-                    const rawTagsAttr = escapeHtml(JSON.stringify(tags));
-                    moreHtml = `<button type="button" class="canvas-grid-location-more-btn canvas-table-loc-more-btn canvas-table-tag-more-btn" data-item-id="${escapeHtml(String((d && d.id) || ''))}" data-item-index="${escapeHtml(String((d && d.index) || ''))}" data-item-tags="${rawTagsAttr}" title="${escapeHtml(isZh ? `查看全部 ${tags.length} 个标签: ${allTagsTitle}` : `View all ${tags.length} tags: ${allTagsTitle}`)}" aria-label="${escapeHtml(isZh ? `还有 ${remainCount} 个标签` : `${remainCount} more tags`)}">+${remainCount}</button>`;
-                    visibleTags = tags.slice(0, limit);
-                }
-
-                const chips = visibleTags.map(t => {
-                    const color = escapeHtml(t.color || 'gray');
-                    const text = String(t.text || t.color || '');
-                    const highlightedText = (typeof highlightSearchKeywords === 'function' && query)
-                        ? highlightSearchKeywords(text, query)
-                        : escapeHtml(text);
-                    return `<span class="search-result-tag-chip canvas-table-tag-chip" title="${escapeHtml(text)}" style="display:inline-flex; align-items:center; height:18px; padding:0 5px; border-radius:999px; font-size:10px; margin:0; flex-shrink:0;"><span class="tag-dot tag-dot-${color}" style="width:6px; height:6px; margin-right:3px;"></span><span class="search-result-tag-chip-text" style="max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${highlightedText}</span></span>`;
-                }).join('');
-
-                // 标签的 +1/+2 胶囊按钮放置在最左侧（首位），与位置栏目风格保持高度一致
-                return `<div class="canvas-table-tags-wrapper" style="display:flex; align-items:center; gap:3px; overflow:hidden; width:100%;">${moreHtml}${chips}</div>`;
-            },
-            cellClick: (e, cell) => {
-                const moreBtn = e.target.closest('.canvas-table-tag-more-btn');
-                if (moreBtn) {
-                    if (e._canvasHandled) return;
-                    e._canvasHandled = true;
-                    try {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    } catch (_) { }
-                    const d = cell.getData();
-                    if (d) {
-                        moreBtn._rowData = d;
-                        moreBtn._tabRow = cell.getRow() ? (typeof cell.getRow().getElement === 'function' ? cell.getRow().getElement() : null) : null;
-                    }
-                    const itemId = String((d && d.id) || moreBtn.getAttribute('data-item-id') || '').trim();
-                    const itemIndex = d ? d.index : -1;
-                    toggleGridItemDetailsBubble(moreBtn, itemId, itemIndex);
-                    return;
-                }
-            }
-        },
-        {
-            title: isZh ? "笔记" : "Note",
-            field: "note",
-            minWidth: 100,
-            width: 130,
-            resizable: true,
-            headerSort: false,
-            formatter: (cell) => {
-                const d = cell.getData();
-                if (!d.note || !d.note.note) return '<span class="text-muted" style="opacity:0.4;">-</span>';
-                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
-                const color = escapeHtml(d.note.color || 'yellow');
-                const noteText = String(d.note.note || '');
-                const highlightedNote = (typeof highlightSearchKeywords === 'function' && query)
-                    ? highlightSearchKeywords(noteText, query)
-                    : escapeHtml(noteText);
-                return `<div class="canvas-table-note-wrapper canvas-table-note-btn note-color-${color}" data-item-id="${escapeHtml(String((d && d.id) || ''))}" data-item-index="${escapeHtml(String((d && d.index) || ''))}" title="${escapeHtml(isZh ? `点击展开完整笔记说明: ${noteText}` : `Click to view full note: ${noteText}`)}" style="display:flex; align-items:center; gap:4px; font-size:11px; max-width:100%; overflow:hidden;"><i class="fas fa-pencil-alt" style="font-size:10px; flex-shrink:0; opacity:0.8;"></i><span class="canvas-table-note-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${highlightedNote}</span></div>`;
-            },
-            cellClick: (e, cell) => {
-                const noteBtn = e.target.closest('.canvas-table-note-btn, .canvas-table-note-wrapper');
-                if (noteBtn) {
-                    if (e._canvasHandled) return;
-                    e._canvasHandled = true;
-                    try {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    } catch (_) { }
-                    const d = cell.getData();
-                    if (!d || !d.note || !d.note.note) return;
-                    noteBtn._rowData = d;
-                    noteBtn._tabRow = cell.getRow() ? (typeof cell.getRow().getElement === 'function' ? cell.getRow().getElement() : null) : null;
-                    const itemId = String((d && d.id) || noteBtn.getAttribute('data-item-id') || '').trim();
-                    const itemIndex = d ? d.index : -1;
-                    toggleGridItemDetailsBubble(noteBtn, itemId, itemIndex);
                     return;
                 }
             }
@@ -13806,6 +14449,101 @@ function getCanvasTabulatorColumns(isZh) {
             }
         },
         {
+            title: isZh ? "标签" : "Tags",
+            field: "tags",
+            minWidth: 110,
+            width: 140,
+            resizable: true,
+            headerSort: false,
+            formatter: (cell) => {
+                const d = cell.getData();
+                const tags = d.tags || [];
+                if (!tags.length) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                const limit = 2;
+                const allTagsTitle = tags.map(t => t.text || t.color).filter(Boolean).join(', ');
+                let moreHtml = '';
+                let visibleTags = tags;
+
+                if (tags.length > limit) {
+                    const remainCount = tags.length - limit;
+                    const rawTagsAttr = escapeHtml(JSON.stringify(tags));
+                    moreHtml = `<button type="button" class="canvas-grid-location-more-btn canvas-table-loc-more-btn canvas-table-tag-more-btn" data-item-id="${escapeHtml(String((d && d.id) || ''))}" data-item-index="${escapeHtml(String((d && d.index) || ''))}" data-item-tags="${rawTagsAttr}" title="${escapeHtml(isZh ? `查看全部 ${tags.length} 个标签: ${allTagsTitle}` : `View all ${tags.length} tags: ${allTagsTitle}`)}" aria-label="${escapeHtml(isZh ? `还有 ${remainCount} 个标签` : `${remainCount} more tags`)}">+${remainCount}</button>`;
+                    visibleTags = tags.slice(0, limit);
+                }
+
+                const chips = visibleTags.map(t => {
+                    const color = escapeHtml(t.color || 'gray');
+                    const text = String(t.text || t.color || '');
+                    const highlightedText = (typeof highlightSearchKeywords === 'function' && query)
+                        ? highlightSearchKeywords(text, query)
+                        : escapeHtml(text);
+                    return `<span class="search-result-tag-chip canvas-table-tag-chip" title="${escapeHtml(text)}" style="display:inline-flex; align-items:center; height:18px; padding:0 5px; border-radius:999px; font-size:10px; margin:0; flex-shrink:0;"><span class="tag-dot tag-dot-${color}" style="width:6px; height:6px; margin-right:3px;"></span><span class="search-result-tag-chip-text" style="max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${highlightedText}</span></span>`;
+                }).join('');
+
+                // 标签的 +1/+2 胶囊按钮放置在最左侧（首位），与位置栏目风格保持高度一致
+                return `<div class="canvas-table-tags-wrapper" style="display:flex; align-items:center; gap:3px; overflow:hidden; width:100%;">${moreHtml}${chips}</div>`;
+            },
+            cellClick: (e, cell) => {
+                const moreBtn = e.target.closest('.canvas-table-tag-more-btn');
+                if (moreBtn) {
+                    if (e._canvasHandled) return;
+                    e._canvasHandled = true;
+                    try {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    } catch (_) { }
+                    const d = cell.getData();
+                    if (d) {
+                        moreBtn._rowData = d;
+                        moreBtn._tabRow = cell.getRow() ? (typeof cell.getRow().getElement === 'function' ? cell.getRow().getElement() : null) : null;
+                    }
+                    const itemId = String((d && d.id) || moreBtn.getAttribute('data-item-id') || '').trim();
+                    const itemIndex = d ? d.index : -1;
+                    toggleGridItemDetailsBubble(moreBtn, itemId, itemIndex);
+                    return;
+                }
+            }
+        },
+        {
+            title: isZh ? "笔记" : "Note",
+            field: "note",
+            minWidth: 100,
+            width: 130,
+            resizable: true,
+            headerSort: false,
+            formatter: (cell) => {
+                const d = cell.getData();
+                if (!d.note || !d.note.note) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                const color = escapeHtml(d.note.color || 'yellow');
+                const noteText = String(d.note.note || '');
+                const highlightedNote = (typeof highlightSearchKeywords === 'function' && query)
+                    ? highlightSearchKeywords(noteText, query)
+                    : escapeHtml(noteText);
+                return `<div class="canvas-table-note-wrapper canvas-table-note-btn note-color-${color}" data-item-id="${escapeHtml(String((d && d.id) || ''))}" data-item-index="${escapeHtml(String((d && d.index) || ''))}" title="${escapeHtml(isZh ? `点击展开完整笔记说明: ${noteText}` : `Click to view full note: ${noteText}`)}" style="display:flex; align-items:center; gap:4px; font-size:11px; max-width:100%; overflow:hidden;"><i class="fas fa-pencil-alt" style="font-size:10px; flex-shrink:0; opacity:0.8;"></i><span class="canvas-table-note-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${highlightedNote}</span></div>`;
+            },
+            cellClick: (e, cell) => {
+                const noteBtn = e.target.closest('.canvas-table-note-btn, .canvas-table-note-wrapper');
+                if (noteBtn) {
+                    if (e._canvasHandled) return;
+                    e._canvasHandled = true;
+                    try {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    } catch (_) { }
+                    const d = cell.getData();
+                    if (!d || !d.note || !d.note.note) return;
+                    noteBtn._rowData = d;
+                    noteBtn._tabRow = cell.getRow() ? (typeof cell.getRow().getElement === 'function' ? cell.getRow().getElement() : null) : null;
+                    const itemId = String((d && d.id) || noteBtn.getAttribute('data-item-id') || '').trim();
+                    const itemIndex = d ? d.index : -1;
+                    toggleGridItemDetailsBubble(noteBtn, itemId, itemIndex);
+                    return;
+                }
+            }
+        },
+        {
             title: isZh ? "网址链接" : "URL",
             field: "url",
             minWidth: 130,
@@ -13875,7 +14613,7 @@ function getCanvasTabulatorColumns(isZh) {
  * 2. 若点击外链图标，打开网页
  * 3. 若点击整行，按规范顺序跳转至第一位位置（永久主栏目 -> 永久副本 -> 临时栏目）
  */
-function handleCanvasTabulatorRowClick(e, row) {
+async function handleCanvasTabulatorRowClick(e, row) {
     if (!e || e._canvasHandled) return;
     const target = e.target;
     if (!target) return;
@@ -13893,6 +14631,30 @@ function handleCanvasTabulatorRowClick(e, row) {
         const locSection = chip.dataset.locSection;
         const rawCopyId = chip.dataset.copyId;
         const copyId = (!rawCopyId || rawCopyId === 'null') ? null : rawCopyId;
+        const d = row ? row.getData() : null;
+        const rawItem = d ? d.rawItem : null;
+        const color = chip.style.getPropertyValue('--loc-color') || (rawItem && rawItem.color) || '#2563eb';
+
+        if (locSource === 'group' || locSource === 'card-group') {
+            await navigateToCanvasStructureOrDescriptionTarget(rawItem || { id: locId, type: 'group', color });
+            return;
+        }
+        if (locSource === 'temporary' || locSource === 'temp-section') {
+            await navigateToCanvasStructureOrDescriptionTarget(rawItem || { id: locSection || locId, sectionId: locSection || locId, type: 'temp-section', color });
+            return;
+        }
+        if (locSource === 'permanent' || locSource === 'permanent-section') {
+            await navigateToCanvasStructureOrDescriptionTarget(rawItem || { id: copyId || locId || 'permanentSection', copyId: copyId || null, type: 'permanent-section', color });
+            return;
+        }
+        if (locSource === 'md-node') {
+            await navigateToCanvasStructureOrDescriptionTarget(rawItem || { id: locId, type: 'md-node', color });
+            return;
+        }
+        if (locSource === 'edge') {
+            await navigateToCanvasStructureOrDescriptionTarget(rawItem || { id: locId, type: 'edge', color });
+            return;
+        }
 
         hideSearchResultsPanel();
         try {
@@ -13900,7 +14662,6 @@ function handleCanvasTabulatorRowClick(e, row) {
             if (inputEl) inputEl.value = '';
         } catch (_) { }
 
-        const color = chip.style.getPropertyValue('--loc-color') || '#2563eb';
         const targetObj = {
             type: 'bookmark-item',
             id: locId,
@@ -13909,7 +14670,7 @@ function handleCanvasTabulatorRowClick(e, row) {
             copyId: copyId,
             color: color
         };
-        navigateToCanvasBookmarkSearchTarget(targetObj);
+        await navigateToCanvasBookmarkSearchTarget(targetObj);
         return;
     }
 
@@ -14037,38 +14798,18 @@ function handleCanvasTabulatorRowClick(e, row) {
         return;
     }
 
-    // 3. 点击表格行：跳转到第一位规范位置 (永久主栏目 -> 永久副本 -> 临时栏目)
+    // 3. 点击表格行：跳转到对应目标
     e._canvasHandled = true;
     const rowData = row ? row.getData() : null;
     if (!rowData) return;
     const rawItem = rowData.rawItem;
     if (!rawItem) return;
 
-    hideSearchResultsPanel();
-    try {
-        const inputEl = document.getElementById('searchInput');
-        if (inputEl) inputEl.value = '';
-    } catch (_) { }
-
-    const locations = Array.isArray(rowData.locations) && rowData.locations.length ? rowData.locations : (rawItem.locations || []);
-    if (locations && locations.length > 0) {
-        const loc = pickBestBookmarkLocationByScope(locations, getActiveFullscreenSearchScopeForFiltering()) || locations[0];
-        const targetObj = {
-            type: 'bookmark-item',
-            id: loc.id,
-            source: loc.source || 'permanent',
-            sectionId: loc.source === 'temporary' ? (loc.sectionId || '') : '',
-            copyId: loc.source === 'permanent' ? (loc.copyId || null) : null,
-            color: loc.color || rawItem.color || '#2563eb',
-            expandTargetFolder: shouldExpandSearchLocateTargetFolder(loc || rawItem)
-        };
-        navigateToCanvasBookmarkSearchTarget(targetObj);
+    const isBookmarkType = rawItem.type === 'bookmark-item' || rawItem.type === 'bookmark-group' || rawItem.type === 'domain-group' || (rowData && rowData.locations && rowData.locations.length > 0);
+    if (isBookmarkType) {
+        await navigateToCanvasTableBookmarkTarget(rowData);
     } else {
-        if (rawItem.type === 'bookmark-item') {
-            locateCanvasBookmarkItem(rawItem);
-        } else {
-            locateCanvasElement(rawItem.id, rawItem.type);
-        }
+        await navigateToCanvasStructureOrDescriptionTarget(rawItem);
     }
 }
 
@@ -14089,17 +14830,30 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
         canvasSearchTabulatorInstance = null;
     }
 
+    const activeMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    canvasSearchTabulatorActiveMode = activeMode;
+    const isFitColumnsMode = (activeMode === 'structure' || activeMode === 'description');
+    const tabulatorLayout = isFitColumnsMode ? "fitColumns" : "fitDataFill";
+
+    let placeholderText = isZh ? "无匹配书签" : "No matching bookmarks";
+    if (activeMode === 'structure') {
+        placeholderText = isZh ? "无匹配卡片或组" : "No matching cards or groups";
+    } else if (activeMode === 'description') {
+        placeholderText = isZh ? "无匹配说明或文本" : "No matching descriptions or text";
+    }
+
     try {
         canvasSearchTabulatorInstance = new Tabulator(containerEl, {
             data: tableData,
-            layout: "fitDataFill",
+            layout: tabulatorLayout,
             renderVertical: "virtual",
             renderVerticalBuffer: 300,
             height: "100%",
             rowHeight: 38,
-            placeholder: isZh ? "无匹配书签" : "No matching bookmarks",
-            columns: getCanvasTabulatorColumns(isZh),
-            rowClick: handleCanvasTabulatorRowClick
+            placeholder: placeholderText,
+            columns: getCanvasTabulatorColumns(isZh, activeMode, tableData),
+            rowClick: handleCanvasTabulatorRowClick,
+            autoResize: false
         });
 
         containerEl.classList.add('canvas-search-tabulator');
@@ -14108,11 +14862,19 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             bindCanvasTabulatorTopScrollbarEvents();
             syncCanvasTabulatorTopScrollbar();
             bindCanvasTabulatorRightScrollbarEvents();
+            if (canvasSearchTabulatorPendingState) {
+                const remain = Math.max(0, canvasSearchTabulatorPendingState.totalResults.length - canvasSearchTabulatorPendingState.loadedCount);
+                updateCanvasTabulatorLoadMoreRow(remain, canvasSearchTabulatorPendingState.isZh);
+            }
             syncCanvasTabulatorRightScrollbar(true);
         });
 
         canvasSearchTabulatorInstance.on("renderComplete", () => {
             syncCanvasTabulatorTopScrollbar();
+            if (canvasSearchTabulatorPendingState) {
+                const remain = Math.max(0, canvasSearchTabulatorPendingState.totalResults.length - canvasSearchTabulatorPendingState.loadedCount);
+                updateCanvasTabulatorLoadMoreRow(remain, canvasSearchTabulatorPendingState.isZh);
+            }
             syncCanvasTabulatorRightScrollbar(true);
         });
 
@@ -14148,6 +14910,8 @@ function updateSearchPanelColumnState(panel) {
     panel.classList.toggle('is-single-column', isSingle);
 }
 
+let _tabulatorResizeRaf = null;
+
 function observeSearchPanelColumns(panel) {
     if (!panel || typeof ResizeObserver === 'undefined') return;
     if (!searchPanelResizeObserver) {
@@ -14155,11 +14919,17 @@ function observeSearchPanelColumns(panel) {
             for (const entry of entries) {
                 const target = entry.target;
                 if (target && target.classList.contains('view-table')) {
-                    if (typeof syncCanvasTabulatorTopScrollbar === 'function') {
-                        syncCanvasTabulatorTopScrollbar();
-                    }
-                    if (typeof syncCanvasTabulatorRightScrollbar === 'function') {
-                        syncCanvasTabulatorRightScrollbar(true);
+                    if (!_tabulatorResizeRaf) {
+                        _tabulatorResizeRaf = requestAnimationFrame(() => {
+                            _tabulatorResizeRaf = null;
+                            safeRedrawCanvasSearchTabulator(false);
+                            if (typeof syncCanvasTabulatorTopScrollbar === 'function') {
+                                syncCanvasTabulatorTopScrollbar();
+                            }
+                            if (typeof syncCanvasTabulatorRightScrollbar === 'function') {
+                                syncCanvasTabulatorRightScrollbar(true);
+                            }
+                        });
                     }
                 }
                 if (!target || !target.classList.contains('view-grid')) {
@@ -14173,6 +14943,35 @@ function observeSearchPanelColumns(panel) {
         });
     }
     searchPanelResizeObserver.observe(panel);
+}
+
+function getCanvasSearchNodeDisplayName(nodeId, isZh = true) {
+    if (!nodeId) return '';
+    try {
+        if (typeof canvasSearchDb === 'object' && canvasSearchDb && canvasSearchDb.itemById) {
+            const item = canvasSearchDb.itemById.get(nodeId);
+            if (item) {
+                return item.title || item.label || item.text || String(nodeId);
+            }
+        }
+        if (typeof activeCanvasState === 'object' && activeCanvasState && Array.isArray(activeCanvasState.mdNodes)) {
+            const node = activeCanvasState.mdNodes.find(n => n && n.id === nodeId);
+            if (node) {
+                return node.title || node.label || node.text || String(nodeId);
+            }
+        }
+    } catch (_) {}
+    return String(nodeId);
+}
+
+function renderCanvasSearchPanelViewToggleGroupHtml(compact = false, isZh = true) {
+    const currentViewMode = (searchUiState && searchUiState.viewMode) || 'grid';
+    const isTableActive = currentViewMode === 'table';
+    const isGridActive = !isTableActive;
+    return `<div class="canvas-bookmark-view-group${compact ? ' canvas-bookmark-view-group-compact' : ''}" role="group" aria-label="${isZh ? '视图模式' : 'View Mode'}">
+        <button class="canvas-bookmark-view-toggle-btn${isGridActive ? ' active' : ''}${compact ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${isZh ? '卡片视图' : 'Card View'}" title="${isZh ? '卡片视图' : 'Card View'}" data-view-mode="grid"><i class="fas fa-th-large" aria-hidden="true"></i></button>
+        <button class="canvas-bookmark-view-toggle-btn${isTableActive ? ' active' : ''}${compact ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${isZh ? '表格视图 (Tabulator)' : 'Table View (Tabulator)'}" title="${isZh ? '表格视图 (Tabulator)' : 'Table View (Tabulator)'}" data-view-mode="table"><i class="fas fa-table" aria-hidden="true"></i></button>
+    </div>`;
 }
 
 /**
@@ -15051,13 +15850,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 ? `<button class="canvas-bookmark-to-temp-btn${compactBookmarkToolbar ? ' canvas-bookmark-to-temp-btn-compact' : ''}" type="button" data-visible-count="${visibleCount}" aria-label="${escapeHtml(exportAriaLabel)}"><span class="canvas-dir-icon-badge canvas-dir-icon-badge-special" aria-hidden="true">✦</span></button>`
                 : '';
 
-            const currentViewMode = (searchUiState && searchUiState.viewMode) || 'grid';
-            const isTableActive = currentViewMode === 'table';
-            const isGridActive = !isTableActive;
-            const viewGroupHtml = `<div class="canvas-bookmark-view-group${compactBookmarkToolbar ? ' canvas-bookmark-view-group-compact' : ''}" role="group" aria-label="${isZh ? '视图模式' : 'View Mode'}">
-                <button class="canvas-bookmark-view-toggle-btn${isGridActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${isZh ? '卡片视图' : 'Card View'}" title="${isZh ? '卡片视图' : 'Card View'}" data-view-mode="grid"><i class="fas fa-th-large" aria-hidden="true"></i></button>
-                <button class="canvas-bookmark-view-toggle-btn${isTableActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${isZh ? '表格视图 (Tabulator)' : 'Table View (Tabulator)'}" title="${isZh ? '表格视图 (Tabulator)' : 'Table View (Tabulator)'}" data-view-mode="table"><i class="fas fa-table" aria-hidden="true"></i></button>
-            </div>`;
+            const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
 
             const rightActionsHtml = `<div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px;">
                 ${exportBtnHtml}
@@ -15075,59 +15868,81 @@ function renderCanvasSearchResults(results, options = {}) {
         }
     }
 
-    if (isStructureMode && structureModeCounts) {
-        const { cardCount, groupCount } = structureModeCounts;
+    if (isStructureMode) {
+        const cardCount = structureModeCounts ? structureModeCounts.cardCount : 0;
+        const groupCount = structureModeCounts ? structureModeCounts.groupCount : 0;
         const active = searchUiState.structureTypeFilter;
         const showCardBtn = cardCount > 0;
         const showGroupBtn = groupCount > 0;
 
-        if (showCardBtn || showGroupBtn) {
-            const makeStructureBtn = ({ type, icon, color, label, count }) => {
-                const isActive = active === type;
-                const bg = isActive ? `${color}22` : 'transparent';
-                const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
-                const text = isActive ? color : 'var(--text-secondary)';
-                const gapPx = compactBookmarkToolbar ? 5 : 6;
-                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
-                const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
-                const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
-                return `<button class="canvas-structure-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
-                        <i class="fas ${icon}" style="color:${color};"></i>
-                        <span>${escapeHtml(label)}</span>
-                        <span>${count}</span>
-                    </button>`;
-            };
-            const cardBtn = showCardBtn
-                ? makeStructureBtn({ type: 'card', icon: 'fa-layer-group', color: '#f97316', label: isZh ? '卡片' : 'Card', count: cardCount })
-                : '';
-            const groupBtn = showGroupBtn
-                ? makeStructureBtn({ type: 'group', icon: 'fa-object-group', color: '#7c3aed', label: isZh ? '组' : 'Group', count: groupCount })
-                : '';
-            const toolbarGap = compactBookmarkToolbar ? 6 : 8;
-            const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
-            const controlGap = compactBookmarkToolbar ? 6 : 8;
+        const makeStructureBtn = ({ type, icon, color, label, count }) => {
+            const isActive = active === type;
+            const bg = isActive ? `${color}22` : 'transparent';
+            const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
+            const text = isActive ? color : 'var(--text-secondary)';
+            const gapPx = compactBookmarkToolbar ? 5 : 6;
+            const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+            const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
+            const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+            return `<button class="canvas-structure-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
+                    <i class="fas ${icon}" style="color:${color};"></i>
+                    <span>${escapeHtml(label)}</span>
+                    <span>${count}</span>
+                </button>`;
+        };
+        const cardBtn = showCardBtn
+            ? makeStructureBtn({ type: 'card', icon: 'fa-layer-group', color: '#f97316', label: isZh ? '卡片' : 'Card', count: cardCount })
+            : '';
+        const groupBtn = showGroupBtn
+            ? makeStructureBtn({ type: 'group', icon: 'fa-object-group', color: '#7c3aed', label: isZh ? '组' : 'Group', count: groupCount })
+            : '';
+        const toolbarGap = compactBookmarkToolbar ? 6 : 8;
+        const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
+        const controlGap = compactBookmarkToolbar ? 6 : 8;
 
-            html += `<div class="canvas-bookmark-type-toggle canvas-structure-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact canvas-structure-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:flex-start; gap:${toolbarGap}px; padding:${toolbarPadding};">
-                <div style="display:flex; align-items:center; gap:${controlGap}px;">${cardBtn}${groupBtn}</div>
-            </div>`;
-        }
+        const leftControls = (cardBtn || groupBtn)
+            ? `<div style="display:flex; align-items:center; gap:${controlGap}px;">${cardBtn}${groupBtn}</div>`
+            : `<div style="display:flex; align-items:center; gap:${controlGap}px; font-size:12px; font-weight:600; color:var(--text-secondary);"><i class="fas fa-layer-group" style="color:#f97316;"></i><span>${isZh ? '卡片与组' : 'Cards & Groups'}</span></div>`;
+
+        const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
+
+        html += `<div class="canvas-bookmark-type-toggle canvas-structure-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact canvas-structure-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:space-between; gap:${toolbarGap}px; padding:${toolbarPadding};">
+            ${leftControls}
+            <div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px;">
+                ${viewGroupHtml}
+            </div>
+        </div>`;
     }
 
-    if (searchUiState.activeMode === 'description' && fullscreenScope) {
-        const othersCount = Array.isArray(searchUiState.fullscreenDescriptionOthers)
+    if (searchUiState.activeMode === 'description') {
+        const othersCount = (fullscreenScope && Array.isArray(searchUiState.fullscreenDescriptionOthers))
             ? searchUiState.fullscreenDescriptionOthers.length
             : 0;
         const showingOthers = !!searchUiState.showFullscreenDescriptionOthers;
 
-        if (othersCount > 0 && !showingOthers) {
+        let leftControls = '';
+        if (fullscreenScope && othersCount > 0 && !showingOthers) {
             const otherBtnLabel = isZh ? '其他' : 'Other';
-
-            html += `<div class="canvas-description-fullscreen-header" style="display:flex; align-items:center; justify-content:flex-start; padding:6px 8px 6px 8px; border-bottom:1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18));">
-                <button class="canvas-description-others-btn" type="button" style="border:1px solid var(--border-color); background:var(--bg-secondary); padding:4px 10px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; font-weight:600; white-space:nowrap;">
-                    ${escapeHtml(otherBtnLabel)} (${othersCount})
-                </button>
+            leftControls = `<button class="canvas-description-others-btn" type="button" style="border:1px solid var(--border-color); background:var(--bg-secondary); padding:4px 10px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; font-weight:600; white-space:nowrap;">
+                ${escapeHtml(otherBtnLabel)} (${othersCount})
+            </button>`;
+        } else {
+            leftControls = `<div style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--text-secondary);">
+                <i class="fas fa-align-left" style="color:var(--accent-primary, #3b82f6);"></i>
+                <span>${isZh ? '说明与连线' : 'Descriptions & Edges'}</span>
             </div>`;
         }
+
+        const toolbarGap = compactBookmarkToolbar ? 6 : 8;
+        const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
+        const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
+
+        html += `<div class="canvas-bookmark-type-toggle canvas-description-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:space-between; gap:${toolbarGap}px; padding:${toolbarPadding}; border-bottom:1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18));">
+            <div style="display:flex; align-items:center; gap:6px;">${leftControls}</div>
+            <div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px;">
+                ${viewGroupHtml}
+            </div>
+        </div>`;
     }
 
     const isTableView = isSearchPanelTableView();
@@ -15139,10 +15954,16 @@ function renderCanvasSearchResults(results, options = {}) {
         panel.classList.remove('view-grid');
         panel.classList.add('view-table');
 
+        const existingGridContainer = panel.querySelector('.search-results-items-container');
+        const existingGridLoadMore = panel.querySelector('.search-results-load-more-row');
+        if (existingGridContainer) existingGridContainer.style.display = 'none';
+        if (existingGridLoadMore) existingGridLoadMore.style.display = 'none';
+
         const existingTableContainer = panel.querySelector('#canvasSearchTabulatorTable');
         const existingWrapper = panel.querySelector('.search-results-table-view-wrapper');
+        const currentActiveMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
 
-        if (!existingTableContainer || !existingWrapper || !canvasSearchTabulatorInstance) {
+        if (!existingTableContainer || !existingWrapper || !canvasSearchTabulatorInstance || canvasSearchTabulatorActiveMode !== currentActiveMode) {
             if (typeof destroyCanvasSearchTabulator === 'function') destroyCanvasSearchTabulator();
             const tableWrapperHtml = `<div class="search-results-table-view-wrapper">
                 <div class="canvas-tabulator-top-scrollbar" id="canvasTabulatorTopScrollbar">
@@ -15153,10 +15974,27 @@ function renderCanvasSearchResults(results, options = {}) {
                     <div class="canvas-tabulator-right-scrollbar-thumb" id="canvasTabulatorRightScrollbarThumb"></div>
                 </div>
             </div>`;
-            panel.innerHTML = html + tableWrapperHtml;
+
+            const existingToolbar = panel.querySelector('.canvas-bookmark-type-toggle');
+            if (existingToolbar) {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                if (tempDiv.firstElementChild) {
+                    existingToolbar.replaceWith(tempDiv.firstElementChild);
+                }
+                const oldWrapper = panel.querySelector('.search-results-table-view-wrapper');
+                if (oldWrapper) oldWrapper.remove();
+                panel.insertAdjacentHTML('beforeend', tableWrapperHtml);
+            } else {
+                panel.innerHTML = html + tableWrapperHtml;
+            }
             feedCanvasSearchTabulatorData(panel.querySelector('#canvasSearchTabulatorTable'), displayResults, renderQuery, isZh);
         } else {
             // 已有表格容器与实例：不重建外层 DOM，仅更新顶部工具栏并流式更新数据
+            existingWrapper.style.display = 'flex';
+            const legacyOuterLoadMore = existingWrapper.querySelector(':scope > #canvasTabulatorLoadMoreRow');
+            if (legacyOuterLoadMore) legacyOuterLoadMore.remove();
+
             if (!existingWrapper.querySelector('#canvasTabulatorTopScrollbar')) {
                 const topBar = document.createElement('div');
                 topBar.className = 'canvas-tabulator-top-scrollbar';
@@ -15171,13 +16009,22 @@ function renderCanvasSearchResults(results, options = {}) {
                 rightBar.innerHTML = '<div class="canvas-tabulator-right-scrollbar-thumb" id="canvasTabulatorRightScrollbarThumb"></div>';
                 existingWrapper.appendChild(rightBar);
             }
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = html;
-            while (panel.firstChild && panel.firstChild !== existingWrapper) {
-                panel.removeChild(panel.firstChild);
-            }
-            while (tempDiv.firstChild) {
-                panel.insertBefore(tempDiv.firstChild, existingWrapper);
+            const existingToolbar = panel.querySelector('.canvas-bookmark-type-toggle');
+            if (existingToolbar) {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                if (tempDiv.firstElementChild) {
+                    existingToolbar.replaceWith(tempDiv.firstElementChild);
+                }
+            } else {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                while (panel.firstChild && panel.firstChild !== existingWrapper && panel.firstChild !== existingGridContainer) {
+                    panel.removeChild(panel.firstChild);
+                }
+                while (tempDiv.firstChild) {
+                    panel.insertBefore(tempDiv.firstChild, existingWrapper);
+                }
             }
 
             feedCanvasSearchTabulatorData(existingTableContainer, displayResults, renderQuery, isZh);
@@ -15216,97 +16063,225 @@ function renderCanvasSearchResults(results, options = {}) {
         const makeColoredBadge = (text, extraClass = '') =>
             `<span class="search-result-badge ${extraClass}" style="${colorStyle} border:1px solid ${itemColor}30;">${escapeHtml(text)}</span>`;
 
-        switch (item.type) {
-            case 'group-result': {
-                // Group Aggregation Display
-                indexLabel = `<span class="search-result-index group" style="background:rgba(139, 92, 246, 0.15);color:#7c3aed;border-color:rgba(139, 92, 246, 0.3);width:auto;padding:0 6px;">GROUP</span>`;
-                const formatted = formatSearchTitleWithWindow(item.title, searchUiState.query);
-                title = formatted.html;
-                if (formatted.isTruncated) {
-                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
-                }
-                badge = `<span class="search-result-badge container" style="cursor:pointer;" title="${isZh ? '点击高亮全部' : 'Click to highlight all'}">${isZh ? '聚合' : 'Agg'}</span>`;
-                break;
-            }
+        const isBookmarkType = item.type === 'bookmark-group' || item.type === 'bookmark-item' || item.type === 'bookmark-group-more' || item.type === 'domain-group';
+        const isCardGroup = !isBookmarkType && (
+            item.type === 'group' || item.type === 'card-group' ||
+            item.type === 'group-result' ||
+            item.subtype === 'card-group' || item.variant === 'card-group-item' ||
+            item.directoryVariant === 'card-group' ||
+            item.isGroup === true ||
+            item.groupType === 'card-group' || item.groupType === 'permanent-group' ||
+            String(item.id || '').startsWith('card-group-') ||
+            String(item.id || '') === 'group-aggregation-result'
+        );
+        const effectiveType = isCardGroup ? 'group' : item.type;
 
+        switch (effectiveType) {
             case 'temp-section': {
-                // 1. 标签：A-1
-                if (item.label) {
-                    // Use item color for the label
-                    indexLabel += makeColoredSpan(item.label, 'group');
+                const sectionColor = item.color || '#2563eb';
+                const isSpecial = item.isSpecial || (item.label && String(item.label).includes('✦')) || (item.source === 'special');
+                const defaultTypeName = isZh ? (isSpecial ? '特殊临时栏目' : '临时栏目') : (isSpecial ? 'Special Temp' : 'Temp Section');
+                const isCardGrid = isGridView && (searchUiState.activeMode === 'structure' || !searchUiState.activeMode || searchUiState.activeMode === 'card');
+                const seqLabel = item.label ? String(item.label).trim() : '';
+                const typeName = (isCardGrid && seqLabel) ? seqLabel : defaultTypeName;
+                const dirIconHtml = getCanvasDirectoryItemIconHtml('temp-section', item);
+                const formattedTypeName = (typeof highlightSearchKeywords === 'function' && searchUiState.query)
+                    ? highlightSearchKeywords(typeName, searchUiState.query)
+                    : escapeHtml(typeName);
+                indexLabel = `<span class="canvas-grid-type-prefix">${dirIconHtml}<span class="canvas-grid-type-name" style="color:${sectionColor};">${formattedTypeName}</span></span>`;
+                const rawTitle = item.title || '';
+                const hasSeparateTitle = rawTitle && rawTitle.trim() && rawTitle.trim() !== typeName.trim() && rawTitle.trim() !== defaultTypeName.trim() && rawTitle.trim() !== seqLabel;
+                if (hasSeparateTitle) {
+                    const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
+                    title = `<span class="canvas-grid-card-title-sep">·</span><span class="canvas-grid-card-title" data-raw-title="${escapeHtml(formatted.fullTitle)}">${formatted.html}</span>`;
+                    if (formatted.isTruncated) {
+                        extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                    }
+                } else {
+                    title = '';
                 }
-                // [Modified] 按照用户需求，临时栏目的来源序号（如 #A 等）不再显示，直接屏蔽不渲染
-                const rawTitle = item.title || (isZh ? '临时栏目' : 'Temp Section');
-                const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
-                title = formatted.html;
-                if (formatted.isTruncated) {
-                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                badge = '';
+
+                let snippet = '';
+                if (item.description) snippet = generateSearchSnippet(item.description, searchUiState.query);
+                const descText = snippet || (item.description ? escapeHtml(item.description) : '');
+                if (descText) {
+                    const snippetRow = `<div class="canvas-grid-card-snippet-row">${descText}</div>`;
+                    descHtml = `<div class="search-result-match canvas-item-summary" style="display:flex; flex-direction:row; align-items:center; gap:6px; width:100%; min-width:0; height:20px; overflow:hidden;">
+                        ${snippetRow}
+                    </div>`;
+                } else {
+                    descHtml = '';
                 }
-                // [Modified] Restore badge with dynamic color
-                badge = makeColoredBadge(isZh ? '临时' : 'Temp', 'temp');
                 break;
             }
 
             case 'md-node': {
-                // MD 卡片
-                const rawTitle = item.title || (item.text ? item.text.substring(0, 50) : (isZh ? 'MD卡片' : 'MD Card'));
-                const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
-                title = formatted.html;
-                if (formatted.isTruncated) {
-                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                const typeName = isZh ? '卡片' : 'Card';
+                const dirIconHtml = getCanvasDirectoryItemIconHtml('md-node', item);
+                indexLabel = `<span class="canvas-grid-type-prefix">${dirIconHtml}<span class="canvas-grid-type-name" style="color:${itemColor};">${escapeHtml(typeName)}</span></span>`;
+                const rawTitle = item.title || (item.text ? item.text.substring(0, 50) : '');
+                const hasSeparateTitle = rawTitle && rawTitle.trim() && rawTitle.trim() !== typeName.trim();
+                if (hasSeparateTitle) {
+                    const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
+                    title = `<span class="canvas-grid-card-title-sep">·</span><span class="canvas-grid-card-title" data-raw-title="${escapeHtml(formatted.fullTitle)}">${formatted.html}</span>`;
+                    if (formatted.isTruncated) {
+                        extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                    }
+                } else {
+                    title = '';
                 }
-                badge = makeColoredBadge(isZh ? '卡片' : 'Card', 'md');
+                badge = '';
+
+                let parentGroupRow = '';
+                if (item.parentGroupTitle) {
+                    const cardLocText = item.parentGroupTitle;
+                    const cardLocChip = `<button type="button" class="search-loc-chip canvas-bookmark-location-chip" data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="md-node" style="--loc-color:#7c3aed; border-color:#7c3aed; color:#7c3aed; background:#7c3aed18;" title="${escapeHtml(cardLocText)}"><span class="canvas-bookmark-location-chip-text"><i class="fas fa-object-group" style="margin-right:3px;"></i>${escapeHtml(cardLocText)}</span></button>`;
+                    parentGroupRow = `<div class="canvas-grid-card-locations-row">${cardLocChip}</div>`;
+                    extraItemAttrs += ' data-has-locations="true"';
+                }
+
+                let snippet = '';
+                if (item.text) snippet = generateSearchSnippet(item.text, searchUiState.query);
+                if (!snippet && item.description) snippet = generateSearchSnippet(item.description, searchUiState.query);
+                const rawPreview = item.description || (item.text ? item.text.substring(0, 100) : '');
+                const previewText = snippet || (rawPreview ? escapeHtml(rawPreview) : '');
+                const snippetRow = previewText ? `<div class="canvas-grid-card-snippet-row">${previewText}</div>` : '';
+
+                if (parentGroupRow || snippetRow) {
+                    descHtml = `<div class="search-result-match canvas-item-summary" style="display:flex; flex-direction:row; align-items:center; gap:6px; width:100%; min-width:0; height:20px; overflow:hidden;">
+                        ${parentGroupRow}
+                        ${snippetRow}
+                    </div>`;
+                } else {
+                    descHtml = '';
+                }
                 break;
             }
 
             case 'edge': {
-                const formatted = formatSearchTitleWithWindow(item.label, searchUiState.query);
-                title = formatted.html;
-                if (formatted.isTruncated) {
-                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                const typeName = isZh ? '连线' : 'Edge';
+                const dirIconHtml = getCanvasDirectoryItemIconHtml('edge', item);
+                indexLabel = `<span class="canvas-grid-type-prefix">${dirIconHtml}<span class="canvas-grid-type-name" style="color:${itemColor};">${escapeHtml(typeName)}</span></span>`;
+                const rawTitle = item.label || '';
+                const hasSeparateTitle = rawTitle && rawTitle.trim() && rawTitle.trim() !== typeName.trim();
+                if (hasSeparateTitle) {
+                    const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
+                    title = `<span class="canvas-grid-card-title-sep">·</span><span class="canvas-grid-card-title" data-raw-title="${escapeHtml(formatted.fullTitle)}">${formatted.html}</span>`;
+                    if (formatted.isTruncated) {
+                        extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                    }
+                } else {
+                    title = '';
                 }
-                badge = makeColoredBadge(isZh ? '连线' : 'Edge', 'edge');
+                badge = '';
+
+                const fromName = getCanvasSearchNodeDisplayName(item.fromId, isZh) || (isZh ? '起点' : 'From');
+                const toName = getCanvasSearchNodeDisplayName(item.toId, isZh) || (isZh ? '终点' : 'To');
+                const arrow = item.direction === 'both' ? '⟷' : (item.direction === 'forward' ? '⟶' : '—');
+                const edgeChipText = `${fromName} ${arrow} ${toName}`;
+                const edgeLocChip = `<button type="button" class="search-loc-chip canvas-bookmark-location-chip" data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="edge" style="--loc-color:${itemColor}; border-color:${itemColor}; color:${itemColor}; background:${itemColor}18;" title="${escapeHtml(edgeChipText)}"><span class="canvas-bookmark-location-chip-text">${escapeHtml(edgeChipText)}</span></button>`;
+                const gridLocRow = `<div class="canvas-grid-card-locations-row">${edgeLocChip}</div>`;
+
+                let edgeSnippet = '';
+                if (item.description) edgeSnippet = generateSearchSnippet(item.description, searchUiState.query);
+                const previewText = edgeSnippet || (item.description ? escapeHtml(item.description) : '');
+                const snippetRow = previewText ? `<div class="canvas-grid-card-snippet-row">${previewText}</div>` : '';
+
+                descHtml = `<div class="search-result-match canvas-item-summary" style="display:flex; flex-direction:row; align-items:center; gap:6px; width:100%; min-width:0; height:20px; overflow:hidden;">
+                    ${gridLocRow}
+                    ${snippetRow}
+                </div>`;
+                extraItemAttrs += ' data-has-locations="true"';
                 break;
             }
 
+            case 'group-result':
+            case 'card-group':
             case 'group': {
-                const rawTitle = item.title || item.label || (isZh ? '组' : 'Group');
-                const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
-                title = formatted.html;
-                if (formatted.isTruncated) {
-                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                const typeName = isZh ? '卡片组' : 'Group';
+                const dirIconHtml = getCanvasDirectoryItemIconHtml('group', item);
+                indexLabel = `<span class="canvas-grid-type-prefix">${dirIconHtml}<span class="canvas-grid-type-name" style="color:#7c3aed;">${escapeHtml(typeName)}</span></span>`;
+                const rawTitle = item.title || item.label || '';
+                const hasSeparateTitle = rawTitle && rawTitle.trim() && rawTitle.trim() !== typeName.trim();
+                if (hasSeparateTitle) {
+                    const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
+                    title = `<span class="canvas-grid-card-title-sep">·</span><span class="canvas-grid-card-title" data-raw-title="${escapeHtml(formatted.fullTitle)}">${formatted.html}</span>`;
+                    if (formatted.isTruncated) {
+                        extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                    }
+                } else {
+                    title = '';
                 }
-                badge = makeColoredBadge(
-                    isZh ? '组' : 'Group',
-                    'md'
-                );
+                badge = '';
+
+                let parentGroupRow = '';
+                if (item.parentGroupTitle) {
+                    const groupChip = `<button type="button" class="search-loc-chip canvas-bookmark-location-chip" data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="group" style="--loc-color:#7c3aed; border-color:#7c3aed; color:#7c3aed; background:#7c3aed18;" title="${escapeHtml(item.parentGroupTitle)}"><span class="canvas-bookmark-location-chip-text"><i class="fas fa-object-group" style="margin-right:3px;"></i>${escapeHtml(item.parentGroupTitle)}</span></button>`;
+                    parentGroupRow = `<div class="canvas-grid-card-locations-row">${groupChip}</div>`;
+                    extraItemAttrs += ' data-has-locations="true"';
+                }
+
+                let groupSnippet = '';
+                if (item.description) groupSnippet = generateSearchSnippet(item.description, searchUiState.query);
+                const previewText = groupSnippet || (item.description ? escapeHtml(item.description) : '');
+                const snippetRow = previewText ? `<div class="canvas-grid-card-snippet-row">${previewText}</div>` : '';
+
+                if (parentGroupRow || snippetRow) {
+                    descHtml = `<div class="search-result-match canvas-item-summary" style="display:flex; flex-direction:row; align-items:center; gap:6px; width:100%; min-width:0; height:20px; overflow:hidden;">
+                        ${parentGroupRow}
+                        ${snippetRow}
+                    </div>`;
+                } else {
+                    descHtml = '';
+                }
                 break;
             }
 
             case 'permanent-section': {
-                // 显示序号 #A, #B, ...
-                const alpha = toAlpha(item.displayIndex);
-                // Permanent color usually static Green, but we use what's in DB
-
-                // [Modified] Conditional #A display
-                // Logic: Show #A only if we are in multi-column mode (copies exist or ghost content exists)
-                // If isMultiColumnMode is false, then displayIndex 1 should be clean.
-                // If displayIndex > 1, always show.
-                if (item.displayIndex === 1 && !item.isMultiColumnMode) {
-                    indexLabel = ''; // No #A label
+                const alpha = toAlpha(item.displayIndex || 1);
+                const isCopy = item.displayIndex > 1;
+                const defaultTypeName = isCopy ? (isZh ? '永久栏目副本' : 'Permanent Copy') : (isZh ? '永久栏目' : 'Permanent');
+                const isCardGrid = isGridView && (searchUiState.activeMode === 'structure' || !searchUiState.activeMode || searchUiState.activeMode === 'card');
+                const seqLabel = `#${alpha}`;
+                const typeName = (isCardGrid && seqLabel) ? seqLabel : defaultTypeName;
+                const dirIconHtml = getCanvasDirectoryItemIconHtml('permanent-section', item);
+                const formattedTypeName = (typeof highlightSearchKeywords === 'function' && searchUiState.query)
+                    ? highlightSearchKeywords(typeName, searchUiState.query)
+                    : escapeHtml(typeName);
+                indexLabel = `<span class="canvas-grid-type-prefix">${dirIconHtml}<span class="canvas-grid-type-name" style="color:#059669;">${formattedTypeName}</span></span>`;
+                const rawTitle = item.title || (isCopy ? `#${alpha}` : '');
+                const isGenericPermanentTitle = !rawTitle
+                    || rawTitle.trim() === typeName.trim()
+                    || rawTitle.trim() === defaultTypeName.trim()
+                    || rawTitle.trim() === seqLabel
+                    || rawTitle.trim() === `永久栏目 #${alpha}`
+                    || rawTitle.trim() === `永久栏目副本 #${alpha}`
+                    || rawTitle.trim() === `Permanent Column #${alpha}`
+                    || rawTitle.trim() === `Permanent Copy #${alpha}`;
+                const hasSeparateTitle = !isGenericPermanentTitle;
+                if (hasSeparateTitle) {
+                    const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
+                    title = `<span class="canvas-grid-card-title-sep">·</span><span class="canvas-grid-card-title" data-raw-title="${escapeHtml(formatted.fullTitle)}">${formatted.html}</span>`;
+                    if (formatted.isTruncated) {
+                        extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                    }
                 } else {
-                    indexLabel = makeColoredSpan(`#${alpha}`, 'permanent');
+                    title = '';
                 }
+                badge = '';
 
-                const rawTitle = item.displayIndex === 1
-                    ? (isZh ? '永久栏目' : 'Permanent')
-                    : (isZh ? '永久栏目副本' : 'Permanent Copy');
-                const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query);
-                title = formatted.html;
-                if (formatted.isTruncated) {
-                    extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                let permSnippet = '';
+                if (item.description) permSnippet = generateSearchSnippet(item.description, searchUiState.query);
+                const descText = permSnippet || (item.description ? escapeHtml(item.description) : '');
+                if (descText) {
+                    const snippetRow = `<div class="canvas-grid-card-snippet-row">${descText}</div>`;
+                    descHtml = `<div class="search-result-match canvas-item-summary" style="display:flex; flex-direction:row; align-items:center; gap:6px; width:100%; min-width:0; height:20px; overflow:hidden;">
+                        ${snippetRow}
+                    </div>`;
+                } else {
+                    descHtml = '';
                 }
-                badge = makeColoredBadge(isZh ? '永久' : 'Perm', 'permanent');
                 break;
             }
 
@@ -15707,7 +16682,9 @@ function renderCanvasSearchResults(results, options = {}) {
                     ${svgContent}
                 </svg>
             `;
-            badge = `<div style="display:flex;align-items:center;">${colorIcon}${badge}</div>`;
+            if (!isGridView) {
+                badge = `<div style="display:flex;align-items:center;">${colorIcon}${badge}</div>`;
+            }
         }
 
         // 2. 说明文字 / MD 内容摘要 (Description / Text Snippet)
@@ -15729,19 +16706,21 @@ function renderCanvasSearchResults(results, options = {}) {
         }
 
         // C. 渲染摘要
-        if (snippet) {
-            const label = isTextMatch ? (isZh ? '匹配内容: ' : 'Match: ') : '';
-            descHtml = `<div class="search-result-match" style="margin-top:4px; color:var(--text-muted); font-size:12px; line-height:1.4;">
-                ${label}${snippet}
-            </div>`;
-        } else if (item.description) {
-            // Fallback: 如果仅标题匹配，但有说明，则显示静态说明（截断）
-            const maxDescLen = 40;
-            let d = item.description;
-            if (d.length > maxDescLen) {
-                d = d.substring(0, maxDescLen) + '...';
+        if (!descHtml) {
+            if (snippet) {
+                const label = isTextMatch ? (isZh ? '匹配内容: ' : 'Match: ') : '';
+                descHtml = `<div class="search-result-match" style="margin-top:4px; color:var(--text-muted); font-size:12px; line-height:1.4;">
+                    ${label}${snippet}
+                </div>`;
+            } else if (item.description) {
+                // Fallback: 如果仅标题匹配，但有说明，则显示静态说明（截断）
+                const maxDescLen = 40;
+                let d = item.description;
+                if (d.length > maxDescLen) {
+                    d = d.substring(0, maxDescLen) + '...';
+                }
+                descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:12px;">${escapeHtml(d)}</div>`;
             }
-            descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:12px;">${escapeHtml(d)}</div>`;
         }
 
         // Bookmark/Folder meta: show matched path/URL plus explicit tag/note searches.
@@ -15826,6 +16805,9 @@ function renderCanvasSearchResults(results, options = {}) {
         if (item.type === 'domain-group') extraClasses.push('domain-group');
         if (item.isChild) extraClasses.push('bookmark-child');
         if (item.domainChild) extraClasses.push('domain-child');
+        if (!descHtml || !String(descHtml).trim()) {
+            extraItemAttrs += ' data-single-line="true"';
+        }
         const rowClassName = ['search-result-item', isSelected].concat(extraClasses).filter(Boolean).join(' ');
         const bookmarkGroupExpandedAttr = item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || ''))
             ? ' data-expanded="true"'
@@ -15901,10 +16883,36 @@ function renderCanvasSearchResults(results, options = {}) {
         return;
     }
 
-    const wrappedItemsHtml = `<div class="search-results-items-container${isGridView ? ' view-grid' : ''}">${itemsHtml}</div>`;
-    html += wrappedItemsHtml + loadMoreHtml;
-    panel.innerHTML = html;
+    const activeMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    const isDescriptionMode = activeMode === 'description';
+
+    const wrappedItemsHtml = `<div class="search-results-items-container${isGridView ? ' view-grid' : ''}" data-search-mode="${activeMode}">${itemsHtml}</div>`;
+    
+    const existingTableWrapper = panel.querySelector('.search-results-table-view-wrapper');
+    if (existingTableWrapper) {
+        existingTableWrapper.style.display = 'none';
+        const existingToolbar = panel.querySelector('.canvas-bookmark-type-toggle');
+        if (existingToolbar) {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            if (tempDiv.firstElementChild) {
+                existingToolbar.replaceWith(tempDiv.firstElementChild);
+            }
+        }
+        const oldGrid = panel.querySelector('.search-results-items-container');
+        if (oldGrid) oldGrid.remove();
+        const oldLoadMore = panel.querySelector('.search-results-load-more-row');
+        if (oldLoadMore) oldLoadMore.remove();
+        existingTableWrapper.insertAdjacentHTML('beforebegin', wrappedItemsHtml + loadMoreHtml);
+    } else {
+        html += wrappedItemsHtml + loadMoreHtml;
+        panel.innerHTML = html;
+    }
     panel.classList.toggle('view-grid', isGridView);
+    panel.classList.toggle('mode-structure', isStructureMode);
+    panel.classList.toggle('mode-description', isDescriptionMode);
+    panel.classList.toggle('mode-bookmark', isBookmarkMode);
+    panel.setAttribute('data-search-mode', activeMode);
     panel.classList.remove('view-table');
 
     if (isGridView) {
@@ -15989,6 +16997,16 @@ function yieldToMainThread() {
 
 function rerenderCanvasBookmarkResults(selectedIndex = 0) {
     const query = String(searchUiState && searchUiState.query || '').trim();
+    if (searchUiState && Array.isArray(searchUiState.resultSource) && searchUiState.resultSource.length > 0) {
+        renderCanvasSearchResults(searchUiState.resultSource, {
+            view: 'canvas',
+            query,
+            selectedIndex: Number.isFinite(selectedIndex) ? selectedIndex : 0,
+            skipEnsureVisible: true,
+            preserveVisibleCount: true
+        });
+        return;
+    }
     const groups = searchUiState ? searchUiState.bookmarkGroupModel : null;
     if (Array.isArray(groups)) {
         const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
@@ -17999,7 +19017,7 @@ async function locateCanvasElement(elementId, type, options = {}) {
         // 4. Permanent Copy
         if (!typeHint || typeHint === 'permanent-section') {
             try {
-                const copy = getPermanentCopyShellsForSearch().find((view) => String(view && view.copyId || '') === String(id || ''));
+                const copy = getPermanentCopyShellsForSearch().find((view) => String(view && (view.copyId || view.id) || '') === String(id || ''));
                 if (copy) {
                     const cardState = copy.cardState || copy;
                     const x = parseFloat(cardState.left) || parseFloat(cardState.x) || 0;
@@ -18132,7 +19150,7 @@ async function locateCanvasElement(elementId, type, options = {}) {
                 targetY = pRect.y + pRect.h / 2;
                 foundLocation = true;
                 if (elementId === 'permanentSection') highlightSelector = '#permanentSection';
-                else highlightSelector = `.permanent-bookmark-section[data-permanent-section-copy-id="${elementId}"]`;
+                else highlightSelector = `.permanent-bookmark-section[data-permanent-section-copy-id="${elementId}"], .permanent-bookmark-section[data-copy-id="${elementId}"]`;
             }
             break;
     }
@@ -18241,10 +19259,12 @@ async function locateCanvasElement(elementId, type, options = {}) {
                     }, 2500);
                 } else {
                     el.classList.add('canvas-search-highlight');
+                    el.classList.add('canvas-search-highlight-pulse');
                     setTimeout(() => {
+                        el.classList.remove('canvas-search-highlight-pulse');
                         el.classList.remove('canvas-search-highlight');
                         el.style.removeProperty('--search-highlight-color');
-                    }, 2000);
+                    }, 2200);
                 }
             }
         };
@@ -18519,7 +19539,7 @@ async function activateCanvasSearchResultAtIndex(index) {
 
     // 清空输入框 (仅针对非群组结果，群组结果需保留文字以维持高亮状态)
     // 在全屏卡片切换前先清空，避免切换过程中 setSearchMode 用旧关键词重新展开结果面板
-    if (item.type !== 'group-result') {
+    if (item.type !== 'group-result' && item.id !== 'group-aggregation-result') {
         prepareSearchInputBeforeCanvasNavigate();
     }
 
@@ -18550,7 +19570,7 @@ async function activateCanvasSearchResultAtIndex(index) {
     }
 
     // Case 1: Group Result (Aggregation Item)
-    if (item.type === 'group-result') {
+    if (item.type === 'group-result' || item.id === 'group-aggregation-result' || (item.type === 'group' && Array.isArray(item.targetIds) && item.targetIds.length > 0)) {
         // DO NOT clear input for group search, as requested by user.
 
         const ids = item.targetIds || [];
@@ -18682,7 +19702,7 @@ async function activateCanvasSearchResultAtIndex(index) {
     // Case 3: Single Element
     if (item.type === 'bookmark-item') {
         await locateCanvasBookmarkItem(item);
-    } else if (item.type === 'group') {
+    } else if (item.type === 'group' || item.type === 'card-group' || item.subtype === 'card-group' || String(item.id || '').startsWith('card-group-')) {
         await locateCanvasGroupSearchResult(item);
     } else {
         const disableAnimationForFullscreenCardSearch = !!fullscreenScope
