@@ -2526,9 +2526,13 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     directoryAutoCollapseWidth: 600, // 自动折叠阈值（px）
     sidepanelDirectoryCollapseMode: 'auto', // 侧边栏目录栏折叠模式：auto / manual
     sidepanelDirectoryAutoCollapseWidth: 600, // 侧边栏目录栏自动折叠阈值（px）
-    searchPanelHeight: 450, // 搜索栏候选列表高度 (px)
+    searchPanelHeight: 450, // 搜索栏候选列表高度 (px) (兼容保留)
+    searchPanelTableWidth: 1080, // 搜索栏表格视图默认宽度 (px)
+    searchPanelTableHeight: 520, // 搜索栏表格视图默认高度 (px)
     searchPanelGridWidth: 920, // 搜索栏网格视图默认宽度 (px)
     searchPanelGridHeight: 520, // 搜索栏网格视图默认高度 (px)
+    searchPanelRootWidth: 500, // #、* 初始面板默认宽度 (px)
+    searchPanelRootHeight: 450, // #、* 初始面板默认高度 (px)
     tempColorFollow: true, // 临时栏目颜色跟随
     tempColorUnlockSync: false, // 解锁后立即继承父色
     tempColorAutoLockAfterSplit: true, // 分裂继承颜色后自动上锁
@@ -3001,6 +3005,20 @@ function normalizeCanvasOtherSettings(input) {
         out.searchPanelHeight || 450
     );
 
+    out.searchPanelTableWidth = __clampNumber(
+        input.searchPanelTableWidth,
+        360,
+        1800,
+        out.searchPanelTableWidth || 1080
+    );
+
+    out.searchPanelTableHeight = __clampNumber(
+        input.searchPanelTableHeight,
+        200,
+        1200,
+        out.searchPanelTableHeight || 520
+    );
+
     out.searchPanelGridWidth = __clampNumber(
         input.searchPanelGridWidth,
         360,
@@ -3013,6 +3031,20 @@ function normalizeCanvasOtherSettings(input) {
         200,
         1200,
         out.searchPanelGridHeight || 520
+    );
+
+    out.searchPanelRootWidth = __clampNumber(
+        input.searchPanelRootWidth,
+        360,
+        1800,
+        out.searchPanelRootWidth || 500
+    );
+
+    out.searchPanelRootHeight = __clampNumber(
+        input.searchPanelRootHeight,
+        200,
+        1200,
+        out.searchPanelRootHeight || 450
     );
 
     out.menuColorSync = !!out.menuLocatableColorSync;
@@ -3214,6 +3246,20 @@ function loadCanvasOtherSettings() {
                 CanvasState.otherSettings.searchPanelHeight = __clampNumber(parsedH, 200, 1200, 450);
             }
         }
+        const directTableW = localStorage.getItem('canvasSearchPanelWidth_table');
+        if (directTableW !== null) {
+            const parsedTW = parseInt(directTableW, 10);
+            if (Number.isFinite(parsedTW)) {
+                CanvasState.otherSettings.searchPanelTableWidth = __clampNumber(parsedTW, 360, 1800, 1080);
+            }
+        }
+        const directTableH = localStorage.getItem('canvasSearchPanelHeight_table');
+        if (directTableH !== null) {
+            const parsedTH = parseInt(directTableH, 10);
+            if (Number.isFinite(parsedTH)) {
+                CanvasState.otherSettings.searchPanelTableHeight = __clampNumber(parsedTH, 200, 1200, 520);
+            }
+        }
         const directGridW = localStorage.getItem('canvasSearchPanelWidth_grid');
         if (directGridW !== null) {
             const parsedGW = parseInt(directGridW, 10);
@@ -3226,6 +3272,20 @@ function loadCanvasOtherSettings() {
             const parsedGH = parseInt(directGridH, 10);
             if (Number.isFinite(parsedGH)) {
                 CanvasState.otherSettings.searchPanelGridHeight = __clampNumber(parsedGH, 200, 1200, 520);
+            }
+        }
+        const directRootW = localStorage.getItem('canvasSearchPanelWidth_root');
+        if (directRootW !== null) {
+            const parsedRW = parseInt(directRootW, 10);
+            if (Number.isFinite(parsedRW)) {
+                CanvasState.otherSettings.searchPanelRootWidth = __clampNumber(parsedRW, 360, 1800, 500);
+            }
+        }
+        const directRootH = localStorage.getItem('canvasSearchPanelHeight_root');
+        if (directRootH !== null) {
+            const parsedRH = parseInt(directRootH, 10);
+            if (Number.isFinite(parsedRH)) {
+                CanvasState.otherSettings.searchPanelRootHeight = __clampNumber(parsedRH, 200, 1200, 450);
             }
         }
     } catch (_) { }
@@ -43790,6 +43850,22 @@ function openCanvasAppearanceSettingsModal() {
         otherSearchPanelHeightInput.value = String(__clampNumber(currentH, 200, 1200, 450));
     }
 
+    const otherSearchPanelTableWidthInput = modal.querySelector('#otherSearchPanelTableWidth');
+    if (otherSearchPanelTableWidthInput) {
+        const currentTW = (typeof window.getSearchPanelWidth === 'function')
+            ? window.getSearchPanelWidth('table')
+            : (otherSettings.searchPanelTableWidth || 1080);
+        otherSearchPanelTableWidthInput.value = String(__clampNumber(currentTW, 360, 1800, 1080));
+    }
+
+    const otherSearchPanelTableHeightInput = modal.querySelector('#otherSearchPanelTableHeight');
+    if (otherSearchPanelTableHeightInput) {
+        const currentTH = (typeof window.getSearchPanelHeight === 'function')
+            ? window.getSearchPanelHeight('table')
+            : (otherSettings.searchPanelTableHeight || 520);
+        otherSearchPanelTableHeightInput.value = String(__clampNumber(currentTH, 200, 1200, 520));
+    }
+
     const otherSearchPanelGridWidthInput = modal.querySelector('#otherSearchPanelGridWidth');
     if (otherSearchPanelGridWidthInput) {
         const currentGW = (typeof window.getSearchPanelWidth === 'function')
@@ -43804,6 +43880,22 @@ function openCanvasAppearanceSettingsModal() {
             ? window.getSearchPanelHeight('grid')
             : (otherSettings.searchPanelGridHeight || 520);
         otherSearchPanelGridHeightInput.value = String(__clampNumber(currentGH, 200, 1200, 520));
+    }
+
+    const otherSearchPanelRootWidthInput = modal.querySelector('#otherSearchPanelRootWidth');
+    if (otherSearchPanelRootWidthInput) {
+        const currentRW = (typeof window.getSearchPanelWidth === 'function')
+            ? window.getSearchPanelWidth('root')
+            : (otherSettings.searchPanelRootWidth || 500);
+        otherSearchPanelRootWidthInput.value = String(__clampNumber(currentRW, 360, 1800, 500));
+    }
+
+    const otherSearchPanelRootHeightInput = modal.querySelector('#otherSearchPanelRootHeight');
+    if (otherSearchPanelRootHeightInput) {
+        const currentRH = (typeof window.getSearchPanelHeight === 'function')
+            ? window.getSearchPanelHeight('root')
+            : (otherSettings.searchPanelRootHeight || 450);
+        otherSearchPanelRootHeightInput.value = String(__clampNumber(currentRH, 200, 1200, 450));
     }
 
     __updateOtherTempColorFollowLock(modal, otherColorFollow && otherColorFollow.checked);
@@ -44189,20 +44281,25 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                     </div>
                     <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
-                    <div class="appearance-row">
+                    <div class="appearance-row" id="otherSearchPanelTableSizeRow">
                         <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Search bar list view height' : '搜索栏列表视图高度'}</span>
-                            <button class="perf-help-btn" id="otherSearchPanelHeightHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                            <span>${isEn ? 'Table view default size' : '表格视图默认长宽'}</span>
+                            <button class="perf-help-btn" id="otherSearchPanelTableSizeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
                         </div>
                         <div class="appearance-row-content appearance-row-content-inline">
                             <div class="appearance-size-inputs">
-                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelHeightReset" title="${isEn ? 'Restore default (450px)' : '还原默认值（450px）'}" aria-label="${isEn ? 'Restore default search bar list view height' : '还原默认搜索栏列表视图高度'}">
+                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelTableSizeReset" title="${isEn ? 'Restore default (1080 × 520px)' : '还原默认值（1080 × 520px）'}" aria-label="${isEn ? 'Restore default table size' : '还原表格视图默认长宽'}">
                                     <i class="fas fa-undo"></i>
                                 </button>
-                                <input type="number" id="otherSearchPanelHeight" min="200" max="1200" step="10">
+                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
+                                <input type="number" id="otherSearchPanelTableWidth" min="360" max="1800" step="10" style="width: 72px;">
+                                <span style="margin-right: 6px;">px</span>
+                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
+                                <input type="number" id="otherSearchPanelTableHeight" min="200" max="1200" step="10" style="width: 72px;">
                                 <span>px</span>
+                                <input type="hidden" id="otherSearchPanelHeight">
                             </div>
                         </div>
                     </div>
@@ -44223,6 +44320,27 @@ function createCanvasAppearanceSettingsModal() {
                                 <span style="margin-right: 6px;">px</span>
                                 <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
                                 <input type="number" id="otherSearchPanelGridHeight" min="200" max="1200" step="10" style="width: 72px;">
+                                <span>px</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appearance-row" id="otherSearchPanelRootSizeRow">
+                        <div class="appearance-row-label appearance-row-label-inline">
+                            <span>${isEn ? '#, * root panel default size' : '#、* 初始面板默认长宽'}</span>
+                            <button class="perf-help-btn" id="otherSearchPanelRootSizeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <div class="appearance-row-content appearance-row-content-inline">
+                            <div class="appearance-size-inputs">
+                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelRootSizeReset" title="${isEn ? 'Restore default (500 × 450px)' : '还原默认值（500 × 450px）'}" aria-label="${isEn ? 'Restore default root panel size' : '还原#、* 初始面板默认长宽'}">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
+                                <input type="number" id="otherSearchPanelRootWidth" min="360" max="1800" step="10" style="width: 72px;">
+                                <span style="margin-right: 6px;">px</span>
+                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
+                                <input type="number" id="otherSearchPanelRootHeight" min="200" max="1200" step="10" style="width: 72px;">
                                 <span>px</span>
                             </div>
                         </div>
@@ -44436,11 +44554,25 @@ function createCanvasAppearanceSettingsModal() {
             : '<b>搜索栏列表视图高度</b>：设置搜索下拉候选面板在列表视图模式下的最大高度。支持在此直接手动输入，也可以在搜索候选面板外侧边缘拖拽把手实时调整大小。在窗口/侧边栏/标签页空间有限时会自动启用临时上限，确保绝不超出实际可见高度。'}
             </div>
         </div>
+        <div class="perf-help-popover" id="otherSearchPanelTableSizeHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Table view default size</b>: Sets the default width and height of the search candidate panel in Table view mode. Table mode and Grid mode maintain completely independent sizes. You can also drag the edge handles directly in the search panel to adjust them.'
+            : '<b>表格视图默认长宽</b>：设置搜索候选面板在表格视图模式下的默认宽度和高度。表格模式与网格模式的尺寸完全独立、互不影响。亦可在表格模式下直接拖拽面板左右和底部的把手实时调整。'}
+            </div>
+        </div>
         <div class="perf-help-popover" id="otherSearchPanelGridSizeHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Grid view default size</b>: Sets the default width and height of the search candidate panel in Grid view mode. Grid mode and List mode maintain completely independent sizes. You can also drag the edge handles directly in the search panel to adjust them.'
-            : '<b>网格视图默认长宽</b>：设置搜索候选面板在网格视图模式下的默认宽度和高度。网格模式与列表模式的尺寸完全独立、互不影响。亦可在网格模式下直接拖拽面板左右和底部的把手实时调整。'}
+            ? '<b>Grid view default size</b>: Sets the default width and height of the search candidate panel in Grid view mode. Grid mode and Table mode maintain completely independent sizes. You can also drag the edge handles directly in the search panel to adjust them.'
+            : '<b>网格视图默认长宽</b>：设置搜索候选面板在网格视图模式下的默认宽度和高度。网格模式与表格模式的尺寸完全独立、互不影响。亦可在网格模式下直接拖拽面板左右和底部的把手实时调整。'}
+            </div>
+        </div>
+        <div class="perf-help-popover" id="otherSearchPanelRootSizeHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>#, * root panel default size</b>: Sets the default width and height of the initial navigation panels opened with # (tags) and * (notes). Their dimensions are completely independent from the candidate Table and Grid views. You can also drag the edge handles directly in the root panel to adjust them.'
+            : '<b>#、* 初始面板默认长宽</b>：设置通过 #（标签导航）与 *（笔记导航）打开的初始根面板的默认宽度和高度。初始面板与展示搜索候选结果的表格、网格视图尺寸完全独立。亦可在初始面板直接拖拽左右和底部把手调整大小。'}
             </div>
         </div>
 
@@ -44536,14 +44668,20 @@ function createCanvasAppearanceSettingsModal() {
     const otherBookmarkNoteHighlightHelpPopover = modal.querySelector('#otherBookmarkNoteHighlightHelpPopover');
     const otherSearchPanelHeightHelpBtn = modal.querySelector('#otherSearchPanelHeightHelpBtn');
     const otherSearchPanelHeightHelpPopover = modal.querySelector('#otherSearchPanelHeightHelpPopover');
+    const otherSearchPanelTableSizeHelpBtn = modal.querySelector('#otherSearchPanelTableSizeHelpBtn');
+    const otherSearchPanelTableSizeHelpPopover = modal.querySelector('#otherSearchPanelTableSizeHelpPopover');
     const otherSearchPanelGridSizeHelpBtn = modal.querySelector('#otherSearchPanelGridSizeHelpBtn');
     const otherSearchPanelGridSizeHelpPopover = modal.querySelector('#otherSearchPanelGridSizeHelpPopover');
+    const otherSearchPanelRootSizeHelpBtn = modal.querySelector('#otherSearchPanelRootSizeHelpBtn');
+    const otherSearchPanelRootSizeHelpPopover = modal.querySelector('#otherSearchPanelRootSizeHelpPopover');
     bindClickHelpPopover(otherTempHelpBtn, otherTempHelpPopover);
     bindClickHelpPopover(otherMenuDefaultColorSyncHelpBtn, otherMenuDefaultColorSyncHelpPopover);
     bindClickHelpPopover(otherMenuLocatableColorSyncHelpBtn, otherMenuLocatableColorSyncHelpPopover);
     bindClickHelpPopover(otherSidebarCollapseModeHelpBtn, otherSidebarCollapseModeHelpPopover);
     bindClickHelpPopover(otherSearchPanelHeightHelpBtn, otherSearchPanelHeightHelpPopover);
+    bindClickHelpPopover(otherSearchPanelTableSizeHelpBtn, otherSearchPanelTableSizeHelpPopover);
     bindClickHelpPopover(otherSearchPanelGridSizeHelpBtn, otherSearchPanelGridSizeHelpPopover);
+    bindClickHelpPopover(otherSearchPanelRootSizeHelpBtn, otherSearchPanelRootSizeHelpPopover);
     bindClickHelpPopover(otherTempUnlockHelpBtn, otherTempUnlockHelpPopover);
     bindClickHelpPopover(otherTempAutoLockHelpBtn, otherTempAutoLockHelpPopover);
     bindClickHelpPopover(otherBookmarkNoteHighlightHelpBtn, otherBookmarkNoteHighlightHelpPopover);
@@ -44625,6 +44763,78 @@ function createCanvasAppearanceSettingsModal() {
         });
     }
 
+    const otherSearchPanelTableWidthInput = modal.querySelector('#otherSearchPanelTableWidth');
+    const otherSearchPanelTableHeightInput = modal.querySelector('#otherSearchPanelTableHeight');
+    const otherSearchPanelTableSizeResetBtn = modal.querySelector('#otherSearchPanelTableSizeReset');
+
+    if (otherSearchPanelTableWidthInput) {
+        otherSearchPanelTableWidthInput.addEventListener('input', () => {
+            const val = parseInt(otherSearchPanelTableWidthInput.value, 10);
+            if (Number.isFinite(val) && typeof window.setSearchPanelWidth === 'function') {
+                window.setSearchPanelWidth(val, { save: true, mode: 'table' });
+            }
+            scheduleOtherSave();
+        });
+        otherSearchPanelTableWidthInput.addEventListener('change', () => {
+            const minW = window.SEARCH_PANEL_WIDTH_MIN || 360;
+            const maxW = window.SEARCH_PANEL_WIDTH_MAX || 1800;
+            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_TABLE || 1080;
+            const clamped = __clampNumber(
+                parseInt(otherSearchPanelTableWidthInput.value, 10),
+                minW,
+                maxW,
+                defW
+            );
+            otherSearchPanelTableWidthInput.value = String(clamped);
+            if (typeof window.setSearchPanelWidth === 'function') {
+                window.setSearchPanelWidth(clamped, { save: true, mode: 'table' });
+            }
+            scheduleOtherSave();
+        });
+    }
+
+    if (otherSearchPanelTableHeightInput) {
+        otherSearchPanelTableHeightInput.addEventListener('input', () => {
+            const val = parseInt(otherSearchPanelTableHeightInput.value, 10);
+            if (Number.isFinite(val) && typeof window.setSearchPanelHeight === 'function') {
+                window.setSearchPanelHeight(val, { syncInput: false, mode: 'table' });
+            }
+            scheduleOtherSave();
+        });
+        otherSearchPanelTableHeightInput.addEventListener('change', () => {
+            const minH = window.SEARCH_PANEL_HEIGHT_MIN || 200;
+            const maxH = window.SEARCH_PANEL_HEIGHT_MAX || 1200;
+            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT_TABLE || 520;
+            const clamped = __clampNumber(
+                parseInt(otherSearchPanelTableHeightInput.value, 10),
+                minH,
+                maxH,
+                defH
+            );
+            otherSearchPanelTableHeightInput.value = String(clamped);
+            if (typeof window.setSearchPanelHeight === 'function') {
+                window.setSearchPanelHeight(clamped, { syncInput: false, mode: 'table' });
+            }
+            scheduleOtherSave();
+        });
+    }
+
+    if (otherSearchPanelTableSizeResetBtn) {
+        otherSearchPanelTableSizeResetBtn.addEventListener('click', () => {
+            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_TABLE || 1080;
+            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT_TABLE || 520;
+            if (otherSearchPanelTableWidthInput) otherSearchPanelTableWidthInput.value = String(defW);
+            if (otherSearchPanelTableHeightInput) otherSearchPanelTableHeightInput.value = String(defH);
+            if (typeof window.setSearchPanelWidth === 'function') {
+                window.setSearchPanelWidth(defW, { save: true, mode: 'table' });
+            }
+            if (typeof window.setSearchPanelHeight === 'function') {
+                window.setSearchPanelHeight(defH, { syncInput: false, mode: 'table' });
+            }
+            saveCanvasOtherSettings({ close: false, modal });
+        });
+    }
+
     const otherSearchPanelGridWidthInput = modal.querySelector('#otherSearchPanelGridWidth');
     const otherSearchPanelGridHeightInput = modal.querySelector('#otherSearchPanelGridHeight');
     const otherSearchPanelGridSizeResetBtn = modal.querySelector('#otherSearchPanelGridSizeReset');
@@ -44692,6 +44902,78 @@ function createCanvasAppearanceSettingsModal() {
             }
             if (typeof window.setSearchPanelHeight === 'function') {
                 window.setSearchPanelHeight(defH, { syncInput: false, mode: 'grid' });
+            }
+            saveCanvasOtherSettings({ close: false, modal });
+        });
+    }
+
+    const otherSearchPanelRootWidthInput = modal.querySelector('#otherSearchPanelRootWidth');
+    const otherSearchPanelRootHeightInput = modal.querySelector('#otherSearchPanelRootHeight');
+    const otherSearchPanelRootSizeResetBtn = modal.querySelector('#otherSearchPanelRootSizeReset');
+
+    if (otherSearchPanelRootWidthInput) {
+        otherSearchPanelRootWidthInput.addEventListener('input', () => {
+            const val = parseInt(otherSearchPanelRootWidthInput.value, 10);
+            if (Number.isFinite(val) && typeof window.setSearchPanelWidth === 'function') {
+                window.setSearchPanelWidth(val, { save: true, mode: 'root' });
+            }
+            scheduleOtherSave();
+        });
+        otherSearchPanelRootWidthInput.addEventListener('change', () => {
+            const minW = window.SEARCH_PANEL_WIDTH_MIN || 360;
+            const maxW = window.SEARCH_PANEL_WIDTH_MAX || 1800;
+            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_ROOT || 500;
+            const clamped = __clampNumber(
+                parseInt(otherSearchPanelRootWidthInput.value, 10),
+                minW,
+                maxW,
+                defW
+            );
+            otherSearchPanelRootWidthInput.value = String(clamped);
+            if (typeof window.setSearchPanelWidth === 'function') {
+                window.setSearchPanelWidth(clamped, { save: true, mode: 'root' });
+            }
+            scheduleOtherSave();
+        });
+    }
+
+    if (otherSearchPanelRootHeightInput) {
+        otherSearchPanelRootHeightInput.addEventListener('input', () => {
+            const val = parseInt(otherSearchPanelRootHeightInput.value, 10);
+            if (Number.isFinite(val) && typeof window.setSearchPanelHeight === 'function') {
+                window.setSearchPanelHeight(val, { syncInput: false, mode: 'root' });
+            }
+            scheduleOtherSave();
+        });
+        otherSearchPanelRootHeightInput.addEventListener('change', () => {
+            const minH = window.SEARCH_PANEL_HEIGHT_MIN || 200;
+            const maxH = window.SEARCH_PANEL_HEIGHT_MAX || 1200;
+            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT_ROOT || 450;
+            const clamped = __clampNumber(
+                parseInt(otherSearchPanelRootHeightInput.value, 10),
+                minH,
+                maxH,
+                defH
+            );
+            otherSearchPanelRootHeightInput.value = String(clamped);
+            if (typeof window.setSearchPanelHeight === 'function') {
+                window.setSearchPanelHeight(clamped, { syncInput: false, mode: 'root' });
+            }
+            scheduleOtherSave();
+        });
+    }
+
+    if (otherSearchPanelRootSizeResetBtn) {
+        otherSearchPanelRootSizeResetBtn.addEventListener('click', () => {
+            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_ROOT || 500;
+            const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT_ROOT || 450;
+            if (otherSearchPanelRootWidthInput) otherSearchPanelRootWidthInput.value = String(defW);
+            if (otherSearchPanelRootHeightInput) otherSearchPanelRootHeightInput.value = String(defH);
+            if (typeof window.setSearchPanelWidth === 'function') {
+                window.setSearchPanelWidth(defW, { save: true, mode: 'root' });
+            }
+            if (typeof window.setSearchPanelHeight === 'function') {
+                window.setSearchPanelHeight(defH, { syncInput: false, mode: 'root' });
             }
             saveCanvasOtherSettings({ close: false, modal });
         });
@@ -45427,6 +45709,40 @@ function saveCanvasOtherSettings(options = {}) {
         window.setSearchPanelHeight(searchPanelHeight, { syncInput: false, mode: 'list' });
     }
 
+    const searchPanelTableWidthInput = modal.querySelector('#otherSearchPanelTableWidth');
+    const searchPanelTableWidthRaw = searchPanelTableWidthInput
+        ? parseInt(searchPanelTableWidthInput.value, 10)
+        : (typeof window.getSearchPanelWidth === 'function' ? window.getSearchPanelWidth('table') : (prevSettings.searchPanelTableWidth || 1080));
+    const searchPanelTableWidth = __clampNumber(
+        searchPanelTableWidthRaw,
+        360,
+        1800,
+        1080
+    );
+    if (searchPanelTableWidthInput && document.activeElement !== searchPanelTableWidthInput) {
+        searchPanelTableWidthInput.value = String(searchPanelTableWidth);
+    }
+    if (typeof window.setSearchPanelWidth === 'function') {
+        window.setSearchPanelWidth(searchPanelTableWidth, { save: true, mode: 'table' });
+    }
+
+    const searchPanelTableHeightInput = modal.querySelector('#otherSearchPanelTableHeight');
+    const searchPanelTableHeightRaw = searchPanelTableHeightInput
+        ? parseInt(searchPanelTableHeightInput.value, 10)
+        : (typeof window.getSearchPanelHeight === 'function' ? window.getSearchPanelHeight('table') : (prevSettings.searchPanelTableHeight || 520));
+    const searchPanelTableHeight = __clampNumber(
+        searchPanelTableHeightRaw,
+        200,
+        1200,
+        520
+    );
+    if (searchPanelTableHeightInput && document.activeElement !== searchPanelTableHeightInput) {
+        searchPanelTableHeightInput.value = String(searchPanelTableHeight);
+    }
+    if (typeof window.setSearchPanelHeight === 'function') {
+        window.setSearchPanelHeight(searchPanelTableHeight, { syncInput: false, mode: 'table' });
+    }
+
     const searchPanelGridWidthInput = modal.querySelector('#otherSearchPanelGridWidth');
     const searchPanelGridWidthRaw = searchPanelGridWidthInput
         ? parseInt(searchPanelGridWidthInput.value, 10)
@@ -45461,11 +45777,49 @@ function saveCanvasOtherSettings(options = {}) {
         window.setSearchPanelHeight(searchPanelGridHeight, { syncInput: false, mode: 'grid' });
     }
 
+    const searchPanelRootWidthInput = modal.querySelector('#otherSearchPanelRootWidth');
+    const searchPanelRootWidthRaw = searchPanelRootWidthInput
+        ? parseInt(searchPanelRootWidthInput.value, 10)
+        : (typeof window.getSearchPanelWidth === 'function' ? window.getSearchPanelWidth('root') : (prevSettings.searchPanelRootWidth || 500));
+    const searchPanelRootWidth = __clampNumber(
+        searchPanelRootWidthRaw,
+        360,
+        1800,
+        500
+    );
+    if (searchPanelRootWidthInput && document.activeElement !== searchPanelRootWidthInput) {
+        searchPanelRootWidthInput.value = String(searchPanelRootWidth);
+    }
+    if (typeof window.setSearchPanelWidth === 'function') {
+        window.setSearchPanelWidth(searchPanelRootWidth, { save: true, mode: 'root' });
+    }
+
+    const searchPanelRootHeightInput = modal.querySelector('#otherSearchPanelRootHeight');
+    const searchPanelRootHeightRaw = searchPanelRootHeightInput
+        ? parseInt(searchPanelRootHeightInput.value, 10)
+        : (typeof window.getSearchPanelHeight === 'function' ? window.getSearchPanelHeight('root') : (prevSettings.searchPanelRootHeight || 450));
+    const searchPanelRootHeight = __clampNumber(
+        searchPanelRootHeightRaw,
+        200,
+        1200,
+        450
+    );
+    if (searchPanelRootHeightInput && document.activeElement !== searchPanelRootHeightInput) {
+        searchPanelRootHeightInput.value = String(searchPanelRootHeight);
+    }
+    if (typeof window.setSearchPanelHeight === 'function') {
+        window.setSearchPanelHeight(searchPanelRootHeight, { syncInput: false, mode: 'root' });
+    }
+
     const settingsInput = {
         autoLinkSplit: autoLink ? !!autoLink.checked : !!prevSettings.autoLinkSplit,
         searchPanelHeight: searchPanelHeight,
+        searchPanelTableWidth: searchPanelTableWidth,
+        searchPanelTableHeight: searchPanelTableHeight,
         searchPanelGridWidth: searchPanelGridWidth,
         searchPanelGridHeight: searchPanelGridHeight,
+        searchPanelRootWidth: searchPanelRootWidth,
+        searchPanelRootHeight: searchPanelRootHeight,
         gridSnapEnabled: gridSnapEnabled ? !!gridSnapEnabled.checked : prevSettings.gridSnapEnabled !== false,
         gridSnapContinuous: gridSnapContinuous ? !!gridSnapContinuous.checked : !!prevSettings.gridSnapContinuous,
         gridPointSpacing: gridPointSpacing,

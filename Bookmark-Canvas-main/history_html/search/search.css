@@ -131,7 +131,11 @@ body.header-dock-bottom .search-panel-resize-handle.handle-bottom {
 .search-results-panel.resizing {
     user-select: none !important;
     transition: none !important;
-    will-change: max-height;
+    will-change: height, max-height;
+}
+
+.search-results-panel.view-table.resizing {
+    transition: none !important;
 }
 
 /* 搜索候选结果面板的宽度调整把手（完全处于面板内部左右边缘，层级高于面板以确保100%可见） */
@@ -263,6 +267,20 @@ body.header-dock-bottom:not(.header-compact) .search-panel-resize-handle.handle-
 
 .search-results-panel::-webkit-scrollbar-thumb:hover {
     background: var(--accent-primary, #1a73e8);
+}
+
+/* 网格模式隐藏原生滚动条，全面采用丝滑解耦的自定义垂直滚动条 */
+.search-results-panel.view-grid::-webkit-scrollbar {
+    width: 0px !important;
+    height: 0px !important;
+    display: none !important;
+}
+
+.search-results-panel.view-grid::-webkit-scrollbar:vertical,
+.search-results-panel.view-grid::-webkit-scrollbar:horizontal {
+    width: 0px !important;
+    height: 0px !important;
+    display: none !important;
 }
 
 .search-results-panel.visible {
@@ -482,6 +500,36 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     height: min(var(--search-panel-height, 520px), var(--search-panel-max-allowed, calc(100vh - 80px)));
 }
 
+/* 表格视图下的上下调整把手：绝对定位贴附于面板边缘，与网格视图一致实现纯透明悬浮层，表格内容横向与纵向自然铺满延伸至边缘 */
+.search-results-panel.view-table .search-panel-resize-handle.handle-bottom {
+    position: absolute !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    height: 14px !important;
+    background: transparent !important;
+    z-index: 60 !important;
+    pointer-events: auto !important;
+}
+
+body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-handle.handle-top {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    height: 14px !important;
+    background: transparent !important;
+    z-index: 60 !important;
+    pointer-events: auto !important;
+}
+
+.search-results-panel.view-table .canvas-search-tabulator .tabulator-tableholder {
+    padding-bottom: 14px !important;
+    box-sizing: border-box !important;
+}
+
 .search-results-table-view-wrapper {
     flex: 1;
     width: 100%;
@@ -554,8 +602,15 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 
 /* 彻底隐藏 Tabulator 表格内置的原生水平与垂直滚动条（完全由解耦自定义滑块接管，消除掉帧与失控） */
 .canvas-search-tabulator .tabulator-tableholder {
+    height: 100% !important;
+    max-height: 100% !important;
+    flex: 1 1 auto !important;
+    background-color: var(--bg-elevated, #fff);
     scrollbar-width: none !important;
     -ms-overflow-style: none !important;
+    overscroll-behavior-y: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+    scroll-behavior: auto !important;
 }
 
 .canvas-search-tabulator .tabulator-tableholder::-webkit-scrollbar {
@@ -586,7 +641,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     cursor: pointer;
     box-sizing: border-box;
     overflow: hidden;
-    pointer-events: auto;
+    pointer-events: none;
     transition: background-color 0.15s ease;
 }
 
@@ -604,6 +659,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     cursor: grab;
     transition: background-color 0.15s ease;
     touch-action: none;
+    pointer-events: auto;
     will-change: top, height;
 }
 
@@ -626,9 +682,68 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     background: #60a5fa;
 }
 
+/* ==================== 网格右侧垂直滚动条（解耦自定义滑块架构，彻底模拟流畅滚轮体验） ==================== */
+.canvas-grid-right-scrollbar {
+    display: none;
+    position: absolute;
+    right: 3px;
+    top: 0;
+    width: 8px;
+    height: 100%;
+    background: transparent;
+    border-radius: 4px;
+    z-index: 205;
+    user-select: none;
+    cursor: pointer;
+    box-sizing: border-box;
+    overflow: hidden;
+    pointer-events: auto;
+    transition: background-color 0.15s ease;
+}
+
+.canvas-grid-right-scrollbar:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.canvas-grid-right-scrollbar-thumb {
+    position: absolute;
+    left: 1px;
+    right: 1px;
+    width: 6px;
+    border-radius: 4px;
+    background: var(--border-color, rgba(0, 0, 0, 0.3));
+    cursor: grab;
+    transition: background-color 0.15s ease;
+    touch-action: none;
+    will-change: top, height;
+}
+
+.canvas-grid-right-scrollbar-thumb:hover,
+.canvas-grid-right-scrollbar.is-dragging .canvas-grid-right-scrollbar-thumb {
+    background: var(--accent-primary, #1a73e8);
+    cursor: grabbing;
+}
+
+[data-theme="dark"] .canvas-grid-right-scrollbar:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .canvas-grid-right-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.28);
+}
+
+[data-theme="dark"] .canvas-grid-right-scrollbar-thumb:hover,
+[data-theme="dark"] .canvas-grid-right-scrollbar.is-dragging .canvas-grid-right-scrollbar-thumb {
+    background: #60a5fa;
+}
+
 /* Tabulator UI Overrides */
 .tabulator.canvas-search-tabulator {
-    background-color: transparent !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    background-color: var(--bg-elevated, #fff) !important;
     border: none !important;
     font-family: inherit !important;
     font-size: 12px !important;
@@ -778,13 +893,35 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     flex-shrink: 0 !important;
 }
 
-.canvas-table-path-text {
+.canvas-table-path-text,
+.canvas-table-path-wrapper {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-secondary);
     font-size: 11px;
 }
+
+.canvas-table-path-part {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: currentColor;
+    cursor: pointer;
+    transition: color 0.12s ease, text-decoration-color 0.12s ease;
+}
+
+.canvas-table-path-part:hover {
+    color: var(--accent-primary, #2563eb);
+    text-decoration-color: var(--accent-primary, #2563eb);
+}
+
+.canvas-table-path-sep {
+    opacity: 0.5;
+    margin: 0 1px;
+    text-decoration: none;
+}
+
 
 .canvas-table-url-text {
     color: var(--text-muted);
@@ -801,12 +938,149 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     color: var(--accent-primary) !important;
 }
 
+.canvas-table-locations-cell {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    width: 100%;
+    min-width: 0;
+}
+
+.canvas-table-locations-cell .search-loc-chip {
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: fit-content;
+}
+
+.canvas-table-locations-cell .canvas-bookmark-location-chip-text {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.canvas-table-loc-title-text {
+    opacity: 0.88;
+    margin-left: 3px;
+    max-width: 140px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+    display: inline-block;
+    font-weight: 500;
+}
+
+.canvas-table-loc-more-btn,
+.canvas-table-tag-more-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text-secondary);
+    background: rgba(128, 128, 128, 0.12);
+    border: 1px solid rgba(128, 128, 128, 0.22);
+    cursor: pointer;
+    flex-shrink: 0 !important;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+}
+
+.canvas-table-loc-more-btn:hover,
+.canvas-table-loc-more-btn.bubble-active,
+.canvas-table-loc-more-btn[aria-expanded="true"],
+.canvas-table-tag-more-btn:hover,
+.canvas-table-tag-more-btn.bubble-active,
+.canvas-table-tag-more-btn[aria-expanded="true"] {
+    background: rgba(37, 99, 235, 0.15);
+    border-color: rgba(37, 99, 235, 0.4);
+    color: #2563eb;
+    transform: translateY(-0.5px);
+}
+
+[data-theme="dark"] .canvas-table-loc-more-btn,
+[data-theme="dark"] .canvas-table-tag-more-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .canvas-table-loc-more-btn:hover,
+[data-theme="dark"] .canvas-table-loc-more-btn.bubble-active,
+[data-theme="dark"] .canvas-table-loc-more-btn[aria-expanded="true"],
+[data-theme="dark"] .canvas-table-tag-more-btn:hover,
+[data-theme="dark"] .canvas-table-tag-more-btn.bubble-active,
+[data-theme="dark"] .canvas-table-tag-more-btn[aria-expanded="true"] {
+    background: rgba(59, 130, 246, 0.25);
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #60a5fa;
+}
+
+.canvas-table-path-ellipsis-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-mono, monospace);
+    line-height: 1;
+    color: var(--text-secondary);
+    background: rgba(128, 128, 128, 0.12);
+    border: 1px solid rgba(128, 128, 128, 0.22);
+    cursor: pointer;
+    flex-shrink: 0 !important;
+    white-space: nowrap;
+    vertical-align: middle;
+    margin-right: 2px;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+}
+
+.canvas-table-path-ellipsis-btn:hover,
+.canvas-table-path-ellipsis-btn.bubble-active,
+.canvas-table-path-ellipsis-btn[aria-expanded="true"] {
+    background: rgba(37, 99, 235, 0.15);
+    border-color: rgba(37, 99, 235, 0.4);
+    color: #2563eb;
+    transform: translateY(-0.5px);
+}
+
+[data-theme="dark"] .canvas-table-path-ellipsis-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .canvas-table-path-ellipsis-btn:hover,
+[data-theme="dark"] .canvas-table-path-ellipsis-btn.bubble-active,
+[data-theme="dark"] .canvas-table-path-ellipsis-btn[aria-expanded="true"] {
+    background: rgba(59, 130, 246, 0.25);
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #60a5fa;
+}
+
 /* Dark Theme Overrides for Tabulator */
 [data-theme="dark"] .canvas-search-tabulator-container {
     background: var(--bg-elevated, #242526);
 }
 
-[data-theme="dark"] .tabulator.canvas-search-tabulator {
+[data-theme="dark"] .tabulator.canvas-search-tabulator,
+[data-theme="dark"] .canvas-search-tabulator .tabulator-tableholder {
+    background-color: var(--bg-elevated, #242526) !important;
     color: var(--text-primary, #e4e6eb) !important;
 }
 
@@ -1412,6 +1686,8 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     flex-direction: column !important;
     justify-content: space-between !important;
     align-items: stretch !important;
+    content-visibility: auto;
+    contain-intrinsic-size: 260px 96px;
     contain: layout paint;
 }
 
@@ -1671,7 +1947,9 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     box-sizing: border-box;
 }
 
-.canvas-grid-location-more-btn:hover {
+.canvas-grid-location-more-btn:hover,
+.canvas-grid-location-more-btn.bubble-active,
+.canvas-grid-location-more-btn[aria-expanded="true"] {
     color: var(--accent-primary);
     border-color: var(--accent-primary);
     background: var(--bg-hover);
@@ -1959,9 +2237,9 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 .search-results-panel.view-grid.is-single-column .canvas-bookmark-location-row {
     display: flex !important;
     flex-wrap: wrap !important;
-    align-items: flex-start !important;
+    align-items: center !important;
     margin-top: 3px !important;
-    gap: 4px 6px !important;
+    gap: 4px !important;
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
@@ -1971,7 +2249,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     display: flex !important;
     flex-wrap: wrap !important;
     align-items: center !important;
-    gap: 4px 6px !important;
+    gap: 4px !important;
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
@@ -2547,29 +2825,27 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     margin-top: 1px;
     display: flex;
     align-items: flex-start;
-    gap: 4px;
+    gap: 6px;
+    width: 100%;
+    margin-bottom: 6px;
 }
 
 .canvas-grid-bubble-body .search-result-path-hint.is-expanded {
-    display: block;
+    display: flex;
+    align-items: flex-start;
 }
 
 .canvas-grid-bubble-body .search-result-path-text {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+    line-height: 1.6;
     min-width: 0;
     flex: 1;
-}
-
-.canvas-grid-bubble-body .search-result-path-hint.is-expanded .search-result-path-text {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    word-break: break-word;
-    overflow-wrap: anywhere;
 }
 
 .canvas-grid-bubble-body .search-result-path-text mark {
@@ -2987,23 +3263,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 }
 
 .canvas-bookmark-location-label {
-    flex: 0 0 auto;
-    color: var(--text-normal);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.2;
-}
-
-.canvas-bookmark-location-row-permanent .canvas-bookmark-location-label {
-    color: #059669;
-}
-
-.canvas-bookmark-location-row-temp .canvas-bookmark-location-label {
-    color: #2563eb;
-}
-
-.canvas-bookmark-location-row-compact .canvas-bookmark-location-label {
-    font-size: 10px;
+    display: none !important;
 }
 
 .canvas-bookmark-location-chip-row {
@@ -3020,12 +3280,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 }
 
 .canvas-bookmark-location-chip-row-break {
-    flex: 0 0 100%;
-    width: 100%;
-    height: 0;
-    margin: 0;
-    padding: 0;
-    pointer-events: none;
+    display: none !important;
 }
 
 .canvas-bookmark-location-more,
@@ -3611,23 +3866,79 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 }
 
 /* ==================== 关键词高亮 ==================== */
-.search-results-panel mark {
-    background: #fff0b3;
-    color: #4a3b00;
-    padding: 0 3px;
-    border-radius: 3px;
-    box-shadow: inset 0 -1px 0 rgba(181, 130, 0, 0.62);
+.search-results-panel mark,
+#searchGridDetailsBubble mark,
+#searchGridDetailsBubble .canvas-grid-bubble-body mark,
+.search-result-note-bubble-content mark,
+.search-result-url-bubble-content mark,
+.canvas-search-tabulator mark,
+.tabulator .tabulator-cell mark,
+.canvas-table-cell-title mark,
+.canvas-table-note-text mark,
+.canvas-table-url-text mark,
+.canvas-table-path-text mark,
+.canvas-table-tag-chip mark {
+    background: #fff0b3 !important;
+    color: #4a3b00 !important;
+    padding: 0 3px !important;
+    border-radius: 3px !important;
+    box-shadow: inset 0 -1px 0 rgba(181, 130, 0, 0.62) !important;
+    font-weight: 600 !important;
+    display: inline !important;
+}
+
+[data-theme="dark"] .search-results-panel mark,
+[data-theme="dark"] #searchGridDetailsBubble mark,
+[data-theme="dark"] #searchGridDetailsBubble .canvas-grid-bubble-body mark,
+[data-theme="dark"] .search-result-note-bubble-content mark,
+[data-theme="dark"] .search-result-url-bubble-content mark,
+[data-theme="dark"] .canvas-search-tabulator mark,
+[data-theme="dark"] .tabulator .tabulator-cell mark,
+[data-theme="dark"] .canvas-table-cell-title mark,
+[data-theme="dark"] .canvas-table-note-text mark,
+[data-theme="dark"] .canvas-table-url-text mark,
+[data-theme="dark"] .canvas-table-path-text mark,
+[data-theme="dark"] .canvas-table-tag-chip mark {
+    background: #705900 !important;
+    color: #fff4c2 !important;
+    box-shadow: inset 0 -1px 0 rgba(244, 210, 92, 0.68) !important;
+}
+
+.search-results-panel .search-result-path-hint mark,
+#searchGridDetailsBubble .search-result-path-hint mark {
+    font-weight: 700 !important;
+}
+
+/* 表格模式便签与网址字段交互样式 */
+.canvas-table-note-wrapper {
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+
+.canvas-table-note-wrapper:hover {
+    background: rgba(245, 158, 11, 0.12) !important;
+}
+
+.canvas-table-note-wrapper.bubble-active {
+    background: rgba(245, 158, 11, 0.22) !important;
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.4) !important;
+}
+
+.canvas-table-url-text {
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.canvas-table-url-text:hover {
+    color: var(--accent-primary) !important;
+    text-decoration: underline;
+}
+
+.canvas-table-url-text.bubble-active {
+    color: var(--accent-primary) !important;
     font-weight: 600;
-}
-
-[data-theme="dark"] .search-results-panel mark {
-    background: #705900;
-    color: #fff4c2;
-    box-shadow: inset 0 -1px 0 rgba(244, 210, 92, 0.68);
-}
-
-.search-results-panel .search-result-path-hint mark {
-    font-weight: 700;
 }
 
 /* =============================================================================
