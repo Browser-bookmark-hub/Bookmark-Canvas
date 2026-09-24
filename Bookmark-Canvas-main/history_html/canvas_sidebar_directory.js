@@ -3,7 +3,7 @@
 
   const ROOT_ID = 'canvasDirectoryTree';
   const CANVAS_CONTENT_ID = 'canvasContent';
-  const REFRESH_INTERVAL_MS = 1200;
+  const REFRESH_INTERVAL_MS = 60000;
   const REFRESH_DEFER_MS = 180;
   const PREVIEW_LIMIT = 30;
   const STRIP_HTML_CACHE_LIMIT = 1200;
@@ -60,12 +60,15 @@
   let refreshDeferredTimer = null;
   let pendingForceRefresh = false;
   let pendingPreferStoredFolderStates = false;
+  let hasPendingRefreshOnVisible = false;
   let canvasObserver = null;
   let observedCanvasContent = null;
   let lastFingerprint = '';
   let activeNodeKey = '';
   let nodeActionMap = new Map();
   let nodeDeleteActionMap = new Map();
+  let directoryNodeDataMap = new Map();
+  const DIRECTORY_UNLOAD_DELAY_MS = 15000;
   let pendingDeleteUiKey = '';
 
   function getLang() {
@@ -2667,15 +2670,21 @@
 
       const childrenWrap = document.createElement('div');
       childrenWrap.className = 'canvas-dir-children';
-      if (Array.isArray(node.children) && node.children.length) {
-        node.children.forEach((child) => {
-          childrenWrap.appendChild(renderNode(child, openFolderKeys));
-        });
+      if (isOpen) {
+        if (Array.isArray(node.children) && node.children.length) {
+          node.children.forEach((child) => {
+            childrenWrap.appendChild(renderNode(child, openFolderKeys));
+          });
+        } else {
+          const empty = document.createElement('div');
+          empty.className = 'canvas-dir-empty';
+          empty.textContent = t('暂无条目', 'No entries');
+          childrenWrap.appendChild(empty);
+        }
+        details.dataset.lazyLoaded = 'true';
       } else {
-        const empty = document.createElement('div');
-        empty.className = 'canvas-dir-empty';
-        empty.textContent = t('暂无条目', 'No entries');
-        childrenWrap.appendChild(empty);
+        // 初始折叠状态：不挂载子 DOM，待用户点击展开时按需懒加载水合
+        details.dataset.lazyLoaded = 'false';
       }
 
       details.appendChild(childrenWrap);
@@ -2740,6 +2749,117 @@
     }
 
     return item;
+  }
+
+  function indexDirectoryNodes(nodes, targetRoot = null) {
+    const map = new Map();
+    function walk(node) {
+      if (!node || !node.key) return;
+      map.set(node.key, node);
+      if (Array.isArray(node.children)) {
+        node.children.forEach(walk);
+      }
+    }
+    if (Array.isArray(nodes)) {
+      nodes.forEach(walk);
+    }
+    if (targetRoot) {
+      targetRoot.__directoryNodeDataMap__ = map;
+    }
+    directoryNodeDataMap = map;
+    return map;
+  }
+
+  function getDirectoryNodeDataMap(details) {
+    const root = details && details.closest ? (details.closest('.canvas-directory-tree') || details.closest('.canvas-dir-root')) : null;
+    if (root && root.__directoryNodeDataMap__) {
+      return root.__directoryNodeDataMap__;
+    }
+    return directoryNodeDataMap;
+  }
+
+  function hydrateFolderChildren(details, openFolderKeys) {
+    if (!details || details.dataset.lazyLoaded === 'true') return;
+    const nodeKey = details.dataset.nodeKey;
+    if (!nodeKey) return;
+    const nodeMap = getDirectoryNodeDataMap(details);
+    const node = nodeMap ? nodeMap.get(nodeKey) : null;
+    const childrenWrap = details.querySelector(':scope > .canvas-dir-children');
+    if (!childrenWrap || !node) return;
+
+    childrenWrap.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    const currentOpenKeys = openFolderKeys || collectOpenFolderKeys(details.closest('.canvas-dir-root'));
+
+    if (Array.isArray(node.children) && node.children.length) {
+      node.children.forEach((child) => {
+        frag.appendChild(renderNode(child, currentOpenKeys));
+      });
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'canvas-dir-empty';
+      empty.textContent = t('暂无条目', 'No entries');
+      frag.appendChild(empty);
+    }
+
+    childrenWrap.appendChild(frag);
+    details.dataset.lazyLoaded = 'true';
+    updateActiveState(details);
+  }
+
+  function scheduleFolderUnload(details) {
+    if (!details || details.dataset.lazyLoaded !== 'true') return;
+    if (details.__unloadTimer__) {
+      clearTimeout(details.__unloadTimer__);
+    }
+    details.__unloadTimer__ = setTimeout(() => {
+      details.__unloadTimer__ = null;
+      if (!details.open && document.body.contains(details)) {
+        const childrenWrap = details.querySelector(':scope > .canvas-dir-children');
+        if (childrenWrap) {
+          clearAllFolderUnloadTimers(childrenWrap);
+          childrenWrap.querySelectorAll('[data-node-key]').forEach((el) => {
+            const k = el.dataset.nodeKey;
+            if (k) {
+              nodeActionMap.delete(k);
+              nodeDeleteActionMap.delete(k);
+            }
+          });
+          childrenWrap.innerHTML = '';
+          details.dataset.lazyLoaded = 'false';
+        }
+      }
+    }, DIRECTORY_UNLOAD_DELAY_MS);
+  }
+
+  function handleFolderToggle(details) {
+    if (!details || !details.classList.contains('canvas-dir-folder')) return;
+    const isOpen = !!details.open;
+    if (details.__lastProcessedOpen__ === isOpen) return;
+    details.__lastProcessedOpen__ = isOpen;
+    const key = details.dataset.nodeKey;
+    if (key) {
+      saveFolderOpenState(key, isOpen);
+    }
+    if (isOpen) {
+      if (details.__unloadTimer__) {
+        clearTimeout(details.__unloadTimer__);
+        details.__unloadTimer__ = null;
+      }
+      hydrateFolderChildren(details);
+    } else {
+      scheduleFolderUnload(details);
+    }
+  }
+
+  function clearAllFolderUnloadTimers(root) {
+    if (!root) return;
+    root.querySelectorAll('.canvas-dir-folder').forEach((el) => {
+      if (el.__unloadTimer__) {
+        clearTimeout(el.__unloadTimer__);
+        el.__unloadTimer__ = null;
+      }
+    });
   }
 
   function updateActiveState(root) {
@@ -3700,6 +3820,7 @@
         event.preventDefault();
         event.stopPropagation();
         folder.open = !folder.open;
+        handleFolderToggle(folder);
       }
       return;
     }
@@ -3799,10 +3920,7 @@
     root.addEventListener('toggle', (event) => {
       const details = event.target;
       if (details && details.classList.contains('canvas-dir-folder')) {
-        const key = details.dataset.nodeKey;
-        if (key) {
-          saveFolderOpenState(key, details.open);
-        }
+        handleFolderToggle(details);
       }
     }, true);
   }
@@ -3810,15 +3928,19 @@
   function renderPreviewDirectory(root, previewState, options = {}) {
     if (!root) return;
     applyDirectoryColorVars(root);
+    bindRootEvents(root);
+    clearAllFolderUnloadTimers(root);
     nodeActionMap = new Map();
     nodeDeleteActionMap = new Map();
 
     const openFolderKeys = new Set();
     const previewNodes = buildDirectoryDataForPreview(previewState, options);
+    indexDirectoryNodes(previewNodes, root);
 
     root.innerHTML = '';
     const container = document.createElement('div');
     container.className = 'canvas-dir-root';
+    container.__directoryNodeDataMap__ = root.__directoryNodeDataMap__;
     previewNodes.forEach((node) => {
       container.appendChild(renderNode(node, openFolderKeys));
     });
@@ -3836,6 +3958,7 @@
       ? new Set()
       : collectOpenFolderKeys(root);
     const nodes = buildDirectoryData();
+    indexDirectoryNodes(nodes, root);
     const fingerprint = JSON.stringify({
       lang: getLang(),
       nodes: serializeNodesForFingerprint(nodes)
@@ -3847,12 +3970,14 @@
     }
 
     lastFingerprint = fingerprint;
+    clearAllFolderUnloadTimers(root);
     nodeActionMap = new Map();
     nodeDeleteActionMap = new Map();
     root.innerHTML = '';
 
     const container = document.createElement('div');
     container.className = 'canvas-dir-root';
+    container.__directoryNodeDataMap__ = root.__directoryNodeDataMap__;
     nodes.forEach((node) => {
       container.appendChild(renderNode(node, openFolderKeys));
     });
@@ -3896,9 +4021,40 @@
     }, REFRESH_DEFER_MS);
   }
 
+  function isSidebarDirectoryVisible() {
+    if (typeof document === 'undefined') return false;
+    if (document.visibilityState === 'hidden') return false;
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && (sidebar.classList.contains('compact') || (sidebar.dataset && sidebar.dataset.collapseState === 'compact'))) {
+      return false;
+    }
+    const root = document.getElementById(ROOT_ID);
+    if (!root || !root.isConnected) return false;
+    if (root.style.display === 'none') return false;
+    const navTabs = root.closest('.nav-tabs');
+    if (navTabs && navTabs.style.display === 'none') return false;
+    if (root.offsetWidth === 0 && root.offsetHeight === 0 && root.offsetParent === null) {
+      return false;
+    }
+    return true;
+  }
+
+  function onBecameVisible() {
+    ensureCanvasObserver();
+    if (!isSidebarDirectoryVisible()) return;
+    if (hasPendingRefreshOnVisible || !lastFingerprint) {
+      hasPendingRefreshOnVisible = false;
+      queueRefresh();
+    }
+  }
+
   function queueRefresh(options = {}) {
     if (options.force) pendingForceRefresh = true;
     if (options.preferStoredFolderStates) pendingPreferStoredFolderStates = true;
+    if (!isSidebarDirectoryVisible()) {
+      hasPendingRefreshOnVisible = true;
+      return;
+    }
     if (lastFingerprint && isCanvasInteractionActiveForDirectory()) {
       scheduleDeferredRefresh();
       return;
@@ -3910,6 +4066,12 @@
       const preferStoredFolderStates = pendingPreferStoredFolderStates;
       pendingForceRefresh = false;
       pendingPreferStoredFolderStates = false;
+      if (!isSidebarDirectoryVisible()) {
+        hasPendingRefreshOnVisible = true;
+        if (force) pendingForceRefresh = true;
+        if (preferStoredFolderStates) pendingPreferStoredFolderStates = true;
+        return;
+      }
       if (lastFingerprint && isCanvasInteractionActiveForDirectory()) {
         if (force) pendingForceRefresh = true;
         if (preferStoredFolderStates) pendingPreferStoredFolderStates = true;
@@ -5064,6 +5226,7 @@
       panelHist.style.display = 'none';
       if (navTabs) navTabs.classList.remove('history-tab-active');
       localStorage.setItem('canvasSidebarActiveTab', 'directory');
+      onBecameVisible();
     });
     
     tabHist.addEventListener('click', () => {
@@ -5095,6 +5258,29 @@
 
   }
 
+  function setupStorageChangeListener() {
+    const storageApi = (typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.onChanged)
+      ? chrome.storage.onChanged
+      : ((typeof browser !== 'undefined' && browser && browser.storage && browser.storage.onChanged)
+        ? browser.storage.onChanged
+        : null);
+
+    if (!storageApi) return;
+
+    try {
+      storageApi.addListener((changes, areaName) => {
+        if (areaName !== 'local') return;
+        const relevantPrefixes = ['bcs:', 'canvas', 'bookmark', 'group-', 'preferredLang'];
+        const hasRelevantChange = Object.keys(changes).some((k) =>
+          relevantPrefixes.some((prefix) => k.startsWith(prefix))
+        );
+        if (hasRelevantChange) {
+          queueRefresh();
+        }
+      });
+    } catch (_) {}
+  }
+
   function init() {
     if (initialized) {
       queueRefresh({ force: true });
@@ -5109,17 +5295,66 @@
 
     try { setupSidebarTabs(); } catch (_) {}
 
+    // Event-driven: 监听 BCS 及底层的持久化存储变动（跨标签页、跨侧边栏秒级响应）
+    setupStorageChangeListener();
+
+    // 低频休眠兜底心跳（60秒一次，且仅在目录真实可见时执行，彻底消除1.2秒高频空转）
     refreshTimer = global.setInterval(() => {
-      ensureCanvasObserver();
-      queueRefresh();
+      if (isSidebarDirectoryVisible()) {
+        ensureCanvasObserver();
+        queueRefresh();
+      }
     }, REFRESH_INTERVAL_MS);
+
+    // 页面可见性感知：切换回前台时，自动补齐休眠期间积攒的刷新
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        onBecameVisible();
+      }
+    });
+
+    global.addEventListener('focus', () => {
+      onBecameVisible();
+    });
+
+    // 监听侧边栏折叠/展开过渡
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && typeof MutationObserver !== 'undefined') {
+      try {
+        const sidebarObserver = new MutationObserver(() => {
+          if (isSidebarDirectoryVisible()) {
+            onBecameVisible();
+          }
+        });
+        sidebarObserver.observe(sidebar, {
+          attributes: true,
+          attributeFilter: ['class', 'data-collapse-state']
+        });
+      } catch (_) {}
+    }
+
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    if (sidebarToggle) {
+      sidebarToggle.addEventListener('click', () => {
+        global.setTimeout(() => {
+          if (isSidebarDirectoryVisible()) {
+            onBecameVisible();
+          }
+        }, 60);
+      });
+    }
 
     global.addEventListener('storage', (event) => {
       const isFolderStateChange = !event || event.key === FOLDER_OPEN_STATES_KEY;
-      queueRefresh({
-        force: true,
-        preferStoredFolderStates: isFolderStateChange
-      });
+      if (isFolderStateChange) {
+        queueRefresh({
+          force: true,
+          preferStoredFolderStates: true
+        });
+      } else {
+        // 非目录折叠状态的存储变动（例如其他Tab写的bcs信号）：走普通比对刷新，避免暴力闪烁
+        queueRefresh();
+      }
       try { renderHistoryPanel(); } catch (_) {}
     });
 
@@ -5128,11 +5363,20 @@
     });
 
     global.addEventListener('canvas-other-settings-updated', () => {
+      queueRefresh();
       try { renderHistoryPanel(); } catch (_) {}
     });
 
     global.addEventListener('canvas-maximized-state-change', () => {
       try { renderHistoryPanel(); } catch (_) {}
+    });
+
+    global.addEventListener('shared-state-updated', () => {
+      queueRefresh();
+    });
+
+    global.addEventListener('bcs:language-changed', () => {
+      queueRefresh({ force: true });
     });
 
     document.addEventListener('click', (e) => {
