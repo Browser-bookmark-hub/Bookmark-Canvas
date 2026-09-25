@@ -1765,6 +1765,7 @@ let searchPanelShowFrame = null;
 function showSearchResultsPanel() {
     const panel = getSearchResultsPanel();
     if (!panel) return;
+    try { ensurePermanentBookmarkDateCacheLoaded(); } catch (_) {}
 
     const isSuggestions = (panel.dataset && panel.dataset.panelType === 'canvas-suggestions') ||
         !!panel.querySelector('.canvas-suggestions-hide-btn') ||
@@ -2568,8 +2569,8 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
-    // Handle Location More Button in Grid Card or Table (opens details bubble)
-    const gridLocationMoreBtn = e.target.closest('.canvas-grid-location-more-btn');
+    // Handle Location & Date More Button in Grid Card or Table (opens details bubble)
+    const gridLocationMoreBtn = e.target.closest('.canvas-grid-location-more-btn, .canvas-table-loc-more-btn, .canvas-table-date-more-btn, .canvas-grid-date-more-btn');
     if (gridLocationMoreBtn) {
         if (e._canvasHandled) return;
         e._canvasHandled = true;
@@ -3776,7 +3777,7 @@ function getOrCreateGridGroupPopover() {
 
             document.addEventListener('pointerdown', (e) => {
                 if (!isGridGroupPopoverVisible()) return;
-                if (e.target.closest('#searchGridGroupPopover') || e.target.closest('.canvas-bookmark-group-actions, .canvas-bookmark-group-toggle, .canvas-bookmark-group-count, .canvas-bookmark-match-count, .canvas-bookmark-details-toggle, .canvas-grid-location-more-btn, .canvas-table-loc-more-btn, .canvas-table-tag-more-btn, .canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle, #searchGridDetailsBubble')) {
+                if (e.target.closest('#searchGridGroupPopover') || e.target.closest('.canvas-bookmark-group-actions, .canvas-bookmark-group-toggle, .canvas-bookmark-group-count, .canvas-bookmark-match-count, .canvas-bookmark-details-toggle, .canvas-grid-location-more-btn, .canvas-table-loc-more-btn, .canvas-table-tag-more-btn, .canvas-table-date-more-btn, .canvas-grid-date-more-btn, .canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle, #searchGridDetailsBubble')) {
                     return;
                 }
                 hideGridGroupPopover();
@@ -3940,6 +3941,11 @@ function showGridGroupPopover(targetBtn, groupId) {
                 noteHtml = `<div class="canvas-grid-group-child-note"><i class="fas fa-pencil-alt" style="margin-right:4px; font-size:9px; opacity:0.7;"></i>${highlightedChildNote}</div>`;
             }
 
+            const childCreationTimeInfo = getBookmarkItemCreationTime(child);
+            const childCreationTimeHtml = childCreationTimeInfo && childCreationTimeInfo.text
+                ? `<div class="canvas-grid-group-child-time" style="display:flex; align-items:center; gap:4px; font-size:10px; color:var(--text-secondary); line-height:1.3; opacity:0.85;"><i class="far fa-clock" style="font-size:9.5px; opacity:0.75;"></i><span>${isZh ? '创建时间: ' : 'Created: '}${escapeHtml(childCreationTimeInfo.text)}</span></div>`
+                : '';
+
             listHtml += `
                 <div class="canvas-grid-group-child-row ${child.nodeType === 'folder' ? 'is-folder' : 'is-bookmark'}"
                      role="button" tabindex="0"
@@ -3962,6 +3968,7 @@ function showGridGroupPopover(targetBtn, groupId) {
                             <i class="fas fa-folder" style="color:#2563eb; font-size:10px;"></i>
                             <span>${pathPartsHtml}</span>
                         </div>
+                        ${childCreationTimeHtml}
                         ${noteHtml}
                     </div>
                 </div>
@@ -4232,7 +4239,7 @@ function getOrCreateGridDetailsBubble() {
 
             document.addEventListener('pointerdown', (e) => {
                 if (!isGridDetailsBubbleVisible()) return;
-                if (e.target.closest('#searchGridDetailsBubble') || e.target.closest('.canvas-bookmark-details-toggle, .canvas-grid-location-more-btn, .canvas-table-loc-more-btn, .canvas-table-tag-more-btn, .canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle, .canvas-table-note-btn, .canvas-table-note-wrapper, .canvas-table-url-btn, .canvas-table-url-text, .canvas-bookmark-group-actions, .canvas-bookmark-group-toggle, .canvas-bookmark-group-count, .canvas-bookmark-match-count, #searchGridGroupPopover')) {
+                if (e.target.closest('#searchGridDetailsBubble') || e.target.closest('.canvas-bookmark-details-toggle, .canvas-grid-location-more-btn, .canvas-table-loc-more-btn, .canvas-table-tag-more-btn, .canvas-table-date-more-btn, .canvas-grid-date-more-btn, .canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle, .canvas-table-note-btn, .canvas-table-note-wrapper, .canvas-table-url-btn, .canvas-table-url-text, .canvas-bookmark-group-actions, .canvas-bookmark-group-toggle, .canvas-bookmark-group-count, .canvas-bookmark-match-count, #searchGridGroupPopover')) {
                     return;
                 }
                 hideGridDetailsBubble();
@@ -4407,6 +4414,9 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
             if ((!item.parentPath && !item.path) && rowData.path) {
                 item = Object.assign({}, item, { parentPath: rowData.path, path: rowData.path });
             }
+            if (!item.dateAdded && rowData.dateAdded) {
+                item = Object.assign({}, item, { dateAdded: rowData.dateAdded });
+            }
         }
     }
     const bubble = getOrCreateGridDetailsBubble();
@@ -4451,7 +4461,8 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
     const bodyEl = bubble.querySelector('.canvas-grid-bubble-body');
     if (bodyEl) {
         let bodyHtml = '';
-        const isLocationBtn = !!(targetBtn && targetBtn.closest('.canvas-grid-location-more-btn:not(.canvas-table-tag-more-btn), .canvas-table-loc-more-btn:not(.canvas-table-tag-more-btn)'));
+        const isDateMoreBtn = !!(targetBtn && targetBtn.closest('.canvas-table-date-more-btn, .canvas-grid-date-more-btn'));
+        const isLocationBtn = !isDateMoreBtn && !!(targetBtn && targetBtn.closest('.canvas-grid-location-more-btn:not(.canvas-table-tag-more-btn), .canvas-table-loc-more-btn:not(.canvas-table-tag-more-btn)'));
         const isTagMoreBtn = !!(targetBtn && targetBtn.closest('.canvas-table-tag-more-btn'));
         const isPathEllipsisBtn = !!(targetBtn && targetBtn.closest('.canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle'));
         const isNoteBtn = !!(targetBtn && targetBtn.closest('.canvas-table-note-btn, .canvas-table-note-wrapper'));
@@ -4472,6 +4483,52 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
             if (!bodyHtml.trim()) {
                 bodyHtml = `<div style="color:var(--text-tertiary); font-size:11px; padding:4px 0;">${isZh ? '暂无更多分布位置' : 'No additional locations'}</div>`;
             }
+        } else if (isDateMoreBtn) {
+            // 点击创建时间前缀加二/加三等更多按钮：展示全部项的创建时间分布列表（配对应分布位置徽章）
+            const datesList = getBookmarkItemCreationTimesList(item || (rowData && rowData.rawItem) || rowData);
+            if (datesList.length > 0) {
+                const rowsHtml = datesList.map((entry, idx) => {
+                    const locLabel = escapeHtml(entry.label || (entry.source === 'permanent' ? '#A' : (isZh ? '临时' : 'Temp')));
+                    const locTitle = escapeHtml(entry.title || (entry.source === 'permanent' ? (isZh ? '永久栏目' : 'Permanent') : (isZh ? '临时栏目' : 'Temp Section')));
+                    const isPerm = entry.source === 'permanent';
+                    const chipClass = isPerm ? 'search-loc-chip search-loc-chip-permanent' : 'search-loc-chip search-loc-chip-temp';
+                    const chipStyle = entry.color ? (isPerm ? `border-left-color:${entry.color};` : `border-color:${entry.color}40; background:${entry.color}15; color:${entry.color};`) : '';
+
+                    const timeText = entry.text || (isZh ? '未知时间' : 'Unknown');
+                    const highlightedTime = (typeof highlightSearchKeywords === 'function' && query)
+                        ? highlightSearchKeywords(timeText, query)
+                        : escapeHtml(timeText);
+
+                    return `<div class="search-result-date-bubble-row" data-sub-id="${escapeHtml(entry.id || '')}" style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 0; border-bottom:1px solid var(--border-color, rgba(128,128,128,0.15)); font-size:12px;">
+                        <div style="display:flex; align-items:center; gap:6px; min-width:0; flex-shrink:1;">
+                            <span class="${chipClass}"
+                                data-loc-id="${escapeHtml(entry.id || '')}"
+                                data-loc-source="${escapeHtml(entry.source || 'permanent')}"
+                                data-loc-section="${escapeHtml(entry.sectionId || '')}"
+                                data-copy-id="${escapeHtml(entry.copyId || '')}"
+                                style="${chipStyle} font-size:11px; padding:2px 7px; border-radius:4px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer;"
+                                title="${escapeHtml(isZh ? `定位至「${locTitle}」` : `Locate "${locTitle}"`)}">
+                                ${locLabel ? `<span style="font-weight:700; margin-right:4px;">${locLabel}</span>` : ''}${locTitle}
+                            </span>
+                        </div>
+                        <div class="search-result-date-bubble-time" style="display:flex; align-items:center; gap:5px; font-family:var(--font-mono, monospace); color:var(--text-primary); font-size:11.5px; flex-shrink:0;">
+                            <i class="far fa-clock" style="color:var(--text-tertiary); font-size:10.5px;"></i>
+                            <span>${highlightedTime}</span>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                bodyHtml = `<div class="search-result-dates-bubble-list" style="display:flex; flex-direction:column; padding:2px 0;">
+                    <div style="font-size:11px; font-weight:600; color:var(--text-tertiary); margin-bottom:6px; display:flex; align-items:center; gap:5px;">
+                        <i class="far fa-calendar-alt" style="font-size:11px; color:var(--accent-primary);"></i>
+                        <span>${isZh ? `全部 ${datesList.length} 处分布的创建时间` : `All ${datesList.length} creation times`}</span>
+                    </div>
+                    ${rowsHtml}
+                </div>`;
+            }
+            if (!bodyHtml.trim()) {
+                bodyHtml = `<div style="color:var(--text-tertiary); font-size:11px; padding:4px 0;">${isZh ? '暂无更多创建时间' : 'No additional creation times'}</div>`;
+            }
         } else if (isTagMoreBtn) {
             // 点击标签加一/加二等更多按钮：直接展示全部标签芯片列表（芯片文本支持关键词高亮）
             const allTags = getBookmarkItemAllTags(item, rowData, targetBtn);
@@ -4490,7 +4547,7 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
                 bodyHtml = `<div style="color:var(--text-tertiary); font-size:11px; padding:4px 0;">${isZh ? '暂无更多标签' : 'No additional tags'}</div>`;
             }
         } else if (isPathEllipsisBtn) {
-            // 点击路径三个点按钮：展示完整路径各级文件夹及书签说明信息（不显示网址链接，完整多行展示各级路径，各字段均支持关键词高亮）
+            // 点击路径三个点按钮：展示完整路径各级文件夹及书签说明信息（不显示网址链接与创建时间，完整多行展示各级路径，各字段均支持关键词高亮）
             let rawPaths = [];
             if (Array.isArray(item && item.parentPaths) && item.parentPaths.length) {
                 rawPaths = item.parentPaths.map(p => String(p || '').trim()).filter(Boolean);
@@ -4523,7 +4580,7 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
             }
 
             let extraInfoHtml = '';
-            // 不显示网址链接（用户明确要求路径说明气泡中仅展示完整路径、标签与便签，不出现链接）
+            // 不显示网址链接与创建时间（用户明确要求路径说明气泡中仅展示完整路径、标签与便签，不要出现创建时间）
             const allTags = getBookmarkItemAllTags(item, rowData, targetBtn);
             if (allTags.length > 0) {
                 const tagsChips = allTags.map(t => {
@@ -4585,11 +4642,21 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
                 bodyHtml = `<div style="color:var(--text-tertiary); font-size:11px; padding:4px 0;">${isZh ? '暂无网址链接' : 'No URL available'}</div>`;
             }
         } else {
-            // 点击信息按钮：展示书签详细信息（目录路径、网址链接、标签、便签备注），不需要出现永久栏目以及临时栏目
+            // 点击信息按钮：展示书签详细信息（目录路径、创建时间、网址链接、标签、便签备注），不需要出现永久栏目以及临时栏目
             if (itemRow) {
                 const detailsCollapsible = itemRow.querySelector('.canvas-bookmark-details-collapsible');
                 if (detailsCollapsible && detailsCollapsible.innerHTML.trim()) {
                     bodyHtml += detailsCollapsible.innerHTML;
+                    if (!bodyHtml.includes('search-result-creation-time-row') && item) {
+                        const timeHtml = renderBookmarkCreationTimeHtml(item, isZh);
+                        if (timeHtml) {
+                            if (bodyHtml.includes('search-result-path-hint')) {
+                                bodyHtml = bodyHtml.replace(/(<\/div>\s*)(?=<div class="search-result-link-row"|<div class="search-result-tags-row"|<div class="search-result-note-snippet"|$)/, `$1${timeHtml}`);
+                            } else {
+                                bodyHtml = timeHtml + bodyHtml;
+                            }
+                        }
+                    }
                 } else {
                     // 兜底（针对没有 collapsible 的条目，如 MD 卡片正文摘要等）
                     const matchEl = itemRow.querySelector('.search-result-match:not(.canvas-bookmark-group-summary)');
@@ -4603,6 +4670,10 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
                 if (item.parentPath || (Array.isArray(item.parentPaths) && item.parentPaths.length)) {
                     const pList = Array.isArray(item.parentPaths) ? item.parentPaths : [item.parentPath];
                     fallbackHtml += `<div class="search-result-path-hint" style="margin-bottom:4px;"><i class="fas fa-folder" style="color:#2563eb; margin-right:4px;"></i>${escapeHtml(pList.join(' / '))}</div>`;
+                }
+                const creationTimeHtml = renderBookmarkCreationTimeHtml(item, isZh);
+                if (creationTimeHtml) {
+                    fallbackHtml += creationTimeHtml;
                 }
                 if (item.url) {
                     fallbackHtml += `<div class="search-result-link-row" style="margin-bottom:4px;"><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-primary); word-break:break-all;">${escapeHtml(item.url)}</a></div>`;
@@ -4635,6 +4706,50 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
             }
         }
         bodyEl.innerHTML = bodyHtml;
+        if (!isPathEllipsisBtn && !isNoteBtn && !isUrlBtn && !isLocationBtn && !isTagMoreBtn && !isDateMoreBtn && !bodyHtml.includes('search-result-creation-time-row') && item) {
+            const targetId = String((item && (item.id || (item.rawItem && item.rawItem.id))) || safeItemId || '').trim();
+            if (targetId && (item.source === 'permanent' || (item.rawItem && item.rawItem.source === 'permanent') || !item.source)) {
+                fetchPermanentBookmarkDateSingle(targetId, (ts) => {
+                    if (ts && bubble.classList.contains('visible')) {
+                        const curBody = bubble.querySelector('.canvas-grid-bubble-body');
+                        if (curBody && !curBody.querySelector('.search-result-creation-time-row')) {
+                            const timeInfo = getBookmarkItemCreationTime({ dateAdded: ts });
+                            const tRowHtml = renderBookmarkCreationTimeHtml(timeInfo, isZh);
+                            if (tRowHtml) {
+                                const pathHint = curBody.querySelector('.search-result-path-hint, .canvas-grid-group-child-path');
+                                if (pathHint) {
+                                    pathHint.insertAdjacentHTML('afterend', tRowHtml);
+                                } else {
+                                    curBody.insertAdjacentHTML('afterbegin', tRowHtml);
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        if (isDateMoreBtn && item) {
+            const curDatesList = getBookmarkItemCreationTimesList(item || (rowData && rowData.rawItem) || rowData);
+            const missingPerm = curDatesList.filter(d => d.source === 'permanent' && (!d.timestamp || !d.text) && d.id);
+            if (missingPerm.length > 0) {
+                missingPerm.forEach(m => {
+                    fetchPermanentBookmarkDateSingle(m.id, (ts) => {
+                        if (ts && bubble.classList.contains('visible')) {
+                            const curBody = bubble.querySelector('.canvas-grid-bubble-body');
+                            if (curBody) {
+                                const timeSpan = curBody.querySelector(`.search-result-date-bubble-row[data-sub-id="${CSS.escape(m.id)}"] .search-result-date-bubble-time span`);
+                                if (timeSpan) {
+                                    const timeInfo = getBookmarkItemCreationTime({ dateAdded: ts });
+                                    if (timeInfo && timeInfo.text) {
+                                        timeSpan.textContent = timeInfo.text;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+        }
     }
 
     // Positioning
@@ -4682,9 +4797,14 @@ function isSameGridBubbleTargetButton(btnA, btnB, currentKey, newKey) {
     if (btnA === btnB) return true;
     if (!currentKey || currentKey !== newKey) return false;
 
-    // 位置更多按钮（排除标签更多按钮）
-    const isLocA = (btnA.classList.contains('canvas-grid-location-more-btn') || btnA.classList.contains('canvas-table-loc-more-btn')) && !btnA.classList.contains('canvas-table-tag-more-btn');
-    const isLocB = (btnB.classList.contains('canvas-grid-location-more-btn') || btnB.classList.contains('canvas-table-loc-more-btn')) && !btnB.classList.contains('canvas-table-tag-more-btn');
+    // 创建时间更多按钮
+    const isDateA = btnA.classList.contains('canvas-table-date-more-btn') || btnA.classList.contains('canvas-grid-date-more-btn');
+    const isDateB = btnB.classList.contains('canvas-table-date-more-btn') || btnB.classList.contains('canvas-grid-date-more-btn');
+    if (isDateA && isDateB) return true;
+
+    // 位置更多按钮（排除标签更多按钮、创建时间更多按钮）
+    const isLocA = (btnA.classList.contains('canvas-grid-location-more-btn') || btnA.classList.contains('canvas-table-loc-more-btn')) && !btnA.classList.contains('canvas-table-tag-more-btn') && !isDateA;
+    const isLocB = (btnB.classList.contains('canvas-grid-location-more-btn') || btnB.classList.contains('canvas-table-loc-more-btn')) && !btnB.classList.contains('canvas-table-tag-more-btn') && !isDateB;
     if (isLocA && isLocB) return true;
 
     // 标签更多按钮
@@ -7627,7 +7747,9 @@ function collectTempSectionSearchItemSnapshots(section) {
                 namedPath: pathStack.length ? pathStack.join(' > ') : '',
                 tags: getInlineTagSearchSignature(it.tags),
                 note: normalizeNoteForSearch(it.note),
-                noteColor: normalizeNoteColorForSearch(it.noteColor)
+                noteColor: normalizeNoteColorForSearch(it.noteColor),
+                dateAdded: (typeof it.dateAdded !== 'undefined' && it.dateAdded !== null) ? it.dateAdded : null,
+                rawItem: it
             });
         }
 
@@ -7685,6 +7807,8 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
         w: metrics.w,
         h: metrics.h,
         color: color,
+        dateAdded: (typeof section.dateAdded !== 'undefined' && section.dateAdded !== null) ? section.dateAdded : (section.createdAt || null),
+        rawItem: section,
         bookmarkCount: Array.isArray(section.items) ? section.items.length : 0,
         __title: title.toLowerCase(),
         __label: label.toLowerCase(),
@@ -7772,6 +7896,8 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
                     tags: inlineTags,
                     note: inlineNote,
                     noteColor: inlineNoteColor,
+                    dateAdded: (typeof it.dateAdded !== 'undefined' && it.dateAdded !== null) ? it.dateAdded : null,
+                    rawItem: it,
                     __title: itemTitle.toLowerCase(),
                     __url: itemUrl.toLowerCase(),
                     __path: namedPath.toLowerCase(),
@@ -7917,6 +8043,9 @@ function parsePermanentSectionSlice(db, coords, isMultiColumnMode) {
     const permanentSectionId = 'permanentSection';
     const permColor = '#10b981';
 
+    const rootDateAdded = (typeof permanentBookmarkDateCache !== 'undefined' && permanentBookmarkDateCache)
+        ? (permanentBookmarkDateCache.get('1') || permanentBookmarkDateCache.get('0') || null)
+        : null;
     const mainTitle = (currentLang === 'en' ? 'Permanent Column' : '永久栏目') + ' #A';
     const mainItem = {
         id: permanentSectionId,
@@ -7927,6 +8056,7 @@ function parsePermanentSectionSlice(db, coords, isMultiColumnMode) {
         displayIndex: 1,
         hasCopies: hasCopies,
         color: permColor,
+        dateAdded: rootDateAdded,
         __title: ((currentLang === 'en' ? 'permanent column' : '永久栏目') + ' #a a').toLowerCase(),
         __label: '#a',
         __alpha: 'a',
@@ -8250,6 +8380,12 @@ function parsePermanentTreeSlice(db, bookmarkOrderRef) {
 
             if (url || title) {
                 const namedPath = pathStack.length ? pathStack.join(' > ') : '';
+                const cachedDate = (typeof permanentBookmarkDateCache !== 'undefined' && permanentBookmarkDateCache)
+                    ? permanentBookmarkDateCache.get(String(node.id))
+                    : null;
+                const nodeDateAdded = (typeof node.dateAdded !== 'undefined' && node.dateAdded !== null && node.dateAdded !== 0)
+                    ? node.dateAdded
+                    : (cachedDate || null);
                 const bItem = {
                     id: String(node.id),
                     type: 'bookmark-item',
@@ -8259,6 +8395,9 @@ function parsePermanentTreeSlice(db, bookmarkOrderRef) {
                     url,
                     parentId: node.parentId ? String(node.parentId) : '',
                     namedPath,
+                    dateAdded: nodeDateAdded,
+                    dateGroupModified: (typeof node.dateGroupModified !== 'undefined' && node.dateGroupModified !== null) ? node.dateGroupModified : null,
+                    rawItem: node,
                     __title: title.toLowerCase(),
                     __url: url.toLowerCase(),
                     __path: namedPath.toLowerCase(),
@@ -10370,6 +10509,346 @@ function getBookmarkItemParentPathForSearch(item) {
     return parts.join(' > ');
 }
 
+function getCanvasBookmarksApiForSearch() {
+    try {
+        if (typeof browserAPI !== 'undefined' && browserAPI && browserAPI.bookmarks) return browserAPI.bookmarks;
+    } catch (_) {}
+    try {
+        if (typeof chrome !== 'undefined' && chrome && chrome.bookmarks) return chrome.bookmarks;
+    } catch (_) {}
+    try {
+        if (typeof browser !== 'undefined' && browser && browser.bookmarks) return browser.bookmarks;
+    } catch (_) {}
+    return null;
+}
+
+const permanentBookmarkDateCache = new Map();
+let permanentBookmarkDateLoadingPromise = null;
+
+function ensurePermanentBookmarkDateCacheLoaded() {
+    if (permanentBookmarkDateCache.size > 0) {
+        return Promise.resolve(permanentBookmarkDateCache);
+    }
+    if (permanentBookmarkDateLoadingPromise) {
+        return permanentBookmarkDateLoadingPromise;
+    }
+    const api = getCanvasBookmarksApiForSearch();
+    if (!api || typeof api.getTree !== 'function') {
+        return Promise.resolve(permanentBookmarkDateCache);
+    }
+    permanentBookmarkDateLoadingPromise = new Promise((resolve) => {
+        try {
+            api.getTree((tree) => {
+                if (Array.isArray(tree) && tree[0]) {
+                    const stack = [tree[0]];
+                    while (stack.length) {
+                        const node = stack.pop();
+                        if (node) {
+                            if (node.id && node.dateAdded) {
+                                permanentBookmarkDateCache.set(String(node.id), Number(node.dateAdded));
+                            }
+                            if (Array.isArray(node.children)) {
+                                for (let i = node.children.length - 1; i >= 0; i--) {
+                                    stack.push(node.children[i]);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Backfill to search db if available
+                if (typeof canvasSearchDb !== 'undefined' && canvasSearchDb && Array.isArray(canvasSearchDb.bookmarkIndex)) {
+                    for (const bItem of canvasSearchDb.bookmarkIndex) {
+                        if (bItem && bItem.source === 'permanent' && (!bItem.dateAdded || bItem.dateAdded === 0) && bItem.id) {
+                            const d = permanentBookmarkDateCache.get(String(bItem.id));
+                            if (d) bItem.dateAdded = d;
+                        }
+                    }
+                }
+                // Backfill to current tabulator instance if rendered
+                if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+                    try {
+                        const rows = canvasSearchTabulatorInstance.getRows();
+                        if (Array.isArray(rows) && rows.length > 0) {
+                            rows.forEach(row => {
+                                const data = row.getData();
+                                if ((data.type === 'bookmark-item' || data.type === 'bookmark' || data.type === 'permanent') && (!data.dateAdded || data.dateAdded === 0) && data.id) {
+                                    const ts = permanentBookmarkDateCache.get(String(data.id));
+                                    if (ts) {
+                                        const timeInfo = getBookmarkItemCreationTime({ dateAdded: ts });
+                                        row.update({ dateAdded: ts, dateAddedText: timeInfo.text });
+                                    }
+                                }
+                            });
+                        }
+                    } catch (_) {}
+                }
+                resolve(permanentBookmarkDateCache);
+            });
+        } catch (_) {
+            resolve(permanentBookmarkDateCache);
+        }
+    });
+    return permanentBookmarkDateLoadingPromise;
+}
+
+function fetchPermanentBookmarkDateSingle(chromeId, callback) {
+    if (!chromeId) return;
+    const strId = String(chromeId);
+    if (permanentBookmarkDateCache.has(strId)) {
+        if (typeof callback === 'function') callback(permanentBookmarkDateCache.get(strId));
+        return;
+    }
+    const api = getCanvasBookmarksApiForSearch();
+    if (!api || typeof api.get !== 'function') return;
+    try {
+        api.get(strId, (nodes) => {
+            if (nodes && nodes[0] && nodes[0].dateAdded) {
+                const ts = Number(nodes[0].dateAdded);
+                permanentBookmarkDateCache.set(strId, ts);
+                if (typeof callback === 'function') callback(ts);
+            }
+        });
+    } catch (_) {}
+}
+
+// 自动后台预热永久书签时间快照
+try { ensurePermanentBookmarkDateCacheLoaded(); } catch (_) {}
+
+function parseTempItemIdCreationDateForSearch(id) {
+    if (typeof parseTempItemIdCreationDate === 'function') {
+        const parsed = parseTempItemIdCreationDate(id);
+        if (parsed) return parsed;
+    }
+    const match = String(id || '').trim().match(/^tempId_(\d{4})(\d{2})(\d{2})_hash_[a-z0-9]{5,}$/i);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+        return null;
+    }
+    return {
+        year,
+        month,
+        day,
+        timestamp: date.getTime()
+    };
+}
+
+function getBookmarkItemCreationTime(item) {
+    if (!item) return { timestamp: 0, text: '', dateOnly: '' };
+    let target = item;
+    if (item.type === 'bookmark-group' && Array.isArray(item.targetItems) && item.targetItems.length > 0) {
+        target = item.targetItems[0];
+    }
+    const candidates = [target, item, target && target.rawItem, item && item.rawItem].filter(Boolean);
+
+    let rawDate = null;
+    let tempParsed = null;
+
+    for (const cand of candidates) {
+        if (cand.dateAdded !== undefined && cand.dateAdded !== null && cand.dateAdded !== '' && cand.dateAdded !== 0) {
+            rawDate = cand.dateAdded;
+            break;
+        }
+        if (cand.createdAt !== undefined && cand.createdAt !== null && cand.createdAt !== '' && cand.createdAt !== 0) {
+            rawDate = cand.createdAt;
+            break;
+        }
+        if (cand.createTime !== undefined && cand.createTime !== null && cand.createTime !== '' && cand.createTime !== 0) {
+            rawDate = cand.createTime;
+            break;
+        }
+    }
+
+    if (!rawDate && (item.source === 'permanent' || (target && target.source === 'permanent') || !item.source)) {
+        const candId = String((target && target.id) || item.id || '').trim();
+        if (candId && permanentBookmarkDateCache.has(candId)) {
+            rawDate = permanentBookmarkDateCache.get(candId);
+        }
+        if (!rawDate && candId) {
+            try {
+                if (typeof getCachedCurrentTreeIndex === 'function') {
+                    const idx = getCachedCurrentTreeIndex();
+                    const node = idx && idx.get ? idx.get(candId) : null;
+                    if (node && node.dateAdded) {
+                        rawDate = node.dateAdded;
+                    }
+                }
+            } catch (_) {}
+        }
+    }
+
+    if (!rawDate) {
+        for (const cand of candidates) {
+            const candId = cand.id || cand.nodeId;
+            if (candId) {
+                const parsed = parseTempItemIdCreationDateForSearch(candId);
+                if (parsed) {
+                    tempParsed = parsed;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (rawDate) {
+        let ts = 0;
+        if (typeof rawDate === 'number' && Number.isFinite(rawDate)) {
+            ts = rawDate;
+        } else if (typeof rawDate === 'string') {
+            const num = Number(rawDate);
+            if (Number.isFinite(num) && num > 0) {
+                ts = num;
+            } else {
+                const parsed = Date.parse(rawDate);
+                if (Number.isFinite(parsed) && parsed > 0) ts = parsed;
+            }
+        }
+        if (ts > 0) {
+            try {
+                const date = new Date(ts);
+                if (!isNaN(date.getTime())) {
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const hours = String(date.getHours()).padStart(2, '0');
+                    const minutes = String(date.getMinutes()).padStart(2, '0');
+                    const seconds = String(date.getSeconds()).padStart(2, '0');
+                    return {
+                        timestamp: ts,
+                        text: `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`,
+                        dateOnly: `${year}/${month}/${day}`
+                    };
+                }
+            } catch (_) {}
+        }
+    }
+
+    if (tempParsed) {
+        const dateText = `${tempParsed.year}/${String(tempParsed.month).padStart(2, '0')}/${String(tempParsed.day).padStart(2, '0')}`;
+        return {
+            timestamp: tempParsed.timestamp,
+            text: dateText,
+            dateOnly: dateText,
+            isDateOnly: true
+        };
+    }
+
+    return { timestamp: 0, text: '', dateOnly: '' };
+}
+
+function getBookmarkItemCreationTimesList(item) {
+    if (!item) return [];
+    const raw = (item && item.rawItem) ? item.rawItem : item;
+
+    let targetList = [];
+    if (Array.isArray(raw.targetItems) && raw.targetItems.length > 0) {
+        targetList = raw.targetItems;
+    } else if (Array.isArray(raw.childItems) && raw.childItems.length > 0) {
+        targetList = raw.childItems;
+    } else if (Array.isArray(item.targetItems) && item.targetItems.length > 0) {
+        targetList = item.targetItems;
+    } else if (Array.isArray(item.childItems) && item.childItems.length > 0) {
+        targetList = item.childItems;
+    } else if (Array.isArray(raw.locations) && raw.locations.length > 0 && raw.locations.some(l => l.originalItem)) {
+        targetList = raw.locations.map(l => l.originalItem || l);
+    } else if (Array.isArray(item.locations) && item.locations.length > 0 && item.locations.some(l => l.originalItem)) {
+        targetList = item.locations.map(l => l.originalItem || l);
+    } else if (Array.isArray(raw.locations) && raw.locations.length > 1) {
+        targetList = raw.locations;
+    } else if (Array.isArray(item.locations) && item.locations.length > 1) {
+        targetList = item.locations;
+    }
+
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+
+    if (!targetList.length) {
+        const singleInfo = getBookmarkItemCreationTime(raw);
+        if (singleInfo && singleInfo.text) {
+            return [{
+                item: raw,
+                id: String(raw.id || ''),
+                timestamp: singleInfo.timestamp,
+                text: singleInfo.text,
+                dateOnly: singleInfo.dateOnly,
+                label: raw.label || raw.sectionLabel || '',
+                title: raw.title || raw.sectionTitle || '',
+                source: raw.source || 'permanent',
+                color: raw.color || ''
+            }];
+        }
+        return [];
+    }
+
+    const locations = Array.isArray(raw.locations) ? raw.locations : (Array.isArray(item.locations) ? item.locations : []);
+    const results = [];
+
+    targetList.forEach((sub, idx) => {
+        if (!sub) return;
+        const timeInfo = getBookmarkItemCreationTime(sub);
+        const loc = locations[idx] || null;
+
+        let label = (loc && loc.label) || sub.label || sub.sectionLabel || '';
+        let title = (loc && loc.title) || sub.title || sub.sectionTitle || '';
+        let source = (loc && loc.source) || sub.source || 'permanent';
+        let color = (loc && loc.color) || sub.color || (source === 'permanent' ? '#059669' : '#2563eb');
+        let sectionId = (loc && loc.sectionId) || sub.sectionId || '';
+        let copyId = (loc && loc.copyId) || sub.copyId || null;
+        let id = String(sub.id || (loc && loc.id) || '');
+
+        if (source === 'permanent' && !label) {
+            label = '#A';
+        }
+        if (!title) {
+            title = source === 'permanent' ? (isZh ? `永久栏目 ${label}` : `Permanent ${label}`).trim() : (sub.sectionTitle || (isZh ? '临时栏目' : 'Temp Section'));
+        }
+
+        results.push({
+            item: sub,
+            id,
+            timestamp: timeInfo.timestamp,
+            text: timeInfo.text,
+            dateOnly: timeInfo.dateOnly,
+            label,
+            title,
+            source,
+            color,
+            sectionId,
+            copyId
+        });
+    });
+
+    return results;
+}
+
+function renderBookmarkCreationTimeHtml(item, isZh = true) {
+    const timeInfo = (item && typeof item === 'object' && item.text) ? item : getBookmarkItemCreationTime(item);
+    if (!timeInfo || !timeInfo.text) return '';
+    const label = isZh ? '创建时间:' : 'Created:';
+    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+    const safeText = (typeof highlightSearchKeywords === 'function' && query)
+        ? highlightSearchKeywords(timeInfo.text, query)
+        : escapeHtml(timeInfo.text);
+
+    const datesList = getBookmarkItemCreationTimesList(item);
+    let moreBtnHtml = '';
+    if (datesList.length > 1) {
+        const remainCount = datesList.length - 1;
+        const itemId = String((item && (item.id || (item.rawItem && item.rawItem.id))) || '');
+        const itemIndex = String((item && item.index !== undefined) ? item.index : '');
+        moreBtnHtml = `<button type="button" class="canvas-grid-location-more-btn canvas-table-loc-more-btn canvas-grid-date-more-btn canvas-table-date-more-btn" data-item-id="${escapeHtml(itemId)}" data-item-index="${escapeHtml(itemIndex)}" title="${escapeHtml(isZh ? `查看全部 ${datesList.length} 项创建时间` : `View all ${datesList.length} creation times`)}" aria-label="${escapeHtml(isZh ? `还有 ${remainCount} 项创建时间` : `${remainCount} more creation times`)}">+${remainCount}</button>`;
+    }
+
+    return `<div class="search-result-creation-time-row" style="display:flex; align-items:center; gap:5px; font-size:11px; line-height:1.4; color:var(--text-secondary); margin-top:2px; margin-bottom:2px;">
+        <i class="far fa-clock" style="color:var(--text-tertiary); font-size:10.5px; flex-shrink:0;"></i>
+        <span class="search-result-creation-time-label" style="opacity:0.85; flex-shrink:0;">${label}</span>
+        ${moreBtnHtml}
+        <span class="search-result-creation-time-val" style="font-family:var(--font-mono, monospace); color:var(--text-primary); font-size:11px;">${safeText}</span>
+    </div>`;
+}
+
 function getBookmarkItemParentPathForSearchScope(item, scope = null) {
     const parentPath = getBookmarkItemParentPathForSearch(item);
     if (!parentPath) return '';
@@ -10674,6 +11153,11 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
         g.header.parentPaths = uniqueParentPaths;
         g.header.parentPath = uniqueParentPaths.length > 0 ? uniqueParentPaths[0] : '';
         g.header.hasMultipleParentPath = uniqueParentPaths.length > 1;
+        const primeItem = (g.firstChild && g.firstChild.item) || (g.children[0] && g.children[0].item) || null;
+        if (primeItem) {
+            g.header.dateAdded = primeItem.dateAdded !== undefined ? primeItem.dateAdded : null;
+            g.header.rawItem = primeItem.rawItem || primeItem;
+        }
     }
 
     groups.sort((a, b) => {
@@ -10834,7 +11318,8 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
             locations: canonicalLocations,
             targetItems: sortedTargetItems,
             childItems: sortedTargetItems,
-            matchesCount: targetItems.length
+            matchesCount: targetItems.length,
+            dateAdded: g.header.dateAdded !== undefined ? g.header.dateAdded : (sortedTargetItems[0] ? sortedTargetItems[0].dateAdded : null)
         });
         results.push(headerItem);
     }
@@ -13998,6 +14483,9 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             iconUrl = item.targetItems[0].favicon || item.targetItems[0].favIconUrl || item.targetItems[0].icon || '';
         }
 
+        // 创建时间提取
+        const creationInfo = getBookmarkItemCreationTime(item);
+
         let typeLabel = '';
         let locationLabel = '';
         let summaryText = '';
@@ -14066,8 +14554,11 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             note,
             path: parentPath,
             url,
+            dateAdded: creationInfo.timestamp,
+            dateAddedText: creationInfo.text,
             type: isCardGroup ? 'group' : item.type,
             rawItem: item,
+            targetItems: item.targetItems || item.childItems || null,
             typeLabel,
             locationLabel,
             summary: summaryText,
@@ -14661,8 +15152,8 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
         {
             title: isZh ? "位置" : "Locations",
             field: "locations",
-            minWidth: 140,
-            width: 180,
+            minWidth: 90,
+            width: 130,
             resizable: true,
             headerSort: false,
             formatter: (cell) => {
@@ -14728,7 +15219,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
             title: isZh ? "路径" : "Path",
             field: "path",
             minWidth: 120,
-            width: 160,
+            width: 150,
             resizable: true,
             headerSort: true,
             formatter: (cell) => {
@@ -14829,8 +15320,8 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
         {
             title: isZh ? "标签" : "Tags",
             field: "tags",
-            minWidth: 110,
-            width: 140,
+            minWidth: 100,
+            width: 130,
             resizable: true,
             headerSort: false,
             formatter: (cell) => {
@@ -14886,8 +15377,8 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
         {
             title: isZh ? "笔记" : "Note",
             field: "note",
-            minWidth: 100,
-            width: 130,
+            minWidth: 90,
+            width: 120,
             resizable: true,
             headerSort: false,
             formatter: (cell) => {
@@ -14922,10 +15413,58 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
             }
         },
         {
+            title: isZh ? "创建时间" : "Created At",
+            field: "dateAdded",
+            minWidth: 165,
+            width: 185,
+            resizable: true,
+            headerSort: true,
+            sorter: (a, b, aRow, bRow, column, dir) => {
+                const numA = Number(a) || 0;
+                const numB = Number(b) || 0;
+                if (numA === numB) return 0;
+                if (!numA) return dir === "desc" ? -1 : 1;
+                if (!numB) return dir === "desc" ? 1 : -1;
+                return numA - numB;
+            },
+            formatter: (cell) => {
+                const d = cell.getData();
+                const timeText = d.dateAddedText || '';
+                if (!timeText) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const datesList = getBookmarkItemCreationTimesList(d.rawItem || d);
+                let moreBtnHtml = '';
+                if (datesList.length > 1) {
+                    const remainCount = datesList.length - 1;
+                    moreBtnHtml = `<button type="button" class="canvas-grid-location-more-btn canvas-table-loc-more-btn canvas-table-date-more-btn" data-item-id="${escapeHtml(String((d && d.id) || ''))}" data-item-index="${escapeHtml(String((d && d.index) || ''))}" title="${escapeHtml(isZh ? `查看全部 ${datesList.length} 项创建时间` : `View all ${datesList.length} creation times`)}" aria-label="${escapeHtml(isZh ? `还有 ${remainCount} 项创建时间` : `${remainCount} more creation times`)}">+${remainCount}</button>`;
+                }
+                return `<div class="canvas-table-date-cell">${moreBtnHtml}<span class="canvas-table-date-text" title="${escapeHtml(timeText)}">${escapeHtml(timeText)}</span></div>`;
+            },
+            cellClick: (e, cell) => {
+                const dateMoreBtn = e.target.closest('.canvas-table-date-more-btn, .canvas-grid-date-more-btn');
+                if (dateMoreBtn) {
+                    if (e._canvasHandled) return;
+                    e._canvasHandled = true;
+                    try {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    } catch (_) { }
+                    const d = cell.getData();
+                    if (d) {
+                        dateMoreBtn._rowData = d;
+                        dateMoreBtn._tabRow = cell.getRow() ? (typeof cell.getRow().getElement === 'function' ? cell.getRow().getElement() : null) : null;
+                    }
+                    const itemId = String((d && d.id) || dateMoreBtn.getAttribute('data-item-id') || '').trim();
+                    const itemIndex = d ? d.index : -1;
+                    toggleGridItemDetailsBubble(dateMoreBtn, itemId, itemIndex);
+                    return;
+                }
+            }
+        },
+        {
             title: isZh ? "网址链接" : "URL",
             field: "url",
-            minWidth: 130,
-            width: 200,
+            minWidth: 120,
+            width: 180,
             resizable: true,
             headerSort: true,
             formatter: (cell) => {
@@ -16095,9 +16634,11 @@ function renderCanvasSearchResults(results, options = {}) {
         `;
 
         const childTagsHtml = childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '';
+        const childCreationTimeHtml = renderBookmarkCreationTimeHtml(child, isZh);
         
         let childDetailsContentHtml = '';
         childDetailsContentHtml += pathHtml;
+        if (childCreationTimeHtml) childDetailsContentHtml += childCreationTimeHtml;
         childDetailsContentHtml += urlHtml;
         if (childTagsHtml) childDetailsContentHtml += childTagsHtml;
         if (childNoteSnippetHtml) childDetailsContentHtml += childNoteSnippetHtml;
@@ -16895,9 +17436,12 @@ function renderCanvasSearchResults(results, options = {}) {
                     </div>
                 `;
 
+                const creationTimeHtml = renderBookmarkCreationTimeHtml(item, isZh);
+
                 const detailsHtml = `
                     <div class="canvas-bookmark-details-collapsible" style="display: ${detailsExpanded ? 'flex' : 'none'}; flex-direction: column; width: 100%; min-width: 0; margin-top: 4px; gap: 4px;">
                         ${parentPathHtml}
+                        ${creationTimeHtml}
                         ${urlHtml}
                         ${tagsRowHtml}
                         ${noteSnippetHtml}
@@ -17174,7 +17718,9 @@ function renderCanvasSearchResults(results, options = {}) {
                 compact: compactBookmarkToolbar,
                 disableLocationJumpBadges
             });
+            const creationTimeHtml = renderBookmarkCreationTimeHtml(item, isZh);
             if (pathHtml) detailsContentHtml += pathHtml;
+            if (creationTimeHtml) detailsContentHtml += creationTimeHtml;
             if (linkHtml) detailsContentHtml += linkHtml;
             if (tagsRowHtml) detailsContentHtml += tagsRowHtml;
             if (itemNoteSnippetHtml) detailsContentHtml += itemNoteSnippetHtml;

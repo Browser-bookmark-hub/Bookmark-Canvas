@@ -1261,6 +1261,11 @@ function __normalizePermanentTreeSnapshotForLocalStorage(rawTree, options = {}) 
         if (typeof nodeInput.index === 'number' && Number.isFinite(nodeInput.index)) output.index = nodeInput.index;
         output.title = rawTitle || (isBookmark ? rawUrl : 'Folder');
 
+        const dateAdded = __parseCanvasProtocolDateValue(nodeInput.dateAdded);
+        if (dateAdded > 0) output.dateAdded = dateAdded;
+        const dateGroupModified = __parseCanvasProtocolDateValue(nodeInput.dateGroupModified);
+        if (dateGroupModified > 0) output.dateGroupModified = dateGroupModified;
+
         if (isBookmark) {
             output.url = rawUrl;
             return output;
@@ -1359,6 +1364,8 @@ function __buildPermanentSyncTreeNode(nodeInput, context = {}) {
     const output = { title };
     if (id) output.id = id;
     if (parentId) output.parentId = parentId;
+    const dateAdded = __parseCanvasProtocolDateValue(nodeInput.dateAdded);
+    if (dateAdded > 0) output.dateAdded = dateAdded;
     if (isBookmark) {
         output.url = rawUrl;
         return output;
