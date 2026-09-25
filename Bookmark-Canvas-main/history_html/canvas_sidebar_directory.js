@@ -4615,9 +4615,9 @@
       
     let html = `
       <div class="sidebar-anchor-container${isAutoDisabledOrEmpty ? ' auto-inactive' : ''}">
-        <!-- Section 1: Pinned Anchors -->
+        <!-- Section 1: Manual Anchors -->
         <div class="sidebar-section-header manual-anchor-header">
-          <span class="sidebar-section-title">${isEn ? 'Pinned Anchors' : '固定锚点'}</span>
+          <span class="sidebar-section-title">${isEn ? 'Manual Anchors' : '手动锚点'}</span>
           <div class="sidebar-header-actions">
             <button class="sidebar-action-btn${isFull ? ' is-full' : ''}${isCardFullscreen ? ' is-disabled' : ''}" id="addManualAnchorBtn" title="${isEn ? 'Add Anchor' : '添加锚点'}"${isCardFullscreen ? ' disabled' : ''}>
               <i class="fas fa-plus"></i>
@@ -4628,7 +4628,7 @@
           </div>
         </div>
         
-        <!-- Inline Settings Panel for Pinned Anchors -->
+        <!-- Inline Settings Panel for Manual Anchors -->
         <div class="manual-anchor-settings-panel" id="manualAnchorInlineSettings" style="${manualAnchorSettingsOpen ? '' : 'display: none;'}">
           <div class="settings-inline-row" style="display: flex; justify-content: space-between; align-items: center;">
             <span class="settings-inline-span">${isEn ? 'Max capacity:' : '最大记录数量：'}</span>
@@ -4644,7 +4644,7 @@
     if (savedSlots.length === 0) {
       html += `
         <div class="history-empty-tip">
-          ${isEn ? 'No pinned anchors yet.' : '暂无固定锚点'}
+          ${isEn ? 'No manual anchors yet.' : '暂无手动锚点'}
         </div>
       `;
     } else {
@@ -4779,7 +4779,7 @@
             <div class="anchor-slot-header">
               <span class="anchor-slot-name" title="${displayName}">${displayName}</span>
               <div class="anchor-slot-actions">
-                <button class="anchor-slot-btn pin-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Pin to slot' : '固定到槽位'}"${isCardFullscreen ? ' disabled' : ''}>
+                <button class="anchor-slot-btn pin-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Pin to slot' : '保存到槽位'}"${isCardFullscreen ? ' disabled' : ''}>
                   <i class="fas fa-thumbtack"></i>
                 </button>
                 <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isEn ? 'Delete record' : '删除记录'}">
@@ -4890,8 +4890,8 @@
           handleSlotAction('save', emptyIndex);
         } else {
           const msg = isEn 
-            ? 'Pinned anchors are full. You can increase the maximum capacity in settings.' 
-            : '固定锚点已满。您可以在右侧设置中增加最大记录上限。';
+            ? 'Manual anchors are full. You can increase the maximum capacity in settings.' 
+            : '手动锚点已满。您可以在右侧设置中增加最大记录上限。';
           if (typeof global.showToast === 'function') {
             global.showToast(msg);
           } else {
@@ -5126,8 +5126,8 @@
           
           if (duplicate) {
             const msg = isEn 
-              ? `Already exists as pinned anchor: "${duplicate.name}"` 
-              : `已存在于固定锚点中，名称为：“${duplicate.name}”`;
+              ? `Already exists as manual anchor: "${duplicate.name}"` 
+              : `已存在于手动锚点中，名称为：“${duplicate.name}”`;
             if (typeof global.showToast === 'function') {
               global.showToast(msg);
             } else {
@@ -5139,8 +5139,8 @@
           const emptyIndex = slots.indexOf(null);
           if (emptyIndex === -1) {
             const msg = isEn 
-              ? 'Pinned anchors are full. Please increase capacity in settings or delete one.' 
-              : '固定锚点已满。请在设置中增加最大记录数量，或者清除已有锚点。';
+              ? 'Manual anchors are full. Please increase capacity in settings or delete one.' 
+              : '手动锚点已满。请在设置中增加最大记录数量，或者清除已有锚点。';
             if (typeof global.showToast === 'function') {
               global.showToast(msg);
             } else {

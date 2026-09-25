@@ -2560,7 +2560,7 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     autoRecordAnchor: false, // 自动记录视口锚点
     autoRecordAnchorInterval: 15, // 停留多少秒记录一次锚点
     autoRecordAnchorLimit: 5, // 自动记录的最大上限
-    manualAnchorLimit: 5 // 固定锚点最大数量
+    manualAnchorLimit: 5 // 手动锚点最大数量
 };
 
 const DEFAULT_PERF_BASELINE = {
@@ -4372,7 +4372,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <h3>搜索</h3>
 <ul>
 <li><strong>书签模式</strong>：搜索书签标题、URL、文件夹名称和 #标签</li>
-<li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（固定槽位/自动视口）等元素的序号、标题、组名、坐标和时间</li>
+<li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（手动槽位/自动锚点）等元素的序号、标题、组名、坐标和时间</li>
 <li><strong>说明模式</strong>：搜索栏目说明、空白卡片文本和连接线标签</li>
 </ul>
 
@@ -4654,7 +4654,7 @@ JSON or HTML backup files exported by these projects can be directly **dragged**
 
 ### 搜索
 - **书签模式**：搜索书签标题、URL、文件夹名称和 #标签
-- **卡片（组）模式**：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（固定槽位/自动视口）等元素的序号、标题、组名、坐标和时间
+- **卡片（组）模式**：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（手动槽位/自动锚点）等元素的序号、标题、组名、坐标和时间
 - **说明模式**：搜索栏目说明、空白卡片文本和连接线标签
 
 ---
