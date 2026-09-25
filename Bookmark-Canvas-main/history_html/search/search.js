@@ -3046,10 +3046,14 @@ function handleSearchResultsPanelClick(e) {
         } catch (_) { }
 
         const type = String(structureTypeBtn.dataset.type || '');
-        if (type !== 'card' && type !== 'group') return;
+        if (type !== 'all' && type !== 'card' && type !== 'group' && type !== 'anchor') return;
         if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
 
-        searchUiState.structureTypeFilter = type;
+        if (type === 'all' || searchUiState.structureTypeFilter === type) {
+            searchUiState.structureTypeFilter = null;
+        } else {
+            searchUiState.structureTypeFilter = type;
+        }
         renderCanvasSearchResults(searchUiState.resultSource || [], {
             view: 'canvas',
             query: searchUiState.query,
@@ -3176,7 +3180,14 @@ function handleSearchResultsPanelClick(e) {
 
         if (copyId) opts.copyId = copyId;
 
-        // Priority 0: Non-bookmark canvas elements (Group, Temp Section, Permanent Section, MD Node, Edge)
+        // Priority 0: Non-bookmark canvas elements (Group, Temp Section, Permanent Section, MD Node, Edge, Anchor)
+        if (locSource === 'anchor' || (item && item.type === 'anchor')) {
+            if (typeof navigateToCanvasAnchorTarget === 'function') {
+                const targetAnchor = item || (canvasSearchDb && canvasSearchDb.itemById && canvasSearchDb.itemById.get(locId));
+                if (targetAnchor) navigateToCanvasAnchorTarget(targetAnchor);
+            }
+            return;
+        }
         if (locSource === 'group' || (item && item.type === 'group')) {
             locateCanvasGroupSearchResult(item || { id: locId });
             return;
@@ -3329,12 +3340,36 @@ function highlightSearchKeywords(text, query) {
     if (!rawTokens.length) return safeText;
 
     // 过滤去重，剔除独立特殊模式符号（如 #、*、.、..、...），允许 #tag 或 *note 高亮其实际词，避免纯点号错误高亮省略号
-    const uniqueTokens = Array.from(new Set(rawTokens))
+    let uniqueTokens = Array.from(new Set(rawTokens))
         .filter(t => !['#', '*'].includes(t) && !/^\.+$/.test(t))
         .map(t => (t.startsWith('#') || t.startsWith('*')) ? t.slice(1) : t)
         .filter(t => t && !/^\.+$/.test(t));
 
     if (!uniqueTokens.length) return safeText;
+
+    // 增强锚点与槽位汉字/阿拉伯数字双向映射高亮
+    // 如搜索「一」或「槽位一」，也能高亮目标里的「1」或「槽位 1」；搜索「1」能高亮「一」
+    const cnDigits = { '一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' };
+    const arDigits = { '1': '一', '2': '二', '3': '三', '4': '四', '5': '五', '6': '六', '7': '七', '8': '八', '9': '九', '10': '十' };
+    const expandedTokens = new Set(uniqueTokens);
+    uniqueTokens.forEach(t => {
+        if (cnDigits[t]) expandedTokens.add(cnDigits[t]);
+        if (arDigits[t]) expandedTokens.add(arDigits[t]);
+        const slotMatch = t.match(/^槽位\s*([一二三四五六七八九十1-9])$/);
+        if (slotMatch) {
+            const digit = slotMatch[1];
+            if (cnDigits[digit]) {
+                expandedTokens.add(`槽位 ${cnDigits[digit]}`);
+                expandedTokens.add(`槽位${cnDigits[digit]}`);
+                expandedTokens.add(cnDigits[digit]);
+            } else if (arDigits[digit]) {
+                expandedTokens.add(`槽位 ${arDigits[digit]}`);
+                expandedTokens.add(`槽位${arDigits[digit]}`);
+                expandedTokens.add(arDigits[digit]);
+            }
+        }
+    });
+    uniqueTokens = Array.from(expandedTokens);
 
     // 按长度降序排序，防止短词破坏更长的复合词（如 Java 破坏 JavaScript）
     uniqueTokens.sort((a, b) => b.length - a.length);
@@ -5595,8 +5630,8 @@ const SEARCH_MODES = [
         labelEn: 'Card (Group)',
         icon: 'fa-layer-group',
         color: 'mode-color-orange',
-        desc: '序号 (#A / A-1), 卡片(组)名字',
-        descEn: 'Index (#A / A-1), Card (Group) name'
+        desc: '序号 (#A / A-1), 卡片(组)名字、锚点',
+        descEn: 'Index (#A / A-1), Card (Group) name, Anchors'
     },
     {
         key: 'description',
@@ -7775,21 +7810,24 @@ function parseCanvasLayoutSlice(db, coords) {
         const color = getCanvasSearchNodeColor(node, '#2563eb');
         const metrics = getCanvasSearchBoxMetrics(node, color);
 
+        const effectiveTitle = title || (text ? text.replace(/[\r\n]+/g, ' ').substring(0, 100) : '');
+
         const item = {
             id: node.id,
             type: 'md-node',
             subtype: subtype,
-            title: title,
+            title: effectiveTitle,
             text: text,
             x: metrics.x,
             y: metrics.y,
             w: metrics.w,
             h: metrics.h,
             color: color,
-            __title: title.toLowerCase(),
+            __title: effectiveTitle.toLowerCase(),
             __text: text.substring(0, 3000).toLowerCase()
         };
 
+        db.structureIndex.push(item);
         db.descriptionIndex.push(item);
         db.itemById.set(node.id, item);
 
@@ -7974,6 +8012,208 @@ function parsePermanentCopySlice(copy, idx, db, coords, isMultiColumnMode) {
             sectionId: null
         };
     }
+}
+
+// ==================== 锚点搜索切片 (Anchor Slices) ====================
+
+function getCanvasManualAnchorSlotsSafe() {
+    try {
+        const raw = localStorage.getItem('canvasManualAnchorSlots');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return parsed;
+        }
+    } catch (_) { }
+    return [];
+}
+
+function getCanvasAutoAnchorHistorySafe() {
+    try {
+        const raw = localStorage.getItem('canvasNavigationHistory');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return parsed;
+        }
+    } catch (_) { }
+    return [];
+}
+
+function formatSearchAnchorZoomPercent(zoom) {
+    const val = Number(zoom);
+    if (!Number.isFinite(val) || val <= 0) return '100%';
+    const pct = val * 100;
+    const rounded = Math.round(pct * 10) / 10;
+    return `${rounded % 1 === 0 ? Math.round(rounded) : rounded.toFixed(1)}%`;
+}
+
+function formatSearchAnchorTime(timestamp, isEn) {
+    if (!timestamp) return '';
+    const dateObj = new Date(timestamp);
+    if (isNaN(dateObj.getTime())) return '';
+    const h = String(dateObj.getHours()).padStart(2, '0');
+    const min = String(dateObj.getMinutes()).padStart(2, '0');
+    const s = String(dateObj.getSeconds()).padStart(2, '0');
+    const timeShort = `${h}:${min}:${s}`;
+    if (isEn) {
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const m = monthNames[dateObj.getMonth()];
+        const d = dateObj.getDate();
+        return `${timeShort} | ${m} ${d}`;
+    } else {
+        const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const d = String(dateObj.getDate()).padStart(2, '0');
+        return `${timeShort} | ${m}月${d}日`;
+    }
+}
+
+function getCanvasAnchorSearchItems() {
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : getCurrentLangSafe()) === 'zh_CN';
+    const isEn = !isZh;
+    const items = [];
+
+    // 1. 固定/手动锚点槽位 (Manual Anchor Slots)
+    const slots = getCanvasManualAnchorSlotsSafe();
+    slots.forEach((slot, idx) => {
+        if (!slot || typeof slot !== 'object') return;
+        const slotNum = idx + 1;
+        const defaultName = isZh ? `槽位 ${slotNum}` : `Slot ${slotNum}`;
+        const rawName = String(slot.name || '').trim();
+        const title = rawName || defaultName;
+        const zoomPercent = formatSearchAnchorZoomPercent(slot.zoom);
+        const coordText = `X: ${Math.round(slot.x || 0)} | Y: ${Math.round(slot.y || 0)} | ${zoomPercent}`;
+        const timeText = slot.timestamp ? formatSearchAnchorTime(slot.timestamp, isEn) : '';
+        const id = `manual-anchor-${idx}`;
+
+        items.push({
+            id,
+            type: 'anchor',
+            anchorType: 'manual',
+            slotIndex: idx,
+            slotNumber: slotNum,
+            title,
+            rawName,
+            x: Number.isFinite(Number(slot.x)) ? Number(slot.x) : 0,
+            y: Number.isFinite(Number(slot.y)) ? Number(slot.y) : 0,
+            zoom: (Number.isFinite(Number(slot.zoom)) && Number(slot.zoom) > 0) ? Number(slot.zoom) : 1,
+            zoomPercent,
+            coordText,
+            timeText,
+            timestamp: Number(slot.timestamp) || 0,
+            color: '#0284c7',
+            locationLabel: isZh ? `槽位 ${slotNum}` : `Slot ${slotNum}`,
+            description: timeText ? `${coordText} · ${timeText}` : coordText,
+            __title: title.toLowerCase(),
+            __rawName: rawName.toLowerCase(),
+            __coords: coordText.toLowerCase(),
+            __time: timeText.toLowerCase()
+        });
+    });
+
+    // 2. 自动记录视口锚点 (Auto-saved Anchors)
+    const historyList = getCanvasAutoAnchorHistorySafe();
+    historyList.forEach((histItem, idx) => {
+        if (!histItem || typeof histItem !== 'object') return;
+        const zoomPercent = formatSearchAnchorZoomPercent(histItem.zoom);
+        const coordText = `X: ${Math.round(histItem.x || 0)} | Y: ${Math.round(histItem.y || 0)} | ${zoomPercent}`;
+        const timeText = histItem.timestamp ? formatSearchAnchorTime(histItem.timestamp, isEn) : '';
+        const defaultName = isZh ? `自动视口 ${idx + 1}` : `Auto Viewport ${idx + 1}`;
+        const rawName = String(histItem.name || '').trim();
+        const title = rawName || defaultName;
+        const id = `auto-anchor-${histItem.timestamp || idx}`;
+
+        items.push({
+            id,
+            type: 'anchor',
+            anchorType: 'auto',
+            historyIndex: idx,
+            title,
+            rawName,
+            x: Number.isFinite(Number(histItem.x)) ? Number(histItem.x) : 0,
+            y: Number.isFinite(Number(histItem.y)) ? Number(histItem.y) : 0,
+            zoom: (Number.isFinite(Number(histItem.zoom)) && Number(histItem.zoom) > 0) ? Number(histItem.zoom) : 1,
+            zoomPercent,
+            coordText,
+            timeText,
+            timestamp: Number(histItem.timestamp) || 0,
+            color: '#06b6d4',
+            locationLabel: isZh ? '自动视口' : 'Auto Viewport',
+            description: timeText ? `${coordText} · ${timeText}` : coordText,
+            __title: title.toLowerCase(),
+            __rawName: rawName.toLowerCase(),
+            __coords: coordText.toLowerCase(),
+            __time: timeText.toLowerCase()
+        });
+    });
+
+    return items;
+}
+
+function refreshCanvasAnchorSearchItems(db) {
+    if (!db || !Array.isArray(db.structureIndex)) return;
+    db.structureIndex = db.structureIndex.filter(item => item && item.type !== 'anchor');
+    const anchors = getCanvasAnchorSearchItems();
+    anchors.forEach(item => {
+        db.structureIndex.push(item);
+        if (db.itemById) {
+            db.itemById.set(item.id, item);
+        }
+    });
+}
+
+function parseCanvasAnchorSlice(db, coords) {
+    if (!db || !Array.isArray(db.structureIndex)) return;
+    const anchors = getCanvasAnchorSearchItems();
+    anchors.forEach(item => {
+        db.structureIndex.push(item);
+        if (db.itemById) {
+            db.itemById.set(item.id, item);
+        }
+        if (coords) {
+            coords[item.id] = {
+                x: item.x,
+                y: item.y,
+                w: 0,
+                h: 0,
+                color: item.color,
+                type: 'anchor',
+                copyId: null,
+                sectionId: null
+            };
+        }
+    });
+}
+
+async function navigateToCanvasAnchorTarget(item) {
+    if (!item) return false;
+    if (typeof hideSearchResultsPanel === 'function') {
+        hideSearchResultsPanel();
+    }
+    try {
+        const inputEl = document.getElementById('searchInput');
+        if (inputEl) inputEl.value = '';
+    } catch (_) {}
+
+    if (typeof isCanvasFullscreenActive === 'function' && isCanvasFullscreenActive()) {
+        if (typeof exitCanvasNodeFullscreenForSearchLocate === 'function') {
+            try {
+                await exitCanvasNodeFullscreenForSearchLocate();
+            } catch (_) {}
+        }
+    }
+
+    if (typeof window !== 'undefined' && window.CanvasModule && typeof window.CanvasModule.navigateToViewport === 'function') {
+        const targetViewport = {
+            x: Number(item.x) || 0,
+            y: Number(item.y) || 0,
+            zoom: Number(item.zoom) || 1
+        };
+        const ok = window.CanvasModule.navigateToViewport(targetViewport);
+        if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refreshNavHistoryPanel === 'function') {
+            window.CanvasSidebarDirectory.refreshNavHistoryPanel();
+        }
+        return ok !== false;
+    }
+    return false;
 }
 
 function parsePermanentTreeSlice(db, bookmarkOrderRef) {
@@ -9249,6 +9489,7 @@ function buildCanvasSearchDbSync() {
     }
 
     parsePermanentTreeSlice(db, bookmarkOrderRef);
+    parseCanvasAnchorSlice(db, coords);
 
     mergeCoordinatesIntoItemById(db, coords);
 
@@ -9553,7 +9794,29 @@ function formatSearchTitleWithWindow(rawTitle, queryText, options = {}) {
     }
 
     const lowerTitle = fullTitle.toLowerCase();
-    const tokens = q.toLowerCase().split(/\s+/).map(t => t.trim()).filter(Boolean).sort((a, b) => b.length - a.length);
+    const rawTokens = q.toLowerCase().split(/\s+/).map(t => t.trim()).filter(Boolean);
+    const tokensSet = new Set(rawTokens);
+    const cnDigits = { '一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' };
+    const arDigits = { '1': '一', '2': '二', '3': '三', '4': '四', '5': '五', '6': '六', '7': '七', '8': '八', '9': '九', '10': '十' };
+    rawTokens.forEach(t => {
+        if (t.startsWith('#') && t.length > 1) tokensSet.add(t.slice(1));
+        if (cnDigits[t]) tokensSet.add(cnDigits[t]);
+        if (arDigits[t]) tokensSet.add(arDigits[t]);
+        const slotMatch = t.match(/^槽位\s*([一二三四五六七八九十1-9])$/);
+        if (slotMatch) {
+            const digit = slotMatch[1];
+            if (cnDigits[digit]) {
+                tokensSet.add(`槽位 ${cnDigits[digit]}`);
+                tokensSet.add(`槽位${cnDigits[digit]}`);
+                tokensSet.add(cnDigits[digit]);
+            } else if (arDigits[digit]) {
+                tokensSet.add(`槽位 ${arDigits[digit]}`);
+                tokensSet.add(`槽位${arDigits[digit]}`);
+                tokensSet.add(arDigits[digit]);
+            }
+        }
+    });
+    const tokens = Array.from(tokensSet).sort((a, b) => b.length - a.length);
 
     // 查找最早匹配的 token 位置
     let matchStart = -1;
@@ -9867,32 +10130,32 @@ function scoreCanvasSearchItem(item, query, options = {}) {
             // 标签匹配（如 A-1, A-1-1）- 最高优先级
             if (item.__label) {
                 if (item.__label.startsWith(q)) score = Math.max(score, 160);
-                else if (!isSingleChar && item.__label.includes(q)) score = Math.max(score, 130);
+                else if (item.__label.includes(q)) score = Math.max(score, 130);
             }
             // 标题匹配
             if (item.__title) {
                 if (item.__title.startsWith(q)) score = Math.max(score, 150);
-                else if (!isSingleChar && item.__title.includes(q)) score = Math.max(score, 120);
+                else if (item.__title.includes(q)) score = Math.max(score, 120);
             }
             // 说明匹配
-            if (item.__description && !isSingleChar && item.__description.includes(q)) score = Math.max(score, 80);
+            if (item.__description && item.__description.includes(q)) score = Math.max(score, isSingleChar ? 50 : 80);
             break;
 
         case 'md-node':
-            // 标题匹配
+            // 标题匹配（含单字母/单汉字包含匹配）
             if (item.__title) {
                 if (item.__title.startsWith(q)) score = Math.max(score, 150);
-                else if (!isSingleChar && item.__title.includes(q)) score = Math.max(score, 120);
+                else if (item.__title.includes(q)) score = Math.max(score, 120);
             }
             // 文本内容匹配
-            if (item.__text && !isSingleChar && item.__text.includes(q)) score = Math.max(score, 90);
+            if (item.__text && item.__text.includes(q)) score = Math.max(score, isSingleChar ? 60 : 90);
             break;
 
         case 'edge':
             // 标签匹配
             if (item.__label) {
                 if (item.__label.startsWith(q)) score = Math.max(score, 140);
-                else if (!isSingleChar && item.__label.includes(q)) score = Math.max(score, 110);
+                else if (item.__label.includes(q)) score = Math.max(score, 110);
             }
             break;
 
@@ -9905,6 +10168,7 @@ function scoreCanvasSearchItem(item, query, options = {}) {
             if (item.__label) {
                 if (item.__label === q || item.__label === `#${q}`) score = Math.max(score, 250);
                 else if (item.__label.startsWith(q) || item.__label.startsWith(`#${q}`)) score = Math.max(score, 180);
+                else if (item.__label.includes(q)) score = Math.max(score, 130);
             }
             if (item.__alpha) {
                 if (item.__alpha === cleanQ) score = Math.max(score, 300);
@@ -9913,11 +10177,10 @@ function scoreCanvasSearchItem(item, query, options = {}) {
             // 标题匹配
             if (item.__title) {
                 if (item.__title.startsWith(q)) score = Math.max(score, 150);
-                else if (!isSingleChar && item.__title.includes(q)) score = Math.max(score, 130);
-                else if (isSingleChar && item.__title.includes(q)) score = Math.max(score, 100);
+                else if (item.__title.includes(q)) score = Math.max(score, 130);
             }
             // 说明匹配 (Only if in Description Mode or index contains it)
-            if (item.__description && !isSingleChar && item.__description.includes(q)) score = Math.max(score, 70);
+            if (item.__description && item.__description.includes(q)) score = Math.max(score, isSingleChar ? 50 : 70);
             break;
         }
 
@@ -9925,13 +10188,72 @@ function scoreCanvasSearchItem(item, query, options = {}) {
             // 卡片组：按 label/title 命中（#7）
             if (item.__title) {
                 if (item.__title.startsWith(q)) score = Math.max(score, 140);
-                else if (!isSingleChar && item.__title.includes(q)) score = Math.max(score, 115);
+                else if (item.__title.includes(q)) score = Math.max(score, 115);
             }
             if (item.__label) {
                 if (item.__label.startsWith(q)) score = Math.max(score, 140);
-                else if (!isSingleChar && item.__label.includes(q)) score = Math.max(score, 115);
+                else if (item.__label.includes(q)) score = Math.max(score, 115);
             }
             break;
+
+        case 'anchor': {
+            const isManual = item.anchorType === 'manual';
+            const isAuto = item.anchorType === 'auto';
+            const slotNum = item.slotNumber;
+
+            // 1. 精确槽位匹配：如 #1, #2 或 slot1, slot 1, 槽位1, 槽位 1, 1, 一, 一号槽位
+            const chineseDigits = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '十一': 11, '十二': 12 };
+            const cleanQ = q.replace(/^#/, '');
+            const qDigit = chineseDigits[cleanQ] || (cleanQ.match(/^\d+$/) ? parseInt(cleanQ, 10) : null);
+            if (isManual && slotNum) {
+                if (cleanQ === String(slotNum) || qDigit === slotNum) {
+                    score = Math.max(score, 300);
+                } else if (q === `槽位${slotNum}` || q === `槽位 ${slotNum}` || q === `slot${slotNum}` || q === `slot ${slotNum}` ||
+                           (qDigit && (q === `槽位${cleanQ}` || q === `槽位 ${cleanQ}` || q === `槽位${slotNum}`))) {
+                    score = Math.max(score, 320);
+                }
+            }
+
+            // 2. 关键词匹配类别（支持单汉字如“槽”、“位”、“锚”、“视”、“口”）
+            if (q === '锚点' || q === 'anchor' || q === 'anchors') {
+                score = Math.max(score, 200);
+            } else if (isManual && (q === '手动锚点' || q === 'manual' || q === 'manual anchor' || q === '槽位' || q === 'slot' || q === '锚' || q === '槽' || q === '位')) {
+                score = Math.max(score, 240);
+            } else if (isAuto && (q === '自动锚点' || q === '自动视口' || q === 'auto' || q === 'auto anchor' || q === 'viewport' || q === '视口' || q === '视' || q === '口' || q === '历史')) {
+                score = Math.max(score, 240);
+            }
+
+            // 3. 标题与自定义名称匹配（支持单字母、单汉字及其包含匹配）
+            if (item.__title) {
+                if (item.__title === q) {
+                    score = Math.max(score, 260);
+                } else if (item.__title.startsWith(q)) {
+                    score = Math.max(score, 200);
+                } else if (item.__title.includes(q)) {
+                    score = Math.max(score, 150);
+                }
+            }
+            if (item.__rawName) {
+                if (item.__rawName === q) {
+                    score = Math.max(score, 260);
+                } else if (item.__rawName.startsWith(q)) {
+                    score = Math.max(score, 200);
+                } else if (item.__rawName.includes(q)) {
+                    score = Math.max(score, 150);
+                }
+            }
+
+            // 4. 坐标 / 缩放匹配 (如 100%, 80%, x: 100, y: 200)
+            if (item.__coords && item.__coords.includes(q)) {
+                score = Math.max(score, isSingleChar ? 70 : 110);
+            }
+
+            // 5. 时间匹配 (如 14:20, 09月, Sep)
+            if (item.__time && item.__time.includes(q)) {
+                score = Math.max(score, isSingleChar ? 70 : 100);
+            }
+            break;
+        }
 
         case 'bookmark-item': {
             // 书签/文件夹匹配（支持多关键词，以空格分隔）；
@@ -9953,10 +10275,12 @@ function scoreCanvasSearchItem(item, query, options = {}) {
                     if (item.__title.startsWith(t)) tokenScore = Math.max(tokenScore, 140);
                     else if (item.__title.includes(t)) tokenScore = Math.max(tokenScore, 110);
                 }
-                if (!isTagToken && item.__url && !isSingleToken && item.__url.includes(t)) tokenScore = Math.max(tokenScore, 90);
+                if (!isTagToken && item.__url && item.__url.includes(t)) {
+                    tokenScore = Math.max(tokenScore, isSingleToken ? 70 : 90);
+                }
                 if (!isTagToken && item.__path) {
                     if (item.__path.startsWith(t)) tokenScore = Math.max(tokenScore, 105);
-                    else if (!isSingleToken && item.__path.includes(t)) tokenScore = Math.max(tokenScore, 95);
+                    else if (item.__path.includes(t)) tokenScore = Math.max(tokenScore, isSingleToken ? 70 : 95);
                 }
                 if (isTagToken && doesCanvasBookmarkItemTagsMatchQuery(item, t)) {
                     tokenScore = Math.max(tokenScore, 135);
@@ -11576,6 +11900,9 @@ function searchCanvasAndRender(query, options = {}) {
     }
     const previousCanvasQuery = String(searchUiState.query || '').trim().toLowerCase();
     const nextCanvasQuery = trimmedQuery.toLowerCase();
+    if (triggerSource === 'input' && previousCanvasQuery !== nextCanvasQuery) {
+        searchUiState.structureTypeFilter = null;
+    }
 
     // Determine Source Index based on Active Mode
     let sourceIndex = [];
@@ -11632,6 +11959,7 @@ function searchCanvasAndRender(query, options = {}) {
         sourceIndex = db.bookmarkIndex || [];
     } else {
         // Default to Structure (Card)
+        refreshCanvasAnchorSearchItems(db);
         sourceIndex = db.structureIndex || [];
     }
 
@@ -11725,8 +12053,8 @@ function searchCanvasAndRender(query, options = {}) {
                 continue;
             }
         } else if (searchUiState.activeMode === 'structure') {
-            // Card/Structure Mode: Permanent Sections, Temp Sections (Structure), Groups
-            if (item.type !== 'permanent-section' && item.type !== 'temp-section' && item.type !== 'group') {
+            // Card/Structure Mode: Permanent Sections, Temp Sections (Structure), Groups, Anchors
+            if (item.type !== 'permanent-section' && item.type !== 'temp-section' && item.type !== 'group' && item.type !== 'anchor') {
                 continue;
             }
         } else if (searchUiState.activeMode === 'tag') {
@@ -13545,6 +13873,7 @@ function buildCanvasTabulatorData(results, query, options = {}) {
         if (!rawTitle) {
             if (item.type === 'temp-section') rawTitle = isZh ? '临时栏目' : 'Temp Section';
             else if (item.type === 'group' || item.type === 'card-group' || item.type === 'group-result' || String(item.id || '') === 'group-aggregation-result') rawTitle = isZh ? '卡片组' : 'Card Group';
+            else if (item.type === 'anchor') rawTitle = item.anchorType === 'manual' ? (isZh ? `槽位 ${item.slotNumber}` : `Slot ${item.slotNumber}`) : (isZh ? `自动视口 ${Number(item.historyIndex >= 0 ? item.historyIndex + 1 : 1)}` : `Auto Viewport ${Number(item.historyIndex >= 0 ? item.historyIndex + 1 : 1)}`);
             else if (item.type === 'md-node') rawTitle = item.text ? item.text.substring(0, 50) : (isZh ? 'MD卡片' : 'MD Card');
             else rawTitle = isFolder ? (isZh ? '未命名文件夹' : 'Unnamed Folder') : (isZh ? '未命名书签' : 'Unnamed Bookmark');
         }
@@ -13707,6 +14036,12 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             locationLabel = item.parentGroupTitle || '';
             summaryText = item.text ? item.text.replace(/[\r\n]+/g, ' ').substring(0, 100) : (item.description || '');
             descText = item.text || item.description || '';
+        } else if (item.type === 'anchor') {
+            const isManual = item.anchorType === 'manual';
+            typeLabel = isManual ? (isZh ? '手动锚点' : 'Manual Anchor') : (isZh ? '自动视口' : 'Auto Viewport');
+            locationLabel = item.locationLabel || (isManual ? `槽位 ${item.slotNumber}` : (isZh ? '自动视口' : 'Auto Viewport'));
+            summaryText = item.coordText || '';
+            descText = item.description || '';
         } else if (item.type === 'edge') {
             typeLabel = isZh ? '连接线' : 'Edge';
             const fromName = typeof getCanvasSearchNodeDisplayName === 'function' ? getCanvasSearchNodeDisplayName(item.fromId, isZh) : (item.fromId || '');
@@ -13791,6 +14126,13 @@ function getCanvasDirectoryItemIconHtml(type, item = {}) {
         case 'edge': {
             return `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-right:0; flex-shrink:0;">
                 <i class="fas fa-link" style="color:${color || '#64748b'}; font-size:13px;"></i>
+            </span>`;
+        }
+        case 'anchor': {
+            const isManual = item && item.anchorType === 'manual';
+            const iconClass = isManual ? 'fa-anchor' : 'fa-history';
+            return `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-right:0; flex-shrink:0;">
+                <i class="fas ${iconClass}" style="color:${color || '#0284c7'}; font-size:12px;"></i>
             </span>`;
         }
         default:
@@ -13885,13 +14227,17 @@ function getResolvedBookmarkTargetItem(d) {
 /**
  * 渲染表格单元格内的序号/位置 Chip（置于标题左侧，无多余彩色背景，点击可直接定位到画布实体）
  */
-function renderCanvasTableItemLocationChipHtml(d) {
+function renderCanvasTableItemLocationChipHtml(d, query = '') {
     if (!d || !d.locationLabel) return '';
     const rawLoc = String(d.locationLabel).trim();
     const rawTitle = String(d.title || '').trim();
     if (rawLoc && rawTitle && rawLoc.toLowerCase() === rawTitle.toLowerCase()) {
         return '';
     }
+    const q = query || (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+    const locFormatted = (typeof highlightSearchKeywords === 'function' && q)
+        ? highlightSearchKeywords(rawLoc, q)
+        : escapeHtml(rawLoc);
     const locText = escapeHtml(rawLoc);
     const item = d.rawItem || d;
     const isBookmarkType = item.type === 'bookmark-group' || item.type === 'bookmark-item' || item.type === 'bookmark-group-more' || item.type === 'domain-group';
@@ -13913,9 +14259,13 @@ function renderCanvasTableItemLocationChipHtml(d) {
         attr = `data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="group"`;
     } else if (type === 'edge') {
         attr = `data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="edge"`;
+    } else if (type === 'anchor') {
+        attr = `data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="anchor"`;
     }
-    const iconPrefix = isCardGroup ? '<i class="fas fa-object-group" style="margin-right:3px;"></i>' : '';
-    return `<button type="button" class="search-loc-chip canvas-bookmark-location-chip canvas-bookmark-location-chip-compact canvas-table-loc-chip-neutral" ${attr} style="font-size:10.5px; height:18px; line-height:16px; padding:0 5px; border-radius:4px; flex-shrink:0; cursor:pointer; margin:0;" title="${locText}"><span class="canvas-bookmark-location-chip-text"><b>${iconPrefix}${locText}</b></span></button>`;
+    const iconPrefix = isCardGroup
+        ? '<i class="fas fa-object-group" style="margin-right:3px;"></i>'
+        : (type === 'anchor' ? '<i class="fas fa-anchor" style="margin-right:3px;"></i>' : '');
+    return `<button type="button" class="search-loc-chip canvas-bookmark-location-chip canvas-bookmark-location-chip-compact canvas-table-loc-chip-neutral" ${attr} style="font-size:10.5px; height:18px; line-height:16px; padding:0 5px; border-radius:4px; flex-shrink:0; cursor:pointer; margin:0;" title="${locText}"><span class="canvas-bookmark-location-chip-text"><b>${iconPrefix}${locFormatted}</b></span></button>`;
 }
 
 /**
@@ -13923,6 +14273,9 @@ function renderCanvasTableItemLocationChipHtml(d) {
  */
 async function navigateToCanvasStructureOrDescriptionTarget(item) {
     if (!item) return false;
+    if (item.type === 'anchor') {
+        return await navigateToCanvasAnchorTarget(item);
+    }
 
     const navigateModeAtStart = (searchUiState && searchUiState.activeMode) || 'bookmark';
     const shouldDismissSearchAfterGlobalFullscreenNavigate = typeof isFullscreenGlobalSearchActive === 'function'
@@ -14077,9 +14430,13 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 const color = d.color || '#2563eb';
                 const itemType = (d.rawItem && d.rawItem.type) || d.type;
                 const iconHtml = getCanvasDirectoryItemIconHtml(itemType, d.rawItem || d);
+                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                const typeText = (typeof highlightSearchKeywords === 'function' && query)
+                    ? highlightSearchKeywords(d.typeLabel || '-', query)
+                    : escapeHtml(d.typeLabel || '-');
                 return `<div class="canvas-table-cell-type canvas-grid-type-prefix" style="display:inline-flex; align-items:center; gap:4px; overflow:hidden;">
                     ${iconHtml}
-                    <span class="canvas-grid-type-name" style="color:${color}; font-weight:600; font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(d.typeLabel || '-')}</span>
+                    <span class="canvas-grid-type-name" style="color:${color}; font-weight:600; font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${typeText}</span>
                 </div>`;
             }
         };
@@ -14097,7 +14454,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 formatter: (cell) => `<span class="canvas-table-index-num">${cell.getValue()}</span>`
             },
             {
-                title: isZh ? "卡片(组)" : "Card(Group)",
+                title: isZh ? "标题" : "Title",
                 field: "title",
                 minWidth: 160,
                 ...(hasContent ? { width: 220 } : { widthGrow: 1 }),
@@ -14117,7 +14474,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     const titleHtml = (typeof highlightSearchKeywords === 'function' && query)
                         ? highlightSearchKeywords(d.title, query)
                         : (d.titleHtml || escapeHtml(d.title));
-                    const locChipHtml = renderCanvasTableItemLocationChipHtml(d);
+                    const locChipHtml = renderCanvasTableItemLocationChipHtml(d, query);
                     return `<div class="canvas-table-cell-title" title="${escapeHtml(d.title)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden; cursor:pointer;">
                         ${locChipHtml}
                         <span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; font-weight:600; cursor:pointer;">${titleHtml}</span>
@@ -14136,6 +14493,23 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 headerSort: false,
                 formatter: (cell) => {
                     const d = cell.getData();
+                    if (d.rawItem && d.rawItem.type === 'anchor') {
+                        const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                        const rawCoord = d.rawItem.coordText || d.summary || '';
+                        const rawTime = d.rawItem.timeText || '';
+                        const coordFormatted = (typeof highlightSearchKeywords === 'function' && query)
+                            ? highlightSearchKeywords(rawCoord, query)
+                            : escapeHtml(rawCoord);
+                        const timeFormatted = (rawTime && typeof highlightSearchKeywords === 'function' && query)
+                            ? highlightSearchKeywords(rawTime, query)
+                            : escapeHtml(rawTime);
+                        const coordHtml = `<span class="anchor-table-coords" style="display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:var(--text-secondary);"><i class="fas fa-crosshairs" style="color:${d.color || '#0284c7'}; font-size:10px;"></i>${coordFormatted}</span>`;
+                        const timeHtml = rawTime ? `<span class="anchor-table-time" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--text-secondary); opacity:0.8; margin-left:auto;"><i class="far fa-clock" style="font-size:10px;"></i>${timeFormatted}</span>` : '';
+                        return `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; overflow:hidden;">
+                            ${coordHtml}
+                            ${timeHtml}
+                        </div>`;
+                    }
                     if (!d.summary) return '<span class="text-muted" style="opacity:0.4;">-</span>';
                     const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
                     const highlighted = (typeof highlightSearchKeywords === 'function' && query)
@@ -14168,9 +14542,13 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 const color = d.color || '#10b981';
                 const itemType = (d.rawItem && d.rawItem.type) || d.type;
                 const iconHtml = getCanvasDirectoryItemIconHtml(itemType, d.rawItem || d);
+                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                const typeText = (typeof highlightSearchKeywords === 'function' && query)
+                    ? highlightSearchKeywords(d.typeLabel || '-', query)
+                    : escapeHtml(d.typeLabel || '-');
                 return `<div class="canvas-table-cell-type canvas-grid-type-prefix" style="display:inline-flex; align-items:center; gap:4px; overflow:hidden;">
                     ${iconHtml}
-                    <span class="canvas-grid-type-name" style="color:${color}; font-weight:600; font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(d.typeLabel || '-')}</span>
+                    <span class="canvas-grid-type-name" style="color:${color}; font-weight:600; font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${typeText}</span>
                 </div>`;
             }
         };
@@ -14188,7 +14566,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 formatter: (cell) => `<span class="canvas-table-index-num">${cell.getValue()}</span>`
             },
             {
-                title: isZh ? "目标名称" : "Target Name",
+                title: isZh ? "标题" : "Title",
                 field: "title",
                 minWidth: 160,
                 ...(hasContent ? { width: 220 } : { widthGrow: 1 }),
@@ -14655,6 +15033,10 @@ async function handleCanvasTabulatorRowClick(e, row) {
             await navigateToCanvasStructureOrDescriptionTarget(rawItem || { id: locId, type: 'edge', color });
             return;
         }
+        if (locSource === 'anchor') {
+            await navigateToCanvasStructureOrDescriptionTarget(rawItem || { id: locId, type: 'anchor', color });
+            return;
+        }
 
         hideSearchResultsPanel();
         try {
@@ -14837,7 +15219,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
 
     let placeholderText = isZh ? "无匹配书签" : "No matching bookmarks";
     if (activeMode === 'structure') {
-        placeholderText = isZh ? "无匹配卡片或组" : "No matching cards or groups";
+        placeholderText = isZh ? "无匹配卡片、组或锚点" : "No matching cards, groups or anchors";
     } else if (activeMode === 'description') {
         placeholderText = isZh ? "无匹配说明或文本" : "No matching descriptions or text";
     }
@@ -15056,28 +15438,25 @@ function renderCanvasSearchResults(results, options = {}) {
     }
 
     if (isStructureMode) {
-        const cardCount = sourceResults.filter(r => r && r.type !== 'group').length;
+        const cardCount = sourceResults.filter(r => r && r.type !== 'group' && r.type !== 'anchor').length;
         const groupCount = sourceResults.filter(r => r && r.type === 'group').length;
-        structureModeCounts = { cardCount, groupCount };
+        const anchorCount = sourceResults.filter(r => r && r.type === 'anchor').length;
+        structureModeCounts = { cardCount, groupCount, anchorCount };
 
         let effectiveFilter = searchUiState.structureTypeFilter;
         if (effectiveFilter === 'card' && cardCount === 0) effectiveFilter = null;
         if (effectiveFilter === 'group' && groupCount === 0) effectiveFilter = null;
-        if (!effectiveFilter) {
-            if (cardCount > 0) {
-                effectiveFilter = 'card';
-            } else if (groupCount > 0) {
-                effectiveFilter = 'group';
-            } else {
-                effectiveFilter = null;
-            }
-        }
+        if (effectiveFilter === 'anchor' && anchorCount === 0) effectiveFilter = null;
         searchUiState.structureTypeFilter = effectiveFilter;
 
         if (effectiveFilter === 'card') {
-            displayResults = sourceResults.filter(r => r && r.type !== 'group');
+            displayResults = sourceResults.filter(r => r && r.type !== 'group' && r.type !== 'anchor');
         } else if (effectiveFilter === 'group') {
             displayResults = sourceResults.filter(r => r && r.type === 'group');
+        } else if (effectiveFilter === 'anchor') {
+            displayResults = sourceResults.filter(r => r && r.type === 'anchor');
+        } else {
+            displayResults = sourceResults;
         }
     }
 
@@ -15282,7 +15661,7 @@ function renderCanvasSearchResults(results, options = {}) {
         return;
     }
 
-    const isZh = currentLang === 'zh_CN';
+    const isZh = (typeof getCurrentLangSafe === 'function' ? getCurrentLangSafe() : (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN')) === 'zh_CN';
     let html = '';
 
     const toAlpha = (num) => {
@@ -15869,14 +16248,17 @@ function renderCanvasSearchResults(results, options = {}) {
     }
 
     if (isStructureMode) {
+        const totalCount = sourceResults.length;
         const cardCount = structureModeCounts ? structureModeCounts.cardCount : 0;
         const groupCount = structureModeCounts ? structureModeCounts.groupCount : 0;
+        const anchorCount = structureModeCounts ? structureModeCounts.anchorCount : 0;
         const active = searchUiState.structureTypeFilter;
         const showCardBtn = cardCount > 0;
         const showGroupBtn = groupCount > 0;
+        const showAnchorBtn = anchorCount > 0;
 
         const makeStructureBtn = ({ type, icon, color, label, count }) => {
-            const isActive = active === type;
+            const isActive = (!active && type === 'all') || (active === type);
             const bg = isActive ? `${color}22` : 'transparent';
             const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
             const text = isActive ? color : 'var(--text-secondary)';
@@ -15884,25 +16266,33 @@ function renderCanvasSearchResults(results, options = {}) {
             const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
             const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
             const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+            const iconHtml = icon ? `<i class="fas ${icon}" style="color:${color};"></i>` : '';
             return `<button class="canvas-structure-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
-                    <i class="fas ${icon}" style="color:${color};"></i>
+                    ${iconHtml}
                     <span>${escapeHtml(label)}</span>
                     <span>${count}</span>
                 </button>`;
         };
+        const categoriesWithResults = (cardCount > 0 ? 1 : 0) + (groupCount > 0 ? 1 : 0) + (anchorCount > 0 ? 1 : 0);
+        const allBtn = categoriesWithResults > 1
+            ? makeStructureBtn({ type: 'all', icon: '', color: '#3b82f6', label: isZh ? '全部' : 'All', count: totalCount })
+            : '';
         const cardBtn = showCardBtn
             ? makeStructureBtn({ type: 'card', icon: 'fa-layer-group', color: '#f97316', label: isZh ? '卡片' : 'Card', count: cardCount })
             : '';
         const groupBtn = showGroupBtn
             ? makeStructureBtn({ type: 'group', icon: 'fa-object-group', color: '#7c3aed', label: isZh ? '组' : 'Group', count: groupCount })
             : '';
+        const anchorBtn = showAnchorBtn
+            ? makeStructureBtn({ type: 'anchor', icon: 'fa-anchor', color: '#0284c7', label: isZh ? '锚点' : 'Anchor', count: anchorCount })
+            : '';
         const toolbarGap = compactBookmarkToolbar ? 6 : 8;
         const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
         const controlGap = compactBookmarkToolbar ? 6 : 8;
 
-        const leftControls = (cardBtn || groupBtn)
-            ? `<div style="display:flex; align-items:center; gap:${controlGap}px;">${cardBtn}${groupBtn}</div>`
-            : `<div style="display:flex; align-items:center; gap:${controlGap}px; font-size:12px; font-weight:600; color:var(--text-secondary);"><i class="fas fa-layer-group" style="color:#f97316;"></i><span>${isZh ? '卡片与组' : 'Cards & Groups'}</span></div>`;
+        const leftControls = (cardBtn || groupBtn || anchorBtn)
+            ? `<div style="display:flex; align-items:center; gap:${controlGap}px;">${allBtn}${cardBtn}${groupBtn}${anchorBtn}</div>`
+            : `<div style="display:flex; align-items:center; gap:${controlGap}px; font-size:12px; font-weight:600; color:var(--text-secondary);"><i class="fas fa-layer-group" style="color:#f97316;"></i><span>${isZh ? '卡片、组与锚点' : 'Cards, Groups & Anchors'}</span></div>`;
 
         const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
 
@@ -16235,6 +16625,49 @@ function renderCanvasSearchResults(results, options = {}) {
                 } else {
                     descHtml = '';
                 }
+                break;
+            }
+
+            case 'anchor': {
+                const isManual = item.anchorType === 'manual';
+                const typeName = isManual ? (isZh ? '手动锚点' : 'Manual Anchor') : (isZh ? '自动视口' : 'Auto Viewport');
+                const dirIconHtml = getCanvasDirectoryItemIconHtml('anchor', item);
+                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                const typeText = (typeof highlightSearchKeywords === 'function' && query)
+                    ? highlightSearchKeywords(typeName, query)
+                    : escapeHtml(typeName);
+                indexLabel = `<span class="canvas-grid-type-prefix">${dirIconHtml}<span class="canvas-grid-type-name" style="color:${itemColor};">${typeText}</span></span>`;
+                const rawTitle = item.title || '';
+                const hasSeparateTitle = rawTitle && rawTitle.trim() && rawTitle.trim() !== typeName.trim();
+                if (hasSeparateTitle) {
+                    const formatted = formatSearchTitleWithWindow(rawTitle, query);
+                    title = `<span class="canvas-grid-card-title-sep">·</span><span class="canvas-grid-card-title" data-raw-title="${escapeHtml(formatted.fullTitle)}">${formatted.html}</span>`;
+                    if (formatted.isTruncated) {
+                        extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
+                    }
+                } else {
+                    title = '';
+                }
+                const badgeText = (isManual && item.slotNumber)
+                    ? (typeof highlightSearchKeywords === 'function' && query ? highlightSearchKeywords(`#${item.slotNumber}`, query) : `#${item.slotNumber}`)
+                    : '';
+                badge = badgeText
+                    ? `<span class="search-result-badge" style="background:#0284c722; color:#0284c7; border:1px solid #0284c744; font-weight:600;">${badgeText}</span>`
+                    : '';
+
+                const rawCoord = item.coordText || '';
+                const rawTime = item.timeText || '';
+                const coordFormatted = (typeof highlightSearchKeywords === 'function' && query)
+                    ? highlightSearchKeywords(rawCoord, query)
+                    : escapeHtml(rawCoord);
+                const timeFormatted = (rawTime && typeof highlightSearchKeywords === 'function' && query)
+                    ? highlightSearchKeywords(rawTime, query)
+                    : escapeHtml(rawTime);
+
+                descHtml = `<div class="search-result-match canvas-item-summary" style="display:flex; flex-direction:row; align-items:center; justify-content:space-between; gap:6px; width:100%; min-width:0; height:20px; overflow:hidden;">
+                    <span class="canvas-grid-anchor-coords" title="${escapeHtml(rawCoord)}" style="display:inline-flex; align-items:center; font-size:11px; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"><i class="fas fa-crosshairs" style="margin-right:4px; font-size:10px; opacity:0.8; color:${itemColor};"></i>${coordFormatted}</span>
+                    ${rawTime ? `<span class="canvas-grid-anchor-time" title="${escapeHtml(rawTime)}" style="display:inline-flex; align-items:center; font-size:11px; color:var(--text-secondary); opacity:0.85; white-space:nowrap; margin-left:auto; flex-shrink:0;"><i class="far fa-clock" style="margin-right:4px; font-size:10px; opacity:0.8;"></i>${timeFormatted}</span>` : ''}
+                </div>`;
                 break;
             }
 
@@ -19547,6 +19980,7 @@ async function activateCanvasSearchResultAtIndex(index) {
         && (
             item.type === 'edge'
             || item.type === 'group'
+            || item.type === 'anchor'
             || (searchUiState.activeMode === 'structure' && item.type === 'md-node')
         );
     if (shouldExitFullscreenForSearchLocate) {
@@ -19700,7 +20134,9 @@ async function activateCanvasSearchResultAtIndex(index) {
     }
 
     // Case 3: Single Element
-    if (item.type === 'bookmark-item') {
+    if (item.type === 'anchor') {
+        await navigateToCanvasAnchorTarget(item);
+    } else if (item.type === 'bookmark-item') {
         await locateCanvasBookmarkItem(item);
     } else if (item.type === 'group' || item.type === 'card-group' || item.subtype === 'card-group' || String(item.id || '').startsWith('card-group-')) {
         await locateCanvasGroupSearchResult(item);
@@ -19739,6 +20175,7 @@ if (typeof window !== 'undefined') {
     window.locateCanvasBookmarkTreeItem = locateCanvasBookmarkTreeItem;
     window.clearCanvasSearchHighlight = clearCanvasSearchHighlight;
     window.activateCanvasSearchResultAtIndex = activateCanvasSearchResultAtIndex;
+    window.navigateToCanvasAnchorTarget = navigateToCanvasAnchorTarget;
     window.ensureCanvasSearchIndexForModeLoaded = ensureIndexForModeLoaded;
     window.ensureCanvasSearchIndexForActiveMode = function () {
         const activeMode = (window.searchUiState && window.searchUiState.activeMode) || 'bookmark';
@@ -19913,6 +20350,18 @@ function updateSearchUILanguage() {
     const resultsPanel = document.getElementById('searchResultsPanel');
     if (resultsPanel) {
         resultsPanel.setAttribute('aria-label', isEn ? 'Search results' : '搜索结果');
+        // 如果当前搜索结果面板处于展示状态，即时重新渲染以更新表格列头（Title等）、工具栏与分类按钮
+        if (!resultsPanel.hidden && resultsPanel.style.display !== 'none' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.resultAll && searchUiState.resultAll.length > 0) {
+            if (typeof destroyCanvasSearchTabulator === 'function') {
+                destroyCanvasSearchTabulator();
+            }
+            if (typeof renderCanvasSearchResults === 'function') {
+                renderCanvasSearchResults(searchUiState.resultSource || searchUiState.resultAll, {
+                    query: searchUiState.query || '',
+                    preserveVisibleCount: true
+                });
+            }
+        }
     }
 }
 window.updateSearchUILanguage = updateSearchUILanguage;

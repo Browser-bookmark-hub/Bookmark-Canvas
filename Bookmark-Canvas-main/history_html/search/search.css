@@ -1827,7 +1827,8 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 .search-results-panel.view-grid:has(.search-result-item[data-type="md-node"]) .search-results-items-container,
 .search-results-panel.view-grid:has(.search-result-item[data-type="edge"]) .search-results-items-container,
 .search-results-panel.view-grid:has(.search-result-item[data-type="group"]) .search-results-items-container,
-.search-results-panel.view-grid:has(.search-result-item[data-type="card-group"]) .search-results-items-container {
+.search-results-panel.view-grid:has(.search-result-item[data-type="card-group"]) .search-results-items-container,
+.search-results-panel.view-grid:has(.search-result-item[data-type="anchor"]) .search-results-items-container {
     grid-auto-rows: 64px !important;
 }
 
@@ -1868,7 +1869,8 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 .search-results-panel.view-grid .search-result-item[data-type="md-node"],
 .search-results-panel.view-grid .search-result-item[data-type="edge"],
 .search-results-panel.view-grid .search-result-item[data-type="group"],
-.search-results-panel.view-grid .search-result-item[data-type="card-group"] {
+.search-results-panel.view-grid .search-result-item[data-type="card-group"],
+.search-results-panel.view-grid .search-result-item[data-type="anchor"] {
     height: 64px !important;
     max-height: 64px !important;
     min-height: 64px !important;
@@ -2077,9 +2079,34 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 .search-results-panel.view-grid .search-result-item[data-type="md-node"] > .search-result-badge,
 .search-results-panel.view-grid .search-result-item[data-type="edge"] > .search-result-badge,
 .search-results-panel.view-grid .search-result-item[data-type="group"] > .search-result-badge,
-.search-results-panel.view-grid .search-result-item[data-type="card-group"] > .search-result-badge {
+.search-results-panel.view-grid .search-result-item[data-type="card-group"] > .search-result-badge,
+.search-results-panel.view-grid .search-result-item[data-type="anchor"] > .search-result-badge {
     top: 8px !important;
     right: 12px !important;
+}
+
+/* 锚点在网格与表格视图中的信息与时间表现 */
+.anchor-table-coords,
+.canvas-grid-anchor-coords {
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.anchor-table-time,
+.canvas-grid-anchor-time {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .search-results-panel.view-grid .search-result-item:has(> .search-result-badge) .search-result-title {
