@@ -5056,6 +5056,10 @@ function pulseBreathingEffect(element, duration = 1500) {
     }, duration);
 }
 
+if (typeof window !== 'undefined') {
+    window.pulseBreathingEffect = pulseBreathingEffect;
+}
+
 function formatTimestampForTitle(date = new Date()) {
     const yyyy = date.getFullYear();
     const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -10292,10 +10296,16 @@ function locateToElement(el, targetZoom = null) {
 
 // 定位到临时栏目（通过 sectionId）
 function locateToTempSection(sectionId, targetZoom = null) {
-    if (!sectionId) return;
+    if (!sectionId) return false;
     try { ensureTempSectionRendered(sectionId); } catch (_) { }
-    const el = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(sectionId)}"]`);
-    if (el) locateToElement(el, targetZoom);
+    const el = document.getElementById(sectionId)
+        || document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(sectionId)}"]`)
+        || document.querySelector(`[data-section-id="${CSS.escape(sectionId)}"]`);
+    if (el) {
+        locateToElement(el, targetZoom);
+        return true;
+    }
+    return false;
 }
 
 // =============================================================================
@@ -43616,6 +43626,7 @@ window.CanvasModule = {
     locatePermanent: locateToPermanentSection,
     locateSection: locateToTempSection,
     locateElement: locateToElement,
+    pulseBreathingEffect: pulseBreathingEffect,
     navigateToViewport: navigateToViewport,
     toggleElementFullscreen,
     exitOrphanedNodeFullscreenState,

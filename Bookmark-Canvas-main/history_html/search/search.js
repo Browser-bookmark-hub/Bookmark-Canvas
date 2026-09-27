@@ -498,6 +498,13 @@ function setSearchPanelViewMode(mode, options = {}) {
     } catch (_) { }
     if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
+    if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
+        const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+        exitCanvasSearchSelectionMode({
+            silent: false,
+            message: isZh ? '切换视图已自动退出勾选模式' : 'Switched view: exited selection mode'
+        });
+    }
 
     const panel = getSearchResultsPanel();
     if (!panel) return;
@@ -544,6 +551,7 @@ function setSearchPanelViewMode(mode, options = {}) {
             if (typeof syncCanvasTabulatorTopScrollbar === 'function') syncCanvasTabulatorTopScrollbar();
             if (typeof syncCanvasTabulatorRightScrollbar === 'function') syncCanvasTabulatorRightScrollbar(true);
             updateSearchResultSelection(searchUiState.selectedIndex >= 0 ? searchUiState.selectedIndex : 0, { ensureVisible: false });
+            if (typeof syncCanvasSearchItemSelectionVisuals === 'function') syncCanvasSearchItemSelectionVisuals();
         });
         return;
     }
@@ -574,6 +582,7 @@ function setSearchPanelViewMode(mode, options = {}) {
             ensureCanvasGridRightScrollbar(panel);
             syncCanvasGridRightScrollbar(panel);
             updateSearchResultSelection(searchUiState.selectedIndex >= 0 ? searchUiState.selectedIndex : 0, { ensureVisible: false });
+            if (typeof syncCanvasSearchItemSelectionVisuals === 'function') syncCanvasSearchItemSelectionVisuals();
         });
         return;
     }
@@ -1784,6 +1793,9 @@ function showSearchResultsPanel() {
     }
 
     if (panel.classList.contains('visible')) return;
+    if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
+        exitCanvasSearchSelectionMode({ silent: true });
+    }
 
     if (searchPanelShowFrame) {
         cancelAnimationFrame(searchPanelShowFrame);
@@ -1822,8 +1834,9 @@ function showSearchResultsPanel() {
  * 隐藏搜索结果面板
  */
 function hideSearchResultsPanel() {
+    if (typeof exitCanvasSearchSelectionMode === 'function') exitCanvasSearchSelectionMode({ silent: true });
     if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
-    if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
+    if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble(true);
     if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
     if (typeof clearSearchPanelAutoInfiniteScroll === 'function') clearSearchPanelAutoInfiniteScroll();
@@ -2263,7 +2276,7 @@ function handleSearchKeydown(e) {
         if (!e) return;
         if (e.isComposing) return;
         if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
-        if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
+        if (e.key !== 'Escape' && typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
 
         const panel = getSearchResultsPanel();
         const panelVisible = !!(panel && panel.classList.contains('visible'));
@@ -2424,6 +2437,16 @@ function handleSearchKeydown(e) {
         }
 
         if (e.key === 'Escape') {
+            if (typeof hideTempSectionBubble === 'function' && tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
+                e.preventDefault();
+                hideTempSectionBubble(true);
+                return;
+            }
+            if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+                e.preventDefault();
+                exitCanvasSearchSelectionMode();
+                return;
+            }
             if (panelVisible) {
                 e.preventDefault();
                 const queryText = e && e.target ? String(e.target.value || '').trim() : '';
@@ -2511,6 +2534,80 @@ function handleSearchResultsPanelClick(e) {
     const panel = getSearchResultsPanel();
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results' && panelType !== 'root-browse') return;
+
+    if (tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
+        const inBubbleOrBtn = e.target && e.target.closest && e.target.closest('#searchTempSectionBubble, .canvas-bookmark-to-temp-btn');
+        if (!inBubbleOrBtn) {
+            hideTempSectionBubble(true);
+        }
+    }
+
+    // ==================== 勾选模式强拦截（防误触与防止意外跳转退出） ====================
+    if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+        const isControlAction = e.target.closest(
+            '.canvas-bookmark-to-temp-btn, .canvas-bookmark-selection-confirm-btn, #searchTempSectionBubble, .canvas-temp-bubble-btn, .canvas-temp-bubble-chip, ' +
+            '.canvas-bookmark-view-toggle-btn, .canvas-bookmark-toolbar-actions, ' +
+            '.canvas-bookmark-type-btn, .canvas-structure-type-btn, .canvas-bookmark-domain-granularity-btn, ' +
+            '.canvas-bookmark-type-toggle, .canvas-structure-type-toggle, ' +
+            '.search-view-mode-toggle, #searchViewModeToggle, #searchViewModeDropdown, ' +
+            '.search-header-btn, .search-close-btn, .canvas-tabulator-load-more-btn'
+        );
+        if (!isControlAction) {
+            const cardEl = e.target.closest('.search-result-item');
+            if (cardEl) {
+                e._canvasHandled = true;
+                try {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                } catch (_) { }
+
+                const idx = parseInt(cardEl.getAttribute('data-index') || '-1', 10);
+                const itemId = String(cardEl.getAttribute('data-id') || '').trim();
+                let itemObj = (idx >= 0 && Array.isArray(searchUiState.results) && searchUiState.results[idx]) ? searchUiState.results[idx] : null;
+                if (!itemObj && typeof findSearchResultItemById === 'function') {
+                    itemObj = findSearchResultItemById(itemId, idx);
+                }
+                const finalId = itemId || (itemObj && itemObj.id) || (idx >= 0 ? `idx_${idx}` : '');
+                if (typeof toggleCanvasSearchItemSelection === 'function' && finalId) {
+                    toggleCanvasSearchItemSelection(finalId, itemObj, cardEl);
+                }
+                return;
+            }
+
+            const tabRow = e.target.closest('.tabulator-row');
+            if (tabRow) {
+                e._canvasHandled = true;
+                try {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                } catch (_) { }
+
+                let rowData = null;
+                if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+                    try {
+                        const r = canvasSearchTabulatorInstance.getRow(tabRow);
+                        rowData = r && typeof r.getData === 'function' ? r.getData() : null;
+                    } catch (_) { }
+                }
+                const itemId = String((rowData && (rowData.id || (rowData.rawItem && rowData.rawItem.id))) || tabRow.getAttribute('data-id') || '').trim();
+                if (typeof toggleCanvasSearchItemSelection === 'function' && itemId) {
+                    toggleCanvasSearchItemSelection(itemId, rowData ? (rowData.rawItem || rowData) : null, tabRow);
+                }
+                return;
+            }
+
+            if (e.target.closest('#searchResultsPanel, .search-results-panel')) {
+                e._canvasHandled = true;
+                try {
+                    e.preventDefault();
+                    e.stopPropagation();
+                } catch (_) { }
+                return;
+            }
+        }
+    }
 
     // Handle Path Ellipsis Button in Table (opens details bubble)
     const tablePathEllipsisBtn = e.target.closest('.canvas-table-path-ellipsis-btn');
@@ -2988,13 +3085,19 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
+    const confirmSelectionBtn = e.target.closest('.canvas-bookmark-selection-confirm-btn');
+    if (confirmSelectionBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        createTempSectionFromSelectedItems();
+        return;
+    }
+
     const exportBtn = e.target.closest('.canvas-bookmark-to-temp-btn');
     if (exportBtn) {
         e.preventDefault();
         e.stopPropagation();
-        if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
-        try { createTempSectionFromSearchResults(); } catch (_) { }
-        try { hideSearchResultsPanel(); } catch (_) { }
+        toggleTempSectionBubble(exportBtn);
         return;
     }
 
@@ -3043,11 +3146,19 @@ function handleSearchResultsPanelClick(e) {
         } catch (_) { }
 
         const type = String(typeBtn.dataset.type || '');
-        if (type !== 'bookmark' && type !== 'folder' && type !== 'domain') return;
+        if (type !== 'all' && type !== 'bookmark' && type !== 'folder' && type !== 'domain') return;
         if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
 
+        if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
+            const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+            exitCanvasSearchSelectionMode({
+                silent: false,
+                message: isZh ? '切换筛选已自动退出勾选模式' : 'Filter changed: exited selection mode'
+            });
+        }
+
         // Update filter and re-render (do NOT close panel)
-        searchUiState.bookmarkTypeFilter = type;
+        searchUiState.bookmarkTypeFilter = (type === 'all' ? null : type);
         if (type === 'domain') {
             searchUiState.domainGrouping = 'root';
             try { localStorage.setItem(DOMAIN_GROUP_PREF_KEY, 'root'); } catch (_) { }
@@ -3073,6 +3184,14 @@ function handleSearchResultsPanelClick(e) {
         const type = String(structureTypeBtn.dataset.type || '');
         if (type !== 'all' && type !== 'card' && type !== 'group' && type !== 'anchor') return;
         if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
+
+        if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
+            const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+            exitCanvasSearchSelectionMode({
+                silent: false,
+                message: isZh ? '切换筛选已自动退出勾选模式' : 'Filter changed: exited selection mode'
+            });
+        }
 
         if (type === 'all' || searchUiState.structureTypeFilter === type) {
             searchUiState.structureTypeFilter = null;
@@ -3268,6 +3387,26 @@ function handleSearchResultsPanelClick(e) {
             return;
         }
 
+        return;
+    }
+
+    const tagChip = e.target.closest('.search-result-tag-chip[data-tag-name]');
+    if (tagChip) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        const tagName = tagChip.getAttribute('data-tag-name');
+        if (tagName) {
+            const input = document.getElementById('searchInput');
+            if (input) {
+                input.value = `#${tagName}`;
+                input.focus();
+            }
+            if (typeof searchCanvasAndRender === 'function') {
+                searchCanvasAndRender(`#${tagName}`, { source: 'input' });
+            }
+        }
         return;
     }
 
@@ -3496,21 +3635,699 @@ function scheduleSearchTitleTooltip(targetEl, fullTitle) {
     }, 700); // 严格满足用户需求：鼠标悬停 0.7s 后出现完整标题
 }
 
+// ==================== 搜索模式：特殊临时栏目勾选与前 N 项拓展系统 ====================
+let isCanvasSearchSelectionMode = false;
+const canvasSearchSelectedItemsMap = new Map();
 let tempSectionBubbleTimer = null;
+let tempSectionBubbleHideTimer = null;
 let tempSectionBubbleEl = null;
 let currentTempSectionBtnTarget = null;
+
+function isCanvasSearchSelectionModeActive() {
+    return isCanvasSearchSelectionMode;
+}
+
+function getCanvasSearchSelectedItemsCount() {
+    return canvasSearchSelectedItemsMap.size;
+}
+
+function exitCanvasSearchSelectionMode(options = {}) {
+    isCanvasSearchSelectionMode = false;
+    canvasSearchSelectedItemsMap.clear();
+    syncCanvasSearchItemSelectionVisuals();
+    updateCanvasSearchTempButtonState();
+    const panel = getSearchResultsPanel();
+    if (panel) {
+        panel.classList.remove('selection-mode-active');
+        panel.querySelectorAll('.canvas-search-item-selected').forEach(el => el.classList.remove('canvas-search-item-selected'));
+        panel.querySelectorAll('.canvas-search-row-selected').forEach(el => el.classList.remove('canvas-search-row-selected'));
+    }
+    if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+        try {
+            const rows = canvasSearchTabulatorInstance.getRows();
+            if (Array.isArray(rows)) {
+                rows.forEach(r => {
+                    const el = r.getElement();
+                    if (el) el.classList.remove('canvas-search-row-selected');
+                });
+            }
+        } catch (_) { }
+    }
+    if (!options.silent) {
+        const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+        const msg = options.message || (isZh ? '已退出勾选模式' : 'Exited selection mode');
+        showCanvasToastSafe(msg, 'info', 1800);
+    }
+    hideTempSectionBubble(true);
+}
+
+function enterCanvasSearchSelectionMode() {
+    isCanvasSearchSelectionMode = true;
+    canvasSearchSelectedItemsMap.clear();
+    syncCanvasSearchItemSelectionVisuals();
+    updateCanvasSearchTempButtonState();
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    showCanvasToastSafe(isZh ? '已进入勾选模式，直接点击条目即可选择' : 'Selection mode active: click items to select', 'info', 2000);
+    hideTempSectionBubble(true);
+}
+
+function toggleCanvasSearchSelectionMode(force) {
+    const nextState = (typeof force === 'boolean') ? force : !isCanvasSearchSelectionMode;
+    if (nextState) {
+        enterCanvasSearchSelectionMode();
+    } else {
+        exitCanvasSearchSelectionMode();
+    }
+}
+
+function clearCanvasSearchSelection() {
+    if (!canvasSearchSelectedItemsMap.size) return;
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    canvasSearchSelectedItemsMap.clear();
+    syncCanvasSearchItemSelectionVisuals();
+    updateCanvasSearchTempButtonState();
+    showCanvasToastSafe(isZh ? '已清空已选项' : 'Selections cleared', 'info', 1400);
+    if (currentTempSectionBtnTarget && tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
+        showTempSectionBubble(currentTempSectionBtnTarget);
+    }
+}
+
+function normalizeCanvasUrlForContentKey(url) {
+    if (!url) return '';
+    let u = String(url).trim();
+    u = u.replace(/^(https?:\/\/)/i, (m) => m.toLowerCase());
+    if (u.endsWith('/') && (u.match(/\//g) || []).length <= 3) {
+        u = u.slice(0, -1);
+    }
+    return u;
+}
+
+function getBookmarkItemContentKey(item) {
+    if (!item) return '';
+    const norm = item.rawItem || item;
+    const isFold = norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true;
+    if (isFold) {
+        const title = String(norm.title || norm.name || norm.id || '').trim().toLowerCase();
+        return `FOLDER::${title}`;
+    }
+    const url = normalizeCanvasUrlForContentKey(norm.url);
+    const title = String(norm.title || norm.name || '').trim().toLowerCase();
+    if (url) {
+        return `BM::${url}::${title}`;
+    }
+    return `ID::${norm.id || title}`;
+}
+
+function getBookmarkItemTagNoteVariantKey(item) {
+    if (!item) return 'EMPTY';
+    const norm = item.rawItem || item;
+
+    // 1. 获取 Tag 列表（多来源兼容）
+    let tags = [];
+    if (typeof getCanvasBookmarkTagsForSearchCached === 'function') {
+        const cached = getCanvasBookmarkTagsForSearchCached(norm);
+        if (Array.isArray(cached) && cached.length > 0) tags = cached;
+        else if (norm !== item) {
+            const cachedOrig = getCanvasBookmarkTagsForSearchCached(item);
+            if (Array.isArray(cachedOrig) && cachedOrig.length > 0) tags = cachedOrig;
+        }
+    }
+    if (!tags.length) {
+        if (Array.isArray(norm.tags) && norm.tags.length > 0) tags = norm.tags;
+        else if (Array.isArray(item.tags) && item.tags.length > 0) tags = item.tags;
+        else if (typeof norm.tags === 'string' && norm.tags.trim()) tags = norm.tags.split(',').map(s => s.trim()).filter(Boolean);
+        else if (typeof item.tags === 'string' && item.tags.trim()) tags = item.tags.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    // 2. 获取 Note 文本与颜色（多来源兼容，含多笔记列表支持）
+    const noteTokens = [];
+    const notesList = (typeof getBookmarkItemNotesList === 'function')
+        ? (getBookmarkItemNotesList(norm) || getBookmarkItemNotesList(item) || [])
+        : [];
+    if (Array.isArray(notesList) && notesList.length > 0) {
+        notesList.forEach(n => {
+            if (!n) return;
+            const text = String(typeof n === 'string' ? n : (n.note || n.text || '')).trim().toLowerCase();
+            const color = String(typeof n === 'object' && n ? (n.color || n.noteColor || '') : '').trim().toLowerCase();
+            if (text) noteTokens.push(`${color}##${text}`);
+        });
+        noteTokens.sort();
+    }
+    let noteKey = noteTokens.join('||');
+    if (!noteKey) {
+        let noteText = '';
+        let noteColor = '';
+        if (typeof getCanvasBookmarkNoteMetaForSearchCached === 'function') {
+            const meta = getCanvasBookmarkNoteMetaForSearchCached(norm);
+            if (meta && meta.note) {
+                noteText = String(meta.note || '').trim().toLowerCase();
+                noteColor = String(meta.color || '').trim().toLowerCase();
+            } else if (norm !== item) {
+                const metaOrig = getCanvasBookmarkNoteMetaForSearchCached(item);
+                if (metaOrig && metaOrig.note) {
+                    noteText = String(metaOrig.note || '').trim().toLowerCase();
+                    noteColor = String(metaOrig.color || '').trim().toLowerCase();
+                }
+            }
+        }
+        if (!noteText) {
+            const noteCandidate = norm.note || item.note;
+            if (noteCandidate) {
+                if (typeof noteCandidate === 'object') {
+                    noteText = String(noteCandidate.note || '').trim().toLowerCase();
+                    noteColor = String(noteCandidate.color || '').trim().toLowerCase();
+                } else {
+                    noteText = String(noteCandidate || '').trim().toLowerCase();
+                }
+            }
+            if (!noteColor) {
+                const colorCandidate = norm.noteColor || item.noteColor;
+                if (colorCandidate) noteColor = String(colorCandidate).trim().toLowerCase();
+            }
+        }
+        if (noteText) {
+            noteKey = `${noteColor}##${noteText}`;
+        }
+    }
+
+    // 3. 规范化 Tag 列表
+    const tagTokens = [];
+    const seenTagTokens = new Set();
+    tags.forEach(t => {
+        if (!t) return;
+        const text = String(typeof t === 'string' ? t : (t.text || t.name || t.label || '')).trim().toLowerCase();
+        const color = String(typeof t === 'object' && t ? (t.color || '') : '').trim().toLowerCase();
+        if (!text && !color) return;
+        const sig = `${color}::${text}`;
+        if (!seenTagTokens.has(sig)) {
+            seenTagTokens.add(sig);
+            tagTokens.push(sig);
+        }
+    });
+    tagTokens.sort();
+    const tagsKey = tagTokens.join('|');
+
+    // 4. 判定是否有 tag 或 note
+    const hasTags = tagsKey.length > 0;
+    const hasNote = noteKey.length > 0;
+
+    // 智能规则：若无任何 tag 且无 note，归一为 'EMPTY'
+    if (!hasTags && !hasNote) {
+        return 'EMPTY';
+    }
+
+    // 若有 tag/note，完全一致的归为同一 Key，不一样的 Key 自然不同
+    return `TAGS:[${tagsKey}]::NOTE:[${noteKey}]`;
+}
+
+function unwrapSearchItemsForTempPayload(items, options = {}) {
+    if (!Array.isArray(items)) return [];
+    const filter = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.bookmarkTypeFilter) || '';
+    const preserveExplicitSelection = !!(options && options.preserveExplicitSelection);
+    const seenContentVariants = (options && options.seenSet) || new Set();
+    const result = [];
+
+    const processCandidate = (candidate) => {
+        if (!candidate) return;
+        const norm = candidate.rawItem || candidate;
+        if (!norm) return;
+        const isFold = norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true;
+        const isBm = !isFold;
+
+        if (!preserveExplicitSelection) {
+            if (filter === 'bookmark' && !isBm) return;
+            if (filter === 'folder' && !isFold) return;
+        }
+
+        // 智能合并规则（核心看 Tag & Note）：
+        // 1. 无 tag、无 note 的多个实例具有相同 Key，智能合并，只保留 1 个
+        // 2. 有 tag/note 且一模一样的多个实例具有相同 Key，智能合并，只保留 1 个
+        // 3. tag 或 note 存在任何差异的，Key 不同，作为独立变体分别保留导出
+        const contentKey = getBookmarkItemContentKey(norm);
+        const variantKey = getBookmarkItemTagNoteVariantKey(norm);
+        const fullKey = `${contentKey}::${variantKey}`;
+
+        if (seenContentVariants.has(fullKey)) return;
+        seenContentVariants.add(fullKey);
+
+        result.push(norm);
+    };
+
+    for (const item of items) {
+        if (!item) continue;
+        if (item.type === 'bookmark-group' || (item.header && Array.isArray(item.children))) {
+            let subList = [];
+            if (Array.isArray(item.targetItems) && item.targetItems.length > 0) {
+                subList = item.targetItems.filter(Boolean);
+            } else if (Array.isArray(item.children) && item.children.length > 0) {
+                subList = item.children.map(c => c && (c.item || c)).filter(Boolean);
+            } else if (item.groupModel && Array.isArray(item.groupModel.children) && item.groupModel.children.length > 0) {
+                subList = item.groupModel.children.map(c => c && (c.item || c)).filter(Boolean);
+            }
+
+            if (subList.length > 0) {
+                let addedSubCount = 0;
+                subList.forEach(sub => {
+                    const normSub = sub && (sub.rawItem || sub);
+                    if (!normSub) return;
+                    processCandidate(normSub);
+                    addedSubCount++;
+                });
+                if (addedSubCount > 0) continue;
+            }
+        }
+
+        processCandidate(item);
+    }
+
+    return result;
+}
+
+function normalizeSearchItemForTempPayload(item) {
+    if (!item) return null;
+    const unwrapped = unwrapSearchItemsForTempPayload([item]);
+    return unwrapped.length > 0 ? unwrapped[0] : (item.rawItem || item);
+}
+
+function toggleCanvasSearchItemSelection(itemId, itemObj = null, element = null) {
+    if (!itemId) return;
+    const key = String(itemId).trim();
+    if (canvasSearchSelectedItemsMap.has(key)) {
+        canvasSearchSelectedItemsMap.delete(key);
+    } else {
+        const resolved = itemObj || ((typeof findSearchResultItemById === 'function') ? findSearchResultItemById(key) : null);
+        canvasSearchSelectedItemsMap.set(key, resolved || { id: key });
+    }
+    if (element && element.classList) {
+        const isNowSelected = canvasSearchSelectedItemsMap.has(key);
+        if (element.classList.contains('tabulator-row')) {
+            element.classList.toggle('canvas-search-row-selected', isNowSelected);
+        } else {
+            element.classList.toggle('canvas-search-item-selected', isNowSelected);
+        }
+    }
+    syncCanvasSearchItemSelectionVisuals();
+    updateCanvasSearchTempButtonState();
+    if (currentTempSectionBtnTarget && tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
+        showTempSectionBubble(currentTempSectionBtnTarget);
+    }
+}
+
+function syncCanvasSearchItemSelectionVisuals() {
+    const panel = getSearchResultsPanel();
+    const isSel = isCanvasSearchSelectionModeActive();
+
+    // 1. 同步网格视图卡片与表格已渲染 DOM 行
+    if (panel) {
+        panel.classList.toggle('selection-mode-active', isSel);
+
+        panel.querySelectorAll('.search-result-item, .canvas-bookmark-group-child-item').forEach(itemEl => {
+            const id = String(itemEl.getAttribute('data-id') || itemEl.getAttribute('data-bookmark-child-id') || '').trim();
+            const selected = isSel && canvasSearchSelectedItemsMap.has(id);
+            itemEl.classList.toggle('canvas-search-item-selected', selected);
+        });
+
+        panel.querySelectorAll('.tabulator-row').forEach(rowEl => {
+            let rowData = null;
+            if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+                try {
+                    const r = canvasSearchTabulatorInstance.getRow(rowEl);
+                    rowData = r && typeof r.getData === 'function' ? r.getData() : null;
+                } catch (_) { }
+            }
+            const id = String((rowData && (rowData.id || (rowData.rawItem && rowData.rawItem.id))) || rowEl.getAttribute('data-id') || '').trim();
+            const selected = isSel && canvasSearchSelectedItemsMap.has(id);
+            rowEl.classList.toggle('canvas-search-row-selected', selected);
+        });
+    }
+
+    // 2. 同步表格模式行实例（保证虚拟滚动复用与后续布局一致）
+    if (typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+        try {
+            const rows = canvasSearchTabulatorInstance.getRows();
+            if (Array.isArray(rows)) {
+                rows.forEach(r => {
+                    const d = r.getData();
+                    const id = String(d && (d.id || (d.rawItem && d.rawItem.id)) || '').trim();
+                    const selected = isSel && canvasSearchSelectedItemsMap.has(id);
+                    const el = r.getElement();
+                    if (el) el.classList.toggle('canvas-search-row-selected', selected);
+                });
+            }
+        } catch (_) { }
+    }
+}
+
+function updateCanvasSearchTempButtonState() {
+    const btns = document.querySelectorAll('.canvas-bookmark-to-temp-btn');
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const isSel = isCanvasSearchSelectionModeActive();
+    const selCount = getCanvasSearchSelectedItemsCount();
+
+    const confirmBtnLabel = isZh
+        ? (selCount > 0 ? `勾选导出 (${selCount})` : '勾选导出')
+        : (selCount > 0 ? `Export Selected (${selCount})` : 'Export Selected');
+
+    btns.forEach(btn => {
+        btn.classList.toggle('is-selection-mode', isSel);
+        const countAttr = btn.getAttribute('data-visible-count');
+        const visibleCount = countAttr ? parseInt(countAttr, 10) : 0;
+        const label = isSel
+            ? (isZh ? `特殊临时栏目菜单 (已选 ${selCount} 项)` : `Special temporary section menu (${selCount} selected)`)
+            : (isZh ? `生成特殊临时栏目${visibleCount ? ` (${visibleCount}项)` : ''}` : `Create special temporary section${visibleCount ? ` (${visibleCount} items)` : ''}`);
+        btn.setAttribute('aria-label', label);
+        btn.removeAttribute('title');
+
+        const parent = btn.parentElement;
+        if (parent) {
+            let confirmBtn = parent.querySelector('.canvas-bookmark-selection-confirm-btn');
+            if (!confirmBtn && isSel) {
+                confirmBtn = document.createElement('button');
+                confirmBtn.className = 'canvas-bookmark-selection-confirm-btn';
+                if (btn.classList.contains('canvas-bookmark-to-temp-btn-compact')) {
+                    confirmBtn.classList.add('canvas-bookmark-selection-confirm-btn-compact');
+                }
+                confirmBtn.type = 'button';
+                parent.insertBefore(confirmBtn, btn);
+            }
+            if (confirmBtn) {
+                confirmBtn.style.display = isSel ? 'inline-flex' : 'none';
+                confirmBtn.classList.toggle('has-selected', isSel && selCount > 0);
+                confirmBtn.setAttribute('aria-label', confirmBtnLabel);
+                confirmBtn.setAttribute('title', confirmBtnLabel);
+                confirmBtn.innerHTML = `<i class="fas fa-check" style="font-size:10px; margin-right:4px;"></i><span class="canvas-selection-confirm-text">${escapeHtml(confirmBtnLabel)}</span>`;
+            }
+        }
+    });
+
+    if (!isSel) {
+        document.querySelectorAll('.canvas-bookmark-selection-confirm-btn').forEach(cBtn => {
+            cBtn.style.display = 'none';
+            cBtn.classList.remove('has-selected');
+        });
+    }
+
+    const panel = getSearchResultsPanel();
+    if (panel) {
+        panel.classList.toggle('selection-mode-active', isSel);
+    }
+}
+
+async function handleCanvasSearchTopNAction(nVal) {
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    let count = 0;
+    if (nVal === 'custom') {
+        const wrap = document.getElementById('canvasTempCustomInputWrap');
+        const input = document.getElementById('canvasTempCustomInput');
+        if (wrap && input) {
+            const isVisible = wrap.classList.contains('visible');
+            if (isVisible) {
+                wrap.classList.remove('visible');
+            } else {
+                wrap.classList.add('visible');
+                if (!input.value) input.value = '15';
+                input.focus();
+                input.select();
+            }
+            if (typeof repositionTempSectionBubble === 'function') repositionTempSectionBubble();
+            return;
+        }
+        const promptInput = prompt(isZh ? '请输入前 N 项数量：' : 'Enter number of top items:', '10');
+        if (!promptInput) return;
+        const parsed = parseInt(promptInput, 10);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            showCanvasToastSafe(isZh ? '请输入有效的正整数' : 'Please enter a valid positive number', 'warning', 1800);
+            return;
+        }
+        count = parsed;
+    } else {
+        count = parseInt(nVal, 10);
+    }
+    if (!Number.isFinite(count) || count <= 0) return;
+
+    const topItems = collectBookmarkItemsForTempSection(count);
+    if (!topItems.length) {
+        showCanvasToastSafe(isZh ? '没有可用的书签结果' : 'No available bookmarks', 'warning', 1800);
+        return;
+    }
+
+    // 点击或输入确认前 N 项后，直接生成临时栏目！
+    hideTempSectionBubble(true);
+    hideSearchResultsPanel();
+    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) ? searchUiState.query.trim() : '';
+    const hasExpandedMulti = topItems.length > count;
+    const title = query
+        ? (isZh ? `搜索: "${query}" (前${count}项${hasExpandedMulti ? `·共${topItems.length}条` : ''})` : `Search: "${query}" (Top ${count}${hasExpandedMulti ? `, ${topItems.length} items` : ''})`)
+        : (isZh ? `书签 (前${count}项${hasExpandedMulti ? `·共${topItems.length}条` : ''})` : `Bookmarks (Top ${count}${hasExpandedMulti ? `, ${topItems.length} items` : ''})`);
+
+    if (isCanvasSearchSelectionModeActive()) {
+        exitCanvasSearchSelectionMode({ silent: true });
+    }
+
+    await createTempSectionFromSearchResults(topItems, title);
+}
+
+async function createTempSectionFromSelectedItems() {
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    if (!canvasSearchSelectedItemsMap.size) {
+        showCanvasToastSafe(isZh ? '请先点击条目进行勾选' : 'Please select items first', 'warning', 2000);
+        return;
+    }
+    const rawSelected = Array.from(canvasSearchSelectedItemsMap.values());
+    const visualCount = rawSelected.length;
+    const items = unwrapSearchItemsForTempPayload(rawSelected, { preserveExplicitSelection: true });
+
+    if (!items.length) {
+        showCanvasToastSafe(isZh ? '所选条目无效或为空' : 'Selected items are invalid or empty', 'warning', 1800);
+        return;
+    }
+    hideTempSectionBubble(true);
+    hideSearchResultsPanel();
+    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) ? searchUiState.query.trim() : '';
+    const hasExpandedMulti = items.length > visualCount;
+    const title = query
+        ? (isZh ? `搜索: "${query}" (已选${visualCount}项${hasExpandedMulti ? `·共${items.length}条` : ''})` : `Search: "${query}" (Selected ${visualCount}${hasExpandedMulti ? `, ${items.length} items` : ''})`)
+        : (isZh ? `已选书签 (${visualCount}项${hasExpandedMulti ? `·共${items.length}条` : ''})` : `Selected Bookmarks (${visualCount}${hasExpandedMulti ? `, ${items.length} items` : ''})`);
+
+    await createTempSectionFromSearchResults(items, title);
+    exitCanvasSearchSelectionMode({ silent: true });
+}
+
+function scheduleHideTempSectionBubble(delay = 200) {
+    if (tempSectionBubbleHideTimer) {
+        clearTimeout(tempSectionBubbleHideTimer);
+        tempSectionBubbleHideTimer = null;
+    }
+}
+
+let tempSectionBubblePinned = false;
+let lastTempBubbleHideTs = 0;
+
+/**
+ * 导出全部搜索结果到特殊临时栏目
+ */
+async function exportAllSearchResultsToTempSection() {
+    hideTempSectionBubble(true);
+    if (isCanvasSearchSelectionModeActive()) {
+        exitCanvasSearchSelectionMode({ silent: true });
+    }
+    const allItems = collectBookmarkItemsForTempSection();
+    if (!allItems.length) {
+        const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+        showCanvasToastSafe(isZh ? '没有可用的书签结果' : 'No available bookmarks', 'warning', 1800);
+        return;
+    }
+    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) ? searchUiState.query.trim() : '';
+    hideSearchResultsPanel();
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const title = query
+        ? (isZh ? `搜索: "${query}" (全部·共${allItems.length}条)` : `Search: "${query}" (All, ${allItems.length} items)`)
+        : (isZh ? `全部书签 (共${allItems.length}条)` : `All Bookmarks (${allItems.length} items)`);
+    await createTempSectionFromSearchResults(allItems, title);
+}
+
+/**
+ * 点击特殊临时栏目按钮切换其展开菜单激活状态
+ */
+function toggleTempSectionBubble(targetBtn) {
+    if (!targetBtn || !document.body.contains(targetBtn)) return;
+    const isCurrentlyVisible = tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible');
+    const isTargetSame = currentTempSectionBtnTarget === targetBtn;
+
+    if (isCurrentlyVisible && isTargetSame && tempSectionBubblePinned) {
+        hideTempSectionBubble(true);
+        return;
+    }
+
+    showTempSectionBubble(targetBtn, { pinned: true });
+}
+
+let tempSectionHelpPopoverEl = null;
+let tempSectionHelpPopoverTimer = null;
+
+function getOrCreateTempSectionHelpPopover() {
+    if (!tempSectionHelpPopoverEl || !document.body.contains(tempSectionHelpPopoverEl)) {
+        let el = document.getElementById('canvasTempSectionHelpPopover');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'canvasTempSectionHelpPopover';
+            el.className = 'canvas-temp-help-popover';
+            el.setAttribute('role', 'tooltip');
+            el.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(el);
+        }
+        tempSectionHelpPopoverEl = el;
+
+        if (!el.hasAttribute('data-events-bound')) {
+            el.setAttribute('data-events-bound', 'true');
+            el.addEventListener('click', (e) => {
+                const closeBtn = e.target.closest('.canvas-temp-help-popover-close-btn');
+                if (closeBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    hideTempSectionHelpPopover();
+                }
+            });
+            el.addEventListener('mouseenter', () => {
+                if (tempSectionHelpPopoverTimer) {
+                    clearTimeout(tempSectionHelpPopoverTimer);
+                    tempSectionHelpPopoverTimer = null;
+                }
+            });
+            el.addEventListener('mouseleave', () => {
+                scheduleHideTempSectionHelpPopover(250);
+            });
+        }
+    }
+    return tempSectionHelpPopoverEl;
+}
+
+function showTempSectionHelpPopover(targetBtn) {
+    if (!targetBtn || !document.body.contains(targetBtn)) return;
+    if (tempSectionHelpPopoverTimer) {
+        clearTimeout(tempSectionHelpPopoverTimer);
+        tempSectionHelpPopoverTimer = null;
+    }
+
+    const popover = getOrCreateTempSectionHelpPopover();
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+
+    popover.innerHTML = `
+        <div class="canvas-temp-help-popover-header">
+            <div class="canvas-temp-help-popover-title">
+                <span class="canvas-temp-help-popover-icon" aria-hidden="true">✦</span>
+                <span>${escapeHtml(isZh ? '特殊临时栏目 · 智能合并规则' : 'Special Temp Section · Smart Merge Rules')}</span>
+            </div>
+            <button type="button" class="canvas-temp-help-popover-close-btn" aria-label="${escapeHtml(isZh ? '关闭' : 'Close')}" title="${escapeHtml(isZh ? '关闭' : 'Close')}">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="canvas-temp-help-popover-body">
+            <div class="canvas-temp-help-section">
+                <div class="canvas-temp-help-section-title">
+                    <i class="fas fa-code-branch"></i>
+                    <span>${escapeHtml(isZh ? '智能合并规则（核心看 Tag & Note）' : 'Smart Merge Rules (Tag & Note)')}</span>
+                </div>
+                <div class="canvas-temp-help-row">
+                    <span class="canvas-temp-help-badge">${escapeHtml(isZh ? 'Title & URL 聚合' : 'Title & URL Grouping')}</span>
+                    <span class="canvas-temp-help-text">${escapeHtml(isZh ? '相同标题与网址的书签，在卡片上作为多处分布统一展示。' : 'Bookmarks with identical title and URL are grouped with location badges.')}</span>
+                </div>
+                <div class="canvas-temp-help-row">
+                    <span class="canvas-temp-help-badge">${escapeHtml(isZh ? '完全一致则智能合并' : 'Merge Identical Instances')}</span>
+                    <span class="canvas-temp-help-text">${escapeHtml(isZh ? '若多处分布均无 Tag/Note，或其 Tag 与 Note 完全一致，系统执行智能合并，仅保留并导出 1 份，避免重复冗余。' : 'If all instances have no tag/note or identical tags & notes, they merge into 1 item to avoid redundancy.')}</span>
+                </div>
+                <div class="canvas-temp-help-row">
+                    <span class="canvas-temp-help-badge">${escapeHtml(isZh ? '存在差异则独立保留' : 'Preserve Differences')}</span>
+                    <span class="canvas-temp-help-text">${escapeHtml(isZh ? '若各分布的 Tag（标签/颜色）或 Note（便签/备注）存在任何不同，系统绝不合并消除，而是作为独立变体分别完整保留导出。' : 'If tags or notes differ across instances, they are never merged and all variants are exported independently.')}</span>
+                </div>
+            </div>
+        </div>
+        <div class="canvas-temp-help-popover-arrow"></div>
+    `;
+
+    popover.classList.remove('visible', 'arrow-bottom', 'arrow-top');
+    popover.style.display = 'block';
+
+    const btnRect = targetBtn.getBoundingClientRect();
+    const popWidth = popover.offsetWidth || 340;
+    const popHeight = popover.offsetHeight || 160;
+
+    let left = btnRect.left + (btnRect.width / 2) - (popWidth / 2);
+    if (left + popWidth > window.innerWidth - 12) {
+        left = window.innerWidth - popWidth - 12;
+    }
+    if (left < 10) left = 10;
+
+    const spaceAbove = btnRect.top;
+    let top = 0;
+    if (spaceAbove >= popHeight + 10) {
+        top = btnRect.top - popHeight - 8;
+        popover.classList.add('arrow-bottom');
+    } else {
+        top = btnRect.bottom + 8;
+        popover.classList.add('arrow-top');
+    }
+
+    const arrowEl = popover.querySelector('.canvas-temp-help-popover-arrow');
+    if (arrowEl) {
+        const arrowX = Math.max(12, Math.min(popWidth - 16, btnRect.left + (btnRect.width / 2) - left));
+        arrowEl.style.left = `${Math.round(arrowX)}px`;
+    }
+
+    popover.style.left = `${Math.round(left)}px`;
+    popover.style.top = `${Math.round(top)}px`;
+
+    requestAnimationFrame(() => {
+        popover.classList.add('visible');
+    });
+}
+
+function hideTempSectionHelpPopover() {
+    if (tempSectionHelpPopoverTimer) {
+        clearTimeout(tempSectionHelpPopoverTimer);
+        tempSectionHelpPopoverTimer = null;
+    }
+    if (tempSectionHelpPopoverEl) {
+        tempSectionHelpPopoverEl.classList.remove('visible');
+    }
+}
+
+function scheduleHideTempSectionHelpPopover(delay = 200) {
+    if (tempSectionHelpPopoverTimer) {
+        clearTimeout(tempSectionHelpPopoverTimer);
+    }
+    tempSectionHelpPopoverTimer = setTimeout(() => {
+        hideTempSectionHelpPopover();
+    }, delay);
+}
 
 /**
  * 隐藏特殊临时栏目说明气泡
  */
-function hideTempSectionBubble() {
+function hideTempSectionBubble(immediate = false) {
+    lastTempBubbleHideTs = Date.now();
+    hideTempSectionHelpPopover();
     if (tempSectionBubbleTimer) {
         clearTimeout(tempSectionBubbleTimer);
         tempSectionBubbleTimer = null;
     }
+    if (tempSectionBubbleHideTimer) {
+        clearTimeout(tempSectionBubbleHideTimer);
+        tempSectionBubbleHideTimer = null;
+    }
+    tempSectionBubblePinned = false;
+    if (currentTempSectionBtnTarget) {
+        currentTempSectionBtnTarget.classList.remove('is-active', 'is-menu-open');
+    }
     currentTempSectionBtnTarget = null;
+    document.querySelectorAll('.canvas-bookmark-to-temp-btn').forEach(btn => {
+        btn.classList.remove('is-active', 'is-menu-open');
+    });
     if (tempSectionBubbleEl) {
         tempSectionBubbleEl.classList.remove('visible');
+        if (immediate) {
+            tempSectionBubbleEl.style.display = 'none';
+        }
     }
 }
 
@@ -3529,55 +4346,91 @@ function getOrCreateTempSectionBubble() {
             document.body.appendChild(el);
         }
         tempSectionBubbleEl = el;
+
+        if (!document.documentElement.hasAttribute('data-temp-bubble-pointerdown-bound')) {
+            document.documentElement.setAttribute('data-temp-bubble-pointerdown-bound', 'true');
+            document.addEventListener('pointerdown', (e) => {
+                if (tempSectionHelpPopoverEl && tempSectionHelpPopoverEl.classList.contains('visible')) {
+                    const inHelpPopover = e.target && e.target.closest && e.target.closest('#canvasTempSectionHelpPopover, .canvas-temp-bubble-help-btn');
+                    if (!inHelpPopover) {
+                        hideTempSectionHelpPopover();
+                    }
+                }
+                if (!tempSectionBubbleEl || !tempSectionBubbleEl.classList.contains('visible')) return;
+                const inBubbleOrBtn = e.target && e.target.closest && e.target.closest('#searchTempSectionBubble, .canvas-bookmark-to-temp-btn, #canvasTempSectionHelpPopover');
+                if (!inBubbleOrBtn) {
+                    hideTempSectionBubble(true);
+                }
+            }, true);
+        }
+
+        if (!document.documentElement.hasAttribute('data-temp-bubble-keydown-bound')) {
+            document.documentElement.setAttribute('data-temp-bubble-keydown-bound', 'true');
+            window.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape') return;
+
+                // 1. 若打开了帮助说明悬浮窗，优先关闭它
+                if (tempSectionHelpPopoverEl && tempSectionHelpPopoverEl.classList.contains('visible')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    hideTempSectionHelpPopover();
+                    return;
+                }
+
+                // 2. 若自定义前 N 项输入行展开，按 Esc 先收起输入行
+                const customWrap = document.getElementById('canvasTempCustomInputWrap');
+                if (customWrap && customWrap.classList.contains('visible')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    customWrap.classList.remove('visible');
+                    repositionTempSectionBubble();
+                    return;
+                }
+
+                // 3. 若说明气泡本身正处于显示状态，按 Esc 仅关闭气泡，绝不连带关闭搜索结果面板
+                if (tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    hideTempSectionBubble(true);
+                    return;
+                }
+
+                // 4. 若正处于勾选模式，按 Esc 仅退出勾选模式，绝不连带关闭搜索结果面板
+                if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    exitCanvasSearchSelectionMode();
+                    return;
+                }
+            }, true);
+        }
     }
     return tempSectionBubbleEl;
 }
 
 /**
- * 显示特殊临时栏目说明气泡（仅右上角 ✦ 按钮）
+ * 重新计算并对齐特殊临时栏目说明气泡位置
  */
-function showTempSectionBubble(targetBtn) {
-    if (!targetBtn || !document.body.contains(targetBtn)) return;
-    const bubble = getOrCreateTempSectionBubble();
-    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
-    const countAttr = targetBtn.getAttribute('data-visible-count');
-    const countNum = countAttr ? parseInt(countAttr, 10) : 0;
-    const safeCount = Number.isFinite(countNum) ? countNum : 0;
-
-    const titleText = isZh ? '生成特殊临时栏目' : 'Create Special Temporary Section';
-    const countBadge = safeCount > 0
-        ? `<span class="canvas-temp-bubble-badge">${safeCount}</span>`
-        : '';
-
-    bubble.innerHTML = `
-        <span class="canvas-temp-bubble-icon" aria-hidden="true">✦</span>
-        <span class="canvas-temp-bubble-title">${escapeHtml(titleText)}</span>
-        ${countBadge}
-        <div class="canvas-temp-bubble-arrow"></div>
-    `;
-
-    bubble.classList.remove('visible');
-    bubble.classList.remove('arrow-top');
-    bubble.classList.remove('arrow-bottom');
-    bubble.style.left = '-9999px';
-    bubble.style.top = '-9999px';
-    bubble.style.display = 'inline-flex';
+function repositionTempSectionBubble() {
+    if (!tempSectionBubbleEl || !currentTempSectionBtnTarget) return;
+    const bubble = tempSectionBubbleEl;
+    const targetBtn = currentTempSectionBtnTarget;
+    if (!document.body.contains(targetBtn)) return;
 
     const btnRect = targetBtn.getBoundingClientRect();
-    const bubbleWidth = bubble.offsetWidth || 150;
-    const bubbleHeight = bubble.offsetHeight || 26;
+    const bubbleWidth = bubble.offsetWidth || 252;
+    const bubbleHeight = bubble.offsetHeight || 120;
 
-    // 水平对齐：贴齐右上角按钮右边缘
     let left = btnRect.right - bubbleWidth + 2;
     if (left + bubbleWidth > window.innerWidth - 12) {
         left = Math.max(10, window.innerWidth - bubbleWidth - 12);
     }
     if (left < 10) left = 10;
 
-    // 垂直对齐：优先在按钮下方展示
     const spaceBelow = window.innerHeight - btnRect.bottom;
     const spaceAbove = btnRect.top;
     let top = 0;
+    bubble.classList.remove('arrow-top', 'arrow-bottom');
     if (spaceBelow >= bubbleHeight + 8 || spaceBelow >= spaceAbove) {
         top = btnRect.bottom + 6;
         bubble.classList.add('arrow-top');
@@ -3592,28 +4445,238 @@ function showTempSectionBubble(targetBtn) {
 
     bubble.style.left = `${Math.round(left)}px`;
     bubble.style.top = `${Math.round(top)}px`;
+}
+
+/**
+ * 显示特殊临时栏目说明气泡（包含全部导出、勾选模式与前 N 项入口）
+ */
+function showTempSectionBubble(targetBtn, options = {}) {
+    if (!targetBtn || !document.body.contains(targetBtn)) return;
+    tempSectionBubblePinned = true;
+    currentTempSectionBtnTarget = targetBtn;
+    targetBtn.classList.add('is-active', 'is-menu-open');
+
+    const bubble = getOrCreateTempSectionBubble();
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const isSel = isCanvasSearchSelectionModeActive();
+    const selCount = getCanvasSearchSelectedItemsCount();
+
+    const titleText = isZh ? '特殊临时栏目' : 'Special Temporary Section';
+
+    bubble.innerHTML = `
+        <div class="canvas-temp-bubble-header">
+            <div class="canvas-temp-bubble-header-left">
+                <span class="canvas-temp-bubble-icon" aria-hidden="true">✦</span>
+                <span class="canvas-temp-bubble-title">${escapeHtml(titleText)}</span>
+                <button type="button" class="canvas-temp-bubble-help-btn" aria-label="${escapeHtml(isZh ? '特殊临时栏目说明' : 'Help')}" aria-expanded="false">
+                    <i class="fas fa-question-circle" aria-hidden="true"></i>
+                </button>
+            </div>
+            <button type="button" class="canvas-temp-bubble-close-btn" aria-label="${escapeHtml(isZh ? '关闭' : 'Close')}" title="${escapeHtml(isZh ? '关闭 (Esc)' : 'Close (Esc)')}">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="canvas-temp-bubble-divider"></div>
+        <div class="canvas-temp-bubble-content">
+            <!-- 分区 1：按数量快速导出（全部与前 N 项整合在一块） -->
+            <div class="canvas-temp-bubble-section canvas-temp-bubble-section-batch">
+                <div class="canvas-temp-bubble-section-header">
+                    <i class="fas fa-layer-group"></i>
+                    <span>${escapeHtml(isZh ? '按数量快速导出' : 'Batch Export')}</span>
+                </div>
+                <div class="canvas-temp-bubble-chips-wrap">
+                    <button type="button" class="canvas-temp-bubble-chip" data-top-n="10" title="${escapeHtml(isZh ? '导出前 10 项' : 'Top 10')}">${escapeHtml(isZh ? '前10项' : 'Top 10')}</button>
+                    <button type="button" class="canvas-temp-bubble-chip" data-top-n="20" title="${escapeHtml(isZh ? '导出前 20 项' : 'Top 20')}">${escapeHtml(isZh ? '前20项' : 'Top 20')}</button>
+                    <button type="button" class="canvas-temp-bubble-chip" data-top-n="50" title="${escapeHtml(isZh ? '导出前 50 项' : 'Top 50')}">${escapeHtml(isZh ? '前50项' : 'Top 50')}</button>
+                    <button type="button" class="canvas-temp-bubble-chip canvas-temp-bubble-chip-custom" data-top-n="custom" title="${escapeHtml(isZh ? '自定义前 N 项' : 'Custom count')}">${escapeHtml(isZh ? '自定' : 'Custom')}</button>
+                    <button type="button" class="canvas-temp-bubble-chip canvas-temp-bubble-chip-all" data-action="export-all" title="${escapeHtml(isZh ? '将当前全部搜索结果直接生成为特殊临时栏目' : 'Export all results')}">${escapeHtml(isZh ? '全部' : 'All')}</button>
+                </div>
+                <div class="canvas-temp-custom-input-wrap" id="canvasTempCustomInputWrap">
+                    <input type="number" min="1" max="999" class="canvas-temp-custom-input" id="canvasTempCustomInput" placeholder="${escapeHtml(isZh ? '输入数量 (如 15)' : 'Count (e.g. 15)')}" />
+                    <button type="button" class="canvas-temp-custom-confirm-btn" id="canvasTempCustomConfirmBtn" title="${escapeHtml(isZh ? '确认生成' : 'Generate')}">${escapeHtml(isZh ? '生成' : 'Go')}</button>
+                    <button type="button" class="canvas-temp-custom-cancel-btn" id="canvasTempCustomCancelBtn" title="${escapeHtml(isZh ? '收起' : 'Cancel')}"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+
+            <div class="canvas-temp-bubble-divider"></div>
+
+            <!-- 分区 2：手动勾选模式（独立成块） -->
+            <div class="canvas-temp-bubble-section canvas-temp-bubble-section-select">
+                <div class="canvas-temp-bubble-section-header">
+                    <i class="fas fa-check-square"></i>
+                    <span>${escapeHtml(isZh ? '手动勾选模式' : 'Manual Selection')}</span>
+                </div>
+                ${isSel ? `
+                    <div class="canvas-temp-bubble-mode-row">
+                        <button type="button" class="canvas-temp-bubble-btn canvas-temp-bubble-clear-btn${selCount > 0 ? '' : ' is-disabled'}" data-action="clear-selection" title="${escapeHtml(isZh ? '清空已选条目' : 'Clear all selected items')}" ${selCount > 0 ? '' : 'disabled'}>
+                            <i class="fas fa-eraser"></i>
+                            <span>${escapeHtml(isZh ? '清空' : 'Clear')}</span>
+                        </button>
+                        <button type="button" class="canvas-temp-bubble-btn canvas-temp-bubble-exit-btn" data-action="toggle-selection-mode" title="${escapeHtml(isZh ? '退出勾选模式' : 'Exit selection mode')}">
+                            <i class="fas fa-times"></i>
+                            <span>${escapeHtml(isZh ? '退出' : 'Exit')}</span>
+                        </button>
+                    </div>
+                ` : `
+                    <button type="button" class="canvas-temp-bubble-btn canvas-temp-bubble-toggle-mode canvas-temp-bubble-btn-enter" data-action="toggle-selection-mode" title="${escapeHtml(isZh ? '进入多选模式，按需在卡片列表中逐项勾选' : 'Enter selection mode to choose specific items')}">
+                        <i class="fas fa-hand-pointer"></i>
+                        <span>${escapeHtml(isZh ? '进入勾选模式' : 'Enter Selection Mode')}</span>
+                    </button>
+                `}
+            </div>
+        </div>
+        <div class="canvas-temp-bubble-arrow"></div>
+    `;
+
+    if (!bubble.hasAttribute('data-events-bound')) {
+        bubble.setAttribute('data-events-bound', 'true');
+        bubble.addEventListener('click', (e) => {
+            const closeBtn = e.target.closest('.canvas-temp-bubble-close-btn');
+            if (closeBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                hideTempSectionBubble(true);
+                return;
+            }
+            const helpBtn = e.target.closest('.canvas-temp-bubble-help-btn');
+            if (helpBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (tempSectionHelpPopoverEl && tempSectionHelpPopoverEl.classList.contains('visible')) {
+                    hideTempSectionHelpPopover();
+                } else {
+                    showTempSectionHelpPopover(helpBtn);
+                }
+                return;
+            }
+            const exportAllBtn = e.target.closest('[data-action="export-all"]');
+            if (exportAllBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                exportAllSearchResultsToTempSection();
+                return;
+            }
+            const clearBtn = e.target.closest('[data-action="clear-selection"]');
+            if (clearBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof clearCanvasSearchSelection === 'function') {
+                    clearCanvasSearchSelection();
+                }
+                return;
+            }
+            const toggleBtn = e.target.closest('.canvas-temp-bubble-toggle-mode, .canvas-temp-bubble-exit-btn, [data-action="toggle-selection-mode"]');
+            if (toggleBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleCanvasSearchSelectionMode();
+                return;
+            }
+            const confirmCustomBtn = e.target.closest('#canvasTempCustomConfirmBtn');
+            if (confirmCustomBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const input = bubble.querySelector('#canvasTempCustomInput');
+                if (!input) return;
+                const val = parseInt(input.value, 10);
+                if (!Number.isFinite(val) || val <= 0) {
+                    showCanvasToastSafe(isZh ? '请输入有效的正整数' : 'Please enter a valid positive number', 'warning', 1800);
+                    input.focus();
+                    return;
+                }
+                handleCanvasSearchTopNAction(val);
+                return;
+            }
+            const cancelCustomBtn = e.target.closest('#canvasTempCustomCancelBtn');
+            if (cancelCustomBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const wrap = bubble.querySelector('#canvasTempCustomInputWrap');
+                if (wrap) wrap.classList.remove('visible');
+                repositionTempSectionBubble();
+                return;
+            }
+            const topNBtn = e.target.closest('[data-top-n]');
+            if (topNBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const nVal = topNBtn.getAttribute('data-top-n');
+                if (nVal === 'custom') {
+                    const wrap = bubble.querySelector('#canvasTempCustomInputWrap');
+                    const input = bubble.querySelector('#canvasTempCustomInput');
+                    if (wrap && input) {
+                        const isVisible = wrap.classList.contains('visible');
+                        if (isVisible) {
+                            wrap.classList.remove('visible');
+                        } else {
+                            wrap.classList.add('visible');
+                            if (!input.value) input.value = '15';
+                            input.focus();
+                            input.select();
+                        }
+                        repositionTempSectionBubble();
+                    }
+                    return;
+                }
+                handleCanvasSearchTopNAction(nVal);
+                return;
+            }
+        });
+
+        bubble.addEventListener('keydown', (e) => {
+            const customInput = e.target.closest('#canvasTempCustomInput');
+            if (!customInput) return;
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                const val = parseInt(customInput.value, 10);
+                if (!Number.isFinite(val) || val <= 0) {
+                    showCanvasToastSafe(isZh ? '请输入有效的正整数' : 'Please enter a valid positive number', 'warning', 1800);
+                    customInput.focus();
+                    return;
+                }
+                handleCanvasSearchTopNAction(val);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                const wrap = bubble.querySelector('#canvasTempCustomInputWrap');
+                if (wrap) wrap.classList.remove('visible');
+                repositionTempSectionBubble();
+            }
+        });
+    }
+
+    const helpBtnEl = bubble.querySelector('.canvas-temp-bubble-help-btn');
+    if (helpBtnEl) {
+        helpBtnEl.addEventListener('mouseenter', () => {
+            showTempSectionHelpPopover(helpBtnEl);
+        });
+        helpBtnEl.addEventListener('mouseleave', () => {
+            scheduleHideTempSectionHelpPopover(250);
+        });
+    }
+
+    bubble.classList.remove('visible');
+    bubble.classList.remove('arrow-top');
+    bubble.classList.remove('arrow-bottom');
+    bubble.style.left = '-9999px';
+    bubble.style.top = '-9999px';
+    bubble.style.display = 'flex';
+
+    repositionTempSectionBubble();
 
     requestAnimationFrame(() => {
-        if (currentTempSectionBtnTarget === targetBtn) {
+        if (currentTempSectionBtnTarget === targetBtn || tempSectionBubblePinned) {
             bubble.classList.add('visible');
         }
     });
 }
 
 /**
- * 计划展示特殊临时栏目说明气泡（120ms 防抖）
+ * 计划展示特殊临时栏目说明气泡（已全面切换为点击模式，悬停不再自动展示）
  */
 function scheduleTempSectionBubble(targetBtn) {
-    if (currentTempSectionBtnTarget === targetBtn && tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
-        return;
-    }
-    hideTempSectionBubble();
-    currentTempSectionBtnTarget = targetBtn;
-    tempSectionBubbleTimer = setTimeout(() => {
-        if (currentTempSectionBtnTarget === targetBtn && document.body.contains(targetBtn)) {
-            showTempSectionBubble(targetBtn);
-        }
-    }, 120);
+    return;
 }
 
 // ==================== 网格视图详情说明气泡 UI ====================
@@ -3651,25 +4714,33 @@ function findSearchResultItemById(itemId, itemIndex = -1) {
     if (typeof searchUiState === 'undefined' || !searchUiState) return null;
     const safeId = String(itemId || '').trim();
     if (safeId) {
-        const pools = [searchUiState.results, searchUiState.resultAll, searchUiState.resultSource];
+        const pools = [searchUiState.results, searchUiState.resultAll, searchUiState.resultSource, searchUiState.bookmarkGroupModel];
         for (const pool of pools) {
             if (!Array.isArray(pool)) continue;
-            const found = pool.find(item => item && String(item.id || '') === safeId);
+            const found = pool.find(item => item && (String(item.id || '') === safeId || String((item.header && item.header.id) || '') === safeId));
             if (found) return found;
         }
         for (const pool of pools) {
             if (!Array.isArray(pool)) continue;
             for (const item of pool) {
-                if (item && Array.isArray(item.targetItems)) {
-                    const child = item.targetItems.find(c => c && (String(c.id || '') === safeId || String(c.locationKey || '') === safeId));
+                if (!item) continue;
+                if (Array.isArray(item.targetItems)) {
+                    const child = item.targetItems.find(c => c && (String(c.id || '') === safeId || String(c.locationKey || '') === safeId || String(c.key || '') === safeId));
                     if (child) return child;
+                }
+                if (Array.isArray(item.children)) {
+                    const child = item.children.find(c => c && (String(c.id || '') === safeId || String(c.locationKey || '') === safeId || String((c.item && c.item.id) || '') === safeId));
+                    if (child) return child.item || child;
+                }
+                if (item.header && (String(item.header.id || '') === safeId || String(item.header.bookmarkId || '') === safeId)) {
+                    return item;
                 }
             }
         }
     }
     const idx = Number(itemIndex);
     if (!Number.isNaN(idx) && idx >= 0) {
-        const pools = [searchUiState.results, searchUiState.resultAll, searchUiState.resultSource];
+        const pools = [searchUiState.results, searchUiState.resultAll, searchUiState.resultSource, searchUiState.bookmarkGroupModel];
         for (const pool of pools) {
             if (Array.isArray(pool) && pool[idx]) {
                 return pool[idx];
@@ -5149,18 +6220,14 @@ function handleSearchResultsPanelMouseOver(e) {
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results') {
         hideSearchTitleTooltip();
-        hideTempSectionBubble();
         return;
     }
 
-    // 0. 特殊临时栏目图标按钮说明气泡逻辑（仅右上角 ✦ 按钮）
+    // 0. 特殊临时栏目图标按钮（仅右上角 ✦ 按钮）：已全面改为点击展开菜单，鼠标悬停不再弹出说明气泡
     const tempBtn = e && e.target ? e.target.closest('.canvas-bookmark-to-temp-btn') : null;
     if (tempBtn) {
         hideSearchTitleTooltip();
-        scheduleTempSectionBubble(tempBtn);
         return;
-    } else {
-        hideTempSectionBubble();
     }
 
     // 1. 悬停 0.7s 浮层逻辑：仅限包含「...」的候选条目
@@ -5207,12 +6274,6 @@ function handleSearchResultsPanelMouseOver(e) {
  * 鼠标移出搜索面板候选条目
  */
 function handleSearchResultsPanelMouseOut(e) {
-    if (currentTempSectionBtnTarget) {
-        const related = e && e.relatedTarget ? e.relatedTarget : null;
-        if (!related || !currentTempSectionBtnTarget.contains(related)) {
-            hideTempSectionBubble();
-        }
-    }
     if (!currentTooltipTarget) return;
     const related = e && e.relatedTarget ? e.relatedTarget : null;
     if (!related || !currentTooltipTarget.contains(related)) {
@@ -5233,6 +6294,20 @@ function handleSearchResultsPanelMouseOut(e) {
  * 搜索面板外部点击处理
  */
 function handleSearchOutsideClick(e) {
+    let wasBubbleVisible = false;
+    if (tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
+        const inBubbleOrBtn = e.target && e.target.closest && e.target.closest('#searchTempSectionBubble, .canvas-bookmark-to-temp-btn');
+        if (!inBubbleOrBtn) {
+            wasBubbleVisible = true;
+            hideTempSectionBubble(true);
+        }
+    }
+
+    // 如果这次点击（或紧随其后的 pointerdown）关闭了特殊临时栏目气泡菜单，则不应同时关闭搜索面板本身
+    if (wasBubbleVisible || (Date.now() - lastTempBubbleHideTs < 350)) {
+        return;
+    }
+
     const container = document.querySelector('.search-container');
     const panel = getSearchResultsPanel();
     if (!container || !panel) return;
@@ -5903,18 +6978,14 @@ function initSearchEvents() {
         searchResultsPanel.addEventListener('mouseout', handleSearchResultsPanelMouseOut);
         searchResultsPanel.addEventListener('focusin', (e) => {
             const tempBtn = e && e.target ? e.target.closest('.canvas-bookmark-to-temp-btn') : null;
-            if (tempBtn) scheduleTempSectionBubble(tempBtn);
+            if (tempBtn) hideSearchTitleTooltip();
         });
-        searchResultsPanel.addEventListener('focusout', (e) => {
-            if (currentTempSectionBtnTarget) hideTempSectionBubble();
-        });
+        searchResultsPanel.addEventListener('focusout', () => {});
         searchResultsPanel.addEventListener('mousedown', () => {
             if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
-            if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
         });
         searchResultsPanel.addEventListener('scroll', () => {
             if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
-            if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
             if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
             if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
             clearGridSelectionOnScroll(searchResultsPanel);
@@ -5927,7 +6998,6 @@ function initSearchEvents() {
             lastSearchResultWheelTs = Date.now();
             lastSearchResultKeyboardNavTs = 0;
             if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
-            if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
             clearGridSelectionOnScroll(searchResultsPanel);
         }, { passive: true });
         searchResultsPanel.setAttribute('data-search-wheel-bound', 'true');
@@ -6695,6 +7765,13 @@ async function setSearchMode(modeKey, options = {}) {
     }
 
     const previousModeKey = searchUiState.activeMode;
+    if (previousModeKey !== modeKey && typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
+        const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+        exitCanvasSearchSelectionMode({
+            silent: false,
+            message: isZh ? '切换模式已自动退出勾选模式' : 'Switched mode: exited selection mode'
+        });
+    }
     searchUiState.activeMode = modeKey;
     searchUiState.showFullscreenDescriptionOthers = false;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
@@ -12043,6 +13120,8 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
             locations: canonicalLocations,
             targetItems: sortedTargetItems,
             childItems: sortedTargetItems,
+            children: g.children,
+            groupModel: g,
             matchesCount: targetItems.length,
             dateAdded: g.header.dateAdded !== undefined ? g.header.dateAdded : (sortedTargetItems[0] ? sortedTargetItems[0].dateAdded : null)
         });
@@ -12320,7 +13399,7 @@ function doesCanvasBookmarkItemTagsMatchQuery(item, query) {
         const rawTagQuery = q.slice(1);
         const tagQuery = rawTagQuery.startsWith('/') ? rawTagQuery.slice(1) : rawTagQuery;
         if (!tagQuery) return state.tags.length > 0;
-        return state.exactTerms.has(tagQuery);
+        return state.exactTerms.has(tagQuery) || state.terms.some((term) => term.includes(tagQuery));
     }
     return state.terms.some((term) => term.includes(q));
 }
@@ -12456,6 +13535,16 @@ function getCanvasBookmarkNoteMetaForSearchCached(item) {
 function doesCanvasBookmarkItemNoteMatchQuery(item, query) {
     const needle = getCanvasNoteSearchNeedle(query);
     if (needle === null) return false;
+    const notesList = (typeof getBookmarkItemNotesList === 'function')
+        ? getBookmarkItemNotesList(item)
+        : [];
+    if (notesList && notesList.length > 0) {
+        if (!needle) return true;
+        return notesList.some((n) => {
+            const text = (typeof n === 'string' ? n : (n && n.note ? n.note : '')).toLowerCase();
+            return text.includes(needle);
+        });
+    }
     const state = getCanvasBookmarkNoteSearchState(item);
     if (!state.note) return false;
     if (!needle) return true;
@@ -13423,8 +14512,31 @@ function searchCanvasAndRender(query, options = {}) {
     }
     const previousCanvasQuery = String(searchUiState.query || '').trim().toLowerCase();
     const nextCanvasQuery = trimmedQuery.toLowerCase();
-    if (triggerSource === 'input' && previousCanvasQuery !== nextCanvasQuery) {
-        searchUiState.structureTypeFilter = null;
+    if (previousCanvasQuery !== nextCanvasQuery) {
+        if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
+            exitCanvasSearchSelectionMode({ silent: true });
+        }
+        if (triggerSource === 'input') {
+            searchUiState.structureTypeFilter = null;
+        }
+    }
+
+    // Auto-align mode for Tag / Note browse or queries
+    const hasBrowseDetail = (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.active === true)
+        || (searchUiState.noteBrowseDetail && searchUiState.noteBrowseDetail.active === true);
+    const isTagBrowseRoot = typeof isTagBrowseRootQuery === 'function' && isTagBrowseRootQuery(trimmedQuery);
+    const isNoteBrowseRoot = typeof isNoteBrowseRootQuery === 'function' && isNoteBrowseRootQuery(trimmedQuery);
+    const isTagSearch = typeof isCanvasTagSearchQuery === 'function' && isCanvasTagSearchQuery(trimmedQuery)
+        && (typeof parsePermanentSectionQuery !== 'function' || parsePermanentSectionQuery(trimmedQuery) === null);
+    const isNoteSearch = typeof isCanvasNoteSearchQuery === 'function' && isCanvasNoteSearchQuery(trimmedQuery);
+
+    if (hasBrowseDetail || isTagBrowseRoot || isNoteBrowseRoot || isTagSearch || isNoteSearch) {
+        if (searchUiState.activeMode !== 'bookmark') {
+            searchUiState.activeMode = 'bookmark';
+            if (typeof renderSearchModeUI === 'function') {
+                try { renderSearchModeUI(); } catch (_) { }
+            }
+        }
     }
 
     // Determine Source Index based on Active Mode
@@ -13661,6 +14773,14 @@ function searchCanvasAndRender(query, options = {}) {
         if (mode === 'tag') {
             const tags = getCanvasBookmarkTagsForSearchCached(item);
             const rawScore = 100 + Math.min(10, tags.length);
+            const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
+            scored.push({ item, s: rawScore + scopeBonus, rawScore });
+            continue;
+        }
+
+        // Secondary Tag/Note Browse detail active: candidates already strictly verified above.
+        if (activeTagBrowseDetail || activeNoteBrowseDetail) {
+            const rawScore = 135;
             const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
             scored.push({ item, s: rawScore + scopeBonus, rawScore });
             continue;
@@ -16446,6 +17566,16 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
             headerSortTristate: true,
             sorter: (a, b, aRow, bRow, col, dir) => compareCanvasSearchNaturalText(a, b, dir),
             cellClick: async (e, cell) => {
+                if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+                    e._canvasHandled = true;
+                    try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                    const d = cell.getData();
+                    const itemId = String(d && (d.id || (d.rawItem && d.rawItem.id)) || '').trim();
+                    if (typeof toggleCanvasSearchItemSelection === 'function') {
+                        toggleCanvasSearchItemSelection(itemId, d ? (d.rawItem || d) : null);
+                    }
+                    return;
+                }
                 if (e.target.closest('.search-loc-chip, .canvas-table-loc-more-btn, .canvas-grid-location-more-btn, a, button')) return;
                 const d = cell.getData();
                 if (!d) return;
@@ -16475,6 +17605,16 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 return renderCanvasTableBookmarkLocationsHtml(d.locations, isZh, d);
             },
             cellClick: (e, cell) => {
+                if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+                    e._canvasHandled = true;
+                    try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                    const d = cell.getData();
+                    const itemId = String(d && (d.id || (d.rawItem && d.rawItem.id)) || '').trim();
+                    if (typeof toggleCanvasSearchItemSelection === 'function') {
+                        toggleCanvasSearchItemSelection(itemId, d ? (d.rawItem || d) : null);
+                    }
+                    return;
+                }
                 const moreBtn = e.target.closest('.canvas-grid-location-more-btn, .canvas-table-loc-more-btn');
                 if (moreBtn) {
                     if (e._canvasHandled) return;
@@ -16993,6 +18133,16 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
  */
 async function handleCanvasTabulatorRowClick(e, row) {
     if (!e || e._canvasHandled) return;
+    if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+        e._canvasHandled = true;
+        try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
+        const rowData = row ? row.getData() : null;
+        const itemId = String(rowData && (rowData.id || (rowData.rawItem && rowData.rawItem.id)) || '').trim();
+        if (typeof toggleCanvasSearchItemSelection === 'function') {
+            toggleCanvasSearchItemSelection(itemId, rowData ? (rowData.rawItem || rowData) : null, row ? row.getElement() : null);
+        }
+        return;
+    }
     const target = e.target;
     if (!target) return;
 
@@ -17238,6 +18388,17 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             },
             columns: getCanvasTabulatorColumns(isZh, activeMode, tableData),
             rowClick: handleCanvasTabulatorRowClick,
+            rowFormatter: (row) => {
+                if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+                    const data = row.getData();
+                    const itemId = String(data && (data.id || (data.rawItem && data.rawItem.id)) || '').trim();
+                    if (canvasSearchSelectedItemsMap.has(itemId)) {
+                        row.getElement().classList.add('canvas-search-row-selected');
+                    } else {
+                        row.getElement().classList.remove('canvas-search-row-selected');
+                    }
+                }
+            },
             autoResize: false
         });
 
@@ -17267,6 +18428,9 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
                 updateCanvasTabulatorLoadMoreRow(remain, canvasSearchTabulatorPendingState.isZh);
             }
             syncCanvasTabulatorRightScrollbar(true);
+            if (typeof syncCanvasSearchItemSelectionVisuals === 'function') {
+                syncCanvasSearchItemSelectionVisuals();
+            }
         });
 
         canvasSearchTabulatorInstance.on("renderComplete", () => {
@@ -17276,6 +18440,9 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
                 updateCanvasTabulatorLoadMoreRow(remain, canvasSearchTabulatorPendingState.isZh);
             }
             syncCanvasTabulatorRightScrollbar(true);
+            if (typeof syncCanvasSearchItemSelectionVisuals === 'function') {
+                syncCanvasSearchItemSelectionVisuals();
+            }
         });
 
         canvasSearchTabulatorInstance.on("scrollVertical", () => {
@@ -17383,7 +18550,7 @@ function renderOrUpdateSearchPanelHeader(panel, headerHtml) {
 
     // 1. 彻底清除所有已有的顶部详情头部与工具栏，杜绝任何历史残留或多行堆叠
     const staleHeaders = panel.querySelectorAll(
-        '.canvas-tag-browse-detail-header, .canvas-bookmark-type-toggle, .search-suggestions-header, .search-empty-suggestions-hint, .canvas-suggestion-mode-item'
+        '.canvas-tag-browse-detail-header, .canvas-bookmark-type-toggle, .search-suggestions-header, .search-empty-suggestions-hint, .canvas-suggestion-mode-item, .canvas-tag-browse-section, .canvas-note-browse-section'
     );
     staleHeaders.forEach(el => el.remove());
 
@@ -18326,6 +19493,15 @@ function renderCanvasSearchResults(results, options = {}) {
                 : `Create special temporary section${visibleCount ? ` (${visibleCount} items)` : ''}`;
 
             const showExportBtn = (active !== 'domain');
+            const isSel = (typeof isCanvasSearchSelectionModeActive === 'function') && isCanvasSearchSelectionModeActive();
+            const selCount = (typeof getCanvasSearchSelectedItemsCount === 'function') ? getCanvasSearchSelectedItemsCount() : 0;
+            const confirmBtnLabel = isZh
+                ? (selCount > 0 ? `勾选导出 (${selCount})` : '勾选导出')
+                : (selCount > 0 ? `Export Selected (${selCount})` : 'Export Selected');
+
+            const confirmSelectionBtnHtml = (showExportBtn && isSel)
+                ? `<button class="canvas-bookmark-selection-confirm-btn${compactBookmarkToolbar ? ' canvas-bookmark-selection-confirm-btn-compact' : ''}${selCount > 0 ? ' has-selected' : ''}" type="button" aria-label="${escapeHtml(confirmBtnLabel)}" title="${escapeHtml(confirmBtnLabel)}"><i class="fas fa-check" style="font-size:10px; margin-right:4px;"></i><span class="canvas-selection-confirm-text">${escapeHtml(confirmBtnLabel)}</span></button>`
+                : '';
             const exportBtnHtml = showExportBtn
                 ? `<button class="canvas-bookmark-to-temp-btn${compactBookmarkToolbar ? ' canvas-bookmark-to-temp-btn-compact' : ''}" type="button" data-visible-count="${visibleCount}" aria-label="${escapeHtml(exportAriaLabel)}"><span class="canvas-dir-icon-badge canvas-dir-icon-badge-special" aria-hidden="true">✦</span></button>`
                 : '';
@@ -18333,6 +19509,7 @@ function renderCanvasSearchResults(results, options = {}) {
             const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
 
             const rightActionsHtml = `<div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px;">
+                ${confirmSelectionBtnHtml}
                 ${exportBtnHtml}
                 ${viewGroupHtml}
             </div>`;
@@ -18474,6 +19651,9 @@ function renderCanvasSearchResults(results, options = {}) {
 
             const oldSuggestions = panel.querySelectorAll('.search-suggestions-header, .canvas-suggestions-hide-btn, .search-empty-suggestions-hide-btn, .canvas-suggestion-mode-item');
             oldSuggestions.forEach(el => el.remove());
+
+            const oldBrowseSections = panel.querySelectorAll('.canvas-tag-browse-section, .canvas-note-browse-section');
+            oldBrowseSections.forEach(el => el.remove());
 
             const handleBottom = panel.querySelector('.search-panel-resize-handle.handle-bottom');
             if (handleBottom) {
@@ -19332,13 +20512,16 @@ function renderCanvasSearchResults(results, options = {}) {
         if (!descHtml || !String(descHtml).trim()) {
             extraItemAttrs += ' data-single-line="true"';
         }
+        if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive() && canvasSearchSelectedItemsMap.has(String(item.id || ''))) {
+            extraClasses.push('canvas-search-item-selected');
+        }
         const rowClassName = ['search-result-item', isSelected].concat(extraClasses).filter(Boolean).join(' ');
         const bookmarkGroupExpandedAttr = item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || ''))
             ? ' data-expanded="true"'
             : '';
 
         itemsHtml += `
-            <div class="${rowClassName}" data-index="${index}" data-id="${item.id}" data-type="${item.type}"${bookmarkGroupExpandedAttr}${extraItemAttrs}>
+            <div class="${rowClassName}" data-index="${index}" data-id="${escapeHtml(item.id)}" data-type="${item.type}"${bookmarkGroupExpandedAttr}${extraItemAttrs}>
                 <div class="search-result-content">
                     <div class="search-result-title">${indexLabel}${title}</div>
                     ${descHtml}
@@ -19449,49 +20632,284 @@ function renderCanvasSearchResults(results, options = {}) {
         ensureCanvasGridRightScrollbar(panel);
         syncCanvasGridRightScrollbar(panel);
     }
+    if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+        syncCanvasSearchItemSelectionVisuals();
+        updateCanvasSearchTempButtonState();
+    }
 
 }
 
-function collectBookmarkItemsForTempSection() {
+function collectBookmarkItemsForTempSection(targetCount = null) {
     const filter = searchUiState.bookmarkTypeFilter;
     if (filter === 'domain') return [];
-    let items = [];
     const groups = searchUiState.bookmarkGroupModel;
+    const isTargetCount = typeof targetCount === 'number' && targetCount > 0;
 
+    let candidatePool = [];
     if (Array.isArray(groups) && groups.length) {
-        groups.forEach(g => {
-            if (!g || !Array.isArray(g.children) || !g.children.length) return;
-            const item = g.children[0].item;
-            if (!item) return;
-            if (filter === 'bookmark' && item.nodeType !== 'bookmark') return;
-            if (filter === 'folder' && item.nodeType !== 'folder') return;
-            items.push(item);
-        });
-        return items;
+        candidatePool = groups;
+    } else {
+        const allCandidates = (Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
+            ? searchUiState.resultAll
+            : (searchUiState.results || []);
+        candidatePool = allCandidates.filter(r => r && (r.type === 'bookmark-item' || r.type === 'bookmark-group'));
     }
 
-    items = (searchUiState.resultAll || searchUiState.results || []).filter(r => r && r.type === 'bookmark-item');
-    if (filter === 'bookmark') {
-        items = items.filter(r => r.nodeType === 'bookmark');
-    } else if (filter === 'folder') {
-        items = items.filter(r => r.nodeType === 'folder');
+    if (!isTargetCount) {
+        // 全部导出
+        return (typeof unwrapSearchItemsForTempPayload === 'function')
+            ? unwrapSearchItemsForTempPayload(candidatePool)
+            : candidatePool.map(r => r.rawItem || r);
     }
-    return items;
+
+    const selectedCandidates = candidatePool.slice(0, targetCount);
+    return (typeof unwrapSearchItemsForTempPayload === 'function')
+        ? unwrapSearchItemsForTempPayload(selectedCandidates)
+        : selectedCandidates.map(r => r.rawItem || r);
 }
 
-function getCanvasViewportCenterForTemp() {
+function getCanvasViewportCenterForTemp(targetWidth, targetHeight) {
     const workspace = document.getElementById('canvasWorkspace');
     const state = getActiveCanvasState();
-    if (!workspace || !state) return { x: 100, y: 100 };
+    const wsW = (workspace && workspace.clientWidth) || window.innerWidth || 1200;
+    const wsH = (workspace && workspace.clientHeight) || window.innerHeight || 800;
+    const zoom = (state && Number.isFinite(state.zoom) && state.zoom > 0) ? state.zoom : 1;
+    const panX = (state && Number.isFinite(state.panOffsetX)) ? state.panOffsetX : 0;
+    const panY = (state && Number.isFinite(state.panOffsetY)) ? state.panOffsetY : 0;
 
-    const rect = workspace.getBoundingClientRect();
-    const zoom = state.zoom || 1;
-    const panX = state.panOffsetX || 0;
-    const panY = state.panOffsetY || 0;
-    const rightShiftPx = Math.min(rect.width * 0.12, 180);
-    const x = (rect.width / 2 + rightShiftPx - panX) / zoom;
-    const y = (rect.height / 2 - panY) / zoom;
-    return { x, y };
+    const baseSize = (typeof getTempSectionBaseSize === 'function')
+        ? getTempSectionBaseSize()
+        : { width: 360, height: 280 };
+    const w = Number.isFinite(targetWidth) && targetWidth > 0 ? targetWidth : (baseSize.width || 360);
+    const h = Number.isFinite(targetHeight) && targetHeight > 0 ? targetHeight : (baseSize.height || 280);
+
+    // 当前视口在 Canvas 坐标系下的中心点
+    const viewCenterX = (wsW / 2 - panX) / zoom;
+    const viewCenterY = (wsH / 2 - panY) / zoom;
+
+    // 基础理想落点：视口正中心（左上角 = 视口中心 - 尺寸的一半）
+    let idealX = viewCenterX - w / 2;
+    let idealY = viewCenterY - h / 2;
+
+    // 收集当前视口内的已有卡片障碍物（永久栏目、现有临时栏目、Markdown卡片）
+    const obstacles = [];
+    if (state) {
+        if (state.permanentPosition && Number.isFinite(state.permanentPosition.left) && Number.isFinite(state.permanentPosition.top)) {
+            obstacles.push({
+                x: Number(state.permanentPosition.left),
+                y: Number(state.permanentPosition.top),
+                w: Number(state.permanentPosition.width) || 600,
+                h: Number(state.permanentPosition.height) || 600
+            });
+        }
+        if (Array.isArray(state.tempSections)) {
+            state.tempSections.forEach(s => {
+                if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) {
+                    obstacles.push({
+                        x: Number(s.x),
+                        y: Number(s.y),
+                        w: Number(s.width) || (baseSize.width || 360),
+                        h: Number(s.height) || (baseSize.height || 280)
+                    });
+                }
+            });
+        }
+        if (Array.isArray(state.mdNodes)) {
+            state.mdNodes.forEach(n => {
+                if (n && Number.isFinite(n.x) && Number.isFinite(n.y)) {
+                    obstacles.push({
+                        x: Number(n.x),
+                        y: Number(n.y),
+                        w: Number(n.width) || 300,
+                        h: Number(n.height) || 200
+                    });
+                }
+            });
+        }
+    }
+
+    const pad = 24;
+    const isColliding = (candX, candY) => {
+        return obstacles.some(obs => {
+            return !(
+                candX + w + pad <= obs.x ||
+                obs.x + obs.w + pad <= candX ||
+                candY + h + pad <= obs.y ||
+                obs.y + obs.h + pad <= candY
+            );
+        });
+    };
+
+    // 1. 如果视口正中心无遮挡，直接使用正中心！
+    if (!isColliding(idealX, idealY)) {
+        if (window.CanvasModule && typeof window.CanvasModule.getGridSnappedCanvasPosition === 'function') {
+            const snapped = window.CanvasModule.getGridSnappedCanvasPosition(idealX, idealY);
+            return { x: snapped.x, y: snapped.y };
+        }
+        return { x: idealX, y: idealY };
+    }
+
+    // 视口边界（Canvas 坐标系）
+    const vLeft = -panX / zoom;
+    const vTop = -panY / zoom;
+    const vRight = vLeft + wsW / zoom;
+    const vBottom = vTop + wsH / zoom;
+
+    // 2. 正中心有遮挡时，优先在当前视口可见区域内微调避让（绝不跳出几千像素以外）
+    const candidates = [
+        // 经典自然层叠偏移（方便用户连点生成时层叠展开，标头均清晰可见）
+        { x: idealX + 36, y: idealY + 36 },
+        { x: idealX + 72, y: idealY + 72 },
+        { x: idealX + 108, y: idealY + 108 },
+        // 右侧/下方紧邻避让（若右/下方仍在当前视口内）
+        { x: idealX + w + pad, y: idealY },
+        { x: idealX, y: idealY + h + pad },
+        { x: idealX - w - pad, y: idealY },
+        { x: idealX, y: idealY - h - pad },
+        { x: idealX - 36, y: idealY + 36 },
+        { x: idealX + 36, y: idealY - 36 }
+    ];
+
+    let foundFreeCandidate = false;
+    for (const cand of candidates) {
+        const insideViewport = (cand.x >= vLeft + 20 && (cand.x + w) <= vRight - 20 &&
+                                cand.y >= vTop + 20 && (cand.y + h) <= vBottom - 20);
+        if (insideViewport && !isColliding(cand.x, cand.y)) {
+            idealX = cand.x;
+            idealY = cand.y;
+            foundFreeCandidate = true;
+            break;
+        }
+    }
+
+    // 3. 若视口内较为密集无完全空白点，在当前中心以自然层叠位呈现（确保第一眼就在眼前，不遮挡旧卡片标头）
+    if (!foundFreeCandidate) {
+        for (let i = 1; i <= 6; i++) {
+            const cascadeX = idealX + i * 36;
+            const cascadeY = idealY + i * 36;
+            const exactCover = obstacles.some(obs => Math.abs(obs.x - cascadeX) < 8 && Math.abs(obs.y - cascadeY) < 8);
+            if (!exactCover) {
+                idealX = cascadeX;
+                idealY = cascadeY;
+                break;
+            }
+        }
+    }
+
+    if (window.CanvasModule && typeof window.CanvasModule.getGridSnappedCanvasPosition === 'function') {
+        const snapped = window.CanvasModule.getGridSnappedCanvasPosition(idealX, idealY);
+        return { x: snapped.x, y: snapped.y };
+    }
+    return { x: idealX, y: idealY };
+}
+
+/**
+ * 强力定位与视觉提示新生成的特殊临时栏目
+ * 兼具 Storage-First 即时计算、视口居中校准、虚拟化唤醒与呼吸高亮脉冲，彻底解决“部分生成后未定位/视口未居中”问题
+ */
+async function locateNewlyCreatedTempSection(sectionId) {
+    if (!sectionId) return false;
+
+    // 1. Storage-First：获取目标栏目在 CanvasState 中的精确坐标
+    const state = getActiveCanvasState();
+    let secData = null;
+    if (state && Array.isArray(state.tempSections)) {
+        secData = state.tempSections.find(s => s && s.id === sectionId);
+    }
+
+    // 2. DOM 节点查找辅助函数（双向兼容 getElementById 与 dataset 选择器）
+    const getTargetEl = () => {
+        return document.getElementById(sectionId)
+            || document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(sectionId)}"]`)
+            || document.querySelector(`[data-section-id="${CSS.escape(sectionId)}"]`);
+    };
+
+    // 3. 多策略定位保障
+    let located = false;
+    try {
+        if (typeof window.locateCanvasImportResult === 'function') {
+            located = window.locateCanvasImportResult({
+                type: 'temp-section',
+                id: sectionId,
+                element: getTargetEl(),
+                zoom: 'keep'
+            });
+        }
+    } catch (_) { }
+
+    if (!located && window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
+        try {
+            located = window.CanvasModule.locateSection(sectionId);
+        } catch (_) { }
+    }
+
+    // 4. Storage-First 终极居中保障：直接根据内存坐标校准视口，保证百分之百居中且不闪退
+    if (secData && state) {
+        try {
+            const workspace = document.getElementById('canvasWorkspace');
+            const wsW = (workspace && workspace.clientWidth) || window.innerWidth || 1200;
+            const wsH = (workspace && workspace.clientHeight) || window.innerHeight || 800;
+            const currentZoom = (state.zoom && state.zoom > 0) ? state.zoom : 1;
+            const cardW = Number.isFinite(secData.width) && secData.width > 0 ? secData.width : 360;
+            const cardH = Number.isFinite(secData.height) && secData.height > 0 ? secData.height : 280;
+            const targetCenterX = secData.x + cardW / 2;
+            const targetCenterY = secData.y + cardH / 2;
+
+            const desiredPanX = wsW / 2 - targetCenterX * currentZoom;
+            const desiredPanY = wsH / 2 - targetCenterY * currentZoom;
+
+            const panDiff = Math.hypot(state.panOffsetX - desiredPanX, state.panOffsetY - desiredPanY);
+            if (panDiff > 2) {
+                state.panOffsetX = desiredPanX;
+                state.panOffsetY = desiredPanY;
+
+                const content = document.getElementById('canvasContent');
+                if (content) {
+                    if (typeof applyCanvasContentTransform === 'function') {
+                        applyCanvasContentTransform(content, desiredPanX, desiredPanY, currentZoom);
+                    } else {
+                        content.style.transform = `translate3d(${desiredPanX}px, ${desiredPanY}px, 0) scale(${currentZoom})`;
+                    }
+                }
+
+                if (window.CanvasModule && typeof window.CanvasModule.updateCanvasScrollBounds === 'function') {
+                    window.CanvasModule.updateCanvasScrollBounds();
+                } else if (typeof updateCanvasScrollBounds === 'function') {
+                    updateCanvasScrollBounds();
+                }
+
+                if (typeof updateCanvasTransform === 'function') {
+                    requestAnimationFrame(() => updateCanvasTransform(false));
+                }
+            }
+            located = true;
+        } catch (e) {
+            console.warn('[Search TempSection] Storage-first pan fallback error:', e);
+        }
+    }
+
+    // 5. 唤醒与就绪渲染（确保 DOM 节点从虚拟化休眠态激活，不施加呼吸动效，遵循原生卡片层级）
+    const ensureNodeAwake = () => {
+        const el = getTargetEl();
+        if (el) {
+            if (window.CanvasModule && typeof window.CanvasModule.wakeCanvasNodeFromLazyState === 'function') {
+                try { window.CanvasModule.wakeCanvasNodeFromLazyState(el); } catch (_) { }
+            }
+            if (window.CanvasModule && typeof window.CanvasModule.forceWakeAndRender === 'function') {
+                try { window.CanvasModule.forceWakeAndRender(sectionId); } catch (_) { }
+            }
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                try { window.__flushTagAndNoteForElement(el); } catch (_) { }
+            }
+        }
+    };
+
+    requestAnimationFrame(() => {
+        ensureNodeAwake();
+        setTimeout(ensureNodeAwake, 80);
+    });
+
+    return located;
 }
 
 function showCanvasToastSafe(message, type = 'info', duration = 2200) {
@@ -19880,7 +21298,7 @@ async function insertLargeFolderPayload(tempApi, sectionId, folderPayload, fallb
     return true;
 }
 
-async function createTempSectionFromSearchResults() {
+async function createTempSectionFromSearchResults(customItems = null, customTitle = null) {
     if (getCurrentViewSafe() !== 'canvas') return;
     if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) return;
     if (isTempSectionCreationInProgress) {
@@ -19891,18 +21309,26 @@ async function createTempSectionFromSearchResults() {
 
     isTempSectionCreationInProgress = true;
     try {
-        const items = collectBookmarkItemsForTempSection();
-        if (!items.length) return;
+        const items = (Array.isArray(customItems) && customItems.length > 0)
+            ? customItems
+            : collectBookmarkItemsForTempSection();
+        if (!items.length) {
+            const isZh = currentLang === 'zh_CN';
+            showCanvasToastSafe(isZh ? '没有可生成的书签条目' : 'No bookmark items to create temp section', 'warning', 1800);
+            return;
+        }
 
         const isZh = currentLang === 'zh_CN';
         showCanvasToastSafe(isZh ? '正在生成临时栏目…' : 'Creating temp section…', 'info', 1800);
 
-        const pos = getCanvasViewportCenterForTemp();
+        const baseSize = (typeof getTempSectionBaseSize === 'function') ? getTempSectionBaseSize() : { width: 360, height: 280 };
+        const pos = getCanvasViewportCenterForTemp(baseSize.width, baseSize.height);
         const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
             title: '',
             label: isZh ? '搜索' : 'Search',
             source: 'search-result',
-            colorLocked: true
+            colorLocked: true,
+            pinned: true
         });
         if (!sectionId) return;
 
@@ -19911,7 +21337,7 @@ async function createTempSectionFromSearchResults() {
             ? tempApi.getSection(sectionId)
             : null;
         if (section) {
-            section.title = isZh ? '搜索结果' : 'Search Results';
+            section.title = customTitle || (isZh ? '搜索结果' : 'Search Results');
             section.label = isZh ? '搜索' : 'Search';
             section.colorLocked = true;
             section.source = 'search-result';
@@ -20069,14 +21495,12 @@ async function createTempSectionFromSearchResults() {
         await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null, { defaultCollapseFolders: true });
 
         try {
-            if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
-                window.CanvasModule.scheduleDormancyUpdate();
-            }
+            await locateNewlyCreatedTempSection(sectionId);
         } catch (_) { }
 
         try {
-            if (window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
-                window.CanvasModule.locateSection(sectionId);
+            if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
+                window.CanvasModule.scheduleDormancyUpdate();
             }
         } catch (_) { }
 
@@ -20148,16 +21572,21 @@ async function createTempSectionFromDomainResult(domain) {
         } catch (_) { }
 
         const items = getDomainItemsForTemp(domainKey, searchUiState.query || '');
-        if (!items.length) return;
+        if (!items.length) {
+            showCanvasToastSafe(isZh ? '该域名下无可用书签' : 'No available bookmarks for this domain', 'warning', 1800);
+            return;
+        }
 
         showCanvasToastSafe(isZh ? '正在生成域名临时栏目…' : 'Creating domain temp section…', 'info', 1800);
 
-        const pos = getCanvasViewportCenterForTemp();
+        const baseSize = (typeof getTempSectionBaseSize === 'function') ? getTempSectionBaseSize() : { width: 360, height: 280 };
+        const pos = getCanvasViewportCenterForTemp(baseSize.width, baseSize.height);
         const sectionId = window.CanvasModule.createEmptyTempSection(pos.x, pos.y, {
             title: '',
             label: isZh ? '搜索' : 'Search',
             source: 'search-result',
-            colorLocked: true
+            colorLocked: true,
+            pinned: true
         });
         if (!sectionId) return;
 
@@ -20217,14 +21646,12 @@ async function createTempSectionFromDomainResult(domain) {
         await insertPayloadWithBatches(tempApi, sectionId, payloadItems, null, { defaultCollapseFolders: true });
 
         try {
-            if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
-                window.CanvasModule.scheduleDormancyUpdate();
-            }
+            await locateNewlyCreatedTempSection(sectionId);
         } catch (_) { }
 
         try {
-            if (window.CanvasModule && typeof window.CanvasModule.locateSection === 'function') {
-                window.CanvasModule.locateSection(sectionId);
+            if (window.CanvasModule && typeof window.CanvasModule.scheduleDormancyUpdate === 'function') {
+                window.CanvasModule.scheduleDormancyUpdate();
             }
         } catch (_) { }
 

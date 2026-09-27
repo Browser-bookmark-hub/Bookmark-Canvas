@@ -414,6 +414,60 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     font-size: 12px;
 }
 
+/* 勾选模式：一级按钮左侧的「勾选导出」确认按钮 */
+.canvas-bookmark-selection-confirm-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    border-radius: 8px;
+    border: 1px solid var(--canvas-dir-color-special-temp, #e9973f);
+    background: var(--canvas-dir-color-special-temp, #e9973f);
+    color: #ffffff;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.16s ease;
+    box-shadow: 0 1px 4px rgba(233, 151, 63, 0.35);
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+.canvas-bookmark-selection-confirm-btn:hover {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 85%, #000);
+    border-color: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 85%, #000);
+    box-shadow: 0 2px 7px rgba(233, 151, 63, 0.5);
+    transform: translateY(-0.5px);
+}
+
+.canvas-bookmark-selection-confirm-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(233, 151, 63, 0.3);
+}
+
+.canvas-bookmark-selection-confirm-btn:not(.has-selected) {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 16%, transparent);
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+    border-color: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 45%, var(--border-color, rgba(128, 128, 128, 0.3)));
+    box-shadow: none;
+}
+
+.canvas-bookmark-selection-confirm-btn:not(.has-selected):hover {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 26%, transparent);
+    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+.canvas-bookmark-selection-confirm-btn-compact {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 10px;
+    border-radius: 6px;
+}
+
 /* 网格视图切换按钮（位于生成特殊临时栏目按钮右侧） */
 .canvas-bookmark-view-toggle-btn {
     display: inline-flex;
@@ -5424,37 +5478,41 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     font-weight: 700;
 }
 
-/* ==================== 候选右上角特殊临时栏目说明气泡 ==================== */
+/* ==================== 候选右上角特殊临时栏目说明气泡与操作菜单 ==================== */
 .canvas-temp-section-bubble {
     position: fixed;
     z-index: 100010;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
     background: var(--bg-elevated, #ffffff);
     color: var(--text-primary, #1f2937);
     border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
     font-size: 11.5px;
-    line-height: 1;
+    line-height: 1.2;
     white-space: nowrap;
-    pointer-events: none;
+    pointer-events: auto;
     opacity: 0;
-    transition: opacity 0.12s ease;
+    transition: opacity 0.14s ease, transform 0.14s ease;
+    transform: translateY(2px);
     box-sizing: border-box;
+    user-select: none;
+    min-width: 260px;
 }
 
 .canvas-temp-section-bubble.visible {
     opacity: 1;
+    transform: translateY(0);
 }
 
 [data-theme="dark"] .canvas-temp-section-bubble {
     background: var(--bg-elevated, #1e2025);
     color: var(--text-primary, #f3f4f6);
     border-color: rgba(255, 255, 255, 0.18);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
 }
 
 .canvas-temp-section-bubble .canvas-temp-bubble-arrow {
@@ -5481,8 +5539,22 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     border-top: none;
 }
 
+.canvas-temp-bubble-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+}
+
+.canvas-temp-bubble-header-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
 .canvas-temp-bubble-icon {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
     color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f));
     line-height: 1;
@@ -5498,14 +5570,647 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     line-height: 1;
 }
 
-.canvas-temp-bubble-badge {
-    font-size: 10px;
+.canvas-temp-bubble-help-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 17px;
+    height: 17px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary, #888888);
+    opacity: 0.75;
+    border-radius: 50%;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-size: 11.5px;
+    line-height: 1;
+    margin-left: 2px;
+    transition: all 0.15s ease;
+}
+
+.canvas-temp-bubble-help-btn:hover,
+.canvas-temp-bubble-help-btn.active {
+    opacity: 1;
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+    background: rgba(233, 151, 63, 0.14);
+    transform: scale(1.08);
+}
+
+/* ==================== 特殊临时栏目独立上层说明气泡 ==================== */
+.canvas-temp-help-popover {
+    position: fixed;
+    z-index: 100030;
+    max-width: 380px;
+    width: 350px;
+    padding: 12px 14px;
+    background: var(--bg-elevated, #ffffff);
+    color: var(--text-primary, #1f2937);
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+    font-size: 11.5px;
+    line-height: 1.5;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+.canvas-temp-help-popover.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+[data-theme="dark"] .canvas-temp-help-popover {
+    background: var(--bg-elevated, #1e2025);
+    color: var(--text-primary, #f3f4f6);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+}
+
+.canvas-temp-help-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.18));
+}
+
+.canvas-temp-help-popover-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
     font-weight: 600;
-    padding: 1px 5px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f)) 18%, transparent);
-    color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f));
-    line-height: 1.2;
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+.canvas-temp-help-popover-icon {
+    font-size: 13px;
+    line-height: 1;
+}
+
+.canvas-temp-help-popover-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 10px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.canvas-temp-help-popover-close-btn:hover {
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.12));
+    color: var(--text-primary);
+}
+
+.canvas-temp-help-popover-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.canvas-temp-help-section {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.canvas-temp-help-section-title {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+    margin-bottom: 1px;
+}
+
+.canvas-temp-help-divider {
+    height: 1px;
+    background: var(--border-color, rgba(128, 128, 128, 0.15));
+    margin: 3px 0;
+}
+
+.canvas-temp-help-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.45;
+}
+
+.canvas-temp-help-badge {
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+.canvas-temp-help-text {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.canvas-temp-help-popover-arrow {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: inherit;
+    border: inherit;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.canvas-temp-help-popover.arrow-bottom .canvas-temp-help-popover-arrow {
+    bottom: -4px;
+    border-left: none;
+    border-top: none;
+}
+
+.canvas-temp-help-popover.arrow-top .canvas-temp-help-popover-arrow {
+    top: -4px;
+    border-right: none;
+    border-bottom: none;
+}
+
+.canvas-temp-bubble-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-size: 11px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.canvas-temp-bubble-close-btn:hover {
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.12));
+    color: var(--text-primary);
+}
+
+.canvas-temp-bubble-divider {
+    height: 1px;
+    background: var(--border-color, rgba(128, 128, 128, 0.18));
+    margin: 1px 0;
+    width: 100%;
+}
+
+.canvas-temp-bubble-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+/* 分区卡片与标题 */
+.canvas-temp-bubble-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.canvas-temp-bubble-section-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text-secondary, #6b7280);
+    line-height: 1;
+    margin-bottom: 1px;
+    letter-spacing: 0.2px;
+}
+
+.canvas-temp-bubble-section-header i {
+    font-size: 10px;
+    opacity: 0.85;
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+/* 胶囊分片选项栏（全部 + 前 N 项一整排） */
+.canvas-temp-bubble-chips-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+}
+
+.canvas-temp-bubble-chip {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 0;
+    border-radius: 5px;
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.24));
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.06));
+    color: var(--text-primary);
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+
+.canvas-temp-bubble-chip:hover {
+    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 18%, transparent);
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+.canvas-temp-bubble-chip.canvas-temp-bubble-chip-all {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 12%, rgba(128, 128, 128, 0.06));
+    border-color: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 35%, rgba(128, 128, 128, 0.24));
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+.canvas-temp-bubble-chip.canvas-temp-bubble-chip-all:hover {
+    background: var(--canvas-dir-color-special-temp, #e9973f);
+    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+    color: #ffffff;
+}
+
+[data-theme="dark"] .canvas-temp-bubble-chip.canvas-temp-bubble-chip-all {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 16%, rgba(255, 255, 255, 0.06));
+    border-color: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 40%, rgba(255, 255, 255, 0.2));
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+[data-theme="dark"] .canvas-temp-bubble-chip.canvas-temp-bubble-chip-all:hover {
+    background: var(--canvas-dir-color-special-temp, #e9973f);
+    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+    color: #ffffff;
+}
+
+.canvas-temp-bubble-chip.canvas-temp-bubble-chip-custom {
+    color: var(--text-secondary);
+}
+
+.canvas-temp-bubble-chip.canvas-temp-bubble-chip-custom:hover {
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+/* 自定义前 N 项输入行 */
+.canvas-temp-custom-input-wrap {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 5px;
+    padding: 4px 6px;
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+
+.canvas-temp-custom-input-wrap.visible {
+    display: flex;
+}
+
+.canvas-temp-custom-input {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 6px;
+    font-size: 11px;
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.28));
+    border-radius: 4px;
+    background: var(--bg-primary, #ffffff);
+    color: var(--text-primary);
+    outline: none;
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .canvas-temp-custom-input {
+    background: var(--bg-secondary, #252830);
+    color: var(--text-primary, #f3f4f6);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.canvas-temp-custom-input:focus {
+    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+.canvas-temp-custom-confirm-btn {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 4px;
+    border: 1px solid var(--canvas-dir-color-special-temp, #e9973f);
+    background: var(--canvas-dir-color-special-temp, #e9973f);
+    color: #ffffff;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.canvas-temp-custom-confirm-btn:hover {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 85%, #000);
+}
+
+.canvas-temp-custom-cancel-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s ease;
+}
+
+.canvas-temp-custom-cancel-btn:hover {
+    background: rgba(128, 128, 128, 0.14);
+    color: var(--text-primary);
+}
+
+/* 通用按钮 */
+.canvas-temp-bubble-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 5.5px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.28));
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+
+.canvas-temp-bubble-btn:hover {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 18%, transparent);
+    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+.canvas-temp-bubble-btn-enter {
+    border-color: var(--border-color, rgba(128, 128, 128, 0.3));
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+    color: var(--text-primary);
+}
+
+.canvas-temp-bubble-btn-enter:hover {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 14%, transparent);
+    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+/* 勾选模式活跃状态双按钮栏：左边【清空】，右边【退出】 */
+.canvas-temp-bubble-mode-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+.canvas-temp-bubble-mode-row .canvas-temp-bubble-btn {
+    flex: 1 1 50%;
+    min-width: 0;
+    justify-content: center;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.canvas-temp-bubble-clear-btn {
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+    color: var(--text-secondary);
+    border-color: var(--border-color, rgba(128, 128, 128, 0.28));
+}
+
+.canvas-temp-bubble-clear-btn:hover:not(:disabled):not(.is-disabled) {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 14%, transparent);
+    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+.canvas-temp-bubble-clear-btn:disabled,
+.canvas-temp-bubble-clear-btn.is-disabled {
+    opacity: 0.45;
+    cursor: not-allowed !important;
+}
+
+.canvas-temp-bubble-exit-btn,
+.canvas-temp-bubble-mode-row .canvas-temp-bubble-toggle-mode.is-exit {
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+    color: var(--text-secondary);
+    border-color: var(--border-color, rgba(128, 128, 128, 0.28));
+}
+
+.canvas-temp-bubble-exit-btn:hover,
+.canvas-temp-bubble-mode-row .canvas-temp-bubble-toggle-mode.is-exit:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #ef4444;
+}
+
+/* ==================== 勾选模式（Selection Mode）视觉高亮 ==================== */
+/* 1. 生成特殊临时栏目按钮进入勾选模式或点击打开菜单时的橙色边框与激活高光 */
+.canvas-bookmark-to-temp-btn.is-active,
+.canvas-bookmark-to-temp-btn.is-menu-open,
+.canvas-bookmark-to-temp-btn.is-selection-mode {
+    border-color: var(--canvas-dir-color-special-temp, #e9973f) !important;
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 20%, transparent) !important;
+    color: var(--canvas-dir-color-special-temp, #e9973f) !important;
+    box-shadow: 0 0 0 1.5px var(--canvas-dir-color-special-temp, #e9973f), 0 0 8px rgba(233, 151, 63, 0.35) !important;
+}
+
+/* 2. 勾选模式：防误触机制（子元素指针穿透，纯声明式零残留）与网格高亮 */
+.search-results-panel.selection-mode-active .search-result-item {
+    cursor: pointer !important;
+    user-select: none !important;
+}
+.search-results-panel.selection-mode-active .search-result-item * {
+    pointer-events: none !important;
+    user-select: none !important;
+}
+.search-results-panel.selection-mode-active .tabulator-row {
+    cursor: pointer !important;
+    user-select: none !important;
+}
+.search-results-panel.selection-mode-active .tabulator-row * {
+    pointer-events: none !important;
+    user-select: none !important;
+}
+
+/* 勾选模式：未选中卡片悬停预选态 */
+.search-results-panel.selection-mode-active .search-result-item:not(.canvas-search-item-selected):hover,
+.search-results-panel.selection-mode-active.view-grid .search-result-item:not(.canvas-search-item-selected):hover {
+    border-color: rgba(233, 151, 63, 0.7) !important;
+    background: rgba(233, 151, 63, 0.06) !important;
+    box-shadow: 0 0 0 1px rgba(233, 151, 63, 0.4), var(--shadow-sm) !important;
+    transform: translateY(-1px);
+}
+
+/* 勾选模式：已选中的网格卡片（极高特异性，覆盖默认 .view-grid .search-result-item） */
+.search-results-panel.view-grid .search-result-item.canvas-search-item-selected,
+.search-results-panel .search-result-item.canvas-search-item-selected,
+.search-result-item.canvas-search-item-selected {
+    border-color: var(--canvas-dir-color-special-temp, #e9973f) !important;
+    background: rgba(233, 151, 63, 0.14) !important;
+    box-shadow: 0 0 0 1.5px var(--canvas-dir-color-special-temp, #e9973f), 0 2px 8px rgba(233, 151, 63, 0.22) !important;
+}
+
+/* 勾选模式：已选中卡片的悬浮 hover 态（保持并强化橙色，绝不丢失勾选颜色） */
+.search-results-panel.view-grid .search-result-item.canvas-search-item-selected:hover,
+.search-results-panel.selection-mode-active .search-result-item.canvas-search-item-selected:hover,
+.search-results-panel .search-result-item.canvas-search-item-selected:hover,
+.search-result-item.canvas-search-item-selected:hover {
+    border-color: var(--canvas-dir-color-special-temp, #e9973f) !important;
+    background: rgba(233, 151, 63, 0.24) !important;
+    box-shadow: 0 0 0 2px var(--canvas-dir-color-special-temp, #e9973f), 0 4px 14px rgba(233, 151, 63, 0.35) !important;
+    transform: translateY(-1px);
+}
+
+/* 深色模式下的勾选高亮与悬浮 */
+[data-theme="dark"] .search-results-panel.view-grid .search-result-item.canvas-search-item-selected,
+[data-theme="dark"] .search-results-panel .search-result-item.canvas-search-item-selected,
+[data-theme="dark"] .search-result-item.canvas-search-item-selected {
+    border-color: var(--canvas-dir-color-special-temp, #e9973f) !important;
+    background: rgba(233, 151, 63, 0.2) !important;
+    box-shadow: 0 0 0 1.5px var(--canvas-dir-color-special-temp, #e9973f), 0 2px 10px rgba(233, 151, 63, 0.35) !important;
+}
+
+[data-theme="dark"] .search-results-panel.view-grid .search-result-item.canvas-search-item-selected:hover,
+[data-theme="dark"] .search-results-panel.selection-mode-active .search-result-item.canvas-search-item-selected:hover,
+[data-theme="dark"] .search-results-panel .search-result-item.canvas-search-item-selected:hover,
+[data-theme="dark"] .search-result-item.canvas-search-item-selected:hover {
+    border-color: var(--canvas-dir-color-special-temp, #e9973f) !important;
+    background: rgba(233, 151, 63, 0.3) !important;
+    box-shadow: 0 0 0 2px var(--canvas-dir-color-special-temp, #e9973f), 0 4px 16px rgba(233, 151, 63, 0.45) !important;
+    transform: translateY(-1px);
+}
+
+/* 3. 表格模式选中的橙色高亮、选中徽章与悬浮态（使用最高特异性，覆盖 .tabulator.canvas-search-tabulator .tabulator-row.tabulator-row-even/odd） */
+.tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected,
+.tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected.tabulator-row-even,
+.tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected.tabulator-row-odd,
+.search-results-panel.view-table .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected,
+.search-results-panel .tabulator-row.canvas-search-row-selected,
+.tabulator-row.canvas-search-row-selected {
+    background-color: rgba(233, 151, 63, 0.22) !important;
+    outline: 1.5px solid var(--canvas-dir-color-special-temp, #e9973f) !important;
+    outline-offset: -1.5px !important;
+    box-shadow: inset 4px 0 0 var(--canvas-dir-color-special-temp, #e9973f), 0 0 10px rgba(233, 151, 63, 0.25) !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected:hover,
+.tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected.tabulator-row-even:hover,
+.tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected.tabulator-row-odd:hover,
+.search-results-panel.view-table .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected:hover,
+.search-results-panel .tabulator-row.canvas-search-row-selected:hover {
+    background-color: rgba(233, 151, 63, 0.3) !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected .tabulator-cell,
+.tabulator-row.canvas-search-row-selected .tabulator-cell {
+    background-color: transparent !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected,
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected.tabulator-row-even,
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected.tabulator-row-odd,
+[data-theme="dark"] .search-results-panel.view-table .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected,
+[data-theme="dark"] .search-results-panel .tabulator-row.canvas-search-row-selected,
+[data-theme="dark"] .tabulator-row.canvas-search-row-selected {
+    background-color: rgba(233, 151, 63, 0.3) !important;
+    outline: 1.5px solid var(--canvas-dir-color-special-temp, #e9973f) !important;
+    outline-offset: -1.5px !important;
+    box-shadow: inset 4px 0 0 var(--canvas-dir-color-special-temp, #e9973f), 0 0 10px rgba(233, 151, 63, 0.35) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected:hover,
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected.tabulator-row-even:hover,
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected.tabulator-row-odd:hover,
+[data-theme="dark"] .search-results-panel.view-table .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected:hover,
+[data-theme="dark"] .search-results-panel .tabulator-row.canvas-search-row-selected:hover {
+    background-color: rgba(233, 151, 63, 0.4) !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected .tabulator-cell,
+[data-theme="dark"] .tabulator-row.canvas-search-row-selected .tabulator-cell {
+    background-color: transparent !important;
+}
+
+/* 序号列显示高辨识度选中勾选徽章 */
+.tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected .tabulator-cell:first-child .canvas-table-index-num {
+    display: none !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-row.canvas-search-row-selected .tabulator-cell:first-child::after {
+    content: "✓";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    background: var(--canvas-dir-color-special-temp, #e9973f);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+    line-height: 1;
+}
+
+/* 勾选模式下表格行悬浮预选态 */
+.search-results-panel.selection-mode-active .tabulator.canvas-search-tabulator .tabulator-row:not(.canvas-search-row-selected):hover,
+.search-results-panel.selection-mode-active .tabulator.canvas-search-tabulator .tabulator-row:not(.canvas-search-row-selected).tabulator-row-even:hover,
+.search-results-panel.selection-mode-active .tabulator.canvas-search-tabulator .tabulator-row:not(.canvas-search-row-selected).tabulator-row-odd:hover {
+    background-color: rgba(233, 151, 63, 0.09) !important;
+    cursor: pointer !important;
+}
+
+.search-results-panel.selection-mode-active .tabulator.canvas-search-tabulator .tabulator-row:not(.canvas-search-row-selected):hover .tabulator-cell:first-child .canvas-table-index-num {
+    opacity: 0.25;
+}
+
+.search-results-panel.selection-mode-active .tabulator.canvas-search-tabulator .tabulator-row:not(.canvas-search-row-selected):hover .tabulator-cell:first-child::after {
+    content: "+";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: 1px dashed var(--canvas-dir-color-special-temp, #e9973f);
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 4px;
+    line-height: 1;
 }
 
 
