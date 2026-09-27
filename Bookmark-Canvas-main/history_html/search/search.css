@@ -2293,7 +2293,7 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     margin: 2px 0;
 }
 
-.search-results-panel.view-grid .canvas-grid-card-locations-row {
+html:not(.side-panel-mode) .search-results-panel.view-grid:not(.is-single-column) .canvas-grid-card-locations-row {
     display: flex !important;
 }
 
@@ -2792,10 +2792,10 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     margin-top: auto !important;
 }
 
-/* 严禁网格内就地展开详情与子条目、位置标签，全部由说明气泡承载，杜绝撑开网格单元 */
+/* 严禁多列网格内就地展开详情与子条目、位置标签，全部由说明气泡承载，杜绝撑开网格单元 */
 .search-results-panel.view-grid .canvas-bookmark-details-collapsible,
 .search-results-panel.view-grid .canvas-bookmark-group-children,
-.search-results-panel.view-grid .canvas-bookmark-location-row {
+html:not(.side-panel-mode) .search-results-panel.view-grid:not(.is-single-column) .canvas-bookmark-location-row {
     display: none !important;
 }
 
@@ -2808,8 +2808,9 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 }
 
 /* ==================== 单纵行（单列）网格视图：全面展示永久与临时栏目 ==================== */
-/* 当网格处于单纵行时（宽度 < 554px 或挂载 .is-single-column），自动解除 96px 锁死，允许栏目多行换行，杜绝横向撑出 */
-.search-results-panel.view-grid.is-single-column .search-results-items-container {
+/* 当网格处于单纵行时（宽度 < 554px 或挂载 .is-single-column 或处于侧边栏模式），自动解除 96px 锁死，允许栏目多行换行，杜绝横向撑出 */
+.search-results-panel.view-grid.is-single-column .search-results-items-container,
+html.side-panel-mode .search-results-panel.view-grid .search-results-items-container {
     grid-template-columns: minmax(0, 1fr) !important;
     grid-auto-rows: auto !important;
     gap: 8px !important;
@@ -2820,7 +2821,8 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     overflow-x: hidden !important;
 }
 
-.search-results-panel.view-grid.is-single-column .search-result-item {
+.search-results-panel.view-grid.is-single-column .search-result-item,
+html.side-panel-mode .search-results-panel.view-grid .search-result-item {
     height: auto !important;
     min-height: 72px !important;
     max-height: none !important;
@@ -2840,15 +2842,21 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 .search-results-panel.view-grid.is-single-column.mode-structure .search-result-item,
 .search-results-panel.view-grid.is-single-column.mode-description .search-result-item,
 .search-results-panel.view-grid.is-single-column[data-search-mode="structure"] .search-result-item,
-.search-results-panel.view-grid.is-single-column[data-search-mode="description"] .search-result-item {
+.search-results-panel.view-grid.is-single-column[data-search-mode="description"] .search-result-item,
+html.side-panel-mode .search-results-panel.view-grid.mode-structure .search-result-item,
+html.side-panel-mode .search-results-panel.view-grid.mode-description .search-result-item,
+html.side-panel-mode .search-results-panel.view-grid[data-search-mode="structure"] .search-result-item,
+html.side-panel-mode .search-results-panel.view-grid[data-search-mode="description"] .search-result-item {
     min-height: 52px !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-grid-card-locations-row {
+.search-results-panel.view-grid.is-single-column .canvas-grid-card-locations-row,
+html.side-panel-mode .search-results-panel.view-grid .canvas-grid-card-locations-row {
     display: none !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-row {
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-row,
+html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-row {
     display: flex !important;
     flex-wrap: wrap !important;
     align-items: center !important;
@@ -2857,9 +2865,12 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
+    max-height: 48px !important;
+    overflow: hidden !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-row {
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-row,
+html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-chip-row {
     display: flex !important;
     flex-wrap: wrap !important;
     align-items: center !important;
@@ -2869,7 +2880,8 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     min-width: 0 !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip {
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip,
+html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-chip {
     max-width: 100% !important;
     min-width: 0 !important;
     flex-shrink: 1 !important;
@@ -2877,7 +2889,8 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     min-height: 18px !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-text {
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-text,
+html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-chip-text {
     max-width: 100% !important;
     min-width: 0 !important;
     overflow: hidden !important;
@@ -2886,19 +2899,23 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 }
 
 .search-results-panel.view-grid.is-single-column .canvas-bookmark-details-row,
-.search-results-panel.view-grid.is-single-column .canvas-grid-card-info-row {
+.search-results-panel.view-grid.is-single-column .canvas-grid-card-info-row,
+html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-details-row,
+html.side-panel-mode .search-results-panel.view-grid .canvas-grid-card-info-row {
     height: auto !important;
     min-height: 20px !important;
     margin-top: 3px !important;
 }
 
-.search-results-panel.view-grid.is-single-column .search-result-details-preview-context {
+.search-results-panel.view-grid.is-single-column .search-result-details-preview-context,
+html.side-panel-mode .search-results-panel.view-grid .search-result-details-preview-context {
     height: auto !important;
     min-height: 18px !important;
 }
 
 @container search-panel (max-width: 554px) {
-    .search-results-panel.view-grid .search-results-items-container {
+    .search-results-items-container.view-grid,
+    .search-results-items-container {
         grid-template-columns: minmax(0, 1fr) !important;
         grid-auto-rows: auto !important;
         gap: 8px !important;
@@ -2908,7 +2925,7 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
         max-width: 100% !important;
         overflow-x: hidden !important;
     }
-    .search-results-panel.view-grid .search-result-item {
+    .search-result-item {
         height: auto !important;
         min-height: 72px !important;
         max-height: none !important;
@@ -2924,10 +2941,14 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
         min-width: 0 !important;
         margin: 0 !important;
     }
-    .search-results-panel.view-grid .canvas-grid-card-locations-row {
+    .search-results-items-container .canvas-grid-card-locations-row,
+    .search-result-item .canvas-grid-card-locations-row,
+    .canvas-grid-card-locations-row {
         display: none !important;
     }
-    .search-results-panel.view-grid .canvas-bookmark-location-row {
+    .search-results-items-container .canvas-bookmark-location-row,
+    .search-result-item .canvas-bookmark-location-row,
+    .canvas-bookmark-location-row {
         display: flex !important;
         flex-wrap: wrap !important;
         align-items: flex-start !important;
@@ -2936,8 +2957,10 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
         width: 100% !important;
         max-width: 100% !important;
         min-width: 0 !important;
+        max-height: 48px !important;
+        overflow: hidden !important;
     }
-    .search-results-panel.view-grid .canvas-bookmark-location-chip-row {
+    .canvas-bookmark-location-chip-row {
         display: flex !important;
         flex-wrap: wrap !important;
         align-items: center !important;
@@ -2946,30 +2969,83 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
         max-width: 100% !important;
         min-width: 0 !important;
     }
-    .search-results-panel.view-grid .canvas-bookmark-location-chip {
+    .canvas-bookmark-location-chip {
         max-width: 100% !important;
         min-width: 0 !important;
         flex-shrink: 1 !important;
         height: auto !important;
         min-height: 18px !important;
     }
-    .search-results-panel.view-grid .canvas-bookmark-location-chip-text {
+    .canvas-bookmark-location-chip-text {
         max-width: 100% !important;
         min-width: 0 !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
         white-space: nowrap !important;
     }
-    .search-results-panel.view-grid .canvas-bookmark-details-row,
-    .search-results-panel.view-grid .canvas-grid-card-info-row {
+    .canvas-bookmark-details-row,
+    .canvas-grid-card-info-row {
         height: auto !important;
         min-height: 20px !important;
         margin-top: 3px !important;
     }
-    .search-results-panel.view-grid .search-result-details-preview-context {
+    .search-result-details-preview-context {
         height: auto !important;
         min-height: 18px !important;
     }
+}
+
+.canvas-single-col-loc-more-btn {
+    height: 18px !important;
+    min-height: 18px !important;
+    line-height: 16px !important;
+    font-size: 11px !important;
+    padding: 0 5px !important;
+    border-radius: 4px !important;
+    flex-shrink: 0 !important;
+    cursor: pointer !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    vertical-align: middle !important;
+}
+
+.search-results-panel.view-grid .canvas-bookmark-location-more,
+.search-results-panel.view-grid .canvas-bookmark-location-less {
+    display: none !important;
+}
+
+.canvas-grid-details-bubble .canvas-bookmark-location-row {
+    max-height: none !important;
+    overflow: visible !important;
+}
+
+/* 气泡内部：对用户点击 +N 之前已经在单元格中展示过的位置徽章进行变灰微暗处理，直观区分哪些是已展示项、哪些是展开新增项 */
+.canvas-grid-bubble-body .search-loc-chip.search-loc-chip-previously-visible,
+.canvas-grid-bubble-body .search-loc-chip[data-loc-in-cell="true"] {
+    opacity: 0.44 !important;
+    filter: grayscale(0.85) brightness(0.9) !important;
+    transition: opacity 0.18s ease, filter 0.18s ease;
+}
+
+.canvas-grid-bubble-body .search-loc-chip.search-loc-chip-previously-visible:hover,
+.canvas-grid-bubble-body .search-loc-chip[data-loc-in-cell="true"]:hover {
+    opacity: 1 !important;
+    filter: none !important;
+}
+
+/* 处于激活态的 +N 胶囊按钮本身保持 100% 鲜明，且以高亮边框和轮廓阴影醒目突出 */
+.canvas-grid-location-more-btn.bubble-active,
+.canvas-single-col-loc-more-btn.bubble-active {
+    opacity: 1 !important;
+    filter: none !important;
+    color: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+    background: var(--bg-hover) !important;
+    box-shadow: 0 0 0 2px var(--accent-primary-alpha, rgba(37, 99, 235, 0.25)) !important;
+    transform: scale(1.05) !important;
 }
 
 /* ==================== 网格视图信息说明气泡 UI ==================== */
