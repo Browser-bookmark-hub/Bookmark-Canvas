@@ -6289,4 +6289,141 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
     line-height: 1;
 }
 
+/* ==========================================================================
+   Tabulator 表头拖拽排序、列记忆与右键菜单交互增强
+   ========================================================================== */
+
+/* 1. 拖拽时的放置占位符（深浅主题高亮与虚线框） */
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-col-placeholder {
+    background-color: rgba(37, 99, 235, 0.12) !important;
+    border: 2px dashed var(--accent-color, #2563eb) !important;
+    box-sizing: border-box !important;
+    border-radius: 4px !important;
+    opacity: 0.85 !important;
+    min-width: 36px !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-col-placeholder {
+    background-color: rgba(59, 130, 246, 0.16) !important;
+    border: 2px dashed var(--accent-color, #3b82f6) !important;
+}
+
+/* 2. 拖拽过程中的悬浮镜像（浮空投影、圆角与半透明） */
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-moving {
+    background-color: var(--bg-elevated, #ffffff) !important;
+    color: var(--accent-color, #2563eb) !important;
+    border: 1.5px solid var(--accent-color, #2563eb) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(37, 99, 235, 0.22) !important;
+    border-radius: 6px !important;
+    opacity: 0.94 !important;
+    z-index: 1000 !important;
+    pointer-events: none !important;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-moving {
+    background-color: var(--bg-elevated, #1e293b) !important;
+    color: var(--accent-color, #3b82f6) !important;
+    border: 1.5px solid var(--accent-color, #3b82f6) !important;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.55), 0 3px 10px rgba(59, 130, 246, 0.25) !important;
+}
+
+/* 3. 表头鼠标手势与光标状态 */
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col:not([tabulator-field="index"]) {
+    cursor: grab !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col:not([tabulator-field="index"]):active {
+    cursor: grabbing !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col[tabulator-field="index"] {
+    cursor: default !important;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col .tabulator-col-resize-handle {
+    cursor: col-resize !important;
+}
+
+/* 4. 表头右键上下文菜单（恢复默认列顺序/列宽） */
+.canvas-tabulator-header-menu {
+    position: fixed;
+    z-index: 10000;
+    min-width: 165px;
+    background-color: var(--bg-elevated, #ffffff);
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+    border-radius: 8px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    user-select: none;
+    font-size: 12.5px;
+    animation: canvasTabMenuFadeIn 0.12s ease-out;
+}
+
+@keyframes canvasTabMenuFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+[data-theme="dark"] .canvas-tabulator-header-menu {
+    background-color: var(--bg-elevated, #1e293b);
+    border-color: var(--border-color, rgba(255, 255, 255, 0.14));
+    box-shadow: 0 12px 28px -5px rgba(0, 0, 0, 0.6), 0 8px 12px -6px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-tabulator-header-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    color: var(--text-primary, #1e293b);
+    cursor: pointer;
+    transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.canvas-tabulator-header-menu-item:hover {
+    background-color: rgba(37, 99, 235, 0.08);
+    color: var(--accent-color, #2563eb);
+}
+
+[data-theme="dark"] .canvas-tabulator-header-menu-item {
+    color: var(--text-primary, #f1f5f9);
+}
+
+[data-theme="dark"] .canvas-tabulator-header-menu-item:hover {
+    background-color: rgba(59, 130, 246, 0.16);
+    color: var(--accent-color, #3b82f6);
+}
+
+.canvas-tabulator-header-menu-item i {
+    width: 14px;
+    text-align: center;
+    font-size: 12px;
+    opacity: 0.75;
+}
+
+.canvas-tabulator-header-menu-item:hover i {
+    opacity: 1;
+}
+
+.canvas-tabulator-header-menu-sep {
+    height: 1px;
+    background-color: var(--border-color, rgba(0, 0, 0, 0.08));
+    margin: 3px 0;
+}
+
+[data-theme="dark"] .canvas-tabulator-header-menu-sep {
+    background-color: var(--border-color, rgba(255, 255, 255, 0.08));
+}
+
+
 

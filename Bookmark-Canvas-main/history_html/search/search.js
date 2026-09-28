@@ -16334,6 +16334,12 @@ function destroyCanvasSearchTabulator() {
         } catch (_) { }
         canvasSearchTabulatorInstance = null;
     }
+    if (typeof stopCanvasTabulatorColumnMoveSession === 'function') {
+        stopCanvasTabulatorColumnMoveSession();
+    }
+    if (typeof hideCanvasTabulatorHeaderContextMenu === 'function') {
+        hideCanvasTabulatorHeaderContextMenu();
+    }
     const tableWrapper = document.querySelector('.search-results-table-view-wrapper');
     if (tableWrapper) {
         tableWrapper.remove();
@@ -16696,6 +16702,519 @@ function saveTabulatorColumnWidth(mode, field, width) {
     } catch (_) { }
 }
 
+const CANVAS_TABULATOR_COL_ORDERS_PREFIX = 'bcs_tabulator_col_orders_';
+
+/**
+ * 获取指定搜索模式下持久化记忆的 Tabulator 表格各列顺序（返回 field 名称数组）
+ */
+function getSavedTabulatorColumnOrder(mode) {
+    if (!mode) mode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    try {
+        const raw = localStorage.getItem(`${CANVAS_TABULATOR_COL_ORDERS_PREFIX}${mode}`);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+    } catch (_) { }
+    return null;
+}
+
+/**
+ * 持久化保存用户手动调整的 Tabulator 列顺序（过滤 index 序号列，序号列永远强制置首）
+ */
+function saveTabulatorColumnOrder(mode, fields) {
+    if (!mode) mode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    if (!Array.isArray(fields) || fields.length === 0) return;
+    try {
+        const cleanFields = fields.filter(f => f && f !== 'index');
+        localStorage.setItem(`${CANVAS_TABULATOR_COL_ORDERS_PREFIX}${mode}`, JSON.stringify(cleanFields));
+    } catch (_) { }
+}
+
+/**
+ * 重置指定搜索模式下持久化记忆的 Tabulator 表格各列顺序
+ */
+function resetSavedTabulatorColumnOrder(mode) {
+    if (!mode) mode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    try {
+        localStorage.removeItem(`${CANVAS_TABULATOR_COL_ORDERS_PREFIX}${mode}`);
+    } catch (_) { }
+}
+
+/**
+ * 根据持久化顺序重新排列列定义数组（保障 index 序号列绝对置首，增量字段安全追加）
+ */
+function applyTabulatorColumnOrder(cols, mode) {
+    if (!Array.isArray(cols) || cols.length <= 1) return cols;
+    const saved = getSavedTabulatorColumnOrder(mode);
+    if (!saved || !Array.isArray(saved) || saved.length === 0) return cols;
+
+    const indexCol = cols.find(c => c && c.field === 'index');
+    const otherCols = cols.filter(c => c && c.field !== 'index');
+
+    const colMap = new Map();
+    otherCols.forEach(c => {
+        if (c && c.field) colMap.set(c.field, c);
+    });
+
+    const ordered = [];
+    saved.forEach(f => {
+        if (colMap.has(f)) {
+            ordered.push(colMap.get(f));
+            colMap.delete(f);
+        }
+    });
+
+    // 将未在已保存顺序中的新字段或动态列，按原相对次序追加在末尾
+    colMap.forEach(c => {
+        ordered.push(c);
+    });
+
+    return indexCol ? [indexCol, ...ordered] : ordered;
+}
+
+let isReorderingIndexGuard = false;
+
+/**
+ * 确保 index 序号列始终稳居表格第 1 列，并同步保存最新列顺序
+ */
+function ensureCanvasTabulatorIndexColumnFirst(tableInstance, activeMode) {
+    if (!tableInstance || isReorderingIndexGuard) return;
+    isReorderingIndexGuard = true;
+    try {
+        const allCols = tableInstance.getColumns();
+        if (allCols && allCols.length > 0) {
+            const firstCol = allCols[0];
+            if (firstCol && firstCol.getField() !== 'index') {
+                const indexCol = tableInstance.getColumn('index');
+                if (indexCol) {
+                    indexCol.move(firstCol, false);
+                }
+            }
+        }
+        const currentFields = (tableInstance.getColumns() || [])
+            .map(c => c.getField())
+            .filter(f => f && f !== 'index');
+        saveTabulatorColumnOrder(activeMode, currentFields);
+
+        if (typeof syncCanvasTabulatorTopScrollbar === 'function') {
+            syncCanvasTabulatorTopScrollbar();
+        }
+        if (typeof syncCanvasTabulatorRightScrollbar === 'function') {
+            syncCanvasTabulatorRightScrollbar(true);
+        }
+    } catch (_) { } finally {
+        isReorderingIndexGuard = false;
+    }
+}
+
+/**
+ * 根据拖拽指针在表头容器中的物理位置，动态更新悬浮镜像与插入占位符
+ */
+function updateMovingColumnPositionUnderPointer(tableInstance, moveMod, pageX) {
+    if (!tableInstance || !moveMod || !moveMod.moving) return;
+
+    // 1. 同步更新浮动镜像位置
+    try {
+        moveMod.moveHover({ pageX: pageX });
+    } catch (_) { }
+
+    // 2. 根据指针当前在表头容器中的物理投影，计算最合适的目标放置列
+    const contentsEl = tableInstance.columnManager && tableInstance.columnManager.getContentsElement();
+    if (!contentsEl) return;
+
+    const contentsRect = contentsEl.getBoundingClientRect();
+    const pointerInContents = (pageX - (window.pageXOffset || 0) - contentsRect.left) + contentsEl.scrollLeft;
+
+    const cols = tableInstance.columnManager.getVisibleColumnsByIndex();
+    if (!cols || !cols.length) return;
+
+    for (let i = 0; i < cols.length; i++) {
+        const col = cols[i];
+        if (col === moveMod.moving) continue;
+        const field = col.getField();
+        const el = col.getElement();
+        if (!el) continue;
+
+        // 序号列绝对锁定：如果悬浮在 index 序号列区域，一律只能插在 index 列后面，绝不可移到 index 前面
+        if (field === 'index') {
+            const idxRight = el.offsetLeft + col.getWidth();
+            if (pointerInContents <= idxRight) {
+                if (!(moveMod.toCol === col && moveMod.toColAfter)) {
+                    el.parentNode.insertBefore(moveMod.placeholderElement, el.nextSibling);
+                    moveMod.moveColumn(col, true);
+                }
+                return;
+            }
+            continue;
+        }
+
+        const left = el.offsetLeft;
+        const width = col.getWidth();
+        if (pointerInContents >= left && pointerInContents <= left + width) {
+            if (pointerInContents > left + width / 2) {
+                if (!(moveMod.toCol === col && moveMod.toColAfter)) {
+                    el.parentNode.insertBefore(moveMod.placeholderElement, el.nextSibling);
+                    moveMod.moveColumn(col, true);
+                }
+            } else {
+                if (moveMod.toCol !== col || moveMod.toColAfter) {
+                    el.parentNode.insertBefore(moveMod.placeholderElement, el);
+                    moveMod.moveColumn(col, false);
+                }
+            }
+            return;
+        }
+    }
+}
+
+let canvasTabulatorColumnMoveSession = null;
+
+/**
+ * 启动列拖拽高级交互会话（边缘平滑自适应滚动 + Shift/滚轮横向视口穿透联动）
+ */
+function startCanvasTabulatorColumnMoveSession(tableInstance, moveMod, startEvent, movingCol) {
+    stopCanvasTabulatorColumnMoveSession();
+
+    const holder = tableInstance.rowManager && tableInstance.rowManager.element;
+    if (!holder) return;
+
+    let currentPointerX = startEvent.pageX || (startEvent.touches && startEvent.touches[0] && startEvent.touches[0].pageX) || (window.innerWidth / 2);
+    let currentPointerY = startEvent.pageY || (startEvent.touches && startEvent.touches[0] && startEvent.touches[0].pageY) || 0;
+    let rafId = null;
+    let isSessionActive = true;
+
+    const onGlobalPointerMove = (e) => {
+        if (!isSessionActive) return;
+        currentPointerX = e.pageX || (e.touches && e.touches[0] && e.touches[0].pageX) || currentPointerX;
+        currentPointerY = e.pageY || (e.touches && e.touches[0] && e.touches[0].pageY) || currentPointerY;
+    };
+
+    // 左右边缘自适应动态感应滚动（Edge Auto-Scroll Loop）
+    const EDGE_ZONE = 60; // 60px 边界感应区
+    const autoScrollLoop = () => {
+        if (!isSessionActive || !moveMod || !moveMod.moving) {
+            rafId = null;
+            return;
+        }
+
+        const rect = holder.getBoundingClientRect();
+        const clientX = currentPointerX - (window.pageXOffset || 0);
+
+        let scrollStep = 0;
+        // 靠近左边缘
+        if (clientX >= rect.left - 30 && clientX <= rect.left + EDGE_ZONE) {
+            const dist = Math.max(0, (rect.left + EDGE_ZONE) - clientX);
+            const ratio = Math.min(1, dist / EDGE_ZONE);
+            scrollStep = -Math.round(4 + ratio * 18);
+        }
+        // 靠近右边缘
+        else if (clientX <= rect.right + 30 && clientX >= rect.right - EDGE_ZONE) {
+            const dist = Math.max(0, clientX - (rect.right - EDGE_ZONE));
+            const ratio = Math.min(1, dist / EDGE_ZONE);
+            scrollStep = Math.round(4 + ratio * 18);
+        }
+
+        if (scrollStep !== 0) {
+            const maxScrollLeft = holder.scrollWidth - holder.clientWidth;
+            if (maxScrollLeft > 0) {
+                const prevScroll = holder.scrollLeft;
+                const nextScroll = Math.max(0, Math.min(maxScrollLeft, prevScroll + scrollStep));
+                if (nextScroll !== prevScroll) {
+                    holder.scrollLeft = nextScroll;
+                    tableInstance.columnManager.scrollHorizontal(nextScroll);
+                    tableInstance.rowManager.scrollHorizontal(nextScroll);
+
+                    if (typeof syncCanvasTabulatorTopScrollbar === 'function') {
+                        syncCanvasTabulatorTopScrollbar();
+                    }
+
+                    updateMovingColumnPositionUnderPointer(tableInstance, moveMod, currentPointerX);
+                }
+            }
+        }
+
+        rafId = requestAnimationFrame(autoScrollLoop);
+    };
+
+    rafId = requestAnimationFrame(autoScrollLoop);
+
+    // 拖拽期间滚轮事件（Shift+滚轮 / 水平滚轮 / 普通滚轮直接水平推进视口）
+    const onWheelDuringDrag = (e) => {
+        if (!isSessionActive || !moveMod || !moveMod.moving) return;
+
+        let delta = 0;
+        if (e.shiftKey) {
+            delta = e.deltaY || e.deltaX;
+        } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+            delta = e.deltaX;
+        } else {
+            delta = e.deltaY;
+        }
+
+        if (!delta) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const maxScrollLeft = holder.scrollWidth - holder.clientWidth;
+        if (maxScrollLeft <= 0) return;
+
+        const prevScroll = holder.scrollLeft;
+        const nextScroll = Math.max(0, Math.min(maxScrollLeft, prevScroll + delta));
+        if (nextScroll !== prevScroll) {
+            holder.scrollLeft = nextScroll;
+            tableInstance.columnManager.scrollHorizontal(nextScroll);
+            tableInstance.rowManager.scrollHorizontal(nextScroll);
+
+            if (typeof syncCanvasTabulatorTopScrollbar === 'function') {
+                syncCanvasTabulatorTopScrollbar();
+            }
+
+            updateMovingColumnPositionUnderPointer(tableInstance, moveMod, currentPointerX);
+        }
+    };
+
+    window.addEventListener('mousemove', onGlobalPointerMove, { passive: true, capture: true });
+    window.addEventListener('wheel', onWheelDuringDrag, { passive: false, capture: true });
+
+    canvasTabulatorColumnMoveSession = {
+        cleanup: () => {
+            isSessionActive = false;
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+            window.removeEventListener('mousemove', onGlobalPointerMove, { capture: true });
+            window.removeEventListener('wheel', onWheelDuringDrag, { capture: true });
+        }
+    };
+}
+
+/**
+ * 结束并销毁列拖拽高级交互会话
+ */
+function stopCanvasTabulatorColumnMoveSession() {
+    if (canvasTabulatorColumnMoveSession) {
+        try {
+            canvasTabulatorColumnMoveSession.cleanup();
+        } catch (_) { }
+        canvasTabulatorColumnMoveSession = null;
+    }
+}
+
+/**
+ * 挂载 Tabulator 列拖拽交互增强与快速位移探测器
+ */
+function bindCanvasTabulatorColumnMoveEnhancements(tableInstance, containerEl, activeMode) {
+    if (!tableInstance || !tableInstance.modules || !tableInstance.modules.moveColumn) return;
+    const moveMod = tableInstance.modules.moveColumn;
+
+    // 缩短按下等待判定，配合位移阈值，保证极速拖拽
+    moveMod.checkPeriod = 150;
+
+    if (!moveMod._enhancedByCanvas) {
+        moveMod._enhancedByCanvas = true;
+
+        const origStartMove = moveMod.startMove.bind(moveMod);
+        const origEndMove = moveMod.endMove.bind(moveMod);
+
+        moveMod.startMove = function(e, col) {
+            // 序号列严格不可拖动
+            if (col && typeof col.getField === 'function' && col.getField() === 'index') {
+                return;
+            }
+
+            origStartMove(e, col);
+            startCanvasTabulatorColumnMoveSession(tableInstance, moveMod, e, col);
+        };
+
+        moveMod.endMove = function(e) {
+            stopCanvasTabulatorColumnMoveSession();
+            origEndMove(e);
+            ensureCanvasTabulatorIndexColumnFirst(tableInstance, activeMode);
+        };
+    }
+
+    // 快速位移拖拽加速：如果鼠标移动 > 4px，无需等待 150ms 延时直接启动拖拽；单击仍无缝触发排序
+    const headerEl = containerEl.querySelector('.tabulator-header');
+    if (headerEl && !headerEl._fastDragMoveBound) {
+        headerEl._fastDragMoveBound = true;
+
+        headerEl.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            // 排除序号列、列宽调整滑块、排序三角
+            if (e.target.closest('.tabulator-col[tabulator-field="index"], .tabulator-col-resize-handle, .tabulator-arrow, .tabulator-col-sorter')) {
+                return;
+            }
+            const colEl = e.target.closest('.tabulator-col:not([tabulator-field="index"])');
+            if (!colEl) return;
+
+            const startX = e.clientX;
+            const startY = e.clientY;
+
+            const onPointerMoveCheck = (moveEvt) => {
+                const dist = Math.hypot(moveEvt.clientX - startX, moveEvt.clientY - startY);
+                if (dist > 4) {
+                    cleanupFastDrag();
+                    if (moveMod.checkTimeout) {
+                        clearTimeout(moveMod.checkTimeout);
+                        moveMod.checkTimeout = null;
+                        const field = colEl.getAttribute('tabulator-field');
+                        const colComp = field ? tableInstance.getColumn(field) : null;
+                        const colObj = colComp ? colComp._column : null;
+                        if (colObj && !moveMod.moving) {
+                            moveMod.startMove(moveEvt, colObj);
+                        }
+                    }
+                }
+            };
+
+            const cleanupFastDrag = () => {
+                window.removeEventListener('pointermove', onPointerMoveCheck, true);
+                window.removeEventListener('pointerup', cleanupFastDrag, true);
+                window.removeEventListener('pointercancel', cleanupFastDrag, true);
+            };
+
+            window.addEventListener('pointermove', onPointerMoveCheck, true);
+            window.addEventListener('pointerup', cleanupFastDrag, true);
+            window.addEventListener('pointercancel', cleanupFastDrag, true);
+        }, true);
+    }
+}
+
+let canvasTabulatorHeaderContextMenuEl = null;
+
+function hideCanvasTabulatorHeaderContextMenu() {
+    if (canvasTabulatorHeaderContextMenuEl) {
+        try {
+            canvasTabulatorHeaderContextMenuEl.remove();
+        } catch (_) { }
+        canvasTabulatorHeaderContextMenuEl = null;
+    }
+}
+
+/**
+ * 绑定表头右键菜单（支持恢复默认列顺序、恢复默认列宽、恢复全部列设置）
+ */
+function bindCanvasTabulatorHeaderContextMenu(containerEl, activeMode, isZh) {
+    const headerEl = containerEl.querySelector('.tabulator-header');
+    if (!headerEl || headerEl._hasResetContextMenu) return;
+    headerEl._hasResetContextMenu = true;
+
+    headerEl.addEventListener('contextmenu', (e) => {
+        // 如果右键发生在输入框或非表头处，放行
+        if (e.target.closest('input, textarea')) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        hideCanvasTabulatorHeaderContextMenu();
+
+        const menu = document.createElement('div');
+        menu.className = 'canvas-tabulator-header-menu';
+        menu.id = 'canvasTabulatorHeaderMenu';
+        menu.innerHTML = `
+            <div class="canvas-tabulator-header-menu-item" data-action="reset-order">
+                <i class="fas fa-arrows-alt-h"></i>
+                <span>${isZh ? '恢复默认列顺序' : 'Reset column order'}</span>
+            </div>
+            <div class="canvas-tabulator-header-menu-item" data-action="reset-widths">
+                <i class="fas fa-columns"></i>
+                <span>${isZh ? '恢复默认列宽' : 'Reset column widths'}</span>
+            </div>
+            <div class="canvas-tabulator-header-menu-sep"></div>
+            <div class="canvas-tabulator-header-menu-item" data-action="reset-all">
+                <i class="fas fa-undo"></i>
+                <span>${isZh ? '恢复全部默认列设置' : 'Reset all column layout'}</span>
+            </div>
+        `;
+
+        document.body.appendChild(menu);
+        canvasTabulatorHeaderContextMenuEl = menu;
+
+        const menuWidth = 175;
+        const menuHeight = 115;
+        let left = e.clientX;
+        let top = e.clientY;
+        if (left + menuWidth > window.innerWidth - 8) {
+            left = Math.max(8, window.innerWidth - menuWidth - 8);
+        }
+        if (top + menuHeight > window.innerHeight - 8) {
+            top = Math.max(8, window.innerHeight - menuHeight - 8);
+        }
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+
+        menu.addEventListener('click', (clickEvt) => {
+            const item = clickEvt.target.closest('.canvas-tabulator-header-menu-item');
+            if (!item) return;
+            const action = item.getAttribute('data-action');
+            hideCanvasTabulatorHeaderContextMenu();
+
+            if (!canvasSearchTabulatorInstance) return;
+            const curMode = (searchUiState && searchUiState.activeMode) || activeMode || 'bookmark';
+
+            if (action === 'reset-order') {
+                resetSavedTabulatorColumnOrder(curMode);
+                refreshTabulatorColumnsAfterReset(curMode, isZh);
+                showCanvasToastSafe(isZh ? '已恢复默认表头顺序' : 'Column order reset to default', 'info', 1500);
+            } else if (action === 'reset-widths') {
+                try {
+                    localStorage.removeItem(`${CANVAS_TABULATOR_COL_WIDTHS_PREFIX}${curMode}`);
+                } catch (_) { }
+                refreshTabulatorColumnsAfterReset(curMode, isZh);
+                showCanvasToastSafe(isZh ? '已恢复默认列宽' : 'Column widths reset to default', 'info', 1500);
+            } else if (action === 'reset-all') {
+                resetSavedTabulatorColumnOrder(curMode);
+                try {
+                    localStorage.removeItem(`${CANVAS_TABULATOR_COL_WIDTHS_PREFIX}${curMode}`);
+                } catch (_) { }
+                refreshTabulatorColumnsAfterReset(curMode, isZh);
+                showCanvasToastSafe(isZh ? '已恢复全部默认列设置' : 'All column layout reset to default', 'info', 1500);
+            }
+        });
+    });
+
+    const onOutsideCloseMenu = (evt) => {
+        if (!canvasTabulatorHeaderContextMenuEl) return;
+        if (evt.type === 'keydown' && evt.key !== 'Escape') return;
+        if (canvasTabulatorHeaderContextMenuEl.contains(evt.target)) return;
+        hideCanvasTabulatorHeaderContextMenu();
+    };
+
+    window.addEventListener('pointerdown', onOutsideCloseMenu, true);
+    window.addEventListener('keydown', onOutsideCloseMenu, true);
+    window.addEventListener('scroll', hideCanvasTabulatorHeaderContextMenu, true);
+}
+
+function refreshTabulatorColumnsAfterReset(curMode, isZh) {
+    if (!canvasSearchTabulatorInstance) return;
+    const tableData = canvasSearchTabulatorPendingState ? canvasSearchTabulatorPendingState.totalResults : [];
+    const newCols = getCanvasTabulatorColumns(isZh, curMode, tableData);
+    try {
+        canvasSearchTabulatorInstance.setColumns(newCols);
+        safeRedrawCanvasSearchTabulator(false);
+        if (typeof syncCanvasTabulatorTopScrollbar === 'function') syncCanvasTabulatorTopScrollbar();
+        if (typeof syncCanvasTabulatorRightScrollbar === 'function') syncCanvasTabulatorRightScrollbar(true);
+    } catch (_) { }
+}
+
+function setupCanvasTabulatorIndexHeaderProtection(tableInstance) {
+    if (!tableInstance) return;
+    try {
+        const indexCol = tableInstance.getColumn('index');
+        if (indexCol) {
+            const el = indexCol.getElement();
+            if (el && !el._preventDragBound) {
+                el._preventDragBound = true;
+                el.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                }, true);
+            }
+        }
+    } catch (_) { }
+}
+
 /**
  * 根据模式和自定义列宽决定 Tabulator 布局模式（fitColumns 或 fitDataFill）
  */
@@ -16771,6 +17290,9 @@ function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery,
         if (isCanvasSearchTabulatorReady()) {
             safeRedrawCanvasSearchTabulator(false);
             updateCanvasTabulatorLoadMoreRow(remain, isZh);
+            setupCanvasTabulatorIndexHeaderProtection(canvasSearchTabulatorInstance);
+            bindCanvasTabulatorHeaderContextMenu(containerEl, activeMode, isZh);
+            bindCanvasTabulatorColumnMoveEnhancements(canvasSearchTabulatorInstance, containerEl, activeMode);
             bindCanvasTabulatorTopScrollbarEvents();
             syncCanvasTabulatorTopScrollbar();
             bindCanvasTabulatorRightScrollbarEvents();
@@ -17746,7 +18268,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
         }
 
         cols.push(typeCol);
-        return cols;
+        return applyTabulatorColumnOrder(cols, mode);
     }
 
     if (mode === 'description') {
@@ -17854,9 +18376,9 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
 
         // 说明类型放在内容右侧，且宽度更紧凑 (95px)
         cols.push(descTypeCol);
-        return cols;
+        return applyTabulatorColumnOrder(cols, mode);
     }
-    return [
+    return applyTabulatorColumnOrder([
         {
             title: "#",
             field: "index",
@@ -18435,7 +18957,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 }
             }
         }
-    ];
+    ], mode);
 }
 
 /**
@@ -18696,6 +19218,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             rowHeight: 38,
             placeholder: placeholderText,
             columnHeaderSortMulti: true,
+            movableColumns: true,
             columnDefaults: {
                 headerSortTristate: true
             },
@@ -18717,6 +19240,9 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
 
         containerEl.classList.add('canvas-search-tabulator');
 
+        // 挂载列拖拽移动高级交互增强（边缘自适应平滑滚动、Shift+滚轮联动、快速拖拽加速）
+        bindCanvasTabulatorColumnMoveEnhancements(canvasSearchTabulatorInstance, containerEl, activeMode);
+
         canvasSearchTabulatorInstance.on("columnResized", (column) => {
             if (!column) return;
             const field = column.getField();
@@ -18732,7 +19258,13 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             }
         });
 
+        canvasSearchTabulatorInstance.on("columnMoved", (column, columns) => {
+            ensureCanvasTabulatorIndexColumnFirst(canvasSearchTabulatorInstance, activeMode);
+        });
+
         canvasSearchTabulatorInstance.on("tableBuilt", () => {
+            setupCanvasTabulatorIndexHeaderProtection(canvasSearchTabulatorInstance);
+            bindCanvasTabulatorHeaderContextMenu(containerEl, activeMode, isZh);
             bindCanvasTabulatorTopScrollbarEvents();
             syncCanvasTabulatorTopScrollbar();
             bindCanvasTabulatorRightScrollbarEvents();
@@ -18747,6 +19279,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
         });
 
         canvasSearchTabulatorInstance.on("renderComplete", () => {
+            setupCanvasTabulatorIndexHeaderProtection(canvasSearchTabulatorInstance);
             syncCanvasTabulatorTopScrollbar();
             if (canvasSearchTabulatorPendingState) {
                 const remain = Math.max(0, canvasSearchTabulatorPendingState.totalResults.length - canvasSearchTabulatorPendingState.loadedCount);
