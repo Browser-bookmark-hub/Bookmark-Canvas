@@ -8910,8 +8910,6 @@ function setupCanvasZoomAndPan() {
             return;
         }
 
-        try { stabilizePermanentSectionAnchors({ syncBounds: false }); } catch (_) { }
-
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
             scheduleDormancyUpdate(120);
@@ -12403,8 +12401,15 @@ function stabilizePermanentSectionAnchors(options = {}) {
         sectionEl.style.transform = 'none';
         sectionEl.style.left = `${nextLeft}px`;
         sectionEl.style.top = `${nextTop}px`;
-        sectionEl.offsetHeight;
-        sectionEl.style.transition = previousTransition;
+        requestAnimationFrame(() => {
+            if (sectionEl && sectionEl.isConnected) {
+                if (previousTransition) {
+                    sectionEl.style.transition = previousTransition;
+                } else {
+                    sectionEl.style.removeProperty('transition');
+                }
+            }
+        });
         changed = true;
     });
 

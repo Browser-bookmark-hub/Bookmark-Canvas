@@ -1772,6 +1772,7 @@
 
     function __observeNoteTreeItem(el) {
         if (!el || !el.classList || !el.classList.contains('tree-item')) return;
+        __ensureCardContainerObserved(el);
         __pendingNoteTreeItems.add(el);
         __scheduleFlushNoteMarkers();
     }
@@ -2147,15 +2148,62 @@
     let __pendingTagTreeItems = new Set();
     let __pendingFlushScheduled = false;
     let __tagFlushFrameTs = 0;
-    const __resizeObservedTreeItems = new WeakSet();
-    const __treeItemResizeObserver = (typeof ResizeObserver !== 'undefined')
+    // Card container resize observer: only observe card containers (a few dozen),
+    // and only refresh tree-items when the card's actual offsetWidth changes (e.g. manual resizing).
+    const CARD_CONTAINER_SELECTOR = '.temp-canvas-node, .permanent-bookmark-section, .md-canvas-node';
+    const __resizeObservedCards = new WeakSet();
+    const __cardLastWidthMap = new WeakMap();
+
+    function __refreshCardTreeItems(card) {
+        if (!card || !card.querySelectorAll) return;
+        const items = card.querySelectorAll('.tree-item');
+        if (!items.length) return;
+        items.forEach((item) => {
+            __pendingTagTreeItems.add(item);
+            __pendingNoteTreeItems.add(item);
+        });
+        __scheduleFlushDots();
+        __scheduleFlushNoteMarkers();
+    }
+
+    const __cardContainerResizeObserver = (typeof ResizeObserver !== 'undefined')
         ? new ResizeObserver((entries) => {
             entries.forEach((entry) => {
-                __observeTagTreeItem(entry.target);
-                __observeNoteTreeItem(entry.target);
+                const card = entry.target;
+                if (!card || !document.contains(card)) return;
+                const currentWidth = card.offsetWidth;
+                if (currentWidth <= 0) return;
+                const lastWidth = __cardLastWidthMap.get(card);
+                // 只有在卡片自身实际尺寸（offsetWidth）发生变化时（例如用户手动拖动右下角拉宽拉窄），
+                // 才按需刷新该卡片内部的书签标签位置。
+                if (lastWidth !== undefined && Math.abs(currentWidth - lastWidth) < 1) {
+                    return;
+                }
+                __cardLastWidthMap.set(card, currentWidth);
+                __refreshCardTreeItems(card);
             });
         })
         : null;
+
+    function __observeCardContainer(card) {
+        if (!__cardContainerResizeObserver || !card || card.nodeType !== 1) return;
+        if (!__resizeObservedCards.has(card)) {
+            __resizeObservedCards.add(card);
+            const w = card.offsetWidth;
+            if (w > 0) {
+                __cardLastWidthMap.set(card, w);
+            }
+            __cardContainerResizeObserver.observe(card);
+        }
+    }
+
+    function __ensureCardContainerObserved(treeItem) {
+        if (!__cardContainerResizeObserver || !treeItem || !treeItem.closest) return;
+        const card = treeItem.closest(CARD_CONTAINER_SELECTOR);
+        if (card) {
+            __observeCardContainer(card);
+        }
+    }
     function __scheduleFlushDots() {
         if (__pendingFlushScheduled) return;
         __pendingFlushScheduled = true;
@@ -2372,10 +2420,7 @@
 
     function __observeTagTreeItem(el) {
         if (!el || !el.classList || !el.classList.contains('tree-item')) return;
-        if (__treeItemResizeObserver && !__resizeObservedTreeItems.has(el)) {
-            __resizeObservedTreeItems.add(el);
-            __treeItemResizeObserver.observe(el);
-        }
+        __ensureCardContainerObserved(el);
         __pendingTagTreeItems.add(el);
         __scheduleFlushDots();
     }
@@ -2424,6 +2469,10 @@
 
     function __scanTreeItemsForTagDots(scope) {
         const root = (scope && scope.querySelectorAll) ? scope : document;
+        if (root.matches && root.matches(CARD_CONTAINER_SELECTOR)) {
+            __observeCardContainer(root);
+        }
+        root.querySelectorAll(CARD_CONTAINER_SELECTOR).forEach(__observeCardContainer);
         root.querySelectorAll('.tree-item').forEach(__observeTreeItem);
     }
 
@@ -2480,6 +2529,12 @@
             }
             m.addedNodes.forEach((node) => {
                 if (node.nodeType !== 1) return;
+                if (node.matches && node.matches(CARD_CONTAINER_SELECTOR)) {
+                    __observeCardContainer(node);
+                }
+                if (node.querySelectorAll) {
+                    node.querySelectorAll(CARD_CONTAINER_SELECTOR).forEach(__observeCardContainer);
+                }
                 if (node.classList && node.classList.contains('tree-item')) {
                     __observeTreeItem(node);
                 }
@@ -2500,7 +2555,10 @@
         __scanTreeItemsForTagDots(document);
     }
     window.addEventListener('resize', () => {
-        __queueTreeItemScanForTagDots(document);
+        const activeMaximized = document.querySelector('.canvas-node-maximized, .canvas-fullscreen-node, .canvas-fullscreen-active');
+        if (activeMaximized) {
+            __refreshCardTreeItems(activeMaximized);
+        }
     }, { passive: true });
 
     window.addEventListener('canvas-other-settings-updated', () => {

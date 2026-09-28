@@ -673,6 +673,7 @@
     overflow-y: auto;
     /* 滚动条在这里，跟随栏目窗口大小 */
     overflow-x: hidden;
+    scrollbar-gutter: stable;
     display: flex;
     flex-direction: column;
     border-bottom-left-radius: 9px;
@@ -1219,6 +1220,7 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
+    scrollbar-gutter: stable;
     /* 外层 overflow:visible，需手动设置圆角 */
     border-bottom-left-radius: 9px;
     border-bottom-right-radius: 9px;
@@ -2783,6 +2785,7 @@ body.canvas-node-maximized-active .canvas-edge-label {
     padding: 8px;
     box-sizing: border-box;
     overflow: auto;
+    scrollbar-gutter: stable;
     min-height: 0;
     max-height: 100%;
     border-radius: 0 0 6px 6px;

@@ -537,11 +537,19 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     animation: none !important;
 }
 
+/* 卡片正文始终预留滚动条槽位，锁定内部排版宽度，彻底消灭滚动条隐现造成的 15px 横向抖动 */
+.temp-node-body,
+.permanent-section-body {
+    scrollbar-gutter: stable;
+}
+
 /* [Perf] 平移/缩放/滚动期间暂停卡片内部滚动容器。
    带圆角的 overflow:auto 会生成独立合成滚动层 + 圆角遮罩，每个都让 GPU 合成每帧多一次昂贵的遮罩绘制；
-   实测 11 张卡片平移时 17fps → 120fps。overflow:hidden 保留 scrollTop，交互结束后原样恢复。 */
+   实测 11 张卡片平移时 17fps → 120fps。overflow:hidden 保留 scrollTop，交互结束后原样恢复。
+   同时配合 scrollbar-gutter: stable !important，确保即使切到 hidden 时，右侧槽位依旧锁定不发生任何水平位移跳动。 */
 .canvas-workspace:is(.panning, .is-zooming, .is-scrolling) :is(.temp-node-body, .permanent-section-body) {
     overflow-y: hidden !important;
+    scrollbar-gutter: stable !important;
 }
 
 /* 交互（缩放/平移）中按需恢复的卡片：柔和淡入 + 轻微上浮，避免突兀弹出。
