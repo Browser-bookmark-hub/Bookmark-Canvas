@@ -68,7 +68,6 @@
   let nodeActionMap = new Map();
   let nodeDeleteActionMap = new Map();
   let directoryNodeDataMap = new Map();
-  const DIRECTORY_UNLOAD_DELAY_MS = 15000;
   let pendingDeleteUiKey = '';
 
   function getLang() {
@@ -1634,7 +1633,7 @@
           color: folderColor,
           defaultColor,
           icon: 'fas fa-link',
-          open: true,
+          open: false,
           count: labeledEdges.length,
           children: labeledItems
         });
@@ -2187,7 +2186,7 @@
           color: defaultColor,
           defaultColor,
           icon: 'fas fa-link',
-          open: true,
+          open: false,
           count: groupLabeledEdges.length,
           children: groupLabeledItems
         });
@@ -2807,6 +2806,8 @@
     updateActiveState(details);
   }
 
+  const FOLDER_UNLOAD_DEBOUNCE_MS = 600;
+
   function scheduleFolderUnload(details) {
     if (!details || details.dataset.lazyLoaded !== 'true') return;
     if (details.__unloadTimer__) {
@@ -2829,7 +2830,7 @@
           details.dataset.lazyLoaded = 'false';
         }
       }
-    }, DIRECTORY_UNLOAD_DELAY_MS);
+    }, FOLDER_UNLOAD_DEBOUNCE_MS);
   }
 
   function handleFolderToggle(details) {

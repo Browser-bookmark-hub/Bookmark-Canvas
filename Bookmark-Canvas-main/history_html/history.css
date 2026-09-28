@@ -3290,6 +3290,9 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     opacity: 0;
     pointer-events: none;
     transform: translateX(-10px);
+    visibility: hidden;
+    will-change: auto;
+    transition: opacity 0.14s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 0.2s;
 }
 
 .sidebar.position-right.compact .nav-tabs {
@@ -3679,8 +3682,9 @@ body.sidebar-resizing * {
     padding-left: 12px;
     padding-right: 12px;
     opacity: 1;
+    visibility: visible;
     transform: translateX(0);
-    transition: opacity 0.14s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition: opacity 0.14s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 0s;
     will-change: opacity, transform;
 }
 
@@ -3754,8 +3758,9 @@ body.sidebar-resizing * {
     margin-top: 0;
     color: var(--text-secondary);
     opacity: 1;
+    visibility: visible;
     transform: translateX(0);
-    transition: opacity 0.14s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition: opacity 0.14s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 0s;
     will-change: opacity, transform;
 }
 
@@ -4405,6 +4410,9 @@ body.sidebar-resizing * {
     opacity: 0;
     pointer-events: none;
     transform: translateX(-10px);
+    visibility: hidden;
+    will-change: auto;
+    transition: opacity 0.14s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 0.2s;
 }
 
 .sidebar.position-right.compact .canvas-directory-tree {
