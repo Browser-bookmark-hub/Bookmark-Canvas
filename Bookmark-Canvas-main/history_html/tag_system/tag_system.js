@@ -1621,10 +1621,15 @@
         if (!note || settings.highlightEnabled === false) {
             if (treeItem.classList.contains('has-note-highlight')) {
                 __noteHighlightMutations.add(treeItem);
+                // classList.remove 即使类不存在也会产生 class 属性变更记录，只在存在时写。
+                treeItem.classList.remove('has-note-highlight');
             }
-            treeItem.classList.remove('has-note-highlight');
-            treeItem.removeAttribute('data-note-highlight-color');
-            treeItem.style.removeProperty('--note-highlight-color');
+            if (treeItem.hasAttribute('data-note-highlight-color')) {
+                treeItem.removeAttribute('data-note-highlight-color');
+            }
+            if (treeItem.style.getPropertyValue('--note-highlight-color')) {
+                treeItem.style.removeProperty('--note-highlight-color');
+            }
             if (typeof window.__updateTreeHighlightSource === 'function') {
                 window.__updateTreeHighlightSource(treeItem);
             } else if (!treeItem.classList.contains('has-trace')) {
@@ -1636,8 +1641,9 @@
         const noteColor = __normalizeNoteColor(meta.color || meta.noteColor);
         if (!treeItem.classList.contains('has-note-highlight')) {
             __noteHighlightMutations.add(treeItem);
+            // classList.add 即使类已存在也会产生 class 属性变更记录，只在缺失时写。
+            treeItem.classList.add('has-note-highlight');
         }
-        treeItem.classList.add('has-note-highlight');
         // [Perf] 值没变就不写。
         // dataset / style 赋值即使内容相同也会生成属性变更、让该元素失效并触发重绘；
         // 而本函数在每次批注刷新时都会对每个待处理节点调用一遍，缩放期间约 60 次/秒。
@@ -1692,7 +1698,8 @@
             const tip = treeItem.querySelector(':scope > .tree-tip-icon, :scope > .tree-info-icon');
             const ref = trailingTags || tip;
             if (ref && ref !== marker) {
-                treeItem.insertBefore(marker, ref);
+                // 已在正确位置就不动：重复 insertBefore 会产生 childList 变更，被树的 MutationObserver 再次入队，形成每帧死循环。
+                if (marker.nextSibling !== ref) treeItem.insertBefore(marker, ref);
             } else if (!marker.parentElement) {
                 treeItem.appendChild(marker);
             }

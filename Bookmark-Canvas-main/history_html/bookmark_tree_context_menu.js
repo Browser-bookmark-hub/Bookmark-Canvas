@@ -7075,8 +7075,11 @@ window.__getTreeHighlightSource = function(treeItem) {
 window.__updateTreeHighlightSource = function(treeItem) {
     if (!treeItem || !treeItem.classList || !treeItem.classList.contains('tree-item')) return '';
     const source = window.__getTreeHighlightSource(treeItem);
-    if (source) treeItem.dataset.highlightSource = source;
-    else treeItem.removeAttribute('data-highlight-source');
+    if (source) {
+        if (treeItem.dataset.highlightSource !== source) treeItem.dataset.highlightSource = source;
+    } else if (treeItem.hasAttribute('data-highlight-source')) {
+        treeItem.removeAttribute('data-highlight-source');
+    }
     return source;
 };
 
