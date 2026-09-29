@@ -3509,26 +3509,73 @@
   function resolveTargetElementForFullscreenSwitch(target) {
     if (!target || typeof target !== 'object') return null;
 
+    const module = getCanvasModule();
+
     switch (target.kind) {
-      case 'permanent-main':
-        return resolvePermanentSectionElement(null);
+      case 'permanent-main': {
+        const el = resolvePermanentSectionElement(null) || document.getElementById('permanentSection');
+        if (el && module && typeof module.wakeCanvasNodeFromLazyState === 'function') {
+          try { module.wakeCanvasNodeFromLazyState(el); } catch (_) { }
+        }
+        return el;
+      }
       case 'permanent-copy': {
         const copyId = normalizeText(target.copyId);
         if (!copyId) return null;
-        return resolvePermanentSectionElement(copyId);
+        let el = resolvePermanentSectionElement(copyId);
+        if (!el && module && typeof module.materializeMaximizedNodeFromDescriptor === 'function') {
+          try {
+            el = module.materializeMaximizedNodeFromDescriptor({ type: 'permanent-copy', copyId });
+          } catch (_) { }
+        }
+        el = el || resolvePermanentSectionElement(copyId);
+        if (el && module && typeof module.wakeCanvasNodeFromLazyState === 'function') {
+          try { module.wakeCanvasNodeFromLazyState(el); } catch (_) { }
+        }
+        return el;
       }
       case 'temp-section': {
         const sectionId = normalizeText(target.sectionId);
         if (!sectionId) return null;
-        return document.getElementById(sectionId);
+        let el = resolveDirectoryTargetElement(target) || document.getElementById(sectionId);
+        if (!el && module && typeof module.materializeMaximizedNodeFromDescriptor === 'function') {
+          try {
+            el = module.materializeMaximizedNodeFromDescriptor({ type: 'temp-node', id: sectionId });
+          } catch (_) { }
+        }
+        if (!el && module && typeof module.forceWakeAndRender === 'function') {
+          try { module.forceWakeAndRender(sectionId); } catch (_) { }
+          el = document.getElementById(sectionId);
+        }
+        if (!el && typeof global.renderTempNode === 'function') {
+          try {
+            const sec = (typeof global.getTempSection === 'function') ? global.getTempSection(sectionId) : null;
+            if (sec) global.renderTempNode(sec);
+            el = document.getElementById(sectionId);
+          } catch (_) { }
+        }
+        el = el || document.getElementById(sectionId);
+        if (el && module && typeof module.wakeCanvasNodeFromLazyState === 'function') {
+          try { module.wakeCanvasNodeFromLazyState(el); } catch (_) { }
+        }
+        return el;
       }
       case 'md-node': {
         const nodeId = normalizeText(target.nodeId);
         if (!nodeId) return null;
         let el = document.getElementById(nodeId);
-        if (!el && window.CanvasModule && typeof window.CanvasModule.locateElement === 'function') {
-          try { window.CanvasModule.locateElement(nodeId); } catch (_) { }
+        if (!el && module && typeof module.materializeMaximizedNodeFromDescriptor === 'function') {
+          try {
+            el = module.materializeMaximizedNodeFromDescriptor({ type: 'md-node', id: nodeId });
+          } catch (_) { }
+        }
+        if (!el && module && typeof module.locateMdNode === 'function') {
+          try { module.locateMdNode(nodeId); } catch (_) { }
           el = document.getElementById(nodeId);
+        }
+        el = el || document.getElementById(nodeId);
+        if (el && module && typeof module.wakeCanvasNodeFromLazyState === 'function') {
+          try { module.wakeCanvasNodeFromLazyState(el); } catch (_) { }
         }
         return el;
       }
@@ -3554,14 +3601,21 @@
         || nextTarget.classList.contains('md-canvas-node'));
     if (!isCanvasNode) return false;
 
-    if (window.CanvasModule && typeof window.CanvasModule.toggleElementFullscreen === 'function') {
+    const module = getCanvasModule();
+    if (module && typeof module.wakeCanvasNodeFromLazyState === 'function') {
+      try { module.wakeCanvasNodeFromLazyState(nextTarget); } catch (_) { }
+    }
+
+    if (module && typeof module.toggleElementFullscreen === 'function') {
       try {
-        window.CanvasModule.toggleElementFullscreen(nextTarget);
+        module.toggleElementFullscreen(nextTarget);
         return true;
       } catch (_) { }
     }
 
-    const fullscreenBtn = nextTarget.querySelector('.canvas-node-fullscreen-btn');
+    const fullscreenBtn = nextTarget.querySelector(
+      '.canvas-node-fullscreen-btn, .permanent-section-fullscreen-btn, .temp-node-fullscreen-btn, .md-node-toolbar-btn[data-action="md-fullscreen"]'
+    );
     if (!fullscreenBtn) return false;
 
     try {

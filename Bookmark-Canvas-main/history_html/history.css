@@ -4146,9 +4146,8 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-folder>summary:hover>.canvas-dir-folder-delete-wrap,
-.canvas-dir-folder>summary:focus-within>.canvas-dir-folder-delete-wrap,
 .canvas-dir-item:hover>.canvas-dir-item-delete-wrap,
-.canvas-dir-item:focus-within>.canvas-dir-item-delete-wrap,
+.canvas-dir-folder-delete-wrap:focus-within,
 .canvas-dir-folder-delete-wrap.is-open {
     margin-left: 4px;
     gap: 4px;
