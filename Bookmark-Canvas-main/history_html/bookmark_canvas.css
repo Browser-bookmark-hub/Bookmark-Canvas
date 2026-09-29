@@ -68,8 +68,7 @@
 /* 永久栏目样式 - 绿色框体 */
 .permanent-bookmark-section {
     position: absolute;
-    /* 移除背景色，让内层元素填充 */
-    background: transparent;
+    background: #edf2f7;
     border: 3px solid var(--permanent-section-color, #10b981);
     border-radius: 12px;
     box-shadow: var(--shadow-lg);
@@ -95,7 +94,7 @@
 }
 
 [data-theme="dark"] .permanent-bookmark-section {
-    background: transparent;
+    background: var(--bg-secondary);
     border-color: var(--permanent-section-color, #10b981);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
@@ -673,14 +672,10 @@
     overflow-y: auto;
     /* 滚动条在这里，跟随栏目窗口大小 */
     overflow-x: hidden;
-    scrollbar-gutter: stable;
     display: flex;
     flex-direction: column;
-    border-bottom-left-radius: 9px;
-    border-bottom-right-radius: 9px;
-    /* 外层 overflow:hidden 会自动裁剪圆角，无需单独设置 */
-    /* 背景色填充整个区域 */
-    background: #edf2f7;
+    /* 滚动容器保持纯直角矩形，彻底消灭 Chromium 对带圆角滚动容器昂贵的每帧 GPU Mask 裁剪开销 */
+    background: transparent;
     overscroll-behavior: contain;
     isolation: isolate;
 }
@@ -703,8 +698,7 @@
     position: absolute;
     width: 360px;
     min-height: 180px;
-    /* 移除背景色，让内层元素填充 */
-    background: transparent;
+    background: #edf2f7;
     border: 3px solid var(--section-color, #2563eb);
     border-radius: 12px;
     box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.08);
@@ -727,7 +721,7 @@
 }
 
 [data-theme="dark"] .temp-canvas-node {
-    background: transparent;
+    background: var(--bg-secondary);
     border-color: var(--section-color, #60a5fa);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.45);
 }
@@ -1220,21 +1214,17 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    scrollbar-gutter: stable;
-    /* 外层 overflow:visible，需手动设置圆角 */
-    border-bottom-left-radius: 9px;
-    border-bottom-right-radius: 9px;
     /* 移除多余 margin，让 body 完全贴合边缘 */
     margin: 0;
-    /* 背景色填充整个区域 */
-    background: #edf2f7;
+    /* 滚动容器保持纯直角矩形，彻底消灭 Chromium 对带圆角滚动容器昂贵的每帧 GPU Mask 裁剪开销 */
+    background: transparent;
     overscroll-behavior: contain;
     isolation: isolate;
 }
 
 [data-theme="dark"] .permanent-section-body,
 [data-theme="dark"] .temp-node-body {
-    background: var(--bg-secondary);
+    background: transparent;
 }
 
 
@@ -2228,13 +2218,18 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
 }
 
 .canvas-workspace::-webkit-scrollbar-track,
-.permanent-section-body::-webkit-scrollbar-track,
-.temp-node-body::-webkit-scrollbar-track,
 .md-canvas-text::-webkit-scrollbar-track,
 .permanent-section-tip::-webkit-scrollbar-track,
 .temp-node-description::-webkit-scrollbar-track {
     background: var(--bg-tertiary);
     border-radius: 6px;
+}
+
+.permanent-section-body::-webkit-scrollbar-track,
+.temp-node-body::-webkit-scrollbar-track {
+    background: transparent;
+    margin-bottom: 8px;
+    margin-top: 4px;
 }
 
 .canvas-workspace::-webkit-scrollbar-thumb,
@@ -2785,10 +2780,8 @@ body.canvas-node-maximized-active .canvas-edge-label {
     padding: 8px;
     box-sizing: border-box;
     overflow: auto;
-    scrollbar-gutter: stable;
     min-height: 0;
     max-height: 100%;
-    border-radius: 0 0 6px 6px;
     line-height: 1.5;
     word-wrap: break-word;
     overflow-wrap: break-word;
@@ -4794,8 +4787,6 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     z-index: 1;
     /* scrollbar-width: thin; -- 移除，统一使用与永久栏目相同的滚动条大小 */
     overscroll-behavior: contain;
-    /* Keep the text layout width stable while the vertical scrollbar appears. */
-    scrollbar-gutter: stable;
     contain: layout paint;
     margin: 0 2px 2px 0;
 }
