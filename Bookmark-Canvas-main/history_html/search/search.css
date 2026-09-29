@@ -6293,38 +6293,85 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
    Tabulator 表头拖拽排序、列记忆与右键菜单交互增强
    ========================================================================== */
 
-/* 1. 拖拽时的放置占位符（深浅主题高亮与虚线框） */
+/* 1. 拖拽时的放置占位符（轻量干净的极简落位标线，剔除粗重阴影与冗余边框） */
 .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-col-placeholder {
-    background-color: rgba(37, 99, 235, 0.12) !important;
-    border: 2px dashed var(--accent-color, #2563eb) !important;
+    position: relative !important;
+    background-color: rgba(37, 99, 235, 0.04) !important;
+    border-left: 2px solid var(--accent-color, #2563eb) !important;
+    border-right: 2px solid var(--accent-color, #2563eb) !important;
+    border-top: none !important;
+    border-bottom: none !important;
+    box-shadow: none !important;
     box-sizing: border-box !important;
-    border-radius: 4px !important;
-    opacity: 0.85 !important;
+    border-radius: 0 !important;
+    opacity: 1 !important;
     min-width: 36px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+    z-index: 10 !important;
 }
 
 [data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-col-placeholder {
-    background-color: rgba(59, 130, 246, 0.16) !important;
-    border: 2px dashed var(--accent-color, #3b82f6) !important;
+    background-color: rgba(59, 130, 246, 0.06) !important;
+    border-left: 2px solid var(--accent-color, #3b82f6) !important;
+    border-right: 2px solid var(--accent-color, #3b82f6) !important;
+    border-top: none !important;
+    border-bottom: none !important;
+    box-shadow: none !important;
 }
 
-/* 2. 拖拽过程中的悬浮镜像（浮空投影、圆角与半透明） */
+/* 占位符内居中提示标签（轻量极简微标，细致字重与舒适间距） */
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-col-placeholder .canvas-tabulator-drop-slot-guide {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background-color: rgba(37, 99, 235, 0.08);
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    color: var(--accent-color, #2563eb);
+    font-size: 10.5px;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.2px;
+    pointer-events: none;
+    user-select: none;
+    white-space: nowrap;
+    max-width: 92%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-col-placeholder .canvas-tabulator-drop-slot-guide i {
+    font-size: 9px;
+    opacity: 0.75;
+}
+
+[data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-col-placeholder .canvas-tabulator-drop-slot-guide {
+    background-color: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.28);
+    color: var(--accent-color, #60a5fa);
+}
+
+/* 2. 拖拽过程中的悬浮镜像（轻质浮空投影、圆角与舒适半透明） */
 .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-moving {
     background-color: var(--bg-elevated, #ffffff) !important;
     color: var(--accent-color, #2563eb) !important;
     border: 1.5px solid var(--accent-color, #2563eb) !important;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(37, 99, 235, 0.22) !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(37, 99, 235, 0.15) !important;
     border-radius: 6px !important;
-    opacity: 0.94 !important;
+    opacity: 0.92 !important;
     z-index: 1000 !important;
     pointer-events: none !important;
 }
-
 [data-theme="dark"] .tabulator.canvas-search-tabulator .tabulator-header .tabulator-col.tabulator-moving {
     background-color: var(--bg-elevated, #1e293b) !important;
     color: var(--accent-color, #3b82f6) !important;
     border: 1.5px solid var(--accent-color, #3b82f6) !important;
-    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.55), 0 3px 10px rgba(59, 130, 246, 0.25) !important;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(59, 130, 246, 0.2) !important;
 }
 
 /* 3. 表头鼠标手势与光标状态 */

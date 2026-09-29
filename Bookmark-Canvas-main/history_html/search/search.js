@@ -16809,69 +16809,114 @@ function ensureCanvasTabulatorIndexColumnFirst(tableInstance, activeMode) {
 }
 
 /**
- * 根据拖拽指针在表头容器中的物理位置，动态更新悬浮镜像与插入占位符
+ * 计算指针所对应的目标插槽索引（1 到 M），并使用迟滞缓冲区（Hysteresis）进行边界防抖
+ * Slot 1: 在 index 序号列 (otherCols[0]) 之后、otherCols[1] 之前
+ * Slot k: 在 otherCols[k-1] 之后、otherCols[k] 之前
+ * Slot M: 在最后一列 otherCols[M-1] 之后
+ * 序号列始终被锁定在位置 0，禁止任何列插入到其前面
+ */
+function calculateCanvasTabulatorTargetSlot(otherCols, pointerX, currentSlot, hysteresis = 14) {
+    if (!otherCols || otherCols.length <= 1) return 1;
+
+    const M = otherCols.length;
+    let accumulatedX = 0;
+    const boundaries = [];
+    for (let i = 0; i < M; i++) {
+        const w = otherCols[i].getWidth();
+        if (i > 0) {
+            boundaries.push({
+                threshold: accumulatedX + w / 2
+            });
+        }
+        accumulatedX += w;
+    }
+
+    let targetSlot = currentSlot;
+    if (targetSlot < 1) targetSlot = 1;
+    if (targetSlot > M) targetSlot = M;
+
+    // 向左跨界判定（需低于阈值 - 迟滞缓冲区）
+    while (targetSlot > 1) {
+        const b = boundaries[targetSlot - 2];
+        if (pointerX < b.threshold - hysteresis) {
+            targetSlot--;
+        } else {
+            break;
+        }
+    }
+
+    // 向右跨界判定（需高于阈值 + 迟滞缓冲区）
+    while (targetSlot < M) {
+        const b = boundaries[targetSlot - 1];
+        if (pointerX > b.threshold + hysteresis) {
+            targetSlot++;
+        } else {
+            break;
+        }
+    }
+
+    return targetSlot;
+}
+
+/**
+ * 根据拖拽指针在表头容器中的物理投影，动态更新悬浮镜像与插入占位符（带迟滞防抖）
  */
 function updateMovingColumnPositionUnderPointer(tableInstance, moveMod, pageX) {
     if (!tableInstance || !moveMod || !moveMod.moving) return;
 
-    // 1. 同步更新浮动镜像位置
+    // 1. 同步更新浮动镜像水平位置
     try {
         moveMod.moveHover({ pageX: pageX });
     } catch (_) { }
 
-    // 2. 根据指针当前在表头容器中的物理投影，计算最合适的目标放置列
+    // 2. 根据指针当前在表头容器中的物理投影，计算最合适的目标放置插槽
     const contentsEl = tableInstance.columnManager && tableInstance.columnManager.getContentsElement();
     if (!contentsEl) return;
 
     const contentsRect = contentsEl.getBoundingClientRect();
     const pointerInContents = (pageX - (window.pageXOffset || 0) - contentsRect.left) + contentsEl.scrollLeft;
 
-    const cols = tableInstance.columnManager.getVisibleColumnsByIndex();
-    if (!cols || !cols.length) return;
+    const allCols = tableInstance.columnManager.getVisibleColumnsByIndex();
+    if (!allCols || !allCols.length) return;
 
-    for (let i = 0; i < cols.length; i++) {
-        const col = cols[i];
-        if (col === moveMod.moving) continue;
-        const field = col.getField();
-        const el = col.getElement();
-        if (!el) continue;
+    // 排除正在被拖动的列自身，得到静态参考列序列
+    const otherCols = allCols.filter(c => c !== moveMod.moving);
+    if (!otherCols.length) return;
 
-        // 序号列绝对锁定：如果悬浮在 index 序号列区域，一律只能插在 index 列后面，绝不可移到 index 前面
-        if (field === 'index') {
-            const idxRight = el.offsetLeft + col.getWidth();
-            if (pointerInContents <= idxRight) {
-                if (!(moveMod.toCol === col && moveMod.toColAfter)) {
-                    el.parentNode.insertBefore(moveMod.placeholderElement, el.nextSibling);
-                    moveMod.moveColumn(col, true);
-                }
-                return;
+    const M = otherCols.length;
+    const currentSlot = moveMod._currentSlotIndex || 1;
+    const targetSlot = calculateCanvasTabulatorTargetSlot(otherCols, pointerInContents, currentSlot, 14);
+
+    if (targetSlot !== currentSlot || !moveMod.toCol) {
+        moveMod._currentSlotIndex = targetSlot;
+
+        let targetCol;
+        let after;
+        if (targetSlot < M) {
+            // 插入在 otherCols[targetSlot] 之前
+            targetCol = otherCols[targetSlot];
+            after = false;
+            const el = targetCol.getElement();
+            if (el && el.parentNode) {
+                el.parentNode.insertBefore(moveMod.placeholderElement, el);
             }
-            continue;
-        }
-
-        const left = el.offsetLeft;
-        const width = col.getWidth();
-        if (pointerInContents >= left && pointerInContents <= left + width) {
-            if (pointerInContents > left + width / 2) {
-                if (!(moveMod.toCol === col && moveMod.toColAfter)) {
-                    el.parentNode.insertBefore(moveMod.placeholderElement, el.nextSibling);
-                    moveMod.moveColumn(col, true);
-                }
-            } else {
-                if (moveMod.toCol !== col || moveMod.toColAfter) {
-                    el.parentNode.insertBefore(moveMod.placeholderElement, el);
-                    moveMod.moveColumn(col, false);
-                }
+        } else {
+            // 插入在最后一列 otherCols[M - 1] 之后
+            targetCol = otherCols[M - 1];
+            after = true;
+            const el = targetCol.getElement();
+            if (el && el.parentNode) {
+                el.parentNode.insertBefore(moveMod.placeholderElement, el.nextSibling);
             }
-            return;
         }
+        moveMod.moveColumn(targetCol, after);
     }
 }
 
 let canvasTabulatorColumnMoveSession = null;
 
 /**
- * 启动列拖拽高级交互会话（边缘平滑自适应滚动 + Shift/滚轮横向视口穿透联动）
+ * 启动列拖拽高级交互会话（边缘平滑自适应滚动 + Shift/滚轮横向视口穿透联动 + 防抖高精度调度）
  */
 function startCanvasTabulatorColumnMoveSession(tableInstance, moveMod, startEvent, movingCol) {
     stopCanvasTabulatorColumnMoveSession();
@@ -16879,19 +16924,40 @@ function startCanvasTabulatorColumnMoveSession(tableInstance, moveMod, startEven
     const holder = tableInstance.rowManager && tableInstance.rowManager.element;
     if (!holder) return;
 
+    // 初始化插槽索引与占位符内视觉导引（左右两端高亮线 + 居中准备落点指示微标）
+    const allCols = tableInstance.columnManager && tableInstance.columnManager.getVisibleColumnsByIndex();
+    let initialSlot = 1;
+    if (allCols && movingCol) {
+        const foundIdx = allCols.indexOf(movingCol);
+        if (foundIdx > 0) initialSlot = foundIdx;
+    }
+    moveMod._currentSlotIndex = initialSlot;
+
+    if (moveMod.placeholderElement) {
+        const isZh = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh');
+        const labelText = isZh ? '落点' : 'Drop';
+        moveMod.placeholderElement.innerHTML = `
+            <div class="canvas-tabulator-drop-slot-guide">
+                <i class="fas fa-arrows-alt-h"></i>
+                <span>${labelText}</span>
+            </div>
+        `;
+    }
+
     let currentPointerX = startEvent.pageX || (startEvent.touches && startEvent.touches[0] && startEvent.touches[0].pageX) || (window.innerWidth / 2);
     let currentPointerY = startEvent.pageY || (startEvent.touches && startEvent.touches[0] && startEvent.touches[0].pageY) || 0;
     let rafId = null;
     let isSessionActive = true;
 
     const onGlobalPointerMove = (e) => {
-        if (!isSessionActive) return;
+        if (!isSessionActive || !moveMod || !moveMod.moving) return;
         currentPointerX = e.pageX || (e.touches && e.touches[0] && e.touches[0].pageX) || currentPointerX;
         currentPointerY = e.pageY || (e.touches && e.touches[0] && e.touches[0].pageY) || currentPointerY;
+        updateMovingColumnPositionUnderPointer(tableInstance, moveMod, currentPointerX);
     };
 
-    // 左右边缘自适应动态感应滚动（Edge Auto-Scroll Loop）
-    const EDGE_ZONE = 60; // 60px 边界感应区
+    // 左右边缘自适应动态感应滚动（Edge Auto-Scroll Loop - 阻尼平滑防冲调优）
+    const EDGE_ZONE = 50; // 50px 边界感应区
     const autoScrollLoop = () => {
         if (!isSessionActive || !moveMod || !moveMod.moving) {
             rafId = null;
@@ -16902,17 +16968,17 @@ function startCanvasTabulatorColumnMoveSession(tableInstance, moveMod, startEven
         const clientX = currentPointerX - (window.pageXOffset || 0);
 
         let scrollStep = 0;
-        // 靠近左边缘
+        // 靠近左边缘（柔和指数加速 2px ~ 8px/帧，避免过快冲出视口）
         if (clientX >= rect.left - 30 && clientX <= rect.left + EDGE_ZONE) {
             const dist = Math.max(0, (rect.left + EDGE_ZONE) - clientX);
             const ratio = Math.min(1, dist / EDGE_ZONE);
-            scrollStep = -Math.round(4 + ratio * 18);
+            scrollStep = -Math.round(2 + Math.pow(ratio, 1.8) * 6);
         }
         // 靠近右边缘
         else if (clientX <= rect.right + 30 && clientX >= rect.right - EDGE_ZONE) {
             const dist = Math.max(0, clientX - (rect.right - EDGE_ZONE));
             const ratio = Math.min(1, dist / EDGE_ZONE);
-            scrollStep = Math.round(4 + ratio * 18);
+            scrollStep = Math.round(2 + Math.pow(ratio, 1.8) * 6);
         }
 
         if (scrollStep !== 0) {
@@ -16987,6 +17053,11 @@ function startCanvasTabulatorColumnMoveSession(tableInstance, moveMod, startEven
             }
             window.removeEventListener('mousemove', onGlobalPointerMove, { capture: true });
             window.removeEventListener('wheel', onWheelDuringDrag, { capture: true });
+            if (moveMod && moveMod.placeholderElement) {
+                try {
+                    moveMod.placeholderElement.innerHTML = '';
+                } catch (_) { }
+            }
         }
     };
 }
@@ -17010,14 +17081,26 @@ function bindCanvasTabulatorColumnMoveEnhancements(tableInstance, containerEl, a
     if (!tableInstance || !tableInstance.modules || !tableInstance.modules.moveColumn) return;
     const moveMod = tableInstance.modules.moveColumn;
 
-    // 缩短按下等待判定，配合位移阈值，保证极速拖拽
-    moveMod.checkPeriod = 150;
+    // 按住等待判定时长
+    moveMod.checkPeriod = 200;
 
     if (!moveMod._enhancedByCanvas) {
         moveMod._enhancedByCanvas = true;
 
         const origStartMove = moveMod.startMove.bind(moveMod);
         const origEndMove = moveMod.endMove.bind(moveMod);
+
+        // 核心优化 1：彻底重写 moveColumn，严禁在拖拽悬浮过程中先行操作纵向单元格 DOM！
+        // 仅在释放落点时由 moveColumnActual 进行原子级整列重排，彻底消除先行位置交换的抖动与违和感。
+        moveMod.moveColumn = function(col, after) {
+            this.toCol = col;
+            this.toColAfter = after;
+        };
+
+        // 屏蔽 Tabulator 自带的每列 mousemove 绑定，由我们全局高精度迟滞控制器统一调度
+        moveMod._bindMouseMove = function() {};
+        moveMod._unbindMouseMove = function() {};
+        moveMod.autoScrollMargin = 0; // 停用原生简陋的 1ms setTimeout 边缘滚动，由 rAF 循环接管
 
         moveMod.startMove = function(e, col) {
             // 序号列严格不可拖动
@@ -17032,11 +17115,16 @@ function bindCanvasTabulatorColumnMoveEnhancements(tableInstance, containerEl, a
         moveMod.endMove = function(e) {
             stopCanvasTabulatorColumnMoveSession();
             origEndMove(e);
+            try {
+                if (tableInstance.rowManager && typeof tableInstance.rowManager.reinitialize === 'function') {
+                    tableInstance.rowManager.reinitialize();
+                }
+            } catch (_) { }
             ensureCanvasTabulatorIndexColumnFirst(tableInstance, activeMode);
         };
     }
 
-    // 快速位移拖拽加速：如果鼠标移动 > 4px，无需等待 150ms 延时直接启动拖拽；单击仍无缝触发排序
+    // 快速位移拖拽加速：如果鼠标移动 >= 10px，无需等待 200ms 延时直接启动拖拽；防抖阈值 10px 彻底消除误触并保留点击排序
     const headerEl = containerEl.querySelector('.tabulator-header');
     if (headerEl && !headerEl._fastDragMoveBound) {
         headerEl._fastDragMoveBound = true;
@@ -17055,7 +17143,8 @@ function bindCanvasTabulatorColumnMoveEnhancements(tableInstance, containerEl, a
 
             const onPointerMoveCheck = (moveEvt) => {
                 const dist = Math.hypot(moveEvt.clientX - startX, moveEvt.clientY - startY);
-                if (dist > 4) {
+                // 防抖优化：将位移判定阈值从 4px 提升至 10px，避免点击排序列时的误拖拽，手感更加扎实稳定
+                if (dist >= 10) {
                     cleanupFastDrag();
                     if (moveMod.checkTimeout) {
                         clearTimeout(moveMod.checkTimeout);
