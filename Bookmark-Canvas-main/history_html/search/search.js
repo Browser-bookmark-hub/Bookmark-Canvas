@@ -594,7 +594,7 @@ function isSearchPanelRootBrowseView(panel) {
     if (panel.querySelector('.canvas-tag-browse-section, .canvas-note-browse-section, .canvas-tag-browse-color-grid')) return true;
     const q = String(searchUiState && searchUiState.query || '').trim();
     const isRootQuery = (typeof isTagBrowseRootQuery === 'function' && isTagBrowseRootQuery(q)) ||
-                        (typeof isNoteBrowseRootQuery === 'function' && isNoteBrowseRootQuery(q));
+        (typeof isNoteBrowseRootQuery === 'function' && isNoteBrowseRootQuery(q));
     const hasTagDetail = !!(searchUiState && searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.active);
     const hasNoteDetail = !!(searchUiState && searchUiState.noteBrowseDetail && searchUiState.noteBrowseDetail.active);
     return isRootQuery && !hasTagDetail && !hasNoteDetail;
@@ -763,8 +763,9 @@ function toggleSearchPanelViewMode() {
  * 搜索候选面板宽度配置与常量（网格、列表与表格模式完全独立记忆）
  */
 const SEARCH_PANEL_WIDTH_MIN = 360;
+const SEARCH_PANEL_WIDTH_MIN_ROOT = 554;
 const SEARCH_PANEL_WIDTH_MAX = 1800;
-const SEARCH_PANEL_WIDTH_DEFAULT_ROOT = 500;
+const SEARCH_PANEL_WIDTH_DEFAULT_ROOT = 560;
 const SEARCH_PANEL_WIDTH_DEFAULT_GRID = 920;
 const SEARCH_PANEL_WIDTH_DEFAULT_TABLE = 1080;
 const SEARCH_PANEL_WIDTH_PREF_KEY_ROOT = 'canvasSearchPanelWidth_root';
@@ -776,11 +777,12 @@ const SEARCH_PANEL_WIDTH_PREF_KEY_LEGACY = 'canvasSearchPanelWidth';
 function getSearchPanelWidth(mode) {
     const targetMode = mode || getSearchPanelMode();
     if (targetMode === 'root') {
+        const rootMinW = SEARCH_PANEL_WIDTH_MIN_ROOT || 554;
         try {
             const saved = localStorage.getItem(SEARCH_PANEL_WIDTH_PREF_KEY_ROOT);
             if (saved !== null) {
                 const val = parseInt(saved, 10);
-                if (Number.isFinite(val) && val >= SEARCH_PANEL_WIDTH_MIN && val <= SEARCH_PANEL_WIDTH_MAX) {
+                if (Number.isFinite(val) && val >= rootMinW && val <= SEARCH_PANEL_WIDTH_MAX) {
                     return val;
                 }
             }
@@ -789,14 +791,14 @@ function getSearchPanelWidth(mode) {
             if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
                 const other = window.CanvasState.otherSettings;
                 if (typeof other.searchPanelRootWidth === 'number' && Number.isFinite(other.searchPanelRootWidth)) {
-                    return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, other.searchPanelRootWidth));
+                    return Math.max(rootMinW, Math.min(SEARCH_PANEL_WIDTH_MAX, other.searchPanelRootWidth));
                 }
             }
             const rawOther = localStorage.getItem('canvas_other_settings');
             if (rawOther) {
                 const parsedOther = JSON.parse(rawOther);
                 if (parsedOther && typeof parsedOther.searchPanelRootWidth === 'number' && Number.isFinite(parsedOther.searchPanelRootWidth)) {
-                    return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, parsedOther.searchPanelRootWidth));
+                    return Math.max(rootMinW, Math.min(SEARCH_PANEL_WIDTH_MAX, parsedOther.searchPanelRootWidth));
                 }
             }
         } catch (_) { }
@@ -962,9 +964,11 @@ function applySearchPanelWidth(width, panel, mode, options = {}) {
 
     let effectiveWidth = null;
     if (rawVal !== null && Number.isFinite(rawVal)) {
-        effectiveWidth = Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(temporaryLimit, Math.round(rawVal)));
+        const minW = (targetMode === 'root') ? (SEARCH_PANEL_WIDTH_MIN_ROOT || 554) : SEARCH_PANEL_WIDTH_MIN;
+        effectiveWidth = Math.max(minW, Math.min(temporaryLimit, Math.round(rawVal)));
     } else if (targetMode === 'root') {
-        effectiveWidth = Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(temporaryLimit, SEARCH_PANEL_WIDTH_DEFAULT_ROOT));
+        const minW = SEARCH_PANEL_WIDTH_MIN_ROOT || 554;
+        effectiveWidth = Math.max(minW, Math.min(temporaryLimit, SEARCH_PANEL_WIDTH_DEFAULT_ROOT));
     } else if (targetMode === 'table') {
         effectiveWidth = Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(temporaryLimit, SEARCH_PANEL_WIDTH_DEFAULT_TABLE));
     } else if (targetMode === 'grid') {
@@ -1012,8 +1016,9 @@ function applySearchPanelWidth(width, panel, mode, options = {}) {
 function setSearchPanelWidth(width, options = {}) {
     const targetMode = options.mode || getSearchPanelMode();
     const rawVal = width !== null ? Math.round(Number(width)) : null;
+    const minW = (targetMode === 'root') ? (SEARCH_PANEL_WIDTH_MIN_ROOT || 554) : SEARCH_PANEL_WIDTH_MIN;
     const preferred = (rawVal !== null && Number.isFinite(rawVal))
-        ? Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, rawVal))
+        ? Math.max(minW, Math.min(SEARCH_PANEL_WIDTH_MAX, rawVal))
         : null;
     const effective = applySearchPanelWidth(preferred, null, targetMode);
 
@@ -1917,7 +1922,7 @@ let searchPanelShowFrame = null;
 function showSearchResultsPanel() {
     const panel = getSearchResultsPanel();
     if (!panel) return;
-    try { ensurePermanentBookmarkDateCacheLoaded(); } catch (_) {}
+    try { ensurePermanentBookmarkDateCacheLoaded(); } catch (_) { }
 
     const isSuggestions = (panel.dataset && panel.dataset.panelType === 'canvas-suggestions') ||
         !!panel.querySelector('.canvas-suggestions-hide-btn') ||
@@ -1984,6 +1989,9 @@ function hideSearchResultsPanel() {
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
     if (typeof clearSearchPanelAutoInfiniteScroll === 'function') clearSearchPanelAutoInfiniteScroll();
     if (typeof destroyCanvasSearchTabulator === 'function') destroyCanvasSearchTabulator();
+    try {
+        document.querySelectorAll('.search-hint-help-popover.show').forEach(p => p.classList.remove('show'));
+    } catch (_) { }
     const panel = getSearchResultsPanel();
     if (panel) {
         if (searchPanelShowFrame) {
@@ -2007,7 +2015,7 @@ function hideSearchResultsPanel() {
     try {
         if (typeof searchUiState === 'object' && searchUiState) {
             searchUiState.canvasSuggestionsVisible = false;
-            
+
             // 立即清理 UI 搜索结果缓存，保证下次打开界面干净
             searchUiState.results = [];
             searchUiState.resultSource = [];
@@ -2401,13 +2409,37 @@ async function activateSearchResultAtIndex(index) {
     await activateCanvasSearchResultAtIndex(index);
 }
 
-// ==================== 事件处理 ====================
+let lastRecordedJumpQuery = null;
+let lastRecordedJumpTime = 0;
+
+/**
+ * 记录跳转搜索历史（严格模式：仅在用户点击条目/单元格/表格行实际跳转时记录）
+ * 无论从网格卡片/徽章、表格行/单元格、面包屑或键盘回车激活跳转，均统一在此记录
+ */
+function recordCurrentSearchJumpHistory() {
+    try {
+        const input = document.getElementById('searchInput');
+        const q = (input && typeof input.value === 'string' && input.value.trim())
+            ? input.value.trim()
+            : String((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '').trim();
+        const now = Date.now();
+        if (q && (q !== lastRecordedJumpQuery || now - lastRecordedJumpTime > 500)) {
+            lastRecordedJumpQuery = q;
+            lastRecordedJumpTime = now;
+            const currentMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
+            if (typeof recordSearchHistory === 'function') {
+                recordSearchHistory(q, currentMode, { trigger: 'jump' });
+            }
+        }
+    } catch (_) { }
+}
 
 /**
  * 激活搜索结果（根据当前视图调用对应的激活函数）
  * @param {number} index - 结果索引
  */
 function activateSearchResult(index) {
+    recordCurrentSearchJumpHistory();
     activateCanvasSearchResultAtIndex(index);
 }
 
@@ -2637,10 +2669,14 @@ async function handleSearchInputFocus(e) {
         }
         const input = e && e.target ? e.target : document.getElementById('searchInput');
         if (!input) return;
+
+        if (typeof updateSearchPlaceholder === 'function') {
+            updateSearchPlaceholder('focused');
+        }
+
         if (isSidePanelModeInSearch()) {
             setSidePanelSearchExpanded(true);
         }
-        
         // 确保主动加载当前激活模式的索引和坐标映射
         const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
         if (typeof ensureIndexForModeLoaded === 'function') {
@@ -2886,10 +2922,10 @@ function handleSearchResultsPanelClick(e) {
         if (!(searchUiState.bookmarkDetailsExpanded instanceof Set)) {
             searchUiState.bookmarkDetailsExpanded = new Set();
         }
-        
+
         const isCurrentlyExpanded = searchUiState.bookmarkDetailsExpanded.has(itemId);
         const willExpand = !isCurrentlyExpanded;
-        
+
         if (willExpand) {
             searchUiState.bookmarkDetailsExpanded.add(itemId);
         } else {
@@ -2903,7 +2939,7 @@ function handleSearchResultsPanelClick(e) {
             bookmarkDetailsToggle.setAttribute('aria-expanded', String(willExpand));
             const isZh = (currentLang === 'zh_CN');
             bookmarkDetailsToggle.setAttribute('title', isZh ? (willExpand ? '收起信息' : '展开信息') : (willExpand ? 'Collapse info' : 'Expand info'));
-            
+
             // Update caret icon
             const caret = bookmarkDetailsToggle.querySelector('i.fas');
             if (caret) {
@@ -3027,7 +3063,7 @@ function handleSearchResultsPanelClick(e) {
             e.preventDefault();
             e.stopPropagation();
         } catch (_) { }
-        
+
         const query = String(searchUiState.query || '').trim();
         if (isNoteBrowseRootQuery(query)) {
             searchUiState.noteBrowseDetail = null;
@@ -3080,6 +3116,7 @@ function handleSearchResultsPanelClick(e) {
                 const folderName = pathPartEl.dataset.folderName || pathPartEl.textContent.trim();
                 const target = resolveBookmarkAncestorFolder(item, folderName);
                 if (target) {
+                    recordCurrentSearchJumpHistory();
                     navigateToBookmarkAncestorFolder(target);
                     return;
                 }
@@ -3218,6 +3255,7 @@ function handleSearchResultsPanelClick(e) {
         }) || null;
 
         if (targetItem) {
+            recordCurrentSearchJumpHistory();
             try {
                 hideSearchResultsPanel();
                 const inputEl = document.getElementById('searchInput');
@@ -3427,6 +3465,7 @@ function handleSearchResultsPanelClick(e) {
         }
 
         // 1b. Determine Action
+        recordCurrentSearchJumpHistory();
         hideSearchResultsPanel();
         try {
             const inputEl = document.getElementById('searchInput');
@@ -5003,6 +5042,7 @@ function getOrCreateGridGroupPopover() {
                         const folderName = pathPartEl.dataset.folderName || pathPartEl.textContent.trim();
                         const target = resolveBookmarkAncestorFolder(childItem, folderName);
                         if (target) {
+                            recordCurrentSearchJumpHistory();
                             navigateToBookmarkAncestorFolder(target);
                             return;
                         }
@@ -5012,6 +5052,7 @@ function getOrCreateGridGroupPopover() {
 
                 const childRow = e.target.closest('.canvas-grid-group-child-row, [data-bookmark-child-id]');
                 if (childRow) {
+                    recordCurrentSearchJumpHistory();
                     const childId = childRow.getAttribute('data-bookmark-child-id') || childRow.getAttribute('data-loc-id');
                     const childSource = childRow.getAttribute('data-loc-source') || 'permanent';
                     const childSection = childRow.getAttribute('data-loc-section') || '';
@@ -5197,7 +5238,7 @@ function showGridGroupPopover(targetBtn, groupId) {
                     return `${safePart}<span class="search-result-path-sep"> &gt; </span>`;
                 }).join('');
             } else {
-                pathPartsHtml = `<span class="search-result-path-part" data-folder-name="${escapeHtml(isZh ? '根目录' : 'Root')}" title="${escapeHtml(isZh ? '定位至「根目录」' : 'Locate "Root"') }">${escapeHtml(isZh ? '根目录' : 'Root')}</span>`;
+                pathPartsHtml = `<span class="search-result-path-part" data-folder-name="${escapeHtml(isZh ? '根目录' : 'Root')}" title="${escapeHtml(isZh ? '定位至「根目录」' : 'Locate "Root"')}">${escapeHtml(isZh ? '根目录' : 'Root')}</span>`;
             }
 
             // Note snippet if any
@@ -5377,6 +5418,7 @@ function getOrCreateGridDetailsBubble() {
                         const folderName = pathPartEl.dataset.folderName || pathPartEl.textContent.trim();
                         const target = resolveBookmarkAncestorFolder(targetItem, folderName);
                         if (target) {
+                            recordCurrentSearchJumpHistory();
                             hideGridDetailsBubble();
                             hideSearchResultsPanel();
                             try {
@@ -5450,7 +5492,7 @@ function getOrCreateGridDetailsBubble() {
                                 origText.textContent = (typeof currentLang !== 'undefined' && currentLang === 'zh_CN') ? '已复制！' : 'Copied!';
                                 setTimeout(() => { origText.textContent = old; }, 1500);
                             }
-                        }).catch(() => {});
+                        }).catch(() => { });
                     }
                     return;
                 }
@@ -5460,6 +5502,7 @@ function getOrCreateGridDetailsBubble() {
                 if (locChip && !locChip.classList.contains('search-loc-chip-disabled')) {
                     e.preventDefault();
                     e.stopPropagation();
+                    recordCurrentSearchJumpHistory();
                     const locId = locChip.getAttribute('data-loc-id');
                     const locSource = locChip.getAttribute('data-loc-source');
                     const locSection = locChip.getAttribute('data-loc-section');
@@ -6517,7 +6560,7 @@ function handleSearchOutsideClick(e) {
     const container = document.querySelector('.search-container');
     const panel = getSearchResultsPanel();
     if (!container || !panel) return;
-    if (container.contains(e.target)) return;
+    if (container.contains(e.target) || (e.composedPath && e.composedPath().some(el => el === container || (el && el.classList && el.classList.contains('search-container'))))) return;
 
     // 点击附着在 body 上的搜索相关气泡/浮层/提示时，不作为外部点击处理，防止事件透传关闭
     if (e.target && e.target.closest && e.target.closest(
@@ -7060,10 +7103,10 @@ function initSearchClearButton() {
         const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
         if (descriptor && descriptor.set) {
             Object.defineProperty(searchInput, 'value', {
-                get: function() {
+                get: function () {
                     return descriptor.get.call(this);
                 },
-                set: function(val) {
+                set: function (val) {
                     descriptor.set.call(this, val);
                     updateClearButton();
                 },
@@ -7085,6 +7128,9 @@ function initSearchClearButton() {
         searchInput.value = '';
         updateClearButton();
         searchInput.focus();
+        if (typeof updateSearchPlaceholder === 'function') {
+            updateSearchPlaceholder('focused');
+        }
 
         if (typeof handleSearch === 'function') {
             handleSearch({ target: searchInput });
@@ -7100,6 +7146,9 @@ function initSearchClearButton() {
  */
 function initSearchEvents() {
     initSearchClearButton();
+    if (typeof bindSearchInputPlaceholderEvents === 'function') {
+        bindSearchInputPlaceholderEvents();
+    }
     if (typeof SearchIndexManager !== 'undefined' && typeof SearchIndexManager.init === 'function') {
         setTimeout(() => {
             SearchIndexManager.init().catch(err => {
@@ -7156,13 +7205,18 @@ function initSearchEvents() {
         // Suggestions / auto search on focus
         searchInput.addEventListener('focus', handleSearchInputFocus);
         searchInput.addEventListener('blur', () => {
-            if (!isSidePanelModeInSearch()) return;
-
             requestAnimationFrame(() => {
                 try {
                     const container = document.querySelector('.search-container');
                     const activeEl = document.activeElement;
                     if (container && activeEl && container.contains(activeEl)) return;
+                    if (searchUiState && searchUiState.isMenuOpen) return;
+
+                    if (typeof updateSearchPlaceholder === 'function') {
+                        updateSearchPlaceholder('unfocused');
+                    }
+
+                    if (!isSidePanelModeInSearch()) return;
 
                     const hasQuery = !!(searchInput && String(searchInput.value || '').trim());
                     if (hasQuery) return;
@@ -7186,7 +7240,7 @@ function initSearchEvents() {
             const tempBtn = e && e.target ? e.target.closest('.canvas-bookmark-to-temp-btn') : null;
             if (tempBtn) hideSearchTitleTooltip();
         });
-        searchResultsPanel.addEventListener('focusout', () => {});
+        searchResultsPanel.addEventListener('focusout', () => { });
         searchResultsPanel.addEventListener('mousedown', () => {
             if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
         });
@@ -7216,12 +7270,12 @@ function initSearchEvents() {
             if (link) {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 // Set search mode to bookmark
                 if (typeof setSearchMode === 'function') {
-                    try { setSearchMode('bookmark', { source: 'user' }); } catch (_) {}
+                    try { setSearchMode('bookmark', { source: 'user' }); } catch (_) { }
                 }
-                
+
                 // Clear input and insert the helper query.
                 const helperQuery = String(link.getAttribute('data-helper-query') || (link.classList.contains('search-helper-note-link') ? '*' : '#')).trim() || '#';
                 const input = document.getElementById('searchInput');
@@ -7230,14 +7284,14 @@ function initSearchEvents() {
                     input.dispatchEvent(new Event('input', { bubbles: true }));
                     input.focus();
                 }
-                
+
                 // Close mode menu if open
                 if (typeof toggleSearchModeMenu === 'function') {
-                    try { toggleSearchModeMenu(false); } catch (_) {}
+                    try { toggleSearchModeMenu(false); } catch (_) { }
                 }
             }
         }, true); // Capture phase
-        
+
         document.addEventListener('click', (e) => {
             const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link');
             if (link) {
@@ -7245,13 +7299,14 @@ function initSearchEvents() {
                 e.stopPropagation();
             }
         }, true);
-        
+
         document.documentElement.setAttribute('data-search-helper-link-bound', 'true');
     }
 
     // Outside click: use the same capture+guard strategy as history.js
     if (!document.documentElement.hasAttribute('data-search-outside-bound')) {
         document.addEventListener('click', handleSearchOutsideClick, true);
+
         document.documentElement.setAttribute('data-search-outside-bound', 'true');
     }
 
@@ -7362,6 +7417,74 @@ function getCurrentViewSafe() {
 function getCanvasModesInOrder() {
     const map = new Map(SEARCH_MODES.map(m => [m.key, m]));
     return CANVAS_MODE_KEYS.map(k => map.get(k)).filter(Boolean);
+}
+
+function getCurrentLangSafe() {
+    try {
+        if (typeof window !== 'undefined' && typeof window.currentLang === 'string' && window.currentLang) {
+            return window.currentLang;
+        }
+    } catch (_) { }
+    try {
+        if (typeof currentLang === 'string' && currentLang) return currentLang;
+    } catch (_) { }
+    return 'zh_CN';
+}
+
+// 统一的搜索模式切换提示文案（未聚焦且未打开模式菜单时展示引导文案；聚焦/输入时垂直光标闪烁，或在模式菜单中切换时，展示对应模式候选详细说明；失焦且无菜单时自动恢复提示文案）
+const SEARCH_MODE_UNIFIED_HINT_ZH = '← 点击左侧按钮切换模式 (书签/卡片/说明)';
+const SEARCH_MODE_UNIFIED_HINT_EN = '← Click left button to switch mode (Bookmark/Card/Desc)';
+
+function getCanvasSearchPlaceholder(state = null) {
+    const isZh = getCurrentLangSafe() === 'zh_CN';
+    const input = document.getElementById('searchInput');
+    const isFocused = (state === 'focused') || (state !== 'unfocused' && input && document.activeElement === input);
+    const isMenuOpen = !!(searchUiState && searchUiState.isMenuOpen);
+
+    // 当用户真的开始输入（输入框聚焦、光标/垂直条闪烁）或处于模式菜单交互中时：展示当前模式候选说明
+    if (isFocused || isMenuOpen) {
+        const mode = getActiveSearchMode();
+        const rawDesc = mode ? (isZh ? mode.desc : mode.descEn) : '';
+        return rawDesc ? rawDesc.replace(/<[^>]*>/g, '') : '';
+    }
+
+    // 未聚焦且未打开模式菜单（垂直条未闪烁）时：恢复展示统一提示文案
+    return isZh ? SEARCH_MODE_UNIFIED_HINT_ZH : SEARCH_MODE_UNIFIED_HINT_EN;
+}
+
+function updateSearchPlaceholder(state = null) {
+    const input = document.getElementById('searchInput');
+    if (!input) return;
+
+    if (getCurrentViewSafe() !== 'canvas') {
+        const isZh = getCurrentLangSafe() === 'zh_CN';
+        input.placeholder = isZh ? '搜索书签、文件夹...' : 'Search bookmarks/folders...';
+        return;
+    }
+
+    input.placeholder = getCanvasSearchPlaceholder(state);
+}
+
+function bindSearchInputPlaceholderEvents() {
+    const input = document.getElementById('searchInput');
+    if (!input || input.hasAttribute('data-placeholder-events-bound')) return;
+    input.setAttribute('data-placeholder-events-bound', 'true');
+
+    input.addEventListener('focus', () => {
+        updateSearchPlaceholder('focused');
+    });
+
+    input.addEventListener('blur', () => {
+        requestAnimationFrame(() => {
+            try {
+                const container = document.querySelector('.search-container');
+                const activeEl = document.activeElement;
+                if (container && activeEl && container.contains(activeEl)) return;
+                if (searchUiState && searchUiState.isMenuOpen) return;
+                updateSearchPlaceholder('unfocused');
+            } catch (_) { }
+        });
+    });
 }
 
 function getCanvasFullscreenScopeFromElement(element) {
@@ -7516,7 +7639,7 @@ function syncFullscreenAreaSearchWithActiveMode() {
                     const suggestionsVisible = !!(searchUiState && searchUiState.canvasSuggestionsVisible);
                     const panelIsSuggestions = !!(panel && panel.dataset && panel.dataset.panelType === 'canvas-suggestions');
                     const panelVisible = !!(panel && panel.classList.contains('visible'));
-                    
+
                     if (panelVisible && (suggestionsVisible || panelIsSuggestions)) {
                         if (shouldShowEmptyQuerySuggestions()) {
                             renderCanvasSearchSuggestions();
@@ -7555,9 +7678,9 @@ function isItemInAreaSearchScope(item, scope) {
         if (item.source === 'temporary') {
             return memberIds.includes(item.sectionId);
         } else if (item.source === 'permanent') {
-            return memberIds.some(id => 
-                id === 'permanentSection' || 
-                id.startsWith('permanent-section') || 
+            return memberIds.some(id =>
+                id === 'permanentSection' ||
+                id.startsWith('permanent-section') ||
                 id.startsWith('permanentSection')
             );
         }
@@ -7663,15 +7786,15 @@ function triggerAreaSearch(scope, options = {}) {
     if (!scope) return;
 
     searchUiState.fullscreenAreaSearchDismissed = false;
-    
+
     searchUiState.areaSearchScope = {
         kind: scope.kind,
         id: scope.id || null,
         memberIds: Array.isArray(scope.memberIds) ? scope.memberIds : []
     };
-    
+
     updateSearchAreaIndicatorUI();
-    
+
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
         const opts = options && typeof options === 'object' ? options : {};
@@ -7685,7 +7808,7 @@ function triggerAreaSearch(scope, options = {}) {
             }
             searchInput.focus();
         }
-        
+
         const q = (searchInput.value || '').trim();
         if (typeof searchCanvasAndRender === 'function') {
             searchCanvasAndRender(q);
@@ -7699,7 +7822,7 @@ function exitAreaSearch() {
         searchUiState.fullscreenAreaSearchDismissed = true;
     }
     updateSearchAreaIndicatorUI();
-    
+
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
         const q = (searchInput.value || '').trim();
@@ -7713,7 +7836,7 @@ function updateSearchAreaIndicatorUI() {
     const indicator = document.getElementById('searchAreaIndicator');
     const inputWrap = document.querySelector('.search-input-wrapper');
     if (!indicator || !inputWrap) return;
-    
+
     if (searchUiState.areaSearchScope) {
         const isEn = getCurrentLangSafe() === 'en';
         const labelText = isEn ? 'Area' : '区域';
@@ -7971,16 +8094,23 @@ async function setSearchMode(modeKey, options = {}) {
     }
 
     const previousModeKey = searchUiState.activeMode;
-    if (previousModeKey !== modeKey && typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
-        const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
-        exitCanvasSearchSelectionMode({
-            silent: false,
-            message: isZh ? '切换模式已自动退出勾选模式' : 'Switched mode: exited selection mode'
-        });
+    if (previousModeKey !== modeKey) {
+        if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
+            const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+            exitCanvasSearchSelectionMode({
+                silent: false,
+                message: isZh ? '切换模式已自动退出勾选模式' : 'Switched mode: exited selection mode'
+            });
+        }
     }
     searchUiState.activeMode = modeKey;
     searchUiState.showFullscreenDescriptionOthers = false;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
+
+    // 同步立即刷新输入框占位符，消除在异步索引加载期间的闪烁与回退
+    if (typeof updateSearchPlaceholder === 'function') {
+        updateSearchPlaceholder();
+    }
 
     // 恢复目标搜索模式在当前宿主环境（侧边栏 / 标签页）下独立的视图记忆（表格/网格）
     const targetViewMode = getSavedSearchPanelViewMode(modeKey);
@@ -8011,7 +8141,7 @@ async function setSearchMode(modeKey, options = {}) {
     if (typeof ensureIndexForModeLoaded === 'function' && !(options && options.skipIndexLoad === true)) {
         try {
             await ensureIndexForModeLoaded(modeKey);
-        } catch (_) {}
+        } catch (_) { }
     }
 
     // Active mode check: if the user quickly selected another mode during index loading, abort
@@ -8029,10 +8159,10 @@ async function setSearchMode(modeKey, options = {}) {
                 }
                 const input2 = document.getElementById('searchInput');
                 if (input2 && input2.value && input2.value.trim()) {
-                    try { searchCanvasAndRender(input2.value.trim()); } catch (_) {}
+                    try { searchCanvasAndRender(input2.value.trim()); } catch (_) { }
                 }
             });
-        } catch (_) {}
+        } catch (_) { }
     }
     if (modeKey === 'bookmark' && typeof window !== 'undefined' && window.NoteSystem && window.NoteSystem.ensurePermNotesLoaded) {
         try {
@@ -8043,20 +8173,17 @@ async function setSearchMode(modeKey, options = {}) {
                 }
                 const input2 = document.getElementById('searchInput');
                 if (input2 && input2.value && input2.value.trim()) {
-                    try { searchCanvasAndRender(input2.value.trim()); } catch (_) {}
+                    try { searchCanvasAndRender(input2.value.trim()); } catch (_) { }
                 }
             });
-        } catch (_) {}
+        } catch (_) { }
     }
 
     // [Modified] Update input placeholder with mode description
     const input = document.getElementById('searchInput');
     if (input) {
-        const isZh = getCurrentLangSafe() === 'zh_CN';
-        // Use the description as placeholder
-        if (getCurrentViewSafe() === 'canvas') {
-            const rawDesc = isZh ? mode.desc : mode.descEn;
-            input.placeholder = rawDesc.replace(/<[^>]*>/g, '');
+        if (typeof updateSearchPlaceholder === 'function') {
+            updateSearchPlaceholder();
         }
 
         // If the Canvas empty-query suggestions panel is currently shown, keep it shown
@@ -8073,6 +8200,8 @@ async function setSearchMode(modeKey, options = {}) {
                 if (shouldShowEmptyQuerySuggestions()) {
                     renderCanvasSearchSuggestions();
                     showSearchResultsPanel();
+                } else {
+                    hideSearchResultsPanel();
                 }
             }
         } catch (_) { }
@@ -8136,6 +8265,9 @@ function toggleSearchModeMenu(show) {
             modeMenuHideTimer = null;
         }
         try {
+            hideSearchResultsPanel();
+        } catch (_) { }
+        try {
             const dock = document.body && document.body.classList.contains('header-dock-bottom')
                 ? 'bottom'
                 : 'top';
@@ -8150,6 +8282,9 @@ function toggleSearchModeMenu(show) {
             }
         });
     } else {
+        try {
+            document.querySelectorAll('.search-hint-help-popover.show').forEach(p => p.classList.remove('show'));
+        } catch (_) { }
         menu.classList.remove('visible');
         if (menu.dataset.menuType === 'mode') {
             if (modeMenuHideTimer) clearTimeout(modeMenuHideTimer);
@@ -8159,13 +8294,16 @@ function toggleSearchModeMenu(show) {
                     menu.setAttribute('hidden', '');
                     menu.dataset.menuType = '';
                 }
-            }, 160);
+            }, 60);
         } else {
             menu.setAttribute('hidden', '');
             menu.dataset.menuType = '';
         }
     }
     searchUiState.isMenuOpen = shouldShow;
+    if (typeof updateSearchPlaceholder === 'function') {
+        updateSearchPlaceholder();
+    }
 }
 
 function toggleSearchHelpMenu(show) {
@@ -8422,7 +8560,37 @@ function getSearchHintHelpContent() {
     return { text, html };
 }
 
-function bindSearchHintHelpButton(helpBtn, helpHtml) {
+function getSearchHistoryHelpContent(activeMode) {
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const limit = getSearchHistoryLimit(activeMode);
+    const text = isZh
+        ? `记录上限：${limit}条（1~50）。命中规则：点击表格或网格结果，跳转后记录。`
+        : `Limit: ${limit} items (1-50). Hit rule: recorded after clicking results to jump.`;
+
+    const limitLabel = isZh ? '记录上限：' : 'Limit:';
+    const limitUnit = isZh ? '条（1~50）' : 'items (1-50)';
+    const hitLabel = isZh ? '命中规则：' : 'Hit rules:';
+    const hitDesc = isZh
+        ? '点击表格或网格结果，跳转后记录。'
+        : 'Recorded after clicking results to jump.';
+
+    const html = `
+        <div class="search-hint-help-row search-history-help-row search-history-help-limit-row" style="margin-bottom:6px;">
+            <span class="search-hint-help-label">${escapeHtml(limitLabel)}</span>
+            <span class="search-hint-help-value">
+                <input type="number" class="search-history-limit-input" value="${limit}" min="1" max="50" step="1" aria-label="${isZh ? '最多保留条数' : 'Max history items'}">
+                <span>${escapeHtml(limitUnit)}</span>
+            </span>
+        </div>
+        <div class="search-hint-help-row search-history-help-row">
+            <span class="search-hint-help-label">${escapeHtml(hitLabel)}</span>
+            <span class="search-hint-help-value">${escapeHtml(hitDesc)}</span>
+        </div>
+    `;
+    return { text, html };
+}
+
+function bindSearchHintHelpButton(helpBtn, helpHtml, customId = 'searchHintPopover', onShow = null) {
     if (!helpBtn) return;
     const getOverlayContainer = () => {
         if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
@@ -8439,11 +8607,11 @@ function bindSearchHintHelpButton(helpBtn, helpHtml) {
     };
 
     const ensurePopover = () => {
-        let pop = document.getElementById('searchHintPopover');
+        let pop = document.getElementById(customId);
         const targetParent = getOverlayContainer();
         if (!pop) {
             pop = document.createElement('div');
-            pop.id = 'searchHintPopover';
+            pop.id = customId;
             pop.className = 'perf-help-popover search-hint-help-popover';
             pop.innerHTML = '<div class="perf-help-popover-content"></div>';
             targetParent.appendChild(pop);
@@ -8454,22 +8622,42 @@ function bindSearchHintHelpButton(helpBtn, helpHtml) {
     };
 
     const helpPopover = ensurePopover();
-    const contentEl = helpPopover.querySelector('.perf-help-popover-content');
-    if (contentEl) contentEl.innerHTML = helpHtml;
 
-    let outsideHandler = null;
     const hideHelp = () => {
         helpPopover.classList.remove('show');
-        if (outsideHandler) {
-            document.removeEventListener('mousedown', outsideHandler, true);
-            outsideHandler = null;
+        helpPopover._currentAnchor = null;
+        if (helpPopover._outsideHandler) {
+            document.removeEventListener('mousedown', helpPopover._outsideHandler, true);
+            helpPopover._outsideHandler = null;
         }
     };
     const showHelp = () => {
+        // 关闭可能已打开的其他 search-hint-help-popover
+        document.querySelectorAll('.search-hint-help-popover.show').forEach(p => {
+            if (p !== helpPopover) p.classList.remove('show');
+        });
+
         const targetParent = getOverlayContainer();
         if (helpPopover.parentElement !== targetParent) {
             targetParent.appendChild(helpPopover);
         }
+
+        // 动态注入内容，确保内容最新
+        const contentEl = helpPopover.querySelector('.perf-help-popover-content');
+        if (contentEl) {
+            const resolvedHtml = typeof helpHtml === 'function' ? helpHtml() : helpHtml;
+            contentEl.innerHTML = resolvedHtml;
+        }
+
+        if (typeof onShow === 'function') {
+            try {
+                onShow(helpPopover);
+            } catch (err) {
+                console.error('[Search] help onShow error:', err);
+            }
+        }
+
+        helpPopover._currentAnchor = helpBtn;
         helpPopover.classList.add('show');
         helpPopover.style.visibility = 'hidden';
         helpPopover.style.width = 'max-content';
@@ -8482,29 +8670,250 @@ function bindSearchHintHelpButton(helpBtn, helpHtml) {
         const maxLeft = window.innerWidth - popRect.width - margin;
         left = Math.max(margin, Math.min(maxLeft, left));
 
-        const top = Math.min(window.innerHeight - popRect.height - margin, rect.bottom + 8);
+        // 智能上下方向定位：下方空间不足且上方空间更充足时向上弹出，否则向下弹出
+        let top;
+        const spaceBelow = window.innerHeight - rect.bottom - margin;
+        const spaceAbove = rect.top - margin;
+        if (spaceBelow < popRect.height && spaceAbove >= popRect.height) {
+            top = Math.max(margin, rect.top - popRect.height - 8);
+        } else {
+            top = Math.min(window.innerHeight - popRect.height - margin, rect.bottom + 8);
+        }
 
         helpPopover.style.left = left + 'px';
         helpPopover.style.top = top + 'px';
         helpPopover.style.visibility = '';
         helpPopover.classList.add('show');
 
-        if (!outsideHandler) {
-            outsideHandler = (ev) => {
-                if (helpBtn.contains(ev.target) || helpPopover.contains(ev.target)) return;
+        if (!helpPopover._outsideHandler) {
+            helpPopover._outsideHandler = (ev) => {
+                const isAnchor = (helpPopover._currentAnchor && helpPopover._currentAnchor.contains(ev.target)) || (helpBtn && helpBtn.contains(ev.target));
+                const isPop = helpPopover.contains(ev.target);
+                if (isAnchor || isPop) return;
                 hideHelp();
             };
-            document.addEventListener('mousedown', outsideHandler, true);
+            document.addEventListener('mousedown', helpPopover._outsideHandler, true);
         }
     };
 
-    helpPopover.classList.remove('show');
+    if (helpPopover.classList.contains('show')) {
+        helpPopover._currentAnchor = helpBtn;
+    } else {
+        helpPopover.classList.remove('show');
+    }
+
     helpBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (helpPopover.classList.contains('show')) hideHelp();
-        else showHelp();
+        if (helpPopover.classList.contains('show') && helpPopover._currentAnchor === helpBtn) {
+            hideHelp();
+        } else {
+            showHelp();
+        }
     };
+}
+
+function escapeSearchHtmlAttr(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function buildSearchHistorySectionHtml(activeMode, options = {}) {
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const allowHide = options.allowHide === true;
+    const historyList = getSearchHistoryList(activeMode);
+    const historyHelp = getSearchHistoryHelpContent(activeMode);
+
+    const clearTitle = isZh ? '清空全部历史' : 'Clear all';
+    const historyTitle = isZh ? '最近搜索' : 'Recent Searches';
+    const helpBtnTitle = isZh ? '搜索历史说明与上限设置' : 'History explanation & limit';
+    const historyHideLabel = isZh ? '不再出现' : "Don't show";
+
+    const hideBtnHtml = allowHide ? `
+        <button type="button" class="search-history-hide-btn canvas-history-hide-btn" title="${isZh ? '关闭/不再显示搜索历史' : 'Hide recent searches'}">
+            ${escapeHtml(historyHideLabel)}
+        </button>
+    ` : '';
+
+    let itemsBodyHtml = '';
+    if (historyList.length > 0) {
+        const historyItemsHtml = historyList.map(query => {
+            const escapedText = escapeHtml(query);
+            const escapedAttr = escapeSearchHtmlAttr(query);
+            return `
+                <div class="search-history-item" data-history-query="${escapedAttr}" title="${escapedAttr}">
+                    <span class="search-history-item-text">${escapedText}</span>
+                    <button type="button" class="search-history-item-del-btn" data-history-query="${escapedAttr}" aria-label="${isZh ? '删除此条' : 'Delete'}" title="${isZh ? '删除' : 'Delete'}">
+                        <i class="fas fa-times" aria-hidden="true"></i>
+                    </button>
+                </div>
+            `;
+        }).join('');
+        itemsBodyHtml = `<div class="search-history-list">${historyItemsHtml}</div>`;
+    } else {
+        itemsBodyHtml = `
+            <div class="search-history-empty">
+                ${isZh ? '暂无搜索历史' : 'No recent searches'}
+            </div>
+        `;
+    }
+
+    const clearBtnHtml = historyList.length > 0 ? `
+        <button type="button" class="search-history-btn search-history-clear-btn" aria-label="${escapeHtml(clearTitle)}" title="${escapeHtml(clearTitle)}">
+            <i class="fas fa-trash-alt" aria-hidden="true"></i>
+        </button>
+    ` : '';
+
+    const closeBtnTitle = isZh ? '关闭' : 'Close';
+    const closeBtnHtml = `
+        <button type="button" class="search-history-btn search-history-close-btn" aria-label="${escapeHtml(closeBtnTitle)}" title="${escapeHtml(closeBtnTitle)}">
+            <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+    `;
+
+    return `
+        <div class="search-history-section">
+            <div class="search-history-header">
+                <div class="search-history-header-left">
+                    <i class="fas fa-history search-history-header-icon" aria-hidden="true"></i>
+                    <span class="search-history-header-title">${escapeHtml(historyTitle)}</span>
+                    <button type="button" class="search-hint-help-btn search-history-help-btn perf-help-btn" aria-label="${escapeHtml(historyHelp.text)}" title="${escapeHtml(helpBtnTitle)}">
+                        <i class="fas fa-question-circle"></i>
+                    </button>
+                </div>
+                <div class="search-history-header-right">
+                    ${clearBtnHtml}
+                    ${hideBtnHtml}
+                    ${closeBtnHtml}
+                </div>
+            </div>
+            ${itemsBodyHtml}
+        </div>
+    `;
+}
+
+function bindSearchHistoryEvents(container, activeMode, onUpdate) {
+    if (!container) return;
+
+    // 搜索历史说明与上限设置帮助按钮
+    const helpBtn = container.querySelector('.search-history-help-btn');
+    if (helpBtn) {
+        bindSearchHintHelpButton(
+            helpBtn,
+            () => getSearchHistoryHelpContent(activeMode).html,
+            'searchHistoryHelpPopover',
+            (popover) => {
+                const limitInput = popover.querySelector('.search-history-limit-input');
+                if (!limitInput) return;
+                let isSaving = false;
+                const saveLimit = () => {
+                    if (isSaving) return;
+                    const val = parseInt(limitInput.value, 10);
+                    if (Number.isFinite(val) && val >= 1) {
+                        const clamped = Math.max(1, Math.min(50, val));
+                        limitInput.value = clamped;
+                        const curLimit = getSearchHistoryLimit(activeMode);
+                        if (clamped !== curLimit) {
+                            isSaving = true;
+                            try {
+                                setSearchHistoryLimit(clamped, activeMode);
+                                if (typeof onUpdate === 'function') onUpdate('limit');
+                            } finally {
+                                isSaving = false;
+                            }
+                        }
+                    } else {
+                        limitInput.value = getSearchHistoryLimit(activeMode);
+                    }
+                };
+                limitInput.addEventListener('mousedown', (ev) => ev.stopPropagation());
+                limitInput.addEventListener('click', (ev) => ev.stopPropagation());
+                limitInput.addEventListener('change', saveLimit);
+                limitInput.addEventListener('blur', saveLimit);
+                limitInput.addEventListener('keydown', (ev) => {
+                    ev.stopPropagation();
+                    if (ev.key === 'Enter') {
+                        ev.preventDefault();
+                        saveLimit();
+                        limitInput.blur();
+                    }
+                });
+            }
+        );
+    }
+
+    // 搜索历史项点击 -> 回填搜索框并立即触发搜索
+    container.querySelectorAll('.search-history-item').forEach((item) => {
+        item.addEventListener('mousedown', (ev) => {
+            if (ev.target.closest('.search-history-item-del-btn')) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const query = item.getAttribute('data-history-query');
+            if (!query) return;
+            const input = document.getElementById('searchInput');
+            if (input) {
+                if (typeof toggleSearchModeMenu === 'function') toggleSearchModeMenu(false);
+                input.value = query;
+                input.focus();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                if (typeof handleSearch === 'function') {
+                    handleSearch({ target: input });
+                }
+            }
+        });
+    });
+
+    // 搜索历史单项右上角删除按钮
+    container.querySelectorAll('.search-history-item-del-btn').forEach((delBtn) => {
+        delBtn.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const query = delBtn.getAttribute('data-history-query');
+            if (query) {
+                removeSearchHistoryItem(query, activeMode);
+                if (typeof onUpdate === 'function') onUpdate('delete');
+            }
+        });
+    });
+
+    // 搜索历史清空按钮
+    const clearBtn = container.querySelector('.search-history-clear-btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            clearAllSearchHistory(activeMode);
+            if (typeof onUpdate === 'function') onUpdate('clear');
+        });
+    }
+
+    // 搜索历史“不再出现”按钮（仅在允许关闭的建议面板中存在）
+    const historyHideBtn = container.querySelector('.canvas-history-hide-btn');
+    if (historyHideBtn) {
+        historyHideBtn.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setSearchHistoryEnabled(false, activeMode);
+            if (typeof onUpdate === 'function') onUpdate('hide');
+        });
+    }
+
+    // 搜索历史区域关闭按钮（在删除按钮右侧，关闭整个页面/浮层：包含模式选择和最近搜索）
+    container.querySelectorAll('.search-history-close-btn').forEach((closeBtn) => {
+        const doClose = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (typeof toggleSearchModeMenu === 'function') toggleSearchModeMenu(false);
+            if (typeof hideSearchResultsPanel === 'function') hideSearchResultsPanel();
+            if (typeof onUpdate === 'function') onUpdate('close');
+        };
+        closeBtn.addEventListener('mousedown', doClose);
+        closeBtn.addEventListener('click', doClose);
+    });
 }
 
 function renderSearchModeMenu() {
@@ -8514,28 +8923,16 @@ function renderSearchModeMenu() {
     // Guard: only render when menu is in mode state
     if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
 
-    // Keep the menu hint short (canvas users open this mainly to switch modes).
-    const hintText = currentLang === 'zh_CN'
-        ? '↑/↓ 切换模式，Enter 选择，→ 返回输入'
-        : '↑/↓ switch mode, Enter select, → back to input';
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const modeTitle = isZh ? '模式切换' : 'Switch Mode';
+    const closeBtnTitle = isZh ? '关闭' : 'Close';
     const hintHelp = getSearchHintHelpContent();
-    const closeLabel = currentLang === 'zh_CN' ? '关闭模式面板' : 'Close mode panel';
+    const activeMode = searchUiState.activeMode || 'bookmark';
 
-    let html = `<div class="search-mode-hint" style="position:relative; text-align:left; display:flex; align-items:center; gap:6px; padding-right:36px;">
-        <span>${escapeHtml(hintText)}</span>
-        <button type="button" class="search-hint-help-btn search-mode-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}">
-            <i class="fas fa-question-circle"></i>
-        </button>
-        <button type="button" class="search-mode-menu-close-btn" aria-label="${escapeHtml(closeLabel)}" title="${escapeHtml(closeLabel)}">
-            <i class="fas fa-times" aria-hidden="true"></i>
-        </button>
-    </div>`;
-
+    // 模式选择面板（常驻入口，标题右侧保留帮助问号与关闭按钮）
     const modes = getCanvasModesInOrder();
-
-    html += modes.map(mode => {
-        const isActive = mode.key === searchUiState.activeMode;
-        const isZh = currentLang === 'zh_CN';
+    const modesListHtml = modes.map(mode => {
+        const isActive = mode.key === activeMode;
         const desc = isZh ? mode.desc : mode.descEn;
 
         return `
@@ -8548,7 +8945,32 @@ function renderSearchModeMenu() {
             </div>
         `;
     }).join('');
-    menu.innerHTML = html;
+
+    const modeSectionHtml = `
+        <div class="search-mode-menu-section">
+            <div class="search-suggestions-header search-mode-menu-header">
+                <div class="search-mode-header-left">
+                    <i class="fas fa-exchange-alt search-mode-header-icon" aria-hidden="true"></i>
+                    <span class="search-mode-header-title">${escapeHtml(modeTitle)}</span>
+                    <button type="button" class="search-hint-help-btn search-mode-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}" title="${isZh ? '模式切换说明' : 'Mode explanation'}">
+                        <i class="fas fa-question-circle"></i>
+                    </button>
+                </div>
+                <div class="search-mode-header-right">
+                    <button type="button" class="search-history-btn search-history-close-btn search-mode-menu-close-btn" aria-label="${escapeHtml(closeBtnTitle)}" title="${escapeHtml(closeBtnTitle)}">
+                        <i class="fas fa-times" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+            <div style="padding:2px 0;">
+                ${modesListHtml}
+            </div>
+        </div>
+    `;
+
+    menu.innerHTML = modeSectionHtml;
+
+    // 事件绑定
     bindSearchHintHelpButton(menu.querySelector('.search-mode-hint-help-btn'), hintHelp.html);
 }
 
@@ -8565,6 +8987,12 @@ function initSearchModeUI() {
     // [Fix] Ensure placeholder and UI are synced on init
     setSearchMode(searchUiState.activeMode, { skipIndexLoad: true });
     applyFullscreenDefaultSearchMode({ onlyWhenInputEmpty: true });
+    if (typeof bindSearchInputPlaceholderEvents === 'function') {
+        bindSearchInputPlaceholderEvents();
+    }
+    if (typeof updateSearchPlaceholder === 'function') {
+        updateSearchPlaceholder('unfocused');
+    }
 
     const trigger = document.getElementById('searchModeTrigger');
     if (trigger && !trigger.hasAttribute('data-mode-ui-bound')) {
@@ -8683,6 +9111,11 @@ function initSearchModeUI() {
         const handleModeSelectAction = (e) => {
             // Only handle mode selection in Canvas/mode menu
             if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
+
+            // Ignore clicks/mousedowns on search history section or help button
+            if (e.target.closest('.search-history-section') || e.target.closest('.search-hint-help-btn')) {
+                return;
+            }
 
             const closeButton = e.target.closest('.search-mode-menu-close-btn');
             if (closeButton) {
@@ -9962,19 +10395,20 @@ function parseCanvasAnchorSlice(db, coords) {
 
 async function navigateToCanvasAnchorTarget(item) {
     if (!item) return false;
+    recordCurrentSearchJumpHistory();
     if (typeof hideSearchResultsPanel === 'function') {
         hideSearchResultsPanel();
     }
     try {
         const inputEl = document.getElementById('searchInput');
         if (inputEl) inputEl.value = '';
-    } catch (_) {}
+    } catch (_) { }
 
     if (typeof isCanvasFullscreenActive === 'function' && isCanvasFullscreenActive()) {
         if (typeof exitCanvasNodeFullscreenForSearchLocate === 'function') {
             try {
                 await exitCanvasNodeFullscreenForSearchLocate();
-            } catch (_) {}
+            } catch (_) { }
         }
     }
 
@@ -10119,7 +10553,7 @@ const SearchIndexManager = {
     bindActivityListeners() {
         if (this.listenersBound) return;
         this.listenersBound = true;
-        
+
         if (typeof chrome !== 'undefined' && chrome && chrome.idle) {
             try {
                 chrome.idle.setDetectionInterval(15);
@@ -10143,11 +10577,11 @@ const SearchIndexManager = {
     setupFallbackIdleTimer() {
         if (this.checkTimer) clearInterval(this.checkTimer);
         this.lastActivityTime = Date.now();
-        
+
         this.recordActivity = () => { this.lastActivityTime = Date.now(); };
         window.addEventListener('focus', this.recordActivity, { passive: true });
         document.addEventListener('visibilitychange', this.recordActivity, { passive: true });
-        
+
         this.checkTimer = setInterval(() => {
             const now = Date.now();
             if (this.isDirty && now - this.lastActivityTime > 15000 && document.visibilityState === 'visible') {
@@ -10161,19 +10595,19 @@ const SearchIndexManager = {
     unbindActivityListeners() {
         if (!this.listenersBound) return;
         this.listenersBound = false;
-        
+
         if (typeof chrome !== 'undefined' && chrome && chrome.idle && this.idleListener) {
             try {
                 chrome.idle.onStateChanged.removeListener(this.idleListener);
-            } catch (_) {}
+            } catch (_) { }
             this.idleListener = null;
         }
-        
+
         if (this.checkTimer) {
             clearInterval(this.checkTimer);
             this.checkTimer = null;
         }
-        
+
         if (this.recordActivity) {
             window.removeEventListener('focus', this.recordActivity);
             document.removeEventListener('visibilitychange', this.recordActivity);
@@ -10297,7 +10731,7 @@ const SearchIndexManager = {
     },
 
     async refreshDirtyStateFromStorage() {
-        await this.dirtyStateWriteChain.catch(() => {});
+        await this.dirtyStateWriteChain.catch(() => { });
         const api = this.getDirtyStateApi();
         if (api && typeof api.getDirtyState === 'function') {
             const state = await api.getDirtyState();
@@ -10418,7 +10852,7 @@ const SearchIndexManager = {
         }
         this.isIndexing = true;
         this.snapshotDirtyState();
-        
+
         // Before rebuilding, check if another tab/end already wrote a fresh IndexedDB index.
         try {
             const liveSig = getCanvasSearchSignature();
@@ -10439,9 +10873,9 @@ const SearchIndexManager = {
         } catch (err) {
             console.error('[SearchIndexManager] Failed to check IndexedDB before idle indexing:', err);
         }
-        
+
         ;
-        
+
         const runTask = () => {
             return new Promise((resolve, reject) => {
                 const checkFull = () => {
@@ -10508,9 +10942,9 @@ const SearchIndexManager = {
                 const liveSig = getCanvasSearchSignature();
                 hasIndex = !!(window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(liveSig));
                 if (window.SearchIndexDb && typeof window.SearchIndexDb.clearLegacyChromeStorageIndex === 'function') {
-                    window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => {});
+                    window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => { });
                 }
-            } catch (_) {}
+            } catch (_) { }
 
             await this.refreshDirtyStateFromStorage();
             if (!hasIndex && !this.isDirty) {
@@ -10533,7 +10967,7 @@ const SearchIndexManager = {
 
 function handleSearchStorageChange(changes, areaName) {
     if (areaName !== 'local') return;
-    
+
     // chrome.storage is only a cross-tab notification surface. The dirty set lives in IndexedDB.
     if (changes['canvas_search_index_dirty'] !== undefined ||
         changes['canvas_search_index_needs_full'] !== undefined ||
@@ -10550,28 +10984,28 @@ function handleSearchStorageChange(changes, areaName) {
         });
         return;
     }
-    
+
     const activeCanvasState = getActiveCanvasState();
     if (activeCanvasState && activeCanvasState.dragState && activeCanvasState.dragState.isDragging) {
         return;
     }
-    
+
     if (SearchIndexManager.isDirty && SearchIndexManager.needsFullUpdate) {
         stopListeningStorageChanges();
         return;
     }
-    
+
     // Note: 'bcs:canvas' (containing MD nodes and edges) is intentionally excluded here to avoid
     // unnecessary background re-indexing storms during frequent canvas edits.
     // Instead, signature comparison (via getCanvasSearchSignature) is used to detect canvas changes
     // dynamically when the user actually initiates search, keeping background tabs highly performant.
-    const changedKeys = Object.keys(changes).filter(key => 
-        key.startsWith('bcs:section:') || 
-        key.startsWith('bcs:perm:') || 
+    const changedKeys = Object.keys(changes).filter(key =>
+        key.startsWith('bcs:section:') ||
+        key.startsWith('bcs:perm:') ||
         key === 'cachedCurrentTree'
     );
     if (changedKeys.length === 0) return;
-    
+
     SearchIndexManager.markDirty({ full: false, keys: changedKeys });
 
     if (SearchIndexManager.needsFullUpdate) {
@@ -10759,7 +11193,7 @@ async function saveMemoryIndexToIndexedDb() {
             }
             return;
         }
-    } catch (_) {}
+    } catch (_) { }
 
     if (!canvasSearchDb.signature) {
         buildCanvasSearchDbSync();
@@ -10795,7 +11229,7 @@ async function saveMemoryIndexToIndexedDb() {
 
         await SearchIndexManager.clearProcessedDirtyState();
         if (window.SearchIndexDb && typeof window.SearchIndexDb.clearLegacyChromeStorageIndex === 'function') {
-            window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => {});
+            window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => { });
         }
         const counts = meta && meta.counts ? meta.counts : {};
         ;
@@ -10907,7 +11341,7 @@ async function loadAllIndexShardsFromIndexedDb(options = {}) {
 
 function applyIncrementalUpdatesToMemory(dirtyKeys) {
     if (!dirtyKeys || dirtyKeys.size === 0) return;
-    
+
     ;
 
     // Save old bookmarkSearchOrder values and find max order to avoid duplicates or resetting to 0
@@ -10938,7 +11372,7 @@ function applyIncrementalUpdatesToMemory(dirtyKeys) {
     let reparsePermMain = false;
     let reparsePermCopies = new Set();
     let reparseCanvasLayout = false;
-    
+
     dirtyKeys.forEach(key => {
         if (key === 'bcs:canvas') {
             reparseCanvasLayout = true;
@@ -10961,20 +11395,20 @@ function applyIncrementalUpdatesToMemory(dirtyKeys) {
             }
         }
     };
-    
+
     const filterPredicates = [];
-    
+
     if (reparseCanvasLayout) {
         filterPredicates.push(item => item.type === 'md-node' || item.type === 'edge' || item.type === 'group');
         parseCanvasLayoutSlice(sliceDb, sliceCoords);
     }
-    
+
     if (reparsePermMain) {
         filterPredicates.push(item => (item.type === 'permanent-section' && item.displayIndex === 1) || (item.source === 'permanent' && !item.copyId));
         parsePermanentSectionSlice(sliceDb, sliceCoords, isMultiColumnMode);
         parsePermanentTreeSlice(sliceDb, bookmarkOrderRef);
     }
-    
+
     reparsePermCopies.forEach(copyId => {
         filterPredicates.push(item => item.copyId === copyId || item.id === copyId);
         const permanentShellSnapshot = collectPermanentViewShellSnapshotForSearch();
@@ -10984,7 +11418,7 @@ function applyIncrementalUpdatesToMemory(dirtyKeys) {
             parsePermanentCopySlice(permanentCopies[idx], idx, sliceDb, sliceCoords, isMultiColumnMode);
         }
     });
-    
+
     reparseSections.forEach(secId => {
         filterPredicates.push(item => item.sectionId === secId || item.id === secId);
         const activeCanvasState = getActiveCanvasState();
@@ -11038,14 +11472,14 @@ async function buildCanvasSearchDbIncrementallyInMemory() {
     }
 
     const liveSig = getCanvasSearchSignature();
-    
+
     // Bypass incremental updates and do a full sync rebuild if a full rebuild is requested
     if (SearchIndexManager.needsFullUpdate) {
         SearchIndexManager.processingBaseSignature = null;
         buildCanvasSearchDbSync();
         return;
     }
-    
+
     const baseLoaded = await loadAllIndexShardsFromIndexedDb({ allowStale: true });
     if (!baseLoaded) {
         SearchIndexManager.processingBaseSignature = null;
@@ -11053,7 +11487,7 @@ async function buildCanvasSearchDbIncrementallyInMemory() {
         return;
     }
     SearchIndexManager.processingBaseSignature = canvasSearchDb.signature || null;
-    
+
     const keysToApply = new Set(SearchIndexManager.processingKeys
         ? Array.from(SearchIndexManager.processingKeys)
         : Array.from(SearchIndexManager.dirtyKeys));
@@ -11081,7 +11515,7 @@ async function buildCanvasSearchDbIncrementallyInMemory() {
         });
         applyIncrementalUpdatesToMemory(keysToApply);
     }
-    
+
     canvasSearchDb.signature = liveSig;
 }
 
@@ -11100,7 +11534,7 @@ async function ensureIndexForModeLoaded(modeKey) {
         }
 
         const liveSig = getCanvasSearchSignature();
-        
+
         // If we are dirty or signatures mismatch, first check if IndexedDB has already been updated.
         if (SearchIndexManager.isDirty || canvasSearchDb.signature !== liveSig) {
             if (SearchIndexManager.isDirty && !SearchIndexManager.processingKeys) {
@@ -11113,7 +11547,7 @@ async function ensureIndexForModeLoaded(modeKey) {
                 return;
             }
         }
-        
+
         if (SearchIndexManager.isDirty) {
             ;
             SearchIndexManager.snapshotDirtyState();
@@ -11124,13 +11558,13 @@ async function ensureIndexForModeLoaded(modeKey) {
 
         if (canvasSearchDb.signature === liveSig) {
             const indexList = modeKey === 'bookmark' ? canvasSearchDb.bookmarkIndex :
-                              modeKey === 'description' ? canvasSearchDb.descriptionIndex :
-                              canvasSearchDb.structureIndex;
+                modeKey === 'description' ? canvasSearchDb.descriptionIndex :
+                    canvasSearchDb.structureIndex;
             if (Array.isArray(indexList) && indexList.length > 0) {
                 return;
             }
         }
-        
+
         const result = await loadIndexForMode(modeKey);
         if (!result) {
             ;
@@ -11225,8 +11659,8 @@ function buildCanvasSearchDb() {
     if (canvasSearchDb.signature === signature) {
         const mode = searchUiState.activeMode;
         const indexList = mode === 'bookmark' ? canvasSearchDb.bookmarkIndex :
-                          mode === 'description' ? canvasSearchDb.descriptionIndex :
-                          canvasSearchDb.structureIndex;
+            mode === 'description' ? canvasSearchDb.descriptionIndex :
+                canvasSearchDb.structureIndex;
         if (canvasSearchLoadedModes.has(normalizeCanvasSearchModeKey(mode)) ||
             (Array.isArray(indexList) && indexList.length > 0)) {
             return canvasSearchDb;
@@ -11466,7 +11900,7 @@ function getSearchTitleVisualBudget(options = {}) {
                 const cols = Math.max(1, Math.floor((pWidth + 10) / 270));
                 cardWidth = Math.floor((pWidth - (cols - 1) * 10) / cols);
             }
-        } catch (_) {}
+        } catch (_) { }
         // 卡片左右 padding 12px * 2 = 24px, 图标与间距 18px + 8px = 26px
         let cardAvailablePx = cardWidth - 50;
         if (options.hasRightActions) {
@@ -11491,7 +11925,7 @@ function getSearchTitleVisualBudget(options = {}) {
             } else if (searchContainer && searchContainer.clientWidth > 100) {
                 containerWidth = searchContainer.clientWidth;
             }
-        } catch (_) {}
+        } catch (_) { }
     }
 
     if (!containerWidth || containerWidth <= 0) {
@@ -11995,7 +12429,7 @@ function scoreCanvasSearchItem(item, query, options = {}) {
                 if (cleanQ === String(slotNum) || qDigit === slotNum) {
                     score = Math.max(score, 300);
                 } else if (q === `槽位${slotNum}` || q === `槽位 ${slotNum}` || q === `slot${slotNum}` || q === `slot ${slotNum}` ||
-                           (qDigit && (q === `槽位${cleanQ}` || q === `槽位 ${cleanQ}` || q === `槽位${slotNum}`))) {
+                    (qDigit && (q === `槽位${cleanQ}` || q === `槽位 ${cleanQ}` || q === `槽位${slotNum}`))) {
                     score = Math.max(score, 320);
                 }
             }
@@ -12198,13 +12632,13 @@ function getBookmarkItemParentPathForSearch(item) {
 function getCanvasBookmarksApiForSearch() {
     try {
         if (typeof browserAPI !== 'undefined' && browserAPI && browserAPI.bookmarks) return browserAPI.bookmarks;
-    } catch (_) {}
+    } catch (_) { }
     try {
         if (typeof chrome !== 'undefined' && chrome && chrome.bookmarks) return chrome.bookmarks;
-    } catch (_) {}
+    } catch (_) { }
     try {
         if (typeof browser !== 'undefined' && browser && browser.bookmarks) return browser.bookmarks;
-    } catch (_) {}
+    } catch (_) { }
     return null;
 }
 
@@ -12266,7 +12700,7 @@ function ensurePermanentBookmarkDateCacheLoaded() {
                                 }
                             });
                         }
-                    } catch (_) {}
+                    } catch (_) { }
                 }
                 resolve(permanentBookmarkDateCache);
             });
@@ -12294,11 +12728,11 @@ function fetchPermanentBookmarkDateSingle(chromeId, callback) {
                 if (typeof callback === 'function') callback(ts);
             }
         });
-    } catch (_) {}
+    } catch (_) { }
 }
 
 // 自动后台预热永久书签时间快照
-try { ensurePermanentBookmarkDateCacheLoaded(); } catch (_) {}
+try { ensurePermanentBookmarkDateCacheLoaded(); } catch (_) { }
 try {
     const _bApi = getCanvasBookmarksApiForSearch();
     if (_bApi && _bApi.onCreated && typeof _bApi.onCreated.addListener === 'function') {
@@ -12308,7 +12742,7 @@ try {
             }
         });
     }
-} catch (_) {}
+} catch (_) { }
 
 function parseTempItemIdCreationDateForSearch(id) {
     if (typeof parseTempItemIdCreationDate === 'function') {
@@ -12372,7 +12806,7 @@ function getBookmarkItemCreationTime(item) {
                         rawDate = node.dateAdded;
                     }
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
     }
 
@@ -12418,7 +12852,7 @@ function getBookmarkItemCreationTime(item) {
                         dateOnly: `${year}/${month}/${day}`
                     };
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
     }
 
@@ -12987,7 +13421,7 @@ function resolveBookmarkAncestorFolder(item, folderName, crumbIndex = -1) {
 
                 // 兜底：在当前临时栏目所有文件夹中按名称匹配
                 if (Array.isArray(db.bookmarkIndex)) {
-                    const fallbackFolder = db.bookmarkIndex.find(b => 
+                    const fallbackFolder = db.bookmarkIndex.find(b =>
                         b && b.source === 'temporary' &&
                         String(b.sectionId || '') === sid &&
                         b.nodeType === 'folder' &&
@@ -13010,7 +13444,7 @@ function resolveBookmarkAncestorFolder(item, folderName, crumbIndex = -1) {
         // 永久栏目：从当前书签的父文件夹向上回溯祖先链
         const treeIndex = (typeof getCachedCurrentTreeIndex === 'function') ? getCachedCurrentTreeIndex() : null;
         const db = (typeof canvasSearchDb !== 'undefined' && canvasSearchDb && canvasSearchDb.itemById) ? canvasSearchDb : null;
-        
+
         let startNode = (treeIndex && item.id) ? treeIndex.get(String(item.id)) : null;
         let curParentId = startNode ? startNode.parentId : (item.parentId || null);
 
@@ -13031,7 +13465,7 @@ function resolveBookmarkAncestorFolder(item, folderName, crumbIndex = -1) {
         let matched = ancestors.find(a => {
             const aTitle = String(a.title || '').trim().toLowerCase();
             if (aTitle === targetNameLower) return true;
-            if ((targetNameLower === '书签栏' || targetNameLower === 'bookmarks bar') && 
+            if ((targetNameLower === '书签栏' || targetNameLower === 'bookmarks bar') &&
                 (aTitle === '书签栏' || aTitle === 'bookmarks bar' || aTitle === 'bookmark bar')) {
                 return true;
             }
@@ -13070,6 +13504,7 @@ function resolveBookmarkAncestorFolder(item, folderName, crumbIndex = -1) {
 async function navigateToBookmarkAncestorFolder(target) {
     if (!target) return;
 
+    recordCurrentSearchJumpHistory();
     if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
     if (typeof hideSearchResultsPanel === 'function') hideSearchResultsPanel();
@@ -14414,29 +14849,29 @@ function renderCanvasTagBrowseRootPanel(model, options = {}) {
     const isZh = currentLang === 'zh_CN';
     const colorEntries = Array.isArray(model && model.colorEntries) ? model.colorEntries : [];
     const tagEntries = Array.isArray(model && model.tagEntries) ? model.tagEntries : [];
-    
+
     // Check if color filter is active
     const activeColorDetail = (searchUiState && searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.active && searchUiState.tagBrowseDetail.kind === 'color')
         ? searchUiState.tagBrowseDetail
         : null;
     const selectedColor = activeColorDetail ? activeColorDetail.color : null;
-    
+
     const colorTitle = isZh ? '颜色' : 'Colors';
-    
+
     let tagTitle = isZh ? '全部标签（0-9 / A-Z）' : 'All Tags (0-9 / A-Z)';
     let titleHtml = `<div class="canvas-tag-browse-section-title">${escapeHtml(tagTitle)}</div>`;
-    
+
     const filteredTagEntries = selectedColor
         ? tagEntries.filter(entry => normalizeTagBrowseColor(entry.color) === selectedColor)
         : tagEntries;
-        
+
     if (selectedColor) {
         const colorLabel = getTagBrowseColorLabel(selectedColor, isZh);
         const displayTagTitle = isZh ? `${colorLabel}标签` : `${colorLabel} Tags`;
-        
+
         const backLabel = isZh ? '返回' : 'Back';
         const collectionLabel = isZh ? '集合' : 'Collection';
-        
+
         titleHtml = `
             <div class="canvas-tag-browse-section-header">
                 <div class="canvas-tag-browse-section-title">${escapeHtml(displayTagTitle)}</div>
@@ -14688,7 +15123,7 @@ function isSpecialTempSectionItem(item) {
     if (typeof isSpecialTempSection === 'function') {
         try {
             return isSpecialTempSection(item);
-        } catch (_) {}
+        } catch (_) { }
     }
     if (item.isSnapshot || item.isSpecial) return true;
     const tempKind = String(item.tempKind || '').toLowerCase();
@@ -14821,8 +15256,8 @@ function searchCanvasAndRender(query, options = {}) {
                 if (currentMode === 'bookmark' && currentQuery === trimmedQuery) {
                     searchCanvasAndRender(trimmedQuery, { source: 'tag-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
                 }
-            } catch (_) {}
-        }).catch(() => {});
+            } catch (_) { }
+        }).catch(() => { });
     }
     if (mode === 'bookmark' && isCanvasNoteSearchQuery(trimmedQuery) &&
         typeof window !== 'undefined' && window.NoteSystem &&
@@ -14840,8 +15275,8 @@ function searchCanvasAndRender(query, options = {}) {
                 if (currentMode === 'bookmark' && currentQuery === trimmedQuery) {
                     searchCanvasAndRender(trimmedQuery, { source: 'note-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
                 }
-            } catch (_) {}
-        }).catch(() => {});
+            } catch (_) { }
+        }).catch(() => { });
     }
     if (mode === 'bookmark' && previousCanvasQuery !== nextCanvasQuery) {
         searchUiState.bookmarkGroupCollapse = new Map();
@@ -14869,6 +15304,9 @@ function searchCanvasAndRender(query, options = {}) {
     if (mode === 'bookmark' && isTagBrowseRootQuery(trimmedQuery)) {
         const detail = searchUiState && searchUiState.tagBrowseDetail ? searchUiState.tagBrowseDetail : null;
         if (!detail || detail.active !== true || (detail.kind === 'color' && !detail.showBookmarks)) {
+            if (typeof recordSearchHistory === 'function') {
+                recordSearchHistory('#', 'bookmark', { trigger: 'jump' });
+            }
             const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
             const rootModel = buildCanvasTagBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
             renderCanvasTagBrowseRootPanel(rootModel, { query: trimmedQuery });
@@ -14878,6 +15316,9 @@ function searchCanvasAndRender(query, options = {}) {
     if (mode === 'bookmark' && isNoteBrowseRootQuery(trimmedQuery)) {
         const detail = searchUiState && searchUiState.noteBrowseDetail ? searchUiState.noteBrowseDetail : null;
         if (!detail || detail.active !== true) {
+            if (typeof recordSearchHistory === 'function') {
+                recordSearchHistory('*', 'bookmark', { trigger: 'jump' });
+            }
             const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
             const rootModel = buildCanvasNoteBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
             renderCanvasNoteBrowseRootPanel(rootModel, { query: trimmedQuery });
@@ -15145,22 +15586,165 @@ function searchCanvasAndRender(query, options = {}) {
 }
 
 
+function normalizeSearchHistoryMode(mode) {
+    const raw = String(mode || (searchUiState && searchUiState.activeMode) || 'bookmark').trim().toLowerCase();
+    if (raw === 'structure' || raw === 'card') return 'structure';
+    if (raw === 'description' || raw === 'desc') return 'description';
+    return 'bookmark';
+}
+
 function getEmptyQuerySuggestionsPrefKey() {
     return 'canvasSearchHideSuggestions';
 }
+
+function getSearchHistoryStorageKey(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    return `canvasSearchHistory_${m}`;
+}
+
+function getSearchHistoryLimitKey(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    return `canvasSearchHistoryLimit_${m}`;
+}
+
+function getSearchHistoryHideKey(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    return `canvasSearchHideHistory_${m}`;
+}
+
+// 自动平滑迁移旧版未区分模式的历史记录到 bookmark 模式
+try {
+    const legacyHistory = localStorage.getItem('canvasSearchHistory');
+    if (legacyHistory && !localStorage.getItem('canvasSearchHistory_bookmark')) {
+        localStorage.setItem('canvasSearchHistory_bookmark', legacyHistory);
+        localStorage.removeItem('canvasSearchHistory');
+    }
+} catch (_) { }
+
+function getSearchHistoryLimit(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const modeVal = parseInt(localStorage.getItem(getSearchHistoryLimitKey(m)), 10);
+        if (Number.isFinite(modeVal) && modeVal > 0) return modeVal;
+        const globalVal = parseInt(localStorage.getItem('canvasSearchHistoryLimit'), 10);
+        if (Number.isFinite(globalVal) && globalVal > 0) return globalVal;
+    } catch (_) { }
+    return 7;
+}
+
+function setSearchHistoryLimit(newLimit, mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const limit = Math.max(1, parseInt(newLimit, 10) || 7);
+        localStorage.setItem(getSearchHistoryLimitKey(m), String(limit));
+        localStorage.setItem('canvasSearchHistoryLimit', String(limit));
+        const currentList = getSearchHistoryList(m);
+        if (currentList.length > limit) {
+            saveSearchHistory(currentList.slice(0, limit), m);
+        }
+    } catch (_) { }
+}
+
+function isSearchHistoryEnabled(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        return localStorage.getItem(getSearchHistoryHideKey(m)) !== 'true';
+    } catch (_) { }
+    return true;
+}
+
+function setSearchHistoryEnabled(enabled, mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        localStorage.setItem(getSearchHistoryHideKey(m), enabled ? 'false' : 'true');
+    } catch (_) { }
+}
+
+function getSearchHistoryList(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const raw = localStorage.getItem(getSearchHistoryStorageKey(m));
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+            return parsed.map(item => String(item || '').trim()).filter(Boolean);
+        }
+    } catch (_) { }
+    return [];
+}
+
+function saveSearchHistory(list, mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const limit = getSearchHistoryLimit(m);
+        const cleanList = (Array.isArray(list) ? list : [])
+            .map(item => String(item || '').trim())
+            .filter(Boolean)
+            .slice(0, limit);
+        localStorage.setItem(getSearchHistoryStorageKey(m), JSON.stringify(cleanList));
+    } catch (_) { }
+}
+
+function recordSearchHistory(query, mode, options = {}) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        if (!isSearchHistoryEnabled(m)) return;
+        // 严格模式（默认且唯一）：仅在用户点击条目/单元格/表格行实际跳转，或进入浏览指令时记录
+        if (options.trigger !== 'jump') {
+            return;
+        }
+        const trimmed = String(query || '').trim();
+        if (!trimmed) return;
+        if (trimmed === '!' || trimmed === '@') return;
+
+        let list = getSearchHistoryList(m);
+        const lowerTrimmed = trimmed.toLowerCase();
+        list = list.filter(item => item.toLowerCase() !== lowerTrimmed);
+        list.unshift(trimmed);
+        saveSearchHistory(list, m);
+    } catch (_) { }
+}
+
+function removeSearchHistoryItem(query, mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const trimmed = String(query || '').trim();
+        let list = getSearchHistoryList(m);
+        list = list.filter(item => item !== trimmed && item.toLowerCase() !== trimmed.toLowerCase());
+        saveSearchHistory(list, m);
+    } catch (_) { }
+}
+
+function clearAllSearchHistory(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        localStorage.removeItem(getSearchHistoryStorageKey(m));
+    } catch (_) { }
+}
+
+try {
+    window.recordSearchHistory = recordSearchHistory;
+    window.recordCurrentSearchJumpHistory = recordCurrentSearchJumpHistory;
+    window.getSearchHistoryList = getSearchHistoryList;
+    window.clearAllSearchHistory = clearAllSearchHistory;
+    window.setSearchHistoryEnabled = setSearchHistoryEnabled;
+    window.isSearchHistoryEnabled = isSearchHistoryEnabled;
+    window.setSearchHistoryLimit = setSearchHistoryLimit;
+    window.getSearchHistoryLimit = getSearchHistoryLimit;
+    window.normalizeSearchHistoryMode = normalizeSearchHistoryMode;
+} catch (_) { }
 
 function shouldShowEmptyQuerySuggestions() {
     try {
         if (typeof window.currentView === 'string' && window.currentView !== 'canvas') return false;
     } catch (_) { }
-    try {
-        return localStorage.getItem(getEmptyQuerySuggestionsPrefKey()) !== 'true';
-    } catch (_) { }
-    return true;
+    const currentMode = normalizeSearchHistoryMode(searchUiState && searchUiState.activeMode);
+    const showHistory = isSearchHistoryEnabled(currentMode) && getSearchHistoryList(currentMode).length > 0;
+    return showHistory;
 }
 
 /**
- * 渲染画布搜索建议（三搜索模式推荐）
+ * 渲染画布临时展板（仅展示最近搜索历史，不展示模式切换与“不再出现”按钮）
  */
 function renderCanvasSearchSuggestions() {
     // Isolation guard: only render suggestions in canvas view
@@ -15168,14 +15752,17 @@ function renderCanvasSearchSuggestions() {
         if (typeof window.currentView === 'string' && window.currentView !== 'canvas') return;
     } catch (_) { }
 
-    const isZh = currentLang === 'zh_CN';
-    const prefKey = getEmptyQuerySuggestionsPrefKey();
-
-    // Match the Canvas mode menu styles (colors/icons) by reusing the same ordered modes.
-    const modesToShow = getCanvasModesInOrder();
+    const activeMode = normalizeSearchHistoryMode(searchUiState && searchUiState.activeMode);
+    const historyList = getSearchHistoryList(activeMode);
+    const showHistory = isSearchHistoryEnabled(activeMode) && historyList.length > 0;
 
     const panel = getSearchResultsPanel();
     if (!panel) return;
+
+    if (!showHistory) {
+        try { hideSearchResultsPanel(); } catch (_) { }
+        return;
+    }
 
     searchUiState.view = 'canvas';
     searchUiState.query = '';
@@ -15191,102 +15778,34 @@ function renderCanvasSearchSuggestions() {
         panel.style.maxHeight = '';
     } catch (_) { }
 
-    const listHtml = modesToShow.map((mode) => {
-        const isActive = mode.key === searchUiState.activeMode;
-        const title = isZh ? mode.label : mode.labelEn;
-        const desc = isZh ? mode.desc : mode.descEn;
-        return `
-            <div class="search-mode-menu-item ${isActive ? 'active' : ''} canvas-suggestion-mode-item" data-mode-key="${escapeHtml(mode.key)}">
-                <div class="mode-icon"><i class="fas ${escapeHtml(mode.icon)} ${escapeHtml(mode.color)}"></i></div>
-                <div class="mode-info">
-                    <div class="mode-name">${escapeHtml(title)}</div>
-                    <div class="mode-desc">${desc}</div>
-                </div>
-            </div>
-        `;
-    }).join('');
+    // 构建“最近搜索”区域 HTML（临时展板不展示“不再出现”按钮，allowHide: false）
+    const historySectionHtml = buildSearchHistorySectionHtml(activeMode, { allowHide: false });
+    panel.innerHTML = historySectionHtml;
 
-    // Add a header or instruction? User said "double click to click exclusive mode???" maybe just display them as hints.
-    // Making them non-clickable (pointer-events: none) as they are suggestions/help.
-    // Or we could make them clickable to pre-fill the input with a prefix like "#" or "A-".
-
-    // [Tweak] Stronger border for separation
-    const isBottomDock = !!(document.body && document.body.classList.contains('header-dock-bottom'));
-    const arrowSvg = isBottomDock ? `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-            <path d="M12 3v14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
-            <path d="M7 13l5 5 5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-    ` : `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-            <path d="M12 21V7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
-            <path d="M7 11l5-5 5 5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-    `;
-
-    const hideLabel = isZh ? '下次不再出现' : "Don't show again";
-    const hintText = isZh
-        ? (isBottomDock ? '点下侧按钮切换模式' : '点左侧按钮切换模式')
-        : (isBottomDock ? 'Use the bottom button to switch mode' : 'Use the left button to switch mode');
-    const hintHelp = getSearchHintHelpContent();
-
-    panel.innerHTML = `
-        <div class="search-suggestions-header" style="position:relative; padding:5px 8px; border-bottom:1px solid var(--search-candidate-divider, var(--border-color)); margin-bottom:2px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
-            <div class="search-empty-suggestions-hint" style="display:inline-flex; align-items:center; gap:4px; min-width:0; flex:1 1 auto; font-size:11px; color:var(--text-tertiary);">
-                <span class="search-hint-icon" style="display:inline-flex; position:relative; top:-1px; flex:0 0 auto;">${arrowSvg}</span>
-                <span class="search-hint-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(hintText)}</span>
-                <button type="button" class="search-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}" style="flex:0 0 auto; margin-left:0;">
-                    <i class="fas fa-question-circle"></i>
-                </button>
-            </div>
-            <button type="button" class="search-empty-suggestions-hide-btn canvas-suggestions-hide-btn" style="flex:0 0 auto; border:1px solid var(--border-color); background:var(--bg-secondary); padding:2px 8px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; white-space:nowrap;">
-                ${escapeHtml(hideLabel)}
-            </button>
-        </div>
-        <div style="padding:2px 0;">
-            ${listHtml}
-        </div>
-    `;
-
-    // Bind
     try {
-        const hideBtn = panel.querySelector('.canvas-suggestions-hide-btn');
-        if (hideBtn) {
-            hideBtn.addEventListener('click', (ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                try { localStorage.setItem(prefKey, 'true'); } catch (_) { }
-                try { hideSearchResultsPanel(); } catch (_) { }
-            });
-        }
-        panel.querySelectorAll('.canvas-suggestion-mode-item').forEach((el) => {
-            el.addEventListener('mousedown', (ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                const key = el.getAttribute('data-mode-key');
-                if (key) {
-                    try { setSearchMode(key, { source: 'user' }); } catch (_) { }
-                    
-                    // Do not automatically collapse the candidate panel, keep it open and re-render suggestions
-                    try {
-                        renderCanvasSearchSuggestions();
-                        showSearchResultsPanel();
-                    } catch (_) { }
-
-                    // Explicitly focus input to allow direct typing
-                    try {
-                        const input = document.getElementById('searchInput');
-                        if (input) input.focus();
-                    } catch (_) { }
+        // 搜索历史区域事件绑定（复用统一的历史记录事件处理器）
+        bindSearchHistoryEvents(panel, activeMode, (action) => {
+            if (action === 'close') {
+                hideSearchResultsPanel();
+                return;
+            }
+            if (action === 'delete' || action === 'clear' || action === 'hide') {
+                if (!shouldShowEmptyQuerySuggestions()) {
+                    hideSearchResultsPanel();
+                } else {
+                    renderCanvasSearchSuggestions();
+                    showSearchResultsPanel();
                 }
-            });
+            } else {
+                renderCanvasSearchSuggestions();
+                showSearchResultsPanel();
+            }
         });
-        bindSearchHintHelpButton(panel.querySelector('.search-hint-help-btn'), hintHelp.html);
-        // 建议提示面板（含“下次不再出现”）下方不需要小白条把手，移除可能存在的把手
+
+        // 移除多余的面板缩放把手
         const staleHandles = panel.querySelectorAll('.search-panel-resize-handle');
         staleHandles.forEach(h => h.remove());
     } catch (_) { }
-
 }
 
 function getDomainCacheKey() {
@@ -15498,9 +16017,9 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
                 if (item.source === 'temporary') {
                     if (!memberIds.includes(item.sectionId)) continue;
                 } else if (item.source === 'permanent') {
-                    if (!memberIds.some(id => 
-                        id === 'permanentSection' || 
-                        id.startsWith('permanent-section') || 
+                    if (!memberIds.some(id =>
+                        id === 'permanentSection' ||
+                        id.startsWith('permanent-section') ||
                         id.startsWith('permanentSection')
                     )) continue;
                 } else {
@@ -16196,7 +16715,7 @@ function safeRedrawCanvasSearchTabulator(full = false) {
     if (!tableContainer || tableContainer.offsetWidth === 0 || tableContainer.offsetHeight === 0) return;
     try {
         canvasSearchTabulatorInstance.redraw(full);
-    } catch (_) {}
+    } catch (_) { }
 }
 
 // 缓存当前搜索注入状态（支持懒加载分批加载与剩余项提示）
@@ -17092,17 +17611,17 @@ function bindCanvasTabulatorColumnMoveEnhancements(tableInstance, containerEl, a
 
         // 核心优化 1：彻底重写 moveColumn，严禁在拖拽悬浮过程中先行操作纵向单元格 DOM！
         // 仅在释放落点时由 moveColumnActual 进行原子级整列重排，彻底消除先行位置交换的抖动与违和感。
-        moveMod.moveColumn = function(col, after) {
+        moveMod.moveColumn = function (col, after) {
             this.toCol = col;
             this.toColAfter = after;
         };
 
         // 屏蔽 Tabulator 自带的每列 mousemove 绑定，由我们全局高精度迟滞控制器统一调度
-        moveMod._bindMouseMove = function() {};
-        moveMod._unbindMouseMove = function() {};
+        moveMod._bindMouseMove = function () { };
+        moveMod._unbindMouseMove = function () { };
         moveMod.autoScrollMargin = 0; // 停用原生简陋的 1ms setTimeout 边缘滚动，由 rAF 循环接管
 
-        moveMod.startMove = function(e, col) {
+        moveMod.startMove = function (e, col) {
             // 序号列严格不可拖动
             if (col && typeof col.getField === 'function' && col.getField() === 'index') {
                 return;
@@ -17112,7 +17631,7 @@ function bindCanvasTabulatorColumnMoveEnhancements(tableInstance, containerEl, a
             startCanvasTabulatorColumnMoveSession(tableInstance, moveMod, e, col);
         };
 
-        moveMod.endMove = function(e) {
+        moveMod.endMove = function (e) {
             stopCanvasTabulatorColumnMoveSession();
             origEndMove(e);
             try {
@@ -17444,7 +17963,7 @@ function renderCanvasTableBookmarkLocationsHtml(locations, isZh, itemData = {}) 
     // 智能布局策略：
     // 核心改进：加二加三等胶囊按钮直接置于最首位（第一位），芯片排在后面自适应展开，
     // 彻底杜绝胶囊按钮被挤压遮挡，同时让临时栏目的标题文字展现得更加完整充分。
-    
+
     // 1. 若恰好为 2 处位置：
     //    如果总长适中（例如至少一个非长标题），平铺展示这两个芯片；
     //    如果两个都带有长标题，则在首位展示 "+1" 按钮，后接第 1 个芯片。
@@ -17722,10 +18241,10 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             descriptionText: descText,
             color: isCardGroup ? (item.color || '#7c3aed')
                 : (item.type === 'permanent-section' ? '#059669'
-                : (item.type === 'edge' ? (item.color || ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode === 'description') ? '#10b981' : '#f59e0b'))
-                : (item.type === 'anchor' ? (item.anchorType === 'auto' ? '#10b981' : '#2563eb')
-                : (item.type === 'temp-section' ? (item.color || (isSpecialTempSectionItem(item) ? '#e9973f' : '#2563eb'))
-                : (item.color || '#2563eb')))))
+                    : (item.type === 'edge' ? (item.color || ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode === 'description') ? '#10b981' : '#f59e0b'))
+                        : (item.type === 'anchor' ? (item.anchorType === 'auto' ? '#10b981' : '#2563eb')
+                            : (item.type === 'temp-section' ? (item.color || (isSpecialTempSectionItem(item) ? '#e9973f' : '#2563eb'))
+                                : (item.color || '#2563eb')))))
         });
     });
 
@@ -17941,6 +18460,7 @@ function renderCanvasTableItemLocationChipHtml(d, query = '') {
  */
 async function navigateToCanvasStructureOrDescriptionTarget(item) {
     if (!item) return false;
+    recordCurrentSearchJumpHistory();
     if (item.type === 'anchor') {
         return await navigateToCanvasAnchorTarget(item);
     }
@@ -18040,6 +18560,7 @@ async function navigateToCanvasTableBookmarkTarget(d) {
         ? d.locations
         : ((rawItem && Array.isArray(rawItem.locations) && rawItem.locations.length) ? rawItem.locations : []);
 
+    recordCurrentSearchJumpHistory();
     hideSearchResultsPanel();
     try {
         const inputEl = document.getElementById('searchInput');
@@ -18253,7 +18774,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     const d = cell.getData();
                     if (!d || !d.rawItem) return;
                     e._canvasHandled = true;
-                    try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                    try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
                     await navigateToCanvasStructureOrDescriptionTarget(d.rawItem);
                 },
                 formatter: (cell) => {
@@ -18418,7 +18939,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     const d = cell.getData();
                     if (!d || !d.rawItem) return;
                     e._canvasHandled = true;
-                    try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                    try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
                     await navigateToCanvasStructureOrDescriptionTarget(d.rawItem);
                 },
                 formatter: (cell) => {
@@ -18492,7 +19013,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
             cellClick: async (e, cell) => {
                 if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
                     e._canvasHandled = true;
-                    try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                    try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
                     const d = cell.getData();
                     const itemId = String(d && (d.id || (d.rawItem && d.rawItem.id)) || '').trim();
                     if (typeof toggleCanvasSearchItemSelection === 'function') {
@@ -18504,7 +19025,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 const d = cell.getData();
                 if (!d) return;
                 e._canvasHandled = true;
-                try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
                 await navigateToCanvasTableBookmarkTarget(d);
             },
             formatter: (cell) => {
@@ -18531,7 +19052,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
             cellClick: (e, cell) => {
                 if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
                     e._canvasHandled = true;
-                    try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                    try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
                     const d = cell.getData();
                     const itemId = String(d && (d.id || (d.rawItem && d.rawItem.id)) || '').trim();
                     if (typeof toggleCanvasSearchItemSelection === 'function') {
@@ -18574,6 +19095,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     const copyId = (!rawCopyId || rawCopyId === 'null') ? null : rawCopyId;
                     const color = chip.style.getPropertyValue('--loc-color') || '#2563eb';
 
+                    recordCurrentSearchJumpHistory();
                     hideSearchResultsPanel();
                     try {
                         const inputEl = document.getElementById('searchInput');
@@ -18714,6 +19236,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     if (targetItem && folderName) {
                         const targetFolder = resolveBookmarkAncestorFolder(targetItem, folderName);
                         if (targetFolder) {
+                            recordCurrentSearchJumpHistory();
                             hideSearchResultsPanel();
                             try {
                                 const inputEl = document.getElementById('searchInput');
@@ -19112,6 +19635,7 @@ async function handleCanvasTabulatorRowClick(e, row) {
             return;
         }
 
+        recordCurrentSearchJumpHistory();
         hideSearchResultsPanel();
         try {
             const inputEl = document.getElementById('searchInput');
@@ -19193,6 +19717,7 @@ async function handleCanvasTabulatorRowClick(e, row) {
         if (targetItem && folderName) {
             const targetFolder = resolveBookmarkAncestorFolder(targetItem, folderName);
             if (targetFolder) {
+                recordCurrentSearchJumpHistory();
                 hideSearchResultsPanel();
                 try {
                     const inputEl = document.getElementById('searchInput');
@@ -19255,6 +19780,7 @@ async function handleCanvasTabulatorRowClick(e, row) {
     }
 
     // 3. 点击表格行：跳转到对应目标
+    recordCurrentSearchJumpHistory();
     e._canvasHandled = true;
     const rowData = row ? row.getData() : null;
     if (!rowData) return;
@@ -19403,7 +19929,7 @@ let searchPanelResizeObserver = null;
 function updateSearchPanelColumnState(panel) {
     if (!panel) panel = getSearchResultsPanel();
     if (!panel) return;
-    if (typeof isSearchPanelGridView === 'function' && !isSearchPanelGridView()) {
+    if ((panel.dataset && panel.dataset.panelType === 'root-browse') || isSearchPanelRootBrowseView(panel) || (typeof isSearchPanelGridView === 'function' && !isSearchPanelGridView())) {
         panel.classList.remove('is-single-column');
         restoreSingleColumnLocationRows(panel);
         return;
@@ -19441,7 +19967,7 @@ function observeSearchPanelColumns(panel) {
                         });
                     }
                 }
-                if (!target || !target.classList.contains('view-grid')) {
+                if (!target || !target.classList.contains('view-grid') || (target.dataset && target.dataset.panelType === 'root-browse')) {
                     target.classList.remove('is-single-column');
                     restoreSingleColumnLocationRows(target);
                     continue;
@@ -19471,6 +19997,7 @@ let _clampSingleColRaf = null;
 function clampSingleColumnLocationRows(panel) {
     if (!panel) panel = getSearchResultsPanel();
     if (!panel) return;
+    if (panel.dataset && panel.dataset.panelType === 'root-browse') return;
     const isGrid = panel.classList.contains('view-grid') || (typeof isSearchPanelGridView === 'function' && isSearchPanelGridView());
     const isSide = typeof isSidePanelModeInSearch === 'function' && isSidePanelModeInSearch();
     const isSingle = isSide || panel.classList.contains('is-single-column') || (panel.clientWidth > 0 && panel.clientWidth < 554);
@@ -19613,7 +20140,7 @@ function getCanvasSearchNodeDisplayName(nodeId, isZh = true) {
                 return node.title || node.label || node.text || String(nodeId);
             }
         }
-    } catch (_) {}
+    } catch (_) { }
     return String(nodeId);
 }
 
@@ -20220,7 +20747,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     return t;
                 }).filter(Boolean) : [];
                 const tokens = [...queryTokens, ...tagDetailToken].filter(Boolean);
-                
+
                 if (tokens.length > 0) {
                     tokens.sort((a, b) => b.length - a.length);
                     let safe = escapeHtml(label);
@@ -20427,7 +20954,7 @@ function renderCanvasSearchResults(results, options = {}) {
         const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
         const hasTagMatch = isTagDetailsQuery && childTagMarkersHtml && childTagMarkersHtml.includes('<mark>');
         const hasNoteMatch = isNoteDetailsQuery && childNoteSnippetHtml && childNoteSnippetHtml.includes('<mark>');
-        
+
         const preview = buildMatchedDetailsPreviewHtml([
             { matched: hasPathMatch, html: pathHtml },
             { matched: hasUrlMatch, html: urlHtml },
@@ -20449,7 +20976,7 @@ function renderCanvasSearchResults(results, options = {}) {
 
         const childTagsHtml = childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '';
         const childCreationTimeHtml = renderBookmarkCreationTimeHtml(child, isZh);
-        
+
         let childDetailsContentHtml = '';
         childDetailsContentHtml += pathHtml;
         if (childCreationTimeHtml) childDetailsContentHtml += childCreationTimeHtml;
@@ -20488,7 +21015,7 @@ function renderCanvasSearchResults(results, options = {}) {
         const groupId = String(groupItem && groupItem.id || '').trim();
         if (!groupId) return '';
         const isExpanded = isBookmarkGroupExpanded(groupId);
-        
+
         let childRowsHtml = '';
         if (isExpanded) {
             if (!(searchUiState.bookmarkGroupVisibleCount instanceof Map)) {
@@ -20497,7 +21024,7 @@ function renderCanvasSearchResults(results, options = {}) {
             const visibleLimit = searchUiState.bookmarkGroupVisibleCount.get(groupId) || 10;
             const sliced = targetItems.slice(0, visibleLimit);
             childRowsHtml = sliced.map((child, childIndex) => renderBookmarkGroupChildRow(child, groupItem, childIndex)).join('');
-            
+
             if (targetItems.length > visibleLimit) {
                 const remain = targetItems.length - visibleLimit;
                 const loadMoreLabel = isZh
@@ -21227,7 +21754,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
                 const hasTagMatch = isTagDetailsQuery && tagsRowHtml && tagsRowHtml.includes('<mark>');
                 const hasNoteMatch = isNoteDetailsQuery && noteSnippetHtml && noteSnippetHtml.includes('<mark>');
-                
+
                 const preview = buildMatchedDetailsPreviewHtml([
                     { matched: hasPathMatch, html: parentPathHtml },
                     { matched: hasUrlMatch, html: urlHtml },
@@ -21291,13 +21818,13 @@ function renderCanvasSearchResults(results, options = {}) {
                         if (typeof getFaviconUrl === 'function') {
                             const faviconSrc = getFaviconUrl(item.url);
                             const hasRealFavicon = faviconSrc && !faviconSrc.startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
-                            
+
                             const spanWidth = item.domainChild ? '18px' : '16px';
                             const spanHeight = item.domainChild ? '20px' : '16px';
                             const spanJustify = item.domainChild ? 'flex-start' : 'center';
                             const imgLeft = '0';
                             const imgTop = item.domainChild ? '2px' : '0';
-                            
+
                             if (hasRealFavicon) {
                                 indexLabel = `<span class="${childDotClass}" style="position:relative; display:inline-flex; align-items:center; justify-content:${spanJustify}; width:${spanWidth}; height:${spanHeight};">
                                     <img class="search-result-favicon" src="${faviconSrc}" data-bookmark-url="${escapeHtml(item.url)}" style="width:16px; height:16px; object-fit:contain; border-radius:3px;" alt="">
@@ -21523,7 +22050,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 : '';
             const linkHtml = item.url ? `<div class="search-result-match search-result-link-row">${renderExternalLinkHtml(item.url)}</div>` : '';
             const itemNoteSnippetHtml = renderBookmarkResultNoteSnippet(item);
-            
+
             let detailsContentHtml = '';
             const bookmarkLocationsHtml = renderCanvasBookmarkLocationsHtml(item, {
                 isZh,
@@ -21541,7 +22068,7 @@ function renderCanvasSearchResults(results, options = {}) {
             const hasUrlMatch = isPlainBookmarkDetailsQuery && linkHtml && linkHtml.includes('<mark>');
             const hasTagMatch = isTagDetailsQuery && tagsRowHtml && tagsRowHtml.includes('<mark>');
             const hasNoteMatch = isNoteDetailsQuery && itemNoteSnippetHtml && itemNoteSnippetHtml.includes('<mark>');
-            
+
             const preview = buildMatchedDetailsPreviewHtml([
                 { matched: hasPathMatch, html: pathHtml },
                 { matched: hasUrlMatch, html: linkHtml },
@@ -21684,7 +22211,7 @@ function renderCanvasSearchResults(results, options = {}) {
     const isDescriptionMode = activeMode === 'description';
 
     const wrappedItemsHtml = `<div class="search-results-items-container${isGridView ? ' view-grid' : ''}" data-search-mode="${activeMode}">${itemsHtml}</div>`;
-    
+
     const existingTableWrapper = panel.querySelector('.search-results-table-view-wrapper');
     if (existingTableWrapper) {
         existingTableWrapper.style.display = 'none';
@@ -21863,7 +22390,7 @@ function getCanvasViewportCenterForTemp(targetWidth, targetHeight) {
     let foundFreeCandidate = false;
     for (const cand of candidates) {
         const insideViewport = (cand.x >= vLeft + 20 && (cand.x + w) <= vRight - 20 &&
-                                cand.y >= vTop + 20 && (cand.y + h) <= vBottom - 20);
+            cand.y >= vTop + 20 && (cand.y + h) <= vBottom - 20);
         if (insideViewport && !isColliding(cand.x, cand.y)) {
             idealX = cand.x;
             idealY = cand.y;
@@ -23240,6 +23767,7 @@ async function exitCanvasNodeFullscreenForSearchLocate() {
 
 async function locateCanvasGroupSearchResult(item) {
     if (!item || !item.id) return false;
+    recordCurrentSearchJumpHistory();
 
     // Reuse the directory's card-group locator: it fits the group's stored
     // rect, drives the shared viewport navigation, then wakes and highlights
@@ -23439,13 +23967,13 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
             if (sameMaximizedTarget) {
                 // 当前就在目标全屏栏目，不触发画布平移，避免全屏层级抖动
             } else {
-            // locateCanvasElement(id, classPart, ...)
-            // 'permanent-section' matches id="permanentSection" via helper or manual logic?
-            // Actually locateCanvasElement's second arg is expected class substring or similar.
-            // But let's check if we can rely on it for copies.
-            // If copyId is set, locateCanvasElement might fail if it relies on ID.
-            // locateToElement logic handles arbitrary element.
-            // Let's manually find element if it's a copy.
+                // locateCanvasElement(id, classPart, ...)
+                // 'permanent-section' matches id="permanentSection" via helper or manual logic?
+                // Actually locateCanvasElement's second arg is expected class substring or similar.
+                // But let's check if we can rely on it for copies.
+                // If copyId is set, locateCanvasElement might fail if it relies on ID.
+                // locateToElement logic handles arbitrary element.
+                // Let's manually find element if it's a copy.
 
                 if (options.copyId) {
                     let copyEl = resolvePermanentSectionElementForSearch(options.copyId);
@@ -23471,7 +23999,7 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
     // 强行唤醒并加载永久栏目 DOM 和树，以防止因卡片懒加载或虚拟滚动导致树内容为空而无法定位
     if (permanentSection) {
         let needWake = false;
-        if (permanentSection.classList.contains('canvas-viewport-lazy-shell') || 
+        if (permanentSection.classList.contains('canvas-viewport-lazy-shell') ||
             (permanentSection.dataset && permanentSection.dataset.viewportLazy === 'true')) {
             needWake = true;
             permanentSection.classList.remove('canvas-viewport-lazy-shell');
@@ -23479,7 +24007,7 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
                 delete permanentSection.dataset.viewportLazy;
             }
         }
-        
+
         // 临时退出低细节模式，确保可见
         if (permanentSection.classList.contains('low-detail-active')) {
             permanentSection.classList.remove('low-detail-active');
@@ -23507,9 +24035,9 @@ async function locateBookmarkItemInPermanentTree(nodeId, options = {}) {
                 }
 
                 try { permanentSection.classList.remove('permanent-tree-unloaded'); } catch (_) { }
-                
-                const key = (permanentSection.id === 'permanentSection') 
-                    ? 'permanentSection' 
+
+                const key = (permanentSection.id === 'permanentSection')
+                    ? 'permanentSection'
                     : (permanentSection.dataset && permanentSection.dataset.permanentSectionCopyId);
                 if (key && window.CanvasState && window.CanvasState.unloadedPermanentSectionTrees) {
                     try { window.CanvasState.unloadedPermanentSectionTrees.delete(key); } catch (_) { }
@@ -23826,6 +24354,7 @@ async function ensureBookmarkSearchTargetFullscreen(target) {
 
 async function locateCanvasBookmarkItem(item) {
     if (!item || item.type !== 'bookmark-item') return false;
+    recordCurrentSearchJumpHistory();
     const expandTargetFolder = shouldExpandSearchLocateTargetFolder(item);
     if (item.source === 'temporary' && item.sectionId) {
         return locateBookmarkItemInTempTree(item.sectionId, item.id, {
@@ -23846,6 +24375,7 @@ async function locateCanvasBookmarkItem(item) {
 
 async function navigateToCanvasBookmarkSearchTarget(item) {
     if (!item || item.type !== 'bookmark-item') return false;
+    recordCurrentSearchJumpHistory();
 
     // Location chips may point outside the current fullscreen card. Switch the
     // fullscreen target first; otherwise CSS isolation keeps the destination hidden.
@@ -23899,11 +24429,11 @@ function highlightAndScrollToText(container, queryText) {
         if (node.nodeType === 3) {
             nodesList.push(node);
         } else if (node.nodeType === 1) {
-            if (node.classList.contains('temp-node-action-btn') || 
+            if (node.classList.contains('temp-node-action-btn') ||
                 node.classList.contains('permanent-section-actions') ||
                 node.classList.contains('temp-node-description-controls') ||
                 node.classList.contains('permanent-section-tip-controls') ||
-                node.tagName === 'SCRIPT' || 
+                node.tagName === 'SCRIPT' ||
                 node.tagName === 'STYLE') {
                 return nodesList;
             }
@@ -23946,15 +24476,15 @@ function highlightAndScrollToText(container, queryText) {
     textNodes.forEach(node => {
         let text = node.data;
         let lowerText = text.toLowerCase();
-        
+
         for (const term of terms) {
             const index = lowerText.indexOf(term.toLowerCase());
             if (index >= 0) {
                 const matchedText = text.substring(index, index + term.length);
                 const remainingText = text.substring(index + term.length);
-                
+
                 node.data = text.substring(0, index);
-                
+
                 const mark = document.createElement('mark');
                 mark.className = 'canvas-text-search-highlight-match';
                 mark.style.backgroundColor = '#fbbf24';
@@ -23964,7 +24494,7 @@ function highlightAndScrollToText(container, queryText) {
                 mark.style.boxShadow = '0 0 5px rgba(251, 191, 36, 0.7)';
                 mark.style.fontWeight = 'bold';
                 mark.textContent = matchedText;
-                
+
                 node.parentNode.insertBefore(mark, node.nextSibling);
                 if (remainingText) {
                     const newTextNode = document.createTextNode(remainingText);
@@ -23980,7 +24510,7 @@ function highlightAndScrollToText(container, queryText) {
         setTimeout(() => {
             try {
                 marks[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            } catch (_) {}
+            } catch (_) { }
         }, 100);
     }
 
@@ -23989,7 +24519,7 @@ function highlightAndScrollToText(container, queryText) {
             if (contentElement.querySelector('.canvas-text-search-highlight-match')) {
                 contentElement.innerHTML = originalHTML;
             }
-        } catch (_) {}
+        } catch (_) { }
         cleanupEvents();
     };
 
@@ -24497,6 +25027,8 @@ async function activateCanvasSearchResultAtIndex(index) {
         return;
     }
 
+    recordCurrentSearchJumpHistory();
+
     // Canvas Bookmark Mode: flat group card
     if (item.type === 'bookmark-group') {
         const locations = Array.isArray(item.locations) ? item.locations : [];
@@ -24797,6 +25329,9 @@ if (typeof window !== 'undefined') {
     window.setSearchMode = setSearchMode;
     window.cycleSearchMode = cycleSearchMode;
     window.toggleSearchModeMenu = toggleSearchModeMenu;
+    window.updateSearchPlaceholder = updateSearchPlaceholder;
+    window.getCanvasSearchPlaceholder = getCanvasSearchPlaceholder;
+    window.bindSearchInputPlaceholderEvents = bindSearchInputPlaceholderEvents;
     window.__canvasApplyFullscreenSearchDefault = function (targetElement, options = {}) {
         const safeOptions = options && typeof options === 'object' ? Object.assign({}, options) : {};
         if (targetElement) safeOptions.targetElement = targetElement;
@@ -24841,6 +25376,7 @@ if (typeof window !== 'undefined') {
     window.SEARCH_PANEL_WIDTH_DEFAULT_GRID = SEARCH_PANEL_WIDTH_DEFAULT_GRID;
     window.SEARCH_PANEL_WIDTH_DEFAULT_TABLE = SEARCH_PANEL_WIDTH_DEFAULT_TABLE;
     window.SEARCH_PANEL_WIDTH_MIN = SEARCH_PANEL_WIDTH_MIN;
+    window.SEARCH_PANEL_WIDTH_MIN_ROOT = SEARCH_PANEL_WIDTH_MIN_ROOT;
     window.SEARCH_PANEL_WIDTH_MAX = SEARCH_PANEL_WIDTH_MAX;
     window.isSearchPanelRootBrowseView = isSearchPanelRootBrowseView;
     window.getSearchPanelMode = getSearchPanelMode;
@@ -24907,6 +25443,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.setSearchMode && window.searchUiState && window.searchUiState.activeMode) {
         window.setSearchMode(window.searchUiState.activeMode, { skipIndexLoad: true });
     }
+    if (typeof window.bindSearchInputPlaceholderEvents === 'function') {
+        window.bindSearchInputPlaceholderEvents();
+    }
+    if (typeof window.updateSearchPlaceholder === 'function') {
+        window.updateSearchPlaceholder('unfocused');
+    }
 
     // 2. Add extra safeguard for button focus cycling IF it wasn't added by previous steps correctly
     // (Though step 214 should have handled it in initSearchModeUI)
@@ -24928,7 +25470,9 @@ document.addEventListener('DOMContentLoaded', () => {
 // [User Request] Function to update search UI language (placeholder & menu)
 function updateSearchUILanguage() {
     // Sync Placeholder
-    if (typeof setSearchMode === 'function' && typeof searchUiState !== 'undefined') {
+    if (typeof updateSearchPlaceholder === 'function') {
+        updateSearchPlaceholder();
+    } else if (typeof setSearchMode === 'function' && typeof searchUiState !== 'undefined') {
         setSearchMode(searchUiState.activeMode, { skipIndexLoad: true });
     }
 

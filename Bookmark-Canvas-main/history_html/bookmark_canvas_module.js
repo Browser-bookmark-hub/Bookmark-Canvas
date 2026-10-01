@@ -2531,7 +2531,7 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     searchPanelTableHeight: 520, // 搜索栏表格视图默认高度 (px)
     searchPanelGridWidth: 920, // 搜索栏网格视图默认宽度 (px)
     searchPanelGridHeight: 520, // 搜索栏网格视图默认高度 (px)
-    searchPanelRootWidth: 500, // #、* 初始面板默认宽度 (px)
+    searchPanelRootWidth: 560, // #、* 初始面板默认宽度 (px)
     searchPanelRootHeight: 450, // #、* 初始面板默认高度 (px)
     tempColorFollow: true, // 临时栏目颜色跟随
     tempColorUnlockSync: false, // 解锁后立即继承父色
@@ -3035,9 +3035,9 @@ function normalizeCanvasOtherSettings(input) {
 
     out.searchPanelRootWidth = __clampNumber(
         input.searchPanelRootWidth,
-        360,
+        554,
         1800,
-        out.searchPanelRootWidth || 500
+        out.searchPanelRootWidth || 560
     );
 
     out.searchPanelRootHeight = __clampNumber(
@@ -43902,8 +43902,8 @@ function openCanvasAppearanceSettingsModal() {
     if (otherSearchPanelRootWidthInput) {
         const currentRW = (typeof window.getSearchPanelWidth === 'function')
             ? window.getSearchPanelWidth('root')
-            : (otherSettings.searchPanelRootWidth || 500);
-        otherSearchPanelRootWidthInput.value = String(__clampNumber(currentRW, 360, 1800, 500));
+            : (otherSettings.searchPanelRootWidth || 560);
+        otherSearchPanelRootWidthInput.value = String(__clampNumber(currentRW, 554, 1800, 560));
     }
 
     const otherSearchPanelRootHeightInput = modal.querySelector('#otherSearchPanelRootHeight');
@@ -44349,11 +44349,11 @@ function createCanvasAppearanceSettingsModal() {
                         </div>
                         <div class="appearance-row-content appearance-row-content-inline">
                             <div class="appearance-size-inputs">
-                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelRootSizeReset" title="${isEn ? 'Restore default (500 × 450px)' : '还原默认值（500 × 450px）'}" aria-label="${isEn ? 'Restore default root panel size' : '还原#、* 初始面板默认长宽'}">
+                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelRootSizeReset" title="${isEn ? 'Restore default (560 × 450px)' : '还原默认值（560 × 450px）'}" aria-label="${isEn ? 'Restore default root panel size' : '还原#、* 初始面板默认长宽'}">
                                     <i class="fas fa-undo"></i>
                                 </button>
                                 <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
-                                <input type="number" id="otherSearchPanelRootWidth" min="360" max="1800" step="10" style="width: 72px;">
+                                <input type="number" id="otherSearchPanelRootWidth" min="554" max="1800" step="10" style="width: 72px;">
                                 <span style="margin-right: 6px;">px</span>
                                 <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
                                 <input type="number" id="otherSearchPanelRootHeight" min="200" max="1200" step="10" style="width: 72px;">
@@ -44936,9 +44936,9 @@ function createCanvasAppearanceSettingsModal() {
             scheduleOtherSave();
         });
         otherSearchPanelRootWidthInput.addEventListener('change', () => {
-            const minW = window.SEARCH_PANEL_WIDTH_MIN || 360;
+            const minW = window.SEARCH_PANEL_WIDTH_MIN_ROOT || 554;
             const maxW = window.SEARCH_PANEL_WIDTH_MAX || 1800;
-            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_ROOT || 500;
+            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_ROOT || 560;
             const clamped = __clampNumber(
                 parseInt(otherSearchPanelRootWidthInput.value, 10),
                 minW,
@@ -44981,7 +44981,7 @@ function createCanvasAppearanceSettingsModal() {
 
     if (otherSearchPanelRootSizeResetBtn) {
         otherSearchPanelRootSizeResetBtn.addEventListener('click', () => {
-            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_ROOT || 500;
+            const defW = window.SEARCH_PANEL_WIDTH_DEFAULT_ROOT || 560;
             const defH = window.SEARCH_PANEL_HEIGHT_DEFAULT_ROOT || 450;
             if (otherSearchPanelRootWidthInput) otherSearchPanelRootWidthInput.value = String(defW);
             if (otherSearchPanelRootHeightInput) otherSearchPanelRootHeightInput.value = String(defH);
@@ -45796,12 +45796,12 @@ function saveCanvasOtherSettings(options = {}) {
     const searchPanelRootWidthInput = modal.querySelector('#otherSearchPanelRootWidth');
     const searchPanelRootWidthRaw = searchPanelRootWidthInput
         ? parseInt(searchPanelRootWidthInput.value, 10)
-        : (typeof window.getSearchPanelWidth === 'function' ? window.getSearchPanelWidth('root') : (prevSettings.searchPanelRootWidth || 500));
+        : (typeof window.getSearchPanelWidth === 'function' ? window.getSearchPanelWidth('root') : (prevSettings.searchPanelRootWidth || 560));
     const searchPanelRootWidth = __clampNumber(
         searchPanelRootWidthRaw,
-        360,
+        554,
         1800,
-        500
+        560
     );
     if (searchPanelRootWidthInput && document.activeElement !== searchPanelRootWidthInput) {
         searchPanelRootWidthInput.value = String(searchPanelRootWidth);
