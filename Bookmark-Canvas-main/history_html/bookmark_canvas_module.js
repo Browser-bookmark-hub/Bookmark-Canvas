@@ -9685,9 +9685,16 @@ function __emitCanvasViewSyncSignal(type, sourcePartition, meta = null) {
 function __syncCameraAcrossAllPartitions() {
     const sourcePartition = __getCanvasViewPartitionKey();
     const zoom = Number.isFinite(CanvasState.zoom) ? CanvasState.zoom : 1;
+    const workspace = document.getElementById('canvasWorkspace');
+    const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
+    const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
+    const panX = Number.isFinite(CanvasState.panOffsetX) ? CanvasState.panOffsetX : 0;
+    const panY = Number.isFinite(CanvasState.panOffsetY) ? CanvasState.panOffsetY : 0;
+
     const pan = {
-        x: Number.isFinite(CanvasState.panOffsetX) ? CanvasState.panOffsetX : 0,
-        y: Number.isFinite(CanvasState.panOffsetY) ? CanvasState.panOffsetY : 0
+        x: Math.round(((wsW / 2 - panX) / zoom) * 100) / 100,
+        y: Math.round(((wsH / 2 - panY) / zoom) * 100) / 100,
+        coordType: 'world'
     };
 
     CANVAS_VIEW_PARTITIONS.forEach((partitionKey) => {
@@ -10126,17 +10133,24 @@ function locateToPermanentSection(targetZoom = null) {
         refreshMaximizedNodes();
     }
     savePanOffsetThrottled();
+    __updateLastAutoRecordAnchor();
+}
+
+function __updateLastAutoRecordAnchor() {
+    const workspace = document.getElementById('canvasWorkspace');
+    const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
+    const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
+    const z = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
     CanvasState.lastAutoRecordAnchor = {
-        x: CanvasState.panOffsetX,
-        y: CanvasState.panOffsetY,
-        zoom: CanvasState.zoom,
+        x: Math.round(((wsW / 2 - CanvasState.panOffsetX) / z) * 100) / 100,
+        y: Math.round(((wsH / 2 - CanvasState.panOffsetY) / z) * 100) / 100,
+        zoom: z,
+        coordType: 'world',
         timestamp: Date.now()
     };
     if (canvasViewportAutoRecordTimer) {
         clearTimeout(canvasViewportAutoRecordTimer);
     }
-
-    ;
 }
 
 // 首次打开 Canvas（演示模板）时：定位并放大到「快捷操作」卡片
@@ -10190,15 +10204,7 @@ function locateToIntroCardsCenter() {
     updateCanvasScrollBounds({ initial: false, recomputeBounds: true });
     updateScrollbarThumbs();
     savePanOffsetThrottled();
-    CanvasState.lastAutoRecordAnchor = {
-        x: CanvasState.panOffsetX,
-        y: CanvasState.panOffsetY,
-        zoom: CanvasState.zoom,
-        timestamp: Date.now()
-    };
-    if (canvasViewportAutoRecordTimer) {
-        clearTimeout(canvasViewportAutoRecordTimer);
-    }
+    __updateLastAutoRecordAnchor();
     return true;
 }
 
@@ -10214,8 +10220,16 @@ function navigateToViewport(anchor) {
     const cy = rect.top + rect.height / 2;
     setCanvasZoom(zoom, cx, cy, { recomputeBounds: true });
 
-    CanvasState.panOffsetX = Number(anchor.x) || 0;
-    CanvasState.panOffsetY = Number(anchor.y) || 0;
+    if (anchor.coordType === 'world') {
+        const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
+        const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
+        CanvasState.panOffsetX = wsW / 2 - Number(anchor.x) * zoom;
+        CanvasState.panOffsetY = wsH / 2 - Number(anchor.y) * zoom;
+    } else {
+        // 旧锚点向下兼容：依然走原本的物理屏幕偏移直接赋值
+        CanvasState.panOffsetX = Number(anchor.x) || 0;
+        CanvasState.panOffsetY = Number(anchor.y) || 0;
+    }
 
     applyPanOffset();
     updateCanvasScrollBounds({ initial: false, recomputeBounds: true });
@@ -10223,15 +10237,7 @@ function navigateToViewport(anchor) {
     savePanOffsetThrottled();
     // 视口锚点定位后：刷新视口内节点的低细节/虚拟化状态
     __schedulePostLocateViewportRefresh();
-    CanvasState.lastAutoRecordAnchor = {
-        x: CanvasState.panOffsetX,
-        y: CanvasState.panOffsetY,
-        zoom: CanvasState.zoom,
-        timestamp: Date.now()
-    };
-    if (canvasViewportAutoRecordTimer) {
-        clearTimeout(canvasViewportAutoRecordTimer);
-    }
+    __updateLastAutoRecordAnchor();
     return true;
 }
 
@@ -10281,15 +10287,7 @@ function locateToElement(el, targetZoom = null) {
         refreshMaximizedNodes();
     }
     savePanOffsetThrottled();
-    CanvasState.lastAutoRecordAnchor = {
-        x: CanvasState.panOffsetX,
-        y: CanvasState.panOffsetY,
-        zoom: CanvasState.zoom,
-        timestamp: Date.now()
-    };
-    if (canvasViewportAutoRecordTimer) {
-        clearTimeout(canvasViewportAutoRecordTimer);
-    }
+    __updateLastAutoRecordAnchor();
 }
 
 // 定位到临时栏目（通过 sectionId）
@@ -33505,24 +33503,34 @@ function triggerCanvasViewportAutoRecord(x, y, zoom) {
     }, intervalS * 1000);
 }
 
-function checkAndRecordCanvasViewport(x, y, zoom) {
+function checkAndRecordCanvasViewport(panX, panY, zoom) {
     if (__isCanvasNodeMaximizedActiveForAnchorGuard()) {
         return;
     }
+    const workspace = document.getElementById('canvasWorkspace');
+    const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
+    const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
+    const z = (typeof zoom === 'number' && zoom > 0) ? zoom : 1;
+    const worldX = Math.round(((wsW / 2 - panX) / z) * 100) / 100;
+    const worldY = Math.round(((wsH / 2 - panY) / z) * 100) / 100;
+
     const last = CanvasState.lastAutoRecordAnchor;
     if (last) {
-        const dx = Math.abs(x - last.x);
-        const dy = Math.abs(y - last.y);
-        const dz = Math.abs(zoom - last.zoom);
+        const lastX = last.coordType === 'world' ? last.x : Math.round(((wsW / 2 - (Number(last.x) || 0)) / (last.zoom || 1)) * 100) / 100;
+        const lastY = last.coordType === 'world' ? last.y : Math.round(((wsH / 2 - (Number(last.y) || 0)) / (last.zoom || 1)) * 100) / 100;
+        const dx = Math.abs(worldX - lastX);
+        const dy = Math.abs(worldY - lastY);
+        const dz = Math.abs(z - (last.zoom || 1));
         if (dx <= 1.0 && dy <= 1.0 && dz <= 0.001) {
             return;
         }
     }
 
     const anchor = {
-        x: x,
-        y: y,
-        zoom: zoom,
+        x: worldX,
+        y: worldY,
+        zoom: z,
+        coordType: 'world',
         timestamp: Date.now()
     };
 
@@ -33541,9 +33549,11 @@ function checkAndRecordCanvasViewport(x, y, zoom) {
 
         historyList = historyList.filter(item => {
             if (!item) return false;
-            const dx = Math.abs(item.x - x);
-            const dy = Math.abs(item.y - y);
-            const dz = Math.abs(item.zoom - zoom);
+            const itemX = item.coordType === 'world' ? item.x : Math.round(((wsW / 2 - (Number(item.x) || 0)) / (item.zoom || 1)) * 100) / 100;
+            const itemY = item.coordType === 'world' ? item.y : Math.round(((wsH / 2 - (Number(item.y) || 0)) / (item.zoom || 1)) * 100) / 100;
+            const dx = Math.abs(itemX - worldX);
+            const dy = Math.abs(itemY - worldY);
+            const dz = Math.abs((item.zoom || 1) - z);
             return !(dx <= 1.0 && dy <= 1.0 && dz <= 0.001);
         });
 
@@ -39664,7 +39674,13 @@ function __readCanvasCameraZoomFromStorage(keys) {
     const key = keys && keys.zoomKey;
     if (!key) return null;
     try {
-        const raw = localStorage.getItem(key);
+        let raw = localStorage.getItem(key);
+        // 如果当前分区（如侧边栏）初次打开无独立记录，回退尝试读取另一分区作为初始视角
+        if (!raw && keys.partitionKey) {
+            const fallbackPartition = keys.partitionKey === 'sidepanel' ? 'page' : 'sidepanel';
+            const fallbackKey = __buildCanvasCameraStorageKey(fallbackPartition, 'zoom');
+            if (fallbackKey) raw = localStorage.getItem(fallbackKey);
+        }
         if (!raw) return null;
         const zoom = parseFloat(raw);
         return Number.isFinite(zoom) ? zoom : null;
@@ -39677,14 +39693,20 @@ function __readCanvasCameraPanFromStorage(keys) {
     const key = keys && keys.panKey;
     if (!key) return null;
     try {
-        const raw = localStorage.getItem(key);
+        let raw = localStorage.getItem(key);
+        // 如果当前分区初次打开无独立记录，回退尝试读取另一分区作为初始中心锚点
+        if (!raw && keys.partitionKey) {
+            const fallbackPartition = keys.partitionKey === 'sidepanel' ? 'page' : 'sidepanel';
+            const fallbackKey = __buildCanvasCameraStorageKey(fallbackPartition, 'pan');
+            if (fallbackKey) raw = localStorage.getItem(fallbackKey);
+        }
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object') return null;
-        return {
-            x: Number(parsed.x) || 0,
-            y: Number(parsed.y) || 0
-        };
+        const x = Number.isFinite(parsed.x) ? Number(parsed.x) : (Number.isFinite(parsed.centerX) ? Number(parsed.centerX) : null);
+        const y = Number.isFinite(parsed.y) ? Number(parsed.y) : (Number.isFinite(parsed.centerY) ? Number(parsed.centerY) : null);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x, y, coordType: parsed.coordType };
     } catch (_) {
         return null;
     }
@@ -39706,12 +39728,25 @@ function loadCanvasZoom() {
             setCanvasZoom(CanvasState.baseZoom, null, null, { recomputeBounds: false, skipSave: true, silent: true });
         }
 
-        // 加载平移位置
+        // 加载世界中心点锚点 (x, y) 或向下兼容旧版物理屏幕平移
         const pan = __readCanvasCameraPanFromStorage(keys);
         if (pan) {
-            CanvasState.panOffsetX = pan.x;
-            CanvasState.panOffsetY = pan.y;
+            const currentZoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+            const workspace = document.getElementById('canvasWorkspace');
+            const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
+            const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
+
+            if (pan.coordType === 'world') {
+                // 直接将世界中心 (x, y) 居中对齐到当前视口
+                CanvasState.panOffsetX = wsW / 2 - pan.x * currentZoom;
+                CanvasState.panOffsetY = wsH / 2 - pan.y * currentZoom;
+            } else {
+                // 旧数据向下兼容：老数据无标记，直接恢复物理屏幕平移
+                CanvasState.panOffsetX = pan.x;
+                CanvasState.panOffsetY = pan.y;
+            }
             applyPanOffset();
+            __updateLastAutoRecordAnchor();
         } else {
             // 首次安装，或者无历史平移
             try {
@@ -39728,9 +39763,21 @@ function loadCanvasZoom() {
 }
 
 function savePanOffset() {
+    const workspace = document.getElementById('canvasWorkspace');
+    const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
+    const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
+    const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
+    const panX = Number.isFinite(CanvasState.panOffsetX) ? CanvasState.panOffsetX : 0;
+    const panY = Number.isFinite(CanvasState.panOffsetY) ? CanvasState.panOffsetY : 0;
+
+    // 视口中心在画布世界坐标系中的真实锚点 (x, y)
+    const x = (wsW / 2 - panX) / zoom;
+    const y = (wsH / 2 - panY) / zoom;
+
     saveViewState('camera', 'pan', {
-        x: CanvasState.panOffsetX,
-        y: CanvasState.panOffsetY
+        x: Number.isFinite(x) ? Math.round(x * 100) / 100 : 0,
+        y: Number.isFinite(y) ? Math.round(y * 100) / 100 : 0,
+        coordType: 'world'
     });
 }
 
@@ -39750,6 +39797,7 @@ function saveZoomThrottled(zoom) {
     }
     zoomSaveTimeout = setTimeout(() => {
         saveViewState('camera', 'zoom', zoom, { asJSON: false });
+        savePanOffset();
         zoomSaveTimeout = null;
     }, 160);
 }

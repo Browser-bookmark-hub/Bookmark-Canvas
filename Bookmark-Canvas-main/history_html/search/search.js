@@ -10260,6 +10260,9 @@ function getCanvasAnchorSearchItems() {
     const isZh = (typeof currentLang !== 'undefined' ? currentLang : getCurrentLangSafe()) === 'zh_CN';
     const isEn = !isZh;
     const items = [];
+    const workspace = document.getElementById('canvasWorkspace');
+    const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
+    const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
 
     // 1. 固定/手动锚点槽位 (Manual Anchor Slots)
     const slots = getCanvasManualAnchorSlotsSafe();
@@ -10279,8 +10282,15 @@ function getCanvasAnchorSearchItems() {
         } else {
             title = rawName;
         }
-        const zoomPercent = formatSearchAnchorZoomPercent(slot.zoom);
-        const coordText = `X: ${Math.round(slot.x || 0)} | Y: ${Math.round(slot.y || 0)} | ${zoomPercent}`;
+        const zoom = (Number.isFinite(Number(slot.zoom)) && Number(slot.zoom) > 0) ? Number(slot.zoom) : 1;
+        const zoomPercent = formatSearchAnchorZoomPercent(zoom);
+        const isWorld = slot.coordType === 'world';
+        const rawX = Number(slot.x) || 0;
+        const rawY = Number(slot.y) || 0;
+        // 搜索索引全面归一化为世界中心坐标：若为旧版本屏幕偏移，按公式转换为世界坐标
+        const worldX = isWorld ? rawX : Math.round(((wsW / 2 - rawX) / zoom) * 100) / 100;
+        const worldY = isWorld ? rawY : Math.round(((wsH / 2 - rawY) / zoom) * 100) / 100;
+        const coordText = `X: ${Math.round(worldX)} | Y: ${Math.round(worldY)} | ${zoomPercent}`;
         const timeText = slot.timestamp ? formatSearchAnchorTime(slot.timestamp, isEn) : '';
         const id = `manual-anchor-${idx}`;
 
@@ -10292,9 +10302,10 @@ function getCanvasAnchorSearchItems() {
             slotNumber: slotNum,
             title,
             rawName,
-            x: Number.isFinite(Number(slot.x)) ? Number(slot.x) : 0,
-            y: Number.isFinite(Number(slot.y)) ? Number(slot.y) : 0,
-            zoom: (Number.isFinite(Number(slot.zoom)) && Number(slot.zoom) > 0) ? Number(slot.zoom) : 1,
+            x: worldX,
+            y: worldY,
+            zoom,
+            coordType: 'world',
             zoomPercent,
             coordText,
             timeText,
@@ -10314,8 +10325,15 @@ function getCanvasAnchorSearchItems() {
     const historyList = getCanvasAutoAnchorHistorySafe();
     historyList.forEach((histItem, idx) => {
         if (!histItem || typeof histItem !== 'object') return;
-        const zoomPercent = formatSearchAnchorZoomPercent(histItem.zoom);
-        const coordText = `X: ${Math.round(histItem.x || 0)} | Y: ${Math.round(histItem.y || 0)} | ${zoomPercent}`;
+        const zoom = (Number.isFinite(Number(histItem.zoom)) && Number(histItem.zoom) > 0) ? Number(histItem.zoom) : 1;
+        const zoomPercent = formatSearchAnchorZoomPercent(zoom);
+        const isWorld = histItem.coordType === 'world';
+        const rawX = Number(histItem.x) || 0;
+        const rawY = Number(histItem.y) || 0;
+        // 自动历史同样归一化为世界中心坐标
+        const worldX = isWorld ? rawX : Math.round(((wsW / 2 - rawX) / zoom) * 100) / 100;
+        const worldY = isWorld ? rawY : Math.round(((wsH / 2 - rawY) / zoom) * 100) / 100;
+        const coordText = `X: ${Math.round(worldX)} | Y: ${Math.round(worldY)} | ${zoomPercent}`;
         const timeText = histItem.timestamp ? formatSearchAnchorTime(histItem.timestamp, isEn) : '';
         const defaultTimeTitle = timeText || (isZh ? `自动锚点 ${idx + 1}` : `Auto Anchor ${idx + 1}`);
         const rawName = String(histItem.name || '').trim();
@@ -10337,9 +10355,10 @@ function getCanvasAnchorSearchItems() {
             historyIndex: idx,
             title,
             rawName,
-            x: Number.isFinite(Number(histItem.x)) ? Number(histItem.x) : 0,
-            y: Number.isFinite(Number(histItem.y)) ? Number(histItem.y) : 0,
-            zoom: (Number.isFinite(Number(histItem.zoom)) && Number(histItem.zoom) > 0) ? Number(histItem.zoom) : 1,
+            x: worldX,
+            y: worldY,
+            zoom,
+            coordType: 'world',
             zoomPercent,
             coordText,
             timeText,
@@ -10416,7 +10435,8 @@ async function navigateToCanvasAnchorTarget(item) {
         const targetViewport = {
             x: Number(item.x) || 0,
             y: Number(item.y) || 0,
-            zoom: Number(item.zoom) || 1
+            zoom: Number(item.zoom) || 1,
+            coordType: 'world'
         };
         const ok = window.CanvasModule.navigateToViewport(targetViewport);
         if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refreshNavHistoryPanel === 'function') {
