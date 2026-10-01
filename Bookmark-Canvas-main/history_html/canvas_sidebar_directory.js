@@ -4406,15 +4406,23 @@
 
       const state = global.CanvasModule && global.CanvasModule.CanvasState;
       if (!state) return;
+
+      const workspace = document.getElementById('canvasWorkspace');
+      const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
+      const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
+      const z = (state.zoom && state.zoom > 0) ? state.zoom : 1;
+      const worldX = Math.round(((wsW / 2 - state.panOffsetX) / z) * 100) / 100;
+      const worldY = Math.round(((wsH / 2 - state.panOffsetY) / z) * 100) / 100;
       
       const existingName = slots[index] ? slots[index].name : null;
       const defaultName = existingName || (isEn ? `Slot ${index + 1}` : `槽位 ${index + 1}`);
       
       slots[index] = {
         name: defaultName,
-        x: state.panOffsetX,
-        y: state.panOffsetY,
-        zoom: state.zoom,
+        x: worldX,
+        y: worldY,
+        zoom: z,
+        coordType: 'world',
         timestamp: Date.now()
       };
       highlightSlotIndex = index;
@@ -5176,7 +5184,8 @@
             slot && 
             Math.round(slot.x) === Math.round(item.x) && 
             Math.round(slot.y) === Math.round(item.y) && 
-            slot.zoom === item.zoom
+            slot.zoom === item.zoom &&
+            (slot.coordType || '') === (item.coordType || '')
           );
           
           if (duplicate) {
@@ -5232,6 +5241,7 @@
             x: item.x,
             y: item.y,
             zoom: item.zoom,
+            ...(item.coordType ? { coordType: item.coordType } : {}),
             timestamp: Date.now()
           };
           
