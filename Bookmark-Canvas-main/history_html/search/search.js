@@ -763,8 +763,9 @@ function toggleSearchPanelViewMode() {
  * 搜索候选面板宽度配置与常量（网格、列表与表格模式完全独立记忆）
  */
 const SEARCH_PANEL_WIDTH_MIN = 360;
+const SEARCH_PANEL_WIDTH_MIN_ROOT = 554;
 const SEARCH_PANEL_WIDTH_MAX = 1800;
-const SEARCH_PANEL_WIDTH_DEFAULT_ROOT = 500;
+const SEARCH_PANEL_WIDTH_DEFAULT_ROOT = 560;
 const SEARCH_PANEL_WIDTH_DEFAULT_GRID = 920;
 const SEARCH_PANEL_WIDTH_DEFAULT_TABLE = 1080;
 const SEARCH_PANEL_WIDTH_PREF_KEY_ROOT = 'canvasSearchPanelWidth_root';
@@ -776,11 +777,12 @@ const SEARCH_PANEL_WIDTH_PREF_KEY_LEGACY = 'canvasSearchPanelWidth';
 function getSearchPanelWidth(mode) {
     const targetMode = mode || getSearchPanelMode();
     if (targetMode === 'root') {
+        const rootMinW = SEARCH_PANEL_WIDTH_MIN_ROOT || 554;
         try {
             const saved = localStorage.getItem(SEARCH_PANEL_WIDTH_PREF_KEY_ROOT);
             if (saved !== null) {
                 const val = parseInt(saved, 10);
-                if (Number.isFinite(val) && val >= SEARCH_PANEL_WIDTH_MIN && val <= SEARCH_PANEL_WIDTH_MAX) {
+                if (Number.isFinite(val) && val >= rootMinW && val <= SEARCH_PANEL_WIDTH_MAX) {
                     return val;
                 }
             }
@@ -789,14 +791,14 @@ function getSearchPanelWidth(mode) {
             if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
                 const other = window.CanvasState.otherSettings;
                 if (typeof other.searchPanelRootWidth === 'number' && Number.isFinite(other.searchPanelRootWidth)) {
-                    return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, other.searchPanelRootWidth));
+                    return Math.max(rootMinW, Math.min(SEARCH_PANEL_WIDTH_MAX, other.searchPanelRootWidth));
                 }
             }
             const rawOther = localStorage.getItem('canvas_other_settings');
             if (rawOther) {
                 const parsedOther = JSON.parse(rawOther);
                 if (parsedOther && typeof parsedOther.searchPanelRootWidth === 'number' && Number.isFinite(parsedOther.searchPanelRootWidth)) {
-                    return Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, parsedOther.searchPanelRootWidth));
+                    return Math.max(rootMinW, Math.min(SEARCH_PANEL_WIDTH_MAX, parsedOther.searchPanelRootWidth));
                 }
             }
         } catch (_) { }
@@ -962,9 +964,11 @@ function applySearchPanelWidth(width, panel, mode, options = {}) {
 
     let effectiveWidth = null;
     if (rawVal !== null && Number.isFinite(rawVal)) {
-        effectiveWidth = Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(temporaryLimit, Math.round(rawVal)));
+        const minW = (targetMode === 'root') ? (SEARCH_PANEL_WIDTH_MIN_ROOT || 554) : SEARCH_PANEL_WIDTH_MIN;
+        effectiveWidth = Math.max(minW, Math.min(temporaryLimit, Math.round(rawVal)));
     } else if (targetMode === 'root') {
-        effectiveWidth = Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(temporaryLimit, SEARCH_PANEL_WIDTH_DEFAULT_ROOT));
+        const minW = SEARCH_PANEL_WIDTH_MIN_ROOT || 554;
+        effectiveWidth = Math.max(minW, Math.min(temporaryLimit, SEARCH_PANEL_WIDTH_DEFAULT_ROOT));
     } else if (targetMode === 'table') {
         effectiveWidth = Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(temporaryLimit, SEARCH_PANEL_WIDTH_DEFAULT_TABLE));
     } else if (targetMode === 'grid') {
@@ -1012,8 +1016,9 @@ function applySearchPanelWidth(width, panel, mode, options = {}) {
 function setSearchPanelWidth(width, options = {}) {
     const targetMode = options.mode || getSearchPanelMode();
     const rawVal = width !== null ? Math.round(Number(width)) : null;
+    const minW = (targetMode === 'root') ? (SEARCH_PANEL_WIDTH_MIN_ROOT || 554) : SEARCH_PANEL_WIDTH_MIN;
     const preferred = (rawVal !== null && Number.isFinite(rawVal))
-        ? Math.max(SEARCH_PANEL_WIDTH_MIN, Math.min(SEARCH_PANEL_WIDTH_MAX, rawVal))
+        ? Math.max(minW, Math.min(SEARCH_PANEL_WIDTH_MAX, rawVal))
         : null;
     const effective = applySearchPanelWidth(preferred, null, targetMode);
 
@@ -1984,6 +1989,9 @@ function hideSearchResultsPanel() {
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
     if (typeof clearSearchPanelAutoInfiniteScroll === 'function') clearSearchPanelAutoInfiniteScroll();
     if (typeof destroyCanvasSearchTabulator === 'function') destroyCanvasSearchTabulator();
+    try {
+        document.querySelectorAll('.search-hint-help-popover.show').forEach(p => p.classList.remove('show'));
+    } catch (_) { }
     const panel = getSearchResultsPanel();
     if (panel) {
         if (searchPanelShowFrame) {
@@ -2401,13 +2409,37 @@ async function activateSearchResultAtIndex(index) {
     await activateCanvasSearchResultAtIndex(index);
 }
 
-// ==================== 事件处理 ====================
+let lastRecordedJumpQuery = null;
+let lastRecordedJumpTime = 0;
+
+/**
+ * 记录跳转搜索历史（严格模式：仅在用户点击条目/单元格/表格行实际跳转时记录）
+ * 无论从网格卡片/徽章、表格行/单元格、面包屑或键盘回车激活跳转，均统一在此记录
+ */
+function recordCurrentSearchJumpHistory() {
+    try {
+        const input = document.getElementById('searchInput');
+        const q = (input && typeof input.value === 'string' && input.value.trim())
+            ? input.value.trim()
+            : String((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '').trim();
+        const now = Date.now();
+        if (q && (q !== lastRecordedJumpQuery || now - lastRecordedJumpTime > 500)) {
+            lastRecordedJumpQuery = q;
+            lastRecordedJumpTime = now;
+            const currentMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
+            if (typeof recordSearchHistory === 'function') {
+                recordSearchHistory(q, currentMode, { trigger: 'jump' });
+            }
+        }
+    } catch (_) { }
+}
 
 /**
  * 激活搜索结果（根据当前视图调用对应的激活函数）
  * @param {number} index - 结果索引
  */
 function activateSearchResult(index) {
+    recordCurrentSearchJumpHistory();
     activateCanvasSearchResultAtIndex(index);
 }
 
@@ -2640,7 +2672,6 @@ async function handleSearchInputFocus(e) {
         if (isSidePanelModeInSearch()) {
             setSidePanelSearchExpanded(true);
         }
-        
         // 确保主动加载当前激活模式的索引和坐标映射
         const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
         if (typeof ensureIndexForModeLoaded === 'function') {
@@ -3080,6 +3111,7 @@ function handleSearchResultsPanelClick(e) {
                 const folderName = pathPartEl.dataset.folderName || pathPartEl.textContent.trim();
                 const target = resolveBookmarkAncestorFolder(item, folderName);
                 if (target) {
+                    recordCurrentSearchJumpHistory();
                     navigateToBookmarkAncestorFolder(target);
                     return;
                 }
@@ -3218,6 +3250,7 @@ function handleSearchResultsPanelClick(e) {
         }) || null;
 
         if (targetItem) {
+            recordCurrentSearchJumpHistory();
             try {
                 hideSearchResultsPanel();
                 const inputEl = document.getElementById('searchInput');
@@ -3427,6 +3460,7 @@ function handleSearchResultsPanelClick(e) {
         }
 
         // 1b. Determine Action
+        recordCurrentSearchJumpHistory();
         hideSearchResultsPanel();
         try {
             const inputEl = document.getElementById('searchInput');
@@ -5003,6 +5037,7 @@ function getOrCreateGridGroupPopover() {
                         const folderName = pathPartEl.dataset.folderName || pathPartEl.textContent.trim();
                         const target = resolveBookmarkAncestorFolder(childItem, folderName);
                         if (target) {
+                            recordCurrentSearchJumpHistory();
                             navigateToBookmarkAncestorFolder(target);
                             return;
                         }
@@ -5012,6 +5047,7 @@ function getOrCreateGridGroupPopover() {
 
                 const childRow = e.target.closest('.canvas-grid-group-child-row, [data-bookmark-child-id]');
                 if (childRow) {
+                    recordCurrentSearchJumpHistory();
                     const childId = childRow.getAttribute('data-bookmark-child-id') || childRow.getAttribute('data-loc-id');
                     const childSource = childRow.getAttribute('data-loc-source') || 'permanent';
                     const childSection = childRow.getAttribute('data-loc-section') || '';
@@ -5377,6 +5413,7 @@ function getOrCreateGridDetailsBubble() {
                         const folderName = pathPartEl.dataset.folderName || pathPartEl.textContent.trim();
                         const target = resolveBookmarkAncestorFolder(targetItem, folderName);
                         if (target) {
+                            recordCurrentSearchJumpHistory();
                             hideGridDetailsBubble();
                             hideSearchResultsPanel();
                             try {
@@ -5460,6 +5497,7 @@ function getOrCreateGridDetailsBubble() {
                 if (locChip && !locChip.classList.contains('search-loc-chip-disabled')) {
                     e.preventDefault();
                     e.stopPropagation();
+                    recordCurrentSearchJumpHistory();
                     const locId = locChip.getAttribute('data-loc-id');
                     const locSource = locChip.getAttribute('data-loc-source');
                     const locSection = locChip.getAttribute('data-loc-section');
@@ -7252,6 +7290,7 @@ function initSearchEvents() {
     // Outside click: use the same capture+guard strategy as history.js
     if (!document.documentElement.hasAttribute('data-search-outside-bound')) {
         document.addEventListener('click', handleSearchOutsideClick, true);
+
         document.documentElement.setAttribute('data-search-outside-bound', 'true');
     }
 
@@ -7971,12 +8010,14 @@ async function setSearchMode(modeKey, options = {}) {
     }
 
     const previousModeKey = searchUiState.activeMode;
-    if (previousModeKey !== modeKey && typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
-        const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
-        exitCanvasSearchSelectionMode({
-            silent: false,
-            message: isZh ? '切换模式已自动退出勾选模式' : 'Switched mode: exited selection mode'
-        });
+    if (previousModeKey !== modeKey) {
+        if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
+            const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+            exitCanvasSearchSelectionMode({
+                silent: false,
+                message: isZh ? '切换模式已自动退出勾选模式' : 'Switched mode: exited selection mode'
+            });
+        }
     }
     searchUiState.activeMode = modeKey;
     searchUiState.showFullscreenDescriptionOthers = false;
@@ -8136,6 +8177,9 @@ function toggleSearchModeMenu(show) {
             modeMenuHideTimer = null;
         }
         try {
+            hideSearchResultsPanel();
+        } catch (_) { }
+        try {
             const dock = document.body && document.body.classList.contains('header-dock-bottom')
                 ? 'bottom'
                 : 'top';
@@ -8150,6 +8194,9 @@ function toggleSearchModeMenu(show) {
             }
         });
     } else {
+        try {
+            document.querySelectorAll('.search-hint-help-popover.show').forEach(p => p.classList.remove('show'));
+        } catch (_) { }
         menu.classList.remove('visible');
         if (menu.dataset.menuType === 'mode') {
             if (modeMenuHideTimer) clearTimeout(modeMenuHideTimer);
@@ -8159,7 +8206,7 @@ function toggleSearchModeMenu(show) {
                     menu.setAttribute('hidden', '');
                     menu.dataset.menuType = '';
                 }
-            }, 160);
+            }, 60);
         } else {
             menu.setAttribute('hidden', '');
             menu.dataset.menuType = '';
@@ -8422,7 +8469,37 @@ function getSearchHintHelpContent() {
     return { text, html };
 }
 
-function bindSearchHintHelpButton(helpBtn, helpHtml) {
+function getSearchHistoryHelpContent(activeMode) {
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const limit = getSearchHistoryLimit(activeMode);
+    const text = isZh
+        ? `记录上限：${limit}条（1~50）。命中规则：点击表格或网格结果，跳转后记录。`
+        : `Limit: ${limit} items (1-50). Hit rule: recorded after clicking results to jump.`;
+
+    const limitLabel = isZh ? '记录上限：' : 'Limit:';
+    const limitUnit = isZh ? '条（1~50）' : 'items (1-50)';
+    const hitLabel = isZh ? '命中规则：' : 'Hit rules:';
+    const hitDesc = isZh
+        ? '点击表格或网格结果，跳转后记录。'
+        : 'Recorded after clicking results to jump.';
+
+    const html = `
+        <div class="search-hint-help-row search-history-help-row search-history-help-limit-row" style="margin-bottom:6px;">
+            <span class="search-hint-help-label">${escapeHtml(limitLabel)}</span>
+            <span class="search-hint-help-value">
+                <input type="number" class="search-history-limit-input" value="${limit}" min="1" max="50" step="1" aria-label="${isZh ? '最多保留条数' : 'Max history items'}">
+                <span>${escapeHtml(limitUnit)}</span>
+            </span>
+        </div>
+        <div class="search-hint-help-row search-history-help-row">
+            <span class="search-hint-help-label">${escapeHtml(hitLabel)}</span>
+            <span class="search-hint-help-value">${escapeHtml(hitDesc)}</span>
+        </div>
+    `;
+    return { text, html };
+}
+
+function bindSearchHintHelpButton(helpBtn, helpHtml, customId = 'searchHintPopover', onShow = null) {
     if (!helpBtn) return;
     const getOverlayContainer = () => {
         if (typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function') {
@@ -8439,11 +8516,11 @@ function bindSearchHintHelpButton(helpBtn, helpHtml) {
     };
 
     const ensurePopover = () => {
-        let pop = document.getElementById('searchHintPopover');
+        let pop = document.getElementById(customId);
         const targetParent = getOverlayContainer();
         if (!pop) {
             pop = document.createElement('div');
-            pop.id = 'searchHintPopover';
+            pop.id = customId;
             pop.className = 'perf-help-popover search-hint-help-popover';
             pop.innerHTML = '<div class="perf-help-popover-content"></div>';
             targetParent.appendChild(pop);
@@ -8454,22 +8531,42 @@ function bindSearchHintHelpButton(helpBtn, helpHtml) {
     };
 
     const helpPopover = ensurePopover();
-    const contentEl = helpPopover.querySelector('.perf-help-popover-content');
-    if (contentEl) contentEl.innerHTML = helpHtml;
 
-    let outsideHandler = null;
     const hideHelp = () => {
         helpPopover.classList.remove('show');
-        if (outsideHandler) {
-            document.removeEventListener('mousedown', outsideHandler, true);
-            outsideHandler = null;
+        helpPopover._currentAnchor = null;
+        if (helpPopover._outsideHandler) {
+            document.removeEventListener('mousedown', helpPopover._outsideHandler, true);
+            helpPopover._outsideHandler = null;
         }
     };
     const showHelp = () => {
+        // 关闭可能已打开的其他 search-hint-help-popover
+        document.querySelectorAll('.search-hint-help-popover.show').forEach(p => {
+            if (p !== helpPopover) p.classList.remove('show');
+        });
+
         const targetParent = getOverlayContainer();
         if (helpPopover.parentElement !== targetParent) {
             targetParent.appendChild(helpPopover);
         }
+
+        // 动态注入内容，确保内容最新
+        const contentEl = helpPopover.querySelector('.perf-help-popover-content');
+        if (contentEl) {
+            const resolvedHtml = typeof helpHtml === 'function' ? helpHtml() : helpHtml;
+            contentEl.innerHTML = resolvedHtml;
+        }
+
+        if (typeof onShow === 'function') {
+            try {
+                onShow(helpPopover);
+            } catch (err) {
+                console.error('[Search] help onShow error:', err);
+            }
+        }
+
+        helpPopover._currentAnchor = helpBtn;
         helpPopover.classList.add('show');
         helpPopover.style.visibility = 'hidden';
         helpPopover.style.width = 'max-content';
@@ -8482,29 +8579,250 @@ function bindSearchHintHelpButton(helpBtn, helpHtml) {
         const maxLeft = window.innerWidth - popRect.width - margin;
         left = Math.max(margin, Math.min(maxLeft, left));
 
-        const top = Math.min(window.innerHeight - popRect.height - margin, rect.bottom + 8);
+        // 智能上下方向定位：下方空间不足且上方空间更充足时向上弹出，否则向下弹出
+        let top;
+        const spaceBelow = window.innerHeight - rect.bottom - margin;
+        const spaceAbove = rect.top - margin;
+        if (spaceBelow < popRect.height && spaceAbove >= popRect.height) {
+            top = Math.max(margin, rect.top - popRect.height - 8);
+        } else {
+            top = Math.min(window.innerHeight - popRect.height - margin, rect.bottom + 8);
+        }
 
         helpPopover.style.left = left + 'px';
         helpPopover.style.top = top + 'px';
         helpPopover.style.visibility = '';
         helpPopover.classList.add('show');
 
-        if (!outsideHandler) {
-            outsideHandler = (ev) => {
-                if (helpBtn.contains(ev.target) || helpPopover.contains(ev.target)) return;
+        if (!helpPopover._outsideHandler) {
+            helpPopover._outsideHandler = (ev) => {
+                const isAnchor = (helpPopover._currentAnchor && helpPopover._currentAnchor.contains(ev.target)) || (helpBtn && helpBtn.contains(ev.target));
+                const isPop = helpPopover.contains(ev.target);
+                if (isAnchor || isPop) return;
                 hideHelp();
             };
-            document.addEventListener('mousedown', outsideHandler, true);
+            document.addEventListener('mousedown', helpPopover._outsideHandler, true);
         }
     };
 
-    helpPopover.classList.remove('show');
+    if (helpPopover.classList.contains('show')) {
+        helpPopover._currentAnchor = helpBtn;
+    } else {
+        helpPopover.classList.remove('show');
+    }
+
     helpBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (helpPopover.classList.contains('show')) hideHelp();
-        else showHelp();
+        if (helpPopover.classList.contains('show') && helpPopover._currentAnchor === helpBtn) {
+            hideHelp();
+        } else {
+            showHelp();
+        }
     };
+}
+
+function escapeSearchHtmlAttr(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function buildSearchHistorySectionHtml(activeMode, options = {}) {
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const allowHide = options.allowHide !== false;
+    const historyList = getSearchHistoryList(activeMode);
+    const historyHelp = getSearchHistoryHelpContent(activeMode);
+
+    const clearTitle = isZh ? '清空全部历史' : 'Clear all';
+    const historyTitle = isZh ? '最近搜索' : 'Recent Searches';
+    const helpBtnTitle = isZh ? '搜索历史说明与上限设置' : 'History explanation & limit';
+    const historyHideLabel = isZh ? '不再出现' : "Don't show";
+
+    const hideBtnHtml = allowHide ? `
+        <button type="button" class="search-history-hide-btn canvas-history-hide-btn" title="${isZh ? '关闭/不再显示搜索历史' : 'Hide recent searches'}">
+            ${escapeHtml(historyHideLabel)}
+        </button>
+    ` : '';
+
+    let itemsBodyHtml = '';
+    if (historyList.length > 0) {
+        const historyItemsHtml = historyList.map(query => {
+            const escapedText = escapeHtml(query);
+            const escapedAttr = escapeSearchHtmlAttr(query);
+            return `
+                <div class="search-history-item" data-history-query="${escapedAttr}" title="${escapedAttr}">
+                    <span class="search-history-item-text">${escapedText}</span>
+                    <button type="button" class="search-history-item-del-btn" data-history-query="${escapedAttr}" aria-label="${isZh ? '删除此条' : 'Delete'}" title="${isZh ? '删除' : 'Delete'}">
+                        <i class="fas fa-times" aria-hidden="true"></i>
+                    </button>
+                </div>
+            `;
+        }).join('');
+        itemsBodyHtml = `<div class="search-history-list">${historyItemsHtml}</div>`;
+    } else {
+        itemsBodyHtml = `
+            <div class="search-history-empty" style="padding:6px 10px 8px; font-size:11px; color:var(--text-tertiary); user-select:none;">
+                ${isZh ? '暂无搜索历史' : 'No recent searches'}
+            </div>
+        `;
+    }
+
+    const clearBtnHtml = historyList.length > 0 ? `
+        <button type="button" class="search-history-btn search-history-clear-btn" aria-label="${escapeHtml(clearTitle)}" title="${escapeHtml(clearTitle)}">
+            <i class="fas fa-trash-alt" aria-hidden="true"></i>
+        </button>
+    ` : '';
+
+    const closeBtnTitle = isZh ? '关闭' : 'Close';
+    const closeBtnHtml = `
+        <button type="button" class="search-history-btn search-history-close-btn" aria-label="${escapeHtml(closeBtnTitle)}" title="${escapeHtml(closeBtnTitle)}">
+            <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+    `;
+
+    return `
+        <div class="search-history-section">
+            <div class="search-history-header">
+                <div class="search-history-header-left">
+                    <i class="fas fa-history search-history-header-icon" aria-hidden="true"></i>
+                    <span class="search-history-header-title">${escapeHtml(historyTitle)}</span>
+                    <button type="button" class="search-hint-help-btn search-history-help-btn perf-help-btn" aria-label="${escapeHtml(historyHelp.text)}" title="${escapeHtml(helpBtnTitle)}">
+                        <i class="fas fa-question-circle"></i>
+                    </button>
+                </div>
+                <div class="search-history-header-right">
+                    ${clearBtnHtml}
+                    ${hideBtnHtml}
+                    ${closeBtnHtml}
+                </div>
+            </div>
+            ${itemsBodyHtml}
+        </div>
+    `;
+}
+
+function bindSearchHistoryEvents(container, activeMode, onUpdate) {
+    if (!container) return;
+
+    // 搜索历史说明与上限设置帮助按钮
+    const helpBtn = container.querySelector('.search-history-help-btn');
+    if (helpBtn) {
+        bindSearchHintHelpButton(
+            helpBtn,
+            () => getSearchHistoryHelpContent(activeMode).html,
+            'searchHistoryHelpPopover',
+            (popover) => {
+                const limitInput = popover.querySelector('.search-history-limit-input');
+                if (!limitInput) return;
+                let isSaving = false;
+                const saveLimit = () => {
+                    if (isSaving) return;
+                    const val = parseInt(limitInput.value, 10);
+                    if (Number.isFinite(val) && val >= 1) {
+                        const clamped = Math.max(1, Math.min(50, val));
+                        limitInput.value = clamped;
+                        const curLimit = getSearchHistoryLimit(activeMode);
+                        if (clamped !== curLimit) {
+                            isSaving = true;
+                            try {
+                                setSearchHistoryLimit(clamped, activeMode);
+                                if (typeof onUpdate === 'function') onUpdate('limit');
+                            } finally {
+                                isSaving = false;
+                            }
+                        }
+                    } else {
+                        limitInput.value = getSearchHistoryLimit(activeMode);
+                    }
+                };
+                limitInput.addEventListener('mousedown', (ev) => ev.stopPropagation());
+                limitInput.addEventListener('click', (ev) => ev.stopPropagation());
+                limitInput.addEventListener('change', saveLimit);
+                limitInput.addEventListener('blur', saveLimit);
+                limitInput.addEventListener('keydown', (ev) => {
+                    ev.stopPropagation();
+                    if (ev.key === 'Enter') {
+                        ev.preventDefault();
+                        saveLimit();
+                        limitInput.blur();
+                    }
+                });
+            }
+        );
+    }
+
+    // 搜索历史项点击 -> 回填搜索框并立即触发搜索
+    container.querySelectorAll('.search-history-item').forEach((item) => {
+        item.addEventListener('mousedown', (ev) => {
+            if (ev.target.closest('.search-history-item-del-btn')) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const query = item.getAttribute('data-history-query');
+            if (!query) return;
+            const input = document.getElementById('searchInput');
+            if (input) {
+                if (typeof toggleSearchModeMenu === 'function') toggleSearchModeMenu(false);
+                input.value = query;
+                input.focus();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                if (typeof handleSearch === 'function') {
+                    handleSearch({ target: input });
+                }
+            }
+        });
+    });
+
+    // 搜索历史单项右上角删除按钮
+    container.querySelectorAll('.search-history-item-del-btn').forEach((delBtn) => {
+        delBtn.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const query = delBtn.getAttribute('data-history-query');
+            if (query) {
+                removeSearchHistoryItem(query, activeMode);
+                if (typeof onUpdate === 'function') onUpdate('delete');
+            }
+        });
+    });
+
+    // 搜索历史清空按钮
+    const clearBtn = container.querySelector('.search-history-clear-btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            clearAllSearchHistory(activeMode);
+            if (typeof onUpdate === 'function') onUpdate('clear');
+        });
+    }
+
+    // 搜索历史“不再出现”按钮（仅在允许关闭的建议面板中存在）
+    const historyHideBtn = container.querySelector('.canvas-history-hide-btn');
+    if (historyHideBtn) {
+        historyHideBtn.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setSearchHistoryEnabled(false, activeMode);
+            if (typeof onUpdate === 'function') onUpdate('hide');
+        });
+    }
+
+    // 搜索历史区域关闭按钮（在删除按钮右侧，关闭整个页面/浮层：包含模式选择和最近搜索）
+    container.querySelectorAll('.search-history-close-btn').forEach((closeBtn) => {
+        const doClose = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (typeof toggleSearchModeMenu === 'function') toggleSearchModeMenu(false);
+            if (typeof hideSearchResultsPanel === 'function') hideSearchResultsPanel();
+            if (typeof onUpdate === 'function') onUpdate('close');
+        };
+        closeBtn.addEventListener('mousedown', doClose);
+        closeBtn.addEventListener('click', doClose);
+    });
 }
 
 function renderSearchModeMenu() {
@@ -8514,28 +8832,16 @@ function renderSearchModeMenu() {
     // Guard: only render when menu is in mode state
     if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
 
-    // Keep the menu hint short (canvas users open this mainly to switch modes).
-    const hintText = currentLang === 'zh_CN'
-        ? '↑/↓ 切换模式，Enter 选择，→ 返回输入'
-        : '↑/↓ switch mode, Enter select, → back to input';
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const isBottomDock = (document.body && document.body.classList.contains('header-dock-bottom'));
+    const modeTitle = isZh ? '模式切换' : 'Switch Mode';
     const hintHelp = getSearchHintHelpContent();
-    const closeLabel = currentLang === 'zh_CN' ? '关闭模式面板' : 'Close mode panel';
+    const activeMode = searchUiState.activeMode || 'bookmark';
 
-    let html = `<div class="search-mode-hint" style="position:relative; text-align:left; display:flex; align-items:center; gap:6px; padding-right:36px;">
-        <span>${escapeHtml(hintText)}</span>
-        <button type="button" class="search-hint-help-btn search-mode-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}">
-            <i class="fas fa-question-circle"></i>
-        </button>
-        <button type="button" class="search-mode-menu-close-btn" aria-label="${escapeHtml(closeLabel)}" title="${escapeHtml(closeLabel)}">
-            <i class="fas fa-times" aria-hidden="true"></i>
-        </button>
-    </div>`;
-
+    // 1. 模式选择面板（永久常驻入口，标题右侧仅保留帮助问号，无冗余说明文字）
     const modes = getCanvasModesInOrder();
-
-    html += modes.map(mode => {
-        const isActive = mode.key === searchUiState.activeMode;
-        const isZh = currentLang === 'zh_CN';
+    const modesListHtml = modes.map(mode => {
+        const isActive = mode.key === activeMode;
         const desc = isZh ? mode.desc : mode.descEn;
 
         return `
@@ -8548,8 +8854,51 @@ function renderSearchModeMenu() {
             </div>
         `;
     }).join('');
-    menu.innerHTML = html;
+
+    const modeSectionHtml = `
+        <div class="search-mode-menu-section">
+            <div class="search-suggestions-header search-mode-menu-header">
+                <div class="search-mode-header-left">
+                    <i class="fas fa-exchange-alt search-mode-header-icon" aria-hidden="true"></i>
+                    <span class="search-mode-header-title">${escapeHtml(modeTitle)}</span>
+                    <button type="button" class="search-hint-help-btn search-mode-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}" title="${isZh ? '模式切换说明' : 'Mode explanation'}">
+                        <i class="fas fa-question-circle"></i>
+                    </button>
+                </div>
+            </div>
+            <div style="padding:2px 0;">
+                ${modesListHtml}
+            </div>
+        </div>
+    `;
+
+    // 2. 记录面板（永久常驻入口，allowHide: false，绝对不展示“不再出现”按钮）
+    const historySectionHtml = buildSearchHistorySectionHtml(activeMode, { allowHide: false });
+
+    // 3. 组合分块：包含模式选择面板与记录面板，严格遵循“最贴近搜索框原则”排列（与临时建议面板保持完全一致）
+    const dividerHtml = `<div class="search-empty-state-divider"></div>`;
+    let sections = [];
+    if (isBottomDock) {
+        // 底部停靠：面板向上展开，搜索框在最底端。
+        // “模式切换”置于面板上方，“最近搜索”置于面板下方（贴近底端搜索框）。
+        sections = [modeSectionHtml, dividerHtml, historySectionHtml];
+    } else {
+        // 顶部停靠：面板向下展开，搜索框在最顶端。
+        // “最近搜索”置于面板上方（贴近顶端搜索框），“模式切换”置于面板下方。
+        sections = [historySectionHtml, dividerHtml, modeSectionHtml];
+    }
+
+    menu.innerHTML = sections.join('');
+
+    // 4. 事件绑定
     bindSearchHintHelpButton(menu.querySelector('.search-mode-hint-help-btn'), hintHelp.html);
+    bindSearchHistoryEvents(menu, activeMode, (action) => {
+        if (action === 'close') {
+            toggleSearchModeMenu(false);
+            return;
+        }
+        renderSearchModeMenu();
+    });
 }
 
 function initSearchModeUI() {
@@ -8683,6 +9032,11 @@ function initSearchModeUI() {
         const handleModeSelectAction = (e) => {
             // Only handle mode selection in Canvas/mode menu
             if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
+
+            // Ignore clicks/mousedowns on search history section or help button
+            if (e.target.closest('.search-history-section') || e.target.closest('.search-hint-help-btn')) {
+                return;
+            }
 
             const closeButton = e.target.closest('.search-mode-menu-close-btn');
             if (closeButton) {
@@ -9962,6 +10316,7 @@ function parseCanvasAnchorSlice(db, coords) {
 
 async function navigateToCanvasAnchorTarget(item) {
     if (!item) return false;
+    recordCurrentSearchJumpHistory();
     if (typeof hideSearchResultsPanel === 'function') {
         hideSearchResultsPanel();
     }
@@ -13070,6 +13425,7 @@ function resolveBookmarkAncestorFolder(item, folderName, crumbIndex = -1) {
 async function navigateToBookmarkAncestorFolder(target) {
     if (!target) return;
 
+    recordCurrentSearchJumpHistory();
     if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
     if (typeof hideSearchResultsPanel === 'function') hideSearchResultsPanel();
@@ -14869,6 +15225,9 @@ function searchCanvasAndRender(query, options = {}) {
     if (mode === 'bookmark' && isTagBrowseRootQuery(trimmedQuery)) {
         const detail = searchUiState && searchUiState.tagBrowseDetail ? searchUiState.tagBrowseDetail : null;
         if (!detail || detail.active !== true || (detail.kind === 'color' && !detail.showBookmarks)) {
+            if (typeof recordSearchHistory === 'function') {
+                recordSearchHistory('#', 'bookmark', { trigger: 'jump' });
+            }
             const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
             const rootModel = buildCanvasTagBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
             renderCanvasTagBrowseRootPanel(rootModel, { query: trimmedQuery });
@@ -14878,6 +15237,9 @@ function searchCanvasAndRender(query, options = {}) {
     if (mode === 'bookmark' && isNoteBrowseRootQuery(trimmedQuery)) {
         const detail = searchUiState && searchUiState.noteBrowseDetail ? searchUiState.noteBrowseDetail : null;
         if (!detail || detail.active !== true) {
+            if (typeof recordSearchHistory === 'function') {
+                recordSearchHistory('*', 'bookmark', { trigger: 'jump' });
+            }
             const scopedSource = getCanvasBookmarkBrowseScopedSource(sourceIndex);
             const rootModel = buildCanvasNoteBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
             renderCanvasNoteBrowseRootPanel(rootModel, { query: trimmedQuery });
@@ -15145,22 +15507,169 @@ function searchCanvasAndRender(query, options = {}) {
 }
 
 
+function normalizeSearchHistoryMode(mode) {
+    const raw = String(mode || (searchUiState && searchUiState.activeMode) || 'bookmark').trim().toLowerCase();
+    if (raw === 'structure' || raw === 'card') return 'structure';
+    if (raw === 'description' || raw === 'desc') return 'description';
+    return 'bookmark';
+}
+
 function getEmptyQuerySuggestionsPrefKey() {
     return 'canvasSearchHideSuggestions';
 }
+
+function getSearchHistoryStorageKey(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    return `canvasSearchHistory_${m}`;
+}
+
+function getSearchHistoryLimitKey(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    return `canvasSearchHistoryLimit_${m}`;
+}
+
+function getSearchHistoryHideKey(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    return `canvasSearchHideHistory_${m}`;
+}
+
+// 自动平滑迁移旧版未区分模式的历史记录到 bookmark 模式
+try {
+    const legacyHistory = localStorage.getItem('canvasSearchHistory');
+    if (legacyHistory && !localStorage.getItem('canvasSearchHistory_bookmark')) {
+        localStorage.setItem('canvasSearchHistory_bookmark', legacyHistory);
+        localStorage.removeItem('canvasSearchHistory');
+    }
+} catch (_) { }
+
+function getSearchHistoryLimit(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const modeVal = parseInt(localStorage.getItem(getSearchHistoryLimitKey(m)), 10);
+        if (Number.isFinite(modeVal) && modeVal > 0) return modeVal;
+        const globalVal = parseInt(localStorage.getItem('canvasSearchHistoryLimit'), 10);
+        if (Number.isFinite(globalVal) && globalVal > 0) return globalVal;
+    } catch (_) { }
+    return 7;
+}
+
+function setSearchHistoryLimit(newLimit, mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const limit = Math.max(1, parseInt(newLimit, 10) || 7);
+        localStorage.setItem(getSearchHistoryLimitKey(m), String(limit));
+        localStorage.setItem('canvasSearchHistoryLimit', String(limit));
+        const currentList = getSearchHistoryList(m);
+        if (currentList.length > limit) {
+            saveSearchHistory(currentList.slice(0, limit), m);
+        }
+    } catch (_) { }
+}
+
+function isSearchHistoryEnabled(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        return localStorage.getItem(getSearchHistoryHideKey(m)) !== 'true';
+    } catch (_) { }
+    return true;
+}
+
+function setSearchHistoryEnabled(enabled, mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        localStorage.setItem(getSearchHistoryHideKey(m), enabled ? 'false' : 'true');
+    } catch (_) { }
+}
+
+function getSearchHistoryList(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const raw = localStorage.getItem(getSearchHistoryStorageKey(m));
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+            return parsed.map(item => String(item || '').trim()).filter(Boolean);
+        }
+    } catch (_) { }
+    return [];
+}
+
+function saveSearchHistory(list, mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const limit = getSearchHistoryLimit(m);
+        const cleanList = (Array.isArray(list) ? list : [])
+            .map(item => String(item || '').trim())
+            .filter(Boolean)
+            .slice(0, limit);
+        localStorage.setItem(getSearchHistoryStorageKey(m), JSON.stringify(cleanList));
+    } catch (_) { }
+}
+
+function recordSearchHistory(query, mode, options = {}) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        if (!isSearchHistoryEnabled(m)) return;
+        // 严格模式（默认且唯一）：仅在用户点击条目/单元格/表格行实际跳转，或进入浏览指令时记录
+        if (options.trigger !== 'jump') {
+            return;
+        }
+        const trimmed = String(query || '').trim();
+        if (!trimmed) return;
+        if (trimmed === '!' || trimmed === '@') return;
+
+        let list = getSearchHistoryList(m);
+        const lowerTrimmed = trimmed.toLowerCase();
+        list = list.filter(item => item.toLowerCase() !== lowerTrimmed);
+        list.unshift(trimmed);
+        saveSearchHistory(list, m);
+    } catch (_) { }
+}
+
+function removeSearchHistoryItem(query, mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        const trimmed = String(query || '').trim();
+        let list = getSearchHistoryList(m);
+        list = list.filter(item => item !== trimmed && item.toLowerCase() !== trimmed.toLowerCase());
+        saveSearchHistory(list, m);
+    } catch (_) { }
+}
+
+function clearAllSearchHistory(mode) {
+    const m = normalizeSearchHistoryMode(mode);
+    try {
+        localStorage.removeItem(getSearchHistoryStorageKey(m));
+    } catch (_) { }
+}
+
+try {
+    window.recordSearchHistory = recordSearchHistory;
+    window.recordCurrentSearchJumpHistory = recordCurrentSearchJumpHistory;
+    window.getSearchHistoryList = getSearchHistoryList;
+    window.clearAllSearchHistory = clearAllSearchHistory;
+    window.setSearchHistoryEnabled = setSearchHistoryEnabled;
+    window.isSearchHistoryEnabled = isSearchHistoryEnabled;
+    window.setSearchHistoryLimit = setSearchHistoryLimit;
+    window.getSearchHistoryLimit = getSearchHistoryLimit;
+    window.normalizeSearchHistoryMode = normalizeSearchHistoryMode;
+} catch (_) { }
 
 function shouldShowEmptyQuerySuggestions() {
     try {
         if (typeof window.currentView === 'string' && window.currentView !== 'canvas') return false;
     } catch (_) { }
+    let showSuggestions = true;
     try {
-        return localStorage.getItem(getEmptyQuerySuggestionsPrefKey()) !== 'true';
+        showSuggestions = localStorage.getItem(getEmptyQuerySuggestionsPrefKey()) !== 'true';
     } catch (_) { }
-    return true;
+    const currentMode = normalizeSearchHistoryMode(searchUiState && searchUiState.activeMode);
+    const showHistory = isSearchHistoryEnabled(currentMode) && getSearchHistoryList(currentMode).length > 0;
+    return showSuggestions || showHistory;
 }
 
 /**
- * 渲染画布搜索建议（三搜索模式推荐）
+ * 渲染画布搜索建议与最近搜索（支持双区域与顶底停靠智能贴近）
  */
 function renderCanvasSearchSuggestions() {
     // Isolation guard: only render suggestions in canvas view
@@ -15169,13 +15678,25 @@ function renderCanvasSearchSuggestions() {
     } catch (_) { }
 
     const isZh = currentLang === 'zh_CN';
-    const prefKey = getEmptyQuerySuggestionsPrefKey();
+    const isBottomDock = !!(document.body && document.body.classList.contains('header-dock-bottom'));
+    const suggestionsPrefKey = getEmptyQuerySuggestionsPrefKey();
 
-    // Match the Canvas mode menu styles (colors/icons) by reusing the same ordered modes.
-    const modesToShow = getCanvasModesInOrder();
+    let showSuggestions = true;
+    try {
+        showSuggestions = localStorage.getItem(suggestionsPrefKey) !== 'true';
+    } catch (_) { }
+
+    const activeMode = normalizeSearchHistoryMode(searchUiState && searchUiState.activeMode);
+    const historyList = getSearchHistoryList(activeMode);
+    const showHistory = isSearchHistoryEnabled(activeMode) && historyList.length > 0;
 
     const panel = getSearchResultsPanel();
     if (!panel) return;
+
+    if (!showSuggestions && !showHistory) {
+        try { hideSearchResultsPanel(); } catch (_) { }
+        return;
+    }
 
     searchUiState.view = 'canvas';
     searchUiState.query = '';
@@ -15191,74 +15712,114 @@ function renderCanvasSearchSuggestions() {
         panel.style.maxHeight = '';
     } catch (_) { }
 
-    const listHtml = modesToShow.map((mode) => {
-        const isActive = mode.key === searchUiState.activeMode;
-        const title = isZh ? mode.label : mode.labelEn;
-        const desc = isZh ? mode.desc : mode.descEn;
-        return `
-            <div class="search-mode-menu-item ${isActive ? 'active' : ''} canvas-suggestion-mode-item" data-mode-key="${escapeHtml(mode.key)}">
-                <div class="mode-icon"><i class="fas ${escapeHtml(mode.icon)} ${escapeHtml(mode.color)}"></i></div>
-                <div class="mode-info">
-                    <div class="mode-name">${escapeHtml(title)}</div>
-                    <div class="mode-desc">${desc}</div>
+    // 1. 构建“最近搜索”区域 HTML
+    let historySectionHtml = '';
+    if (showHistory) {
+        historySectionHtml = buildSearchHistorySectionHtml(activeMode, { allowHide: true });
+    }
+
+    // 2. 构建“模式建议”区域 HTML
+    let suggestionsSectionHtml = '';
+    let hintHelp = null;
+    if (showSuggestions) {
+        const modesToShow = getCanvasModesInOrder();
+        const listHtml = modesToShow.map((mode) => {
+            const isActive = mode.key === searchUiState.activeMode;
+            const title = isZh ? mode.label : mode.labelEn;
+            const desc = isZh ? mode.desc : mode.descEn;
+            return `
+                <div class="search-mode-menu-item ${isActive ? 'active' : ''} canvas-suggestion-mode-item" data-mode-key="${escapeHtml(mode.key)}">
+                    <div class="mode-icon"><i class="fas ${escapeHtml(mode.icon)} ${escapeHtml(mode.color)}"></i></div>
+                    <div class="mode-info">
+                        <div class="mode-name">${escapeHtml(title)}</div>
+                        <div class="mode-desc">${desc}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        const modeTitle = isZh ? '模式切换' : 'Switch Mode';
+        const hideLabel = isZh ? '不再出现' : "Don't show";
+        hintHelp = getSearchHintHelpContent();
+
+        suggestionsSectionHtml = `
+            <div class="search-mode-suggestions-section">
+                <div class="search-suggestions-header search-mode-menu-header">
+                    <div class="search-mode-header-left">
+                        <i class="fas fa-exchange-alt search-mode-header-icon" aria-hidden="true"></i>
+                        <span class="search-mode-header-title">${escapeHtml(modeTitle)}</span>
+                        <button type="button" class="search-hint-help-btn search-mode-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}" title="${isZh ? '模式切换说明' : 'Mode explanation'}">
+                            <i class="fas fa-question-circle"></i>
+                        </button>
+                    </div>
+                    <div class="search-mode-header-right">
+                        <button type="button" class="search-empty-suggestions-hide-btn canvas-suggestions-hide-btn" title="${escapeHtml(hideLabel)}">
+                            ${escapeHtml(hideLabel)}
+                        </button>
+                    </div>
+                </div>
+                <div style="padding:2px 0;">
+                    ${listHtml}
                 </div>
             </div>
         `;
-    }).join('');
+    }
 
-    // Add a header or instruction? User said "double click to click exclusive mode???" maybe just display them as hints.
-    // Making them non-clickable (pointer-events: none) as they are suggestions/help.
-    // Or we could make them clickable to pre-fill the input with a prefix like "#" or "A-".
+    // 3. 根据搜索框停靠方向（最贴近搜索框原则）组合分块
+    const dividerHtml = `<div class="search-empty-state-divider"></div>`;
+    let sections = [];
+    if (isBottomDock) {
+        // 底部停靠：面板向上展开，搜索框在最底端。
+        // “最近搜索”置于面板下方（贴近底端搜索框），“模式建议”置于面板上方。
+        if (showSuggestions) sections.push(suggestionsSectionHtml);
+        if (showSuggestions && showHistory) sections.push(dividerHtml);
+        if (showHistory) sections.push(historySectionHtml);
+    } else {
+        // 顶部停靠：面板向下展开，搜索框在最顶端。
+        // “最近搜索”置于面板上方（贴近顶端搜索框），“模式建议”置于面板下方。
+        if (showHistory) sections.push(historySectionHtml);
+        if (showSuggestions && showHistory) sections.push(dividerHtml);
+        if (showSuggestions) sections.push(suggestionsSectionHtml);
+    }
 
-    // [Tweak] Stronger border for separation
-    const isBottomDock = !!(document.body && document.body.classList.contains('header-dock-bottom'));
-    const arrowSvg = isBottomDock ? `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-            <path d="M12 3v14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
-            <path d="M7 13l5 5 5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-    ` : `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-            <path d="M12 21V7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
-            <path d="M7 11l5-5 5 5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-    `;
+    panel.innerHTML = sections.join('');
 
-    const hideLabel = isZh ? '下次不再出现' : "Don't show again";
-    const hintText = isZh
-        ? (isBottomDock ? '点下侧按钮切换模式' : '点左侧按钮切换模式')
-        : (isBottomDock ? 'Use the bottom button to switch mode' : 'Use the left button to switch mode');
-    const hintHelp = getSearchHintHelpContent();
-
-    panel.innerHTML = `
-        <div class="search-suggestions-header" style="position:relative; padding:5px 8px; border-bottom:1px solid var(--search-candidate-divider, var(--border-color)); margin-bottom:2px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
-            <div class="search-empty-suggestions-hint" style="display:inline-flex; align-items:center; gap:4px; min-width:0; flex:1 1 auto; font-size:11px; color:var(--text-tertiary);">
-                <span class="search-hint-icon" style="display:inline-flex; position:relative; top:-1px; flex:0 0 auto;">${arrowSvg}</span>
-                <span class="search-hint-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(hintText)}</span>
-                <button type="button" class="search-hint-help-btn perf-help-btn" aria-label="${escapeHtml(hintHelp.text)}" style="flex:0 0 auto; margin-left:0;">
-                    <i class="fas fa-question-circle"></i>
-                </button>
-            </div>
-            <button type="button" class="search-empty-suggestions-hide-btn canvas-suggestions-hide-btn" style="flex:0 0 auto; border:1px solid var(--border-color); background:var(--bg-secondary); padding:2px 8px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; white-space:nowrap;">
-                ${escapeHtml(hideLabel)}
-            </button>
-        </div>
-        <div style="padding:2px 0;">
-            ${listHtml}
-        </div>
-    `;
-
-    // Bind
     try {
+        // 搜索历史区域事件绑定（复用统一的历史记录事件处理器）
+        bindSearchHistoryEvents(panel, activeMode, (action) => {
+            if (action === 'close') {
+                hideSearchResultsPanel();
+                return;
+            }
+            renderCanvasSearchSuggestions();
+            if (action === 'delete' || action === 'clear' || action === 'hide') {
+                if (!shouldShowEmptyQuerySuggestions()) {
+                    hideSearchResultsPanel();
+                } else {
+                    showSearchResultsPanel();
+                }
+            } else {
+                showSearchResultsPanel();
+            }
+        });
+
+        // 模式建议“下次不再出现”按钮
         const hideBtn = panel.querySelector('.canvas-suggestions-hide-btn');
         if (hideBtn) {
             hideBtn.addEventListener('click', (ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
-                try { localStorage.setItem(prefKey, 'true'); } catch (_) { }
-                try { hideSearchResultsPanel(); } catch (_) { }
+                try { localStorage.setItem(suggestionsPrefKey, 'true'); } catch (_) { }
+                renderCanvasSearchSuggestions();
+                if (!shouldShowEmptyQuerySuggestions()) {
+                    hideSearchResultsPanel();
+                } else {
+                    showSearchResultsPanel();
+                }
             });
         }
+
+        // 模式建议条目点击
         panel.querySelectorAll('.canvas-suggestion-mode-item').forEach((el) => {
             el.addEventListener('mousedown', (ev) => {
                 ev.preventDefault();
@@ -15266,14 +15827,8 @@ function renderCanvasSearchSuggestions() {
                 const key = el.getAttribute('data-mode-key');
                 if (key) {
                     try { setSearchMode(key, { source: 'user' }); } catch (_) { }
-                    
-                    // Do not automatically collapse the candidate panel, keep it open and re-render suggestions
-                    try {
-                        renderCanvasSearchSuggestions();
-                        showSearchResultsPanel();
-                    } catch (_) { }
-
-                    // Explicitly focus input to allow direct typing
+                    renderCanvasSearchSuggestions();
+                    showSearchResultsPanel();
                     try {
                         const input = document.getElementById('searchInput');
                         if (input) input.focus();
@@ -15281,12 +15836,20 @@ function renderCanvasSearchSuggestions() {
                 }
             });
         });
-        bindSearchHintHelpButton(panel.querySelector('.search-hint-help-btn'), hintHelp.html);
-        // 建议提示面板（含“下次不再出现”）下方不需要小白条把手，移除可能存在的把手
+
+        // 模式建议中的帮助按钮绑定（精确定位建议区域的按钮，避免误匹配历史记录区域按钮）
+        if (hintHelp) {
+            const modeSuggestionsHelpBtn = panel.querySelector('.search-mode-suggestions-section .search-mode-hint-help-btn') ||
+                panel.querySelector('.search-mode-suggestions-section .search-hint-help-btn');
+            if (modeSuggestionsHelpBtn) {
+                bindSearchHintHelpButton(modeSuggestionsHelpBtn, hintHelp.html);
+            }
+        }
+
+        // 移除多余的面板缩放把手
         const staleHandles = panel.querySelectorAll('.search-panel-resize-handle');
         staleHandles.forEach(h => h.remove());
     } catch (_) { }
-
 }
 
 function getDomainCacheKey() {
@@ -17941,6 +18504,7 @@ function renderCanvasTableItemLocationChipHtml(d, query = '') {
  */
 async function navigateToCanvasStructureOrDescriptionTarget(item) {
     if (!item) return false;
+    recordCurrentSearchJumpHistory();
     if (item.type === 'anchor') {
         return await navigateToCanvasAnchorTarget(item);
     }
@@ -18040,6 +18604,7 @@ async function navigateToCanvasTableBookmarkTarget(d) {
         ? d.locations
         : ((rawItem && Array.isArray(rawItem.locations) && rawItem.locations.length) ? rawItem.locations : []);
 
+    recordCurrentSearchJumpHistory();
     hideSearchResultsPanel();
     try {
         const inputEl = document.getElementById('searchInput');
@@ -18574,6 +19139,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     const copyId = (!rawCopyId || rawCopyId === 'null') ? null : rawCopyId;
                     const color = chip.style.getPropertyValue('--loc-color') || '#2563eb';
 
+                    recordCurrentSearchJumpHistory();
                     hideSearchResultsPanel();
                     try {
                         const inputEl = document.getElementById('searchInput');
@@ -18714,6 +19280,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     if (targetItem && folderName) {
                         const targetFolder = resolveBookmarkAncestorFolder(targetItem, folderName);
                         if (targetFolder) {
+                            recordCurrentSearchJumpHistory();
                             hideSearchResultsPanel();
                             try {
                                 const inputEl = document.getElementById('searchInput');
@@ -19112,6 +19679,7 @@ async function handleCanvasTabulatorRowClick(e, row) {
             return;
         }
 
+        recordCurrentSearchJumpHistory();
         hideSearchResultsPanel();
         try {
             const inputEl = document.getElementById('searchInput');
@@ -19193,6 +19761,7 @@ async function handleCanvasTabulatorRowClick(e, row) {
         if (targetItem && folderName) {
             const targetFolder = resolveBookmarkAncestorFolder(targetItem, folderName);
             if (targetFolder) {
+                recordCurrentSearchJumpHistory();
                 hideSearchResultsPanel();
                 try {
                     const inputEl = document.getElementById('searchInput');
@@ -19255,6 +19824,7 @@ async function handleCanvasTabulatorRowClick(e, row) {
     }
 
     // 3. 点击表格行：跳转到对应目标
+    recordCurrentSearchJumpHistory();
     e._canvasHandled = true;
     const rowData = row ? row.getData() : null;
     if (!rowData) return;
@@ -19403,7 +19973,7 @@ let searchPanelResizeObserver = null;
 function updateSearchPanelColumnState(panel) {
     if (!panel) panel = getSearchResultsPanel();
     if (!panel) return;
-    if (typeof isSearchPanelGridView === 'function' && !isSearchPanelGridView()) {
+    if ((panel.dataset && panel.dataset.panelType === 'root-browse') || isSearchPanelRootBrowseView(panel) || (typeof isSearchPanelGridView === 'function' && !isSearchPanelGridView())) {
         panel.classList.remove('is-single-column');
         restoreSingleColumnLocationRows(panel);
         return;
@@ -19441,7 +20011,7 @@ function observeSearchPanelColumns(panel) {
                         });
                     }
                 }
-                if (!target || !target.classList.contains('view-grid')) {
+                if (!target || !target.classList.contains('view-grid') || (target.dataset && target.dataset.panelType === 'root-browse')) {
                     target.classList.remove('is-single-column');
                     restoreSingleColumnLocationRows(target);
                     continue;
@@ -19471,6 +20041,7 @@ let _clampSingleColRaf = null;
 function clampSingleColumnLocationRows(panel) {
     if (!panel) panel = getSearchResultsPanel();
     if (!panel) return;
+    if (panel.dataset && panel.dataset.panelType === 'root-browse') return;
     const isGrid = panel.classList.contains('view-grid') || (typeof isSearchPanelGridView === 'function' && isSearchPanelGridView());
     const isSide = typeof isSidePanelModeInSearch === 'function' && isSidePanelModeInSearch();
     const isSingle = isSide || panel.classList.contains('is-single-column') || (panel.clientWidth > 0 && panel.clientWidth < 554);
@@ -23240,6 +23811,7 @@ async function exitCanvasNodeFullscreenForSearchLocate() {
 
 async function locateCanvasGroupSearchResult(item) {
     if (!item || !item.id) return false;
+    recordCurrentSearchJumpHistory();
 
     // Reuse the directory's card-group locator: it fits the group's stored
     // rect, drives the shared viewport navigation, then wakes and highlights
@@ -23826,6 +24398,7 @@ async function ensureBookmarkSearchTargetFullscreen(target) {
 
 async function locateCanvasBookmarkItem(item) {
     if (!item || item.type !== 'bookmark-item') return false;
+    recordCurrentSearchJumpHistory();
     const expandTargetFolder = shouldExpandSearchLocateTargetFolder(item);
     if (item.source === 'temporary' && item.sectionId) {
         return locateBookmarkItemInTempTree(item.sectionId, item.id, {
@@ -23846,6 +24419,7 @@ async function locateCanvasBookmarkItem(item) {
 
 async function navigateToCanvasBookmarkSearchTarget(item) {
     if (!item || item.type !== 'bookmark-item') return false;
+    recordCurrentSearchJumpHistory();
 
     // Location chips may point outside the current fullscreen card. Switch the
     // fullscreen target first; otherwise CSS isolation keeps the destination hidden.
@@ -24497,6 +25071,8 @@ async function activateCanvasSearchResultAtIndex(index) {
         return;
     }
 
+    recordCurrentSearchJumpHistory();
+
     // Canvas Bookmark Mode: flat group card
     if (item.type === 'bookmark-group') {
         const locations = Array.isArray(item.locations) ? item.locations : [];
@@ -24841,6 +25417,7 @@ if (typeof window !== 'undefined') {
     window.SEARCH_PANEL_WIDTH_DEFAULT_GRID = SEARCH_PANEL_WIDTH_DEFAULT_GRID;
     window.SEARCH_PANEL_WIDTH_DEFAULT_TABLE = SEARCH_PANEL_WIDTH_DEFAULT_TABLE;
     window.SEARCH_PANEL_WIDTH_MIN = SEARCH_PANEL_WIDTH_MIN;
+    window.SEARCH_PANEL_WIDTH_MIN_ROOT = SEARCH_PANEL_WIDTH_MIN_ROOT;
     window.SEARCH_PANEL_WIDTH_MAX = SEARCH_PANEL_WIDTH_MAX;
     window.isSearchPanelRootBrowseView = isSearchPanelRootBrowseView;
     window.getSearchPanelMode = getSearchPanelMode;

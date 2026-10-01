@@ -102,7 +102,8 @@ body.header-dock-bottom .search-panel-resize-handle.handle-bottom {
 */
 .search-results-panel[data-panel-type="canvas-suggestions"],
 .search-results-panel:has(.canvas-suggestions-hide-btn),
-.search-results-panel:has(.search-empty-suggestions-hide-btn) {
+.search-results-panel:has(.search-empty-suggestions-hide-btn),
+.search-results-panel:has(.search-history-section) {
     top: calc(100% + 8px) !important;
     left: 0 !important;
     right: 0 !important;
@@ -116,18 +117,42 @@ body.header-dock-bottom .search-panel-resize-handle.handle-bottom {
     padding: 3px !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
+    transition: opacity 0.06s ease, visibility 0s linear 0.06s !important;
+}
+
+.search-results-panel[data-panel-type="canvas-suggestions"].visible,
+.search-results-panel:has(.search-history-section).visible {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transition-delay: 0s !important;
+}
+
+/* 模式菜单弹出速度与建议面板保持完全一致 (0.06s)，并限制最大高度支持滚动，防止历史记录较多时超出视口 */
+.search-mode-menu {
+    max-height: min(420px, calc(100vh - 80px)) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    transition: opacity 0.06s ease, visibility 0s linear 0.06s !important;
+}
+
+.search-mode-menu.visible {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transition-delay: 0s !important;
 }
 
 body.header-dock-bottom:not(.header-compact) .search-results-panel[data-panel-type="canvas-suggestions"],
 body.header-dock-bottom:not(.header-compact) .search-results-panel:has(.canvas-suggestions-hide-btn),
-body.header-dock-bottom:not(.header-compact) .search-results-panel:has(.search-empty-suggestions-hide-btn) {
+body.header-dock-bottom:not(.header-compact) .search-results-panel:has(.search-empty-suggestions-hide-btn),
+body.header-dock-bottom:not(.header-compact) .search-results-panel:has(.search-history-section) {
     top: auto !important;
     bottom: calc(100% + 8px) !important;
 }
 
 .search-results-panel[data-panel-type="canvas-suggestions"] .search-panel-resize-handle,
 .search-results-panel:has(.canvas-suggestions-hide-btn) .search-panel-resize-handle,
-.search-results-panel:has(.search-empty-suggestions-hide-btn) .search-panel-resize-handle {
+.search-results-panel:has(.search-empty-suggestions-hide-btn) .search-panel-resize-handle,
+.search-results-panel:has(.search-history-section) .search-panel-resize-handle {
     display: none !important;
 }
 
@@ -1706,13 +1731,16 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     border-bottom: 1px solid var(--border-color) !important;
     border-radius: 12px;
     margin: 0;
-    padding: 4px 8px;
+    padding: 4px 8px !important;
     min-width: 0;
     flex-shrink: 0;
-    display: flex;
-    align-items: center;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
     gap: 4px;
-    height: 24px;
+    height: 24px !important;
+    min-height: 24px !important;
+    max-height: 24px !important;
     box-sizing: border-box;
     transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -1783,6 +1811,14 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 
 .search-result-item.canvas-tag-browse-item.is-tag-row {
     border-radius: 8px;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    min-height: 30px !important;
+    max-height: none !important;
+    height: auto !important;
+    padding: 7px 12px !important;
 }
 
 .search-result-item.canvas-tag-browse-item .search-result-title {
@@ -1902,7 +1938,7 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 .search-result-meta,
 .search-result-match {
     user-select: text;
-    cursor: text;
+    cursor: default;
 }
 
 /* But keep chips/buttons pointer */
@@ -2914,8 +2950,8 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
 }
 
 @container search-panel (max-width: 554px) {
-    .search-results-items-container.view-grid,
-    .search-results-items-container {
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .search-results-items-container.view-grid,
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .search-results-items-container {
         grid-template-columns: minmax(0, 1fr) !important;
         grid-auto-rows: auto !important;
         gap: 8px !important;
@@ -2925,7 +2961,7 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
         max-width: 100% !important;
         overflow-x: hidden !important;
     }
-    .search-result-item {
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .search-result-item:not(.canvas-tag-browse-item):not(.canvas-note-browse-item):not(.canvas-note-browse-bucket-btn) {
         height: auto !important;
         min-height: 72px !important;
         max-height: none !important;
@@ -2941,14 +2977,14 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
         min-width: 0 !important;
         margin: 0 !important;
     }
-    .search-results-items-container .canvas-grid-card-locations-row,
-    .search-result-item .canvas-grid-card-locations-row,
-    .canvas-grid-card-locations-row {
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .search-results-items-container .canvas-grid-card-locations-row,
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .search-result-item .canvas-grid-card-locations-row,
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .canvas-grid-card-locations-row {
         display: none !important;
     }
-    .search-results-items-container .canvas-bookmark-location-row,
-    .search-result-item .canvas-bookmark-location-row,
-    .canvas-bookmark-location-row {
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .search-results-items-container .canvas-bookmark-location-row,
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .search-result-item .canvas-bookmark-location-row,
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .canvas-bookmark-location-row {
         display: flex !important;
         flex-wrap: wrap !important;
         align-items: flex-start !important;
@@ -2960,7 +2996,7 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
         max-height: 48px !important;
         overflow: hidden !important;
     }
-    .canvas-bookmark-location-chip-row {
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .canvas-bookmark-location-chip-row {
         display: flex !important;
         flex-wrap: wrap !important;
         align-items: center !important;
@@ -2969,27 +3005,27 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
         max-width: 100% !important;
         min-width: 0 !important;
     }
-    .canvas-bookmark-location-chip {
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .canvas-bookmark-location-chip {
         max-width: 100% !important;
         min-width: 0 !important;
         flex-shrink: 1 !important;
         height: auto !important;
         min-height: 18px !important;
     }
-    .canvas-bookmark-location-chip-text {
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .canvas-bookmark-location-chip-text {
         max-width: 100% !important;
         min-width: 0 !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
         white-space: nowrap !important;
     }
-    .canvas-bookmark-details-row,
-    .canvas-grid-card-info-row {
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .canvas-bookmark-details-row,
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .canvas-grid-card-info-row {
         height: auto !important;
         min-height: 20px !important;
         margin-top: 3px !important;
     }
-    .search-result-details-preview-context {
+    .search-results-panel.view-grid:not([data-panel-type="root-browse"]) .search-result-details-preview-context {
         height: auto !important;
         min-height: 18px !important;
     }
@@ -5229,10 +5265,10 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
 }
 
 .canvas-note-browse-bucket-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
     color: var(--text-primary);
@@ -5242,7 +5278,9 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;
-    min-height: 38px;
+    min-height: 38px !important;
+    max-height: 48px !important;
+    height: auto !important;
     box-sizing: border-box;
     position: relative;
     transition: all 0.15s ease;
@@ -6470,6 +6508,375 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
 
 [data-theme="dark"] .canvas-tabulator-header-menu-sep {
     background-color: var(--border-color, rgba(255, 255, 255, 0.08));
+}
+
+/* =============================================================================
+   搜索历史（最近搜索）样式模块
+   ============================================================================= */
+
+/* 搜索历史与模式选择分块容器：保证两者的外层内边距完全一致 */
+.search-history-section,
+.search-mode-menu-section,
+.search-mode-suggestions-section {
+    position: relative;
+    padding: 2px 2px 4px 2px;
+    box-sizing: border-box;
+}
+
+/* 统一的分块头部（最近搜索、模式切换） */
+.search-history-header,
+.search-mode-menu-header,
+.search-suggestions-header {
+    position: relative;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--search-candidate-divider, var(--border-color));
+    margin-bottom: 6px;
+    box-sizing: border-box;
+}
+
+/* 头部左侧组合（图标 + 4字标题 + 问号说明按钮）：严格对齐 */
+.search-history-header-left,
+.search-mode-header-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+/* 头部左侧图标：固定 14px 宽居中对齐，保证后续标题文本起始位置完全垂直对齐 */
+.search-history-header-icon,
+.search-mode-header-icon {
+    font-size: 11px;
+    width: 14px;
+    min-width: 14px;
+    max-width: 14px;
+    height: 14px;
+    color: var(--text-tertiary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+/* 头部标题文字（4字中文字符：最近搜索 vs 模式切换）：完全一致的排版与文字间距 */
+.search-history-header-title,
+.search-mode-header-title {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    letter-spacing: normal;
+}
+
+/* 头部右侧按钮组 */
+.search-history-header-right,
+.search-mode-header-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+/* 说明问号按钮：固定 14px 宽居中对齐，紧随 4 字标题后，保证垂直对齐 */
+.search-mode-header-left .search-hint-help-btn,
+.search-history-header-left .search-hint-help-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    min-width: 14px;
+    max-width: 14px;
+    height: 14px;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0 !important;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    transition: color 0.15s ease;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+.search-mode-header-left .search-hint-help-btn i,
+.search-history-header-left .search-hint-help-btn i {
+    font-size: 11px;
+    line-height: 1;
+}
+
+.search-mode-header-left .search-hint-help-btn:hover,
+.search-history-header-left .search-hint-help-btn:hover {
+    color: var(--text-primary);
+}
+
+.search-history-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.search-history-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.search-history-btn.active {
+    background: var(--accent-primary, #2563eb);
+    color: #ffffff;
+}
+
+[data-theme="dark"] .search-history-btn.active {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+/* 历史记录面板关闭按钮（位于删除按钮右侧）悬浮效果 */
+.search-history-close-btn:hover {
+    background: rgba(239, 68, 68, 0.12) !important;
+    color: #ef4444 !important;
+}
+
+[data-theme="dark"] .search-history-close-btn:hover {
+    background: rgba(239, 68, 68, 0.22) !important;
+    color: #f87171 !important;
+}
+
+.search-history-hide-btn,
+.canvas-suggestions-hide-btn,
+.search-empty-suggestions-hide-btn {
+    flex: 0 0 auto;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.search-history-hide-btn:hover,
+.canvas-suggestions-hide-btn:hover,
+.search-empty-suggestions-hide-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+/* 搜索历史说明浮层内部行：确保标签与文本绝对基线水平对齐 */
+.search-history-help-row {
+    display: flex !important;
+    align-items: baseline !important;
+    gap: 6px !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+}
+
+.search-history-help-row.search-history-help-limit-row {
+    align-items: center !important;
+}
+
+.search-history-help-row .search-hint-help-label {
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    color: var(--text-tertiary) !important;
+    white-space: nowrap !important;
+    display: inline-flex !important;
+    align-items: baseline !important;
+}
+
+.search-history-help-row .search-hint-help-value {
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    color: var(--text-secondary) !important;
+    display: inline-flex !important;
+    align-items: baseline !important;
+}
+
+.search-history-help-limit-row .search-hint-help-label,
+.search-history-help-limit-row .search-hint-help-value {
+    align-items: center !important;
+}
+
+.search-container input.search-history-limit-input,
+.search-history-limit-input {
+    width: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    flex: 0 0 44px !important;
+    height: 20px !important;
+    line-height: 18px !important;
+    padding: 0 4px !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 4px !important;
+    background: var(--bg-primary, #ffffff) !important;
+    color: var(--text-primary) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    text-align: center !important;
+    outline: none !important;
+    box-sizing: border-box !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: textfield !important;
+    appearance: textfield !important;
+    margin: 0 !important;
+    vertical-align: middle !important;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.search-history-limit-input::-webkit-outer-spin-button,
+.search-history-limit-input::-webkit-inner-spin-button {
+    -webkit-appearance: none !important;
+    margin: 0 !important;
+}
+
+.search-history-limit-input:focus {
+    border-color: var(--accent-primary, #2563eb) !important;
+    box-shadow: 0 0 0 1.5px rgba(37, 99, 235, 0.18) !important;
+}
+
+[data-theme="dark"] .search-container input.search-history-limit-input,
+[data-theme="dark"] .search-history-limit-input {
+    background: var(--bg-tertiary, #2c313a) !important;
+    color: #e2e8f0 !important;
+}
+
+
+/* 历史记录标签列表 */
+.search-history-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    padding: 6px 8px 8px 8px;
+    overflow: visible;
+}
+
+/* 单个搜索历史条目卡片/胶囊：对称内边距，完全不给删除按钮占位 */
+.search-history-item {
+    position: relative;
+    overflow: visible !important;
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 11px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    max-width: 100%;
+    user-select: none;
+    z-index: 1;
+}
+
+.search-history-item:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary, #3b82f6);
+    color: var(--accent-primary, #3b82f6);
+    z-index: 15;
+}
+
+.search-history-item-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+    line-height: 1.35;
+}
+
+/* 单个历史项的清理按钮：默认彻底隐藏，不占用任何条目空间；悬停时在右上角以小圆形气泡浮现 */
+.search-history-item-del-btn {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.18));
+    color: var(--text-secondary, #64748b);
+    box-shadow: 0 1.5px 4px rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    padding: 0;
+    font-size: 7px;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: scale(0.5);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    z-index: 20;
+}
+
+/* 扩展点击感应区域，保持视觉小巧的同时保证点击便捷 */
+.search-history-item-del-btn::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    right: -4px;
+    bottom: -4px;
+}
+
+[data-theme="dark"] .search-history-item-del-btn {
+    background: #2a2e39;
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #cbd5e1;
+    box-shadow: 0 1.5px 4px rgba(0, 0, 0, 0.45);
+}
+
+/* 仅在鼠标悬浮在对应条目上时浮现圆形 x 按钮 */
+.search-history-item:hover .search-history-item-del-btn {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: scale(1);
+}
+
+.search-history-item-del-btn:hover {
+    background: #ef4444 !important;
+    border-color: #ef4444 !important;
+    color: #ffffff !important;
+    transform: scale(1.12);
+}
+
+.search-history-item-del-btn i {
+    font-size: 7px;
+    line-height: 1;
+    pointer-events: none;
+}
+
+/* 历史记录与模式建议之间的分割线 */
+.search-empty-state-divider {
+    height: 1px;
+    background: var(--search-candidate-divider, var(--border-color));
+    margin: 4px 4px;
+    opacity: 0.55;
 }
 
 

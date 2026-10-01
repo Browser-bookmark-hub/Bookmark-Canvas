@@ -1656,7 +1656,7 @@ html.side-panel-mode .search-mode-trigger.mode-color-green {
     pointer-events: none;
     transform: none;
     will-change: opacity;
-    transition: opacity 0.16s ease, visibility 0s linear 0.16s;
+    transition: opacity 0.06s ease, visibility 0s linear 0.06s;
     transform-origin: top left;
 }
 
@@ -1680,13 +1680,17 @@ body.header-dock-bottom:not(.header-compact) .search-mode-menu {
 .search-mode-menu-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     padding: 8px 12px;
     border-radius: 6px;
     cursor: pointer;
     font-size: 13px;
     color: var(--text-primary);
     transition: background 0.15s ease;
+}
+
+.search-mode-menu-item + .search-mode-menu-item {
+    margin-top: 3px;
 }
 
 .search-mode-menu-item:hover {
@@ -1757,6 +1761,7 @@ body.header-dock-bottom:not(.header-compact) .search-mode-menu {
 
 .mode-icon {
     width: 20px;
+    flex-shrink: 0;
     text-align: center;
     font-size: 14px;
 }
