@@ -39588,6 +39588,7 @@ if (typeof window !== 'undefined') {
 // 性能优化：调度滚动条更新（使用 RAF 去抖）
 function scheduleScrollbarUpdate() {
     if (__isCanvasNodeMaximizedActive()) return;
+    if (CanvasState.scrollState?.vertical?.hidden && CanvasState.scrollState?.horizontal?.hidden) return;
     if (scrollbarUpdatePending) return;
 
     scrollbarUpdatePending = true;
@@ -39600,6 +39601,7 @@ function scheduleScrollbarUpdate() {
         scrollbarUpdateFrame = null;
         scrollbarUpdatePending = false;
         if (__isCanvasNodeMaximizedActive()) return;
+        if (CanvasState.scrollState?.vertical?.hidden && CanvasState.scrollState?.horizontal?.hidden) return;
         updateScrollbarThumbs();
     });
 }
@@ -40290,6 +40292,7 @@ function setupCanvasScrollbars() {
     if (!CanvasState.scrollState.handlersAttached) {
         document.addEventListener('mousemove', handleScrollbarThumbDrag);
         document.addEventListener('mouseup', stopScrollbarThumbDrag);
+        window.addEventListener('blur', stopScrollbarThumbDrag);
         CanvasState.scrollState.handlersAttached = true;
     }
 
@@ -40355,6 +40358,13 @@ function updateScrollbarControls(axis) {
     if (disableIcon) {
         disableIcon.className = CanvasState.scrollState[axis].disabled ? 'fas fa-unlock' : 'fas fa-ban';
     }
+
+    const thumb = bar.querySelector('.scrollbar-thumb');
+    if (thumb) {
+        thumb.title = isEn
+            ? 'Drag to pan canvas (Hold Shift or drag outward for precision mode)'
+            : '按住拖拽移动视口（按住 Shift 或向外拉远可开启微调）';
+    }
 }
 
 function startScrollbarThumbDrag(event, axis) {
@@ -40371,8 +40381,19 @@ function startScrollbarThumbDrag(event, axis) {
 
     const trackRect = track.getBoundingClientRect();
     const thumbRect = thumb.getBoundingClientRect();
-    const offset = axis === 'vertical' ? event.clientY - thumbRect.top : event.clientX - thumbRect.left;
-    const trackStart = axis === 'vertical' ? trackRect.top : trackRect.left;
+    const isVertical = axis === 'vertical';
+    const offset = isVertical ? event.clientY - thumbRect.top : event.clientX - thumbRect.left;
+    const trackStart = isVertical ? trackRect.top : trackRect.left;
+    const trackSize = isVertical ? trackRect.height : trackRect.width;
+    const thumbSize = isVertical ? thumbRect.height : thumbRect.width;
+    const maxTravel = Math.max(0, trackSize - thumbSize);
+    const clientPos = isVertical ? event.clientY : event.clientX;
+    const perpPos = isVertical ? event.clientX : event.clientY;
+    const trackPerpCenter = isVertical
+        ? trackRect.left + trackRect.width * 0.5
+        : trackRect.top + trackRect.height * 0.5;
+
+    const initialCoord = Math.min(Math.max(clientPos - trackStart - offset, 0), maxTravel);
 
     __cancelCanvasWheelPanMotion();
 
@@ -40380,53 +40401,143 @@ function startScrollbarThumbDrag(event, axis) {
     CanvasState.scrollState.dragInfo = {
         offset,
         trackStart,
-        trackSize: axis === 'vertical' ? trackRect.height : trackRect.width,
-        thumbSize: axis === 'vertical' ? thumbRect.height : thumbRect.width
+        trackSize,
+        thumbSize,
+        maxTravel,
+        trackPerpCenter,
+        isVertical,
+        lastClientPos: clientPos,
+        targetCoord: initialCoord,
+        currentCoord: initialCoord,
+        thumb,
+        rafId: null
     };
-    __setCanvasScrollbarMetricCache(axis, track, thumb, CanvasState.scrollState.dragInfo.trackSize, CanvasState.scrollState.dragInfo.thumbSize);
+    __setCanvasScrollbarMetricCache(axis, track, thumb, trackSize, thumbSize);
 
     CanvasState.scrollState[axis].dragging = true;
     thumb.classList.add('dragging');
+    document.body.classList.add('canvas-scrollbar-dragging');
+
+    markScrolling();
 }
 
 function handleScrollbarThumbDrag(event) {
     const axis = CanvasState.scrollState.activeDragAxis;
-    if (!axis) return;
-
-    if (CanvasState.scrollState[axis].disabled) return;
+    if (!axis || CanvasState.scrollState[axis].disabled) return;
 
     const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
     if (!bar) return;
 
-    const track = bar.querySelector('.scrollbar-track');
-    const thumb = bar.querySelector('.scrollbar-thumb');
     const info = CanvasState.scrollState.dragInfo;
-    if (!track || !thumb || !info) return;
+    if (!info) return;
 
     event.preventDefault();
 
-    const coord = axis === 'vertical'
-        ? event.clientY - info.trackStart - info.offset
-        : event.clientX - info.trackStart - info.offset;
-    const maxTravel = Math.max(0, info.trackSize - info.thumbSize);
-    const clampedCoord = Math.min(Math.max(coord, 0), maxTravel);
-    const ratio = maxTravel === 0 ? 0 : clampedCoord / maxTravel;
-    const bounds = axis === 'vertical' ? CanvasState.scrollBounds.vertical : CanvasState.scrollBounds.horizontal;
-    const target = bounds.max - ratio * (bounds.max - bounds.min);
+    const isVertical = info.isVertical;
+    const clientPos = isVertical ? event.clientY : event.clientX;
+    const perpPos = isVertical ? event.clientX : event.clientY;
+    const maxTravel = info.maxTravel;
+    if (maxTravel <= 0) return;
 
-    if (axis === 'vertical') {
-        CanvasState.panOffsetY = target;
+    // 1. 动态阻尼与手感优化计算：
+    // - 按住 Shift 键：进入 0.25x 精细微调模式
+    // - 离轨降速：鼠标离开轨道中心越远，降速越平稳细腻
+    let damping = 1.0;
+    if (event.shiftKey) {
+        damping = 0.25;
     } else {
-        CanvasState.panOffsetX = target;
+        const perpDist = Math.abs(perpPos - info.trackPerpCenter);
+        if (perpDist > 160) {
+            damping = 0.2;
+        } else if (perpDist > 90) {
+            damping = 0.4;
+        } else if (perpDist > 40) {
+            damping = 0.7;
+        }
     }
 
-    applyPanOffset();
+    const deltaPos = clientPos - (info.lastClientPos !== undefined ? info.lastClientPos : clientPos);
+    info.lastClientPos = clientPos;
+
+    if (damping < 1.0) {
+        // 阻尼模式下采用相对微调累计，手感细腻可控
+        info.targetCoord = Math.min(Math.max(0, info.targetCoord + deltaPos * damping), maxTravel);
+    } else {
+        // 正常模式 1:1 绝对对齐目标
+        const rawCoord = clientPos - info.trackStart - info.offset;
+        info.targetCoord = Math.min(Math.max(0, rawCoord), maxTravel);
+    }
+
+    markScrolling();
+
+    // 启动连续 RAF 平滑插值动画，化解 1px 阶跃跳动
+    if (!info.rafId) {
+        info.rafId = requestAnimationFrame(runScrollbarDragSmooth);
+    }
+}
+
+function runScrollbarDragSmooth() {
+    const axis = CanvasState.scrollState && CanvasState.scrollState.activeDragAxis;
+    const info = CanvasState.scrollState && CanvasState.scrollState.dragInfo;
+    if (!axis || !info) return;
+
+    const isVertical = info.isVertical;
+    const maxTravel = info.maxTravel;
+    if (maxTravel <= 0) {
+        info.rafId = null;
+        return;
+    }
+
+    const diff = info.targetCoord - info.currentCoord;
+    const isDragging = CanvasState.scrollState[axis]?.dragging;
+
+    // 自适应速度响应度：
+    // 快速大范围拖动时提高响应（0.55~0.60），紧贴鼠标绝不迟钝；
+    // 慢动作微动时平滑缓动（0.30），将鼠标 1px 离散阶跃拆解成 60/120Hz 连续亚像素微动。
+    const absDiff = Math.abs(diff);
+    let ease = 0.30;
+    if (absDiff > 25) {
+        ease = 0.60;
+    } else if (absDiff > 6) {
+        ease = 0.42;
+    }
+
+    if (absDiff > 0.02) {
+        info.currentCoord += diff * ease;
+    } else {
+        info.currentCoord = info.targetCoord;
+    }
+
+    const ratio = maxTravel === 0 ? 0 : info.currentCoord / maxTravel;
+    const bounds = isVertical ? CanvasState.scrollBounds.vertical : CanvasState.scrollBounds.horizontal;
+    const targetPan = bounds.max - ratio * (bounds.max - bounds.min);
+
+    if (isVertical) {
+        CanvasState.panOffsetY = targetPan;
+        if (info.thumb) {
+            info.thumb.style.transform = `translateY(${info.currentCoord}px)`;
+        }
+    } else {
+        CanvasState.panOffsetX = targetPan;
+        if (info.thumb) {
+            info.thumb.style.transform = `translateX(${info.currentCoord}px)`;
+        }
+    }
+
+    applyPanOffsetFast();
+
+    if (isDragging || Math.abs(info.targetCoord - info.currentCoord) > 0.02) {
+        info.rafId = requestAnimationFrame(runScrollbarDragSmooth);
+    } else {
+        info.rafId = null;
+    }
 }
 
 function stopScrollbarThumbDrag() {
     const axis = CanvasState.scrollState.activeDragAxis;
     if (!axis) return;
 
+    const info = CanvasState.scrollState.dragInfo;
     const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
     const thumb = bar ? bar.querySelector('.scrollbar-thumb') : null;
 
@@ -40434,10 +40545,41 @@ function stopScrollbarThumbDrag() {
         thumb.classList.remove('dragging');
     }
 
+    document.body.classList.remove('canvas-scrollbar-dragging');
+
+    try {
+        const ws = document.getElementById('canvasWorkspace');
+        if (ws) ws.classList.remove('is-scrolling');
+    } catch (_) { }
+
     CanvasState.scrollState[axis].dragging = false;
-    CanvasState.scrollState.activeDragAxis = null;
-    CanvasState.scrollState.dragInfo = null;
-    savePanOffsetThrottled();
+
+    const finalize = () => {
+        const curInfo = CanvasState.scrollState.dragInfo;
+        if (curInfo && curInfo.rafId) {
+            cancelAnimationFrame(curInfo.rafId);
+            curInfo.rafId = null;
+        }
+        CanvasState.scrollState.activeDragAxis = null;
+        CanvasState.scrollState.dragInfo = null;
+        applyPanOffset();
+        scheduleScrollbarUpdate();
+        savePanOffsetThrottled();
+    };
+
+    if (!info || !info.rafId || Math.abs(info.targetCoord - info.currentCoord) < 0.05) {
+        finalize();
+    } else {
+        const checkFinish = () => {
+            const curInfo = CanvasState.scrollState.dragInfo;
+            if (!curInfo || Math.abs(curInfo.targetCoord - curInfo.currentCoord) < 0.05) {
+                finalize();
+            } else {
+                requestAnimationFrame(checkFinish);
+            }
+        };
+        requestAnimationFrame(checkFinish);
+    }
 }
 
 function attachScrollbarHoverHandlers(bar, axis) {
@@ -42875,12 +43017,13 @@ function scheduleScrollUpdate() {
 function updateScrollbarThumbsLightweight() {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
+    if (CanvasState.scrollState?.vertical?.hidden && CanvasState.scrollState?.horizontal?.hidden) return;
 
     const verticalBar = document.getElementById('canvasVerticalScrollbar');
     const horizontalBar = document.getElementById('canvasHorizontalScrollbar');
 
     // 更新垂直滚动条
-    if (verticalBar) {
+    if (verticalBar && !CanvasState.scrollState.vertical.hidden && !CanvasState.scrollState.vertical.dragging) {
         const metrics = getCachedCanvasScrollbarMetrics('vertical');
         if (metrics && metrics.thumb) {
             const trackSize = metrics.trackSize;
@@ -42899,7 +43042,7 @@ function updateScrollbarThumbsLightweight() {
     }
 
     // 更新水平滚动条
-    if (horizontalBar) {
+    if (horizontalBar && !CanvasState.scrollState.horizontal.hidden && !CanvasState.scrollState.horizontal.dragging) {
         const metrics = getCachedCanvasScrollbarMetrics('horizontal');
         if (metrics && metrics.thumb) {
             const trackSize = metrics.trackSize;
@@ -43412,11 +43555,24 @@ function updateCanvasScrollBounds(options = {}) {
     const workspaceWidth = workspace.clientWidth || 1;
     const workspaceHeight = workspace.clientHeight || 1;
 
-    // 允许滚动到内容区域外的空白区域
-    const minPanX = workspaceWidth - CANVAS_SCROLL_MARGIN - bounds.maxX * zoom - CANVAS_SCROLL_EXTRA_SPACE;
-    const maxPanX = CANVAS_SCROLL_MARGIN - bounds.minX * zoom + CANVAS_SCROLL_EXTRA_SPACE;
-    const minPanY = workspaceHeight - CANVAS_SCROLL_MARGIN - bounds.maxY * zoom - CANVAS_SCROLL_EXTRA_SPACE;
-    const maxPanY = CANVAS_SCROLL_MARGIN - bounds.minY * zoom + CANVAS_SCROLL_EXTRA_SPACE;
+    // 允许滚动到内容区域外的空白区域（使用更合理紧凑的视口冗余，避免虚高空白导致滑块极小且灵敏失控）
+    const extraSpaceX = Math.max(300, Math.min(600, Math.round(workspaceWidth * 0.4)));
+    const extraSpaceY = Math.max(300, Math.min(600, Math.round(workspaceHeight * 0.4)));
+
+    let minPanX = workspaceWidth - CANVAS_SCROLL_MARGIN - bounds.maxX * zoom - extraSpaceX;
+    let maxPanX = CANVAS_SCROLL_MARGIN - bounds.minX * zoom + extraSpaceX;
+    let minPanY = workspaceHeight - CANVAS_SCROLL_MARGIN - bounds.maxY * zoom - extraSpaceY;
+    let maxPanY = CANVAS_SCROLL_MARGIN - bounds.minY * zoom + extraSpaceY;
+
+    // 弹性扩展：若用户已漫游至边界之外，平滑纳入当前视口，避免滑块卡死在边缘
+    if (Number.isFinite(CanvasState.panOffsetX)) {
+        minPanX = Math.min(minPanX, CanvasState.panOffsetX - 100);
+        maxPanX = Math.max(maxPanX, CanvasState.panOffsetX + 100);
+    }
+    if (Number.isFinite(CanvasState.panOffsetY)) {
+        minPanY = Math.min(minPanY, CanvasState.panOffsetY - 100);
+        maxPanY = Math.max(maxPanY, CanvasState.panOffsetY + 100);
+    }
 
     CanvasState.scrollBounds.horizontal = normalizeScrollBounds(minPanX, maxPanX, workspaceWidth);
     CanvasState.scrollBounds.vertical = normalizeScrollBounds(minPanY, maxPanY, workspaceHeight);
@@ -43554,11 +43710,12 @@ function clampPan(axis, value) {
 function updateScrollbarThumbs() {
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace) return;
+    if (CanvasState.scrollState?.vertical?.hidden && CanvasState.scrollState?.horizontal?.hidden) return;
 
     const verticalBar = document.getElementById('canvasVerticalScrollbar');
     const horizontalBar = document.getElementById('canvasHorizontalScrollbar');
 
-    if (verticalBar) {
+    if (verticalBar && !CanvasState.scrollState.vertical.hidden && !CanvasState.scrollState.vertical.dragging) {
         const track = verticalBar.querySelector('.scrollbar-track');
         const thumb = verticalBar.querySelector('.scrollbar-thumb');
         if (track && thumb) {
@@ -43583,7 +43740,7 @@ function updateScrollbarThumbs() {
         }
     }
 
-    if (horizontalBar) {
+    if (horizontalBar && !CanvasState.scrollState.horizontal.hidden && !CanvasState.scrollState.horizontal.dragging) {
         const track = horizontalBar.querySelector('.scrollbar-track');
         const thumb = horizontalBar.querySelector('.scrollbar-thumb');
         if (track && thumb) {

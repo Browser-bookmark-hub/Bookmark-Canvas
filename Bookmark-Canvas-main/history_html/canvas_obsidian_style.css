@@ -346,7 +346,7 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     position: absolute;
     background: rgba(9, 105, 218, 0.5);
     border-radius: 6px;
-    cursor: pointer;
+    cursor: grab;
     transition: background 0.2s ease;
 }
 
@@ -362,9 +362,19 @@ html.side-panel-mode .canvas-scrollbar.horizontal .scrollbar-track {
     left: 0;
 }
 
-.canvas-scrollbar .scrollbar-thumb:hover,
-.canvas-scrollbar .scrollbar-thumb.dragging {
+.canvas-scrollbar .scrollbar-thumb:hover {
     background: rgba(9, 105, 218, 0.65);
+}
+
+.canvas-scrollbar .scrollbar-thumb.dragging {
+    background: rgba(9, 105, 218, 0.75);
+    cursor: grabbing !important;
+}
+
+body.canvas-scrollbar-dragging,
+body.canvas-scrollbar-dragging * {
+    user-select: none !important;
+    cursor: grabbing !important;
 }
 
 .canvas-scrollbar.is-hidden {
