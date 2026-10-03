@@ -3515,11 +3515,25 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
     font-size: 11px;
     color: var(--text-secondary);
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
     display: flex;
     align-items: center;
     gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.canvas-grid-group-child-path > i {
+    flex-shrink: 0;
+}
+
+.canvas-grid-group-child-path > span,
+.canvas-grid-group-child-path .canvas-grid-group-child-path-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1;
 }
 
 .canvas-grid-group-child-path.is-expanded {
@@ -3529,6 +3543,22 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
     word-break: break-word;
     overflow-wrap: anywhere;
     display: block;
+}
+
+.canvas-grid-group-child-path.is-expanded > i {
+    display: inline-block;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.canvas-grid-group-child-path.is-expanded > span,
+.canvas-grid-group-child-path.is-expanded .canvas-grid-group-child-path-text {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    display: inline;
 }
 
 .canvas-grid-group-child-note {

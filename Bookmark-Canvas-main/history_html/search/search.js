@@ -5005,8 +5005,8 @@ function getOrCreateGridGroupPopover() {
             el.addEventListener('click', (e) => {
                 e.stopPropagation();
 
-                // 1. 路径展开省略号按钮 (三个点 ...)
-                const pathEllipsisToggle = e.target.closest('.search-result-path-ellipsis-toggle');
+                // 1. 路径展开省略号按钮 (三个点 ...) 对齐普通网格视图与表格视图
+                const pathEllipsisToggle = e.target.closest('.search-result-path-ellipsis-toggle, .canvas-table-path-ellipsis-btn');
                 if (pathEllipsisToggle) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -5019,7 +5019,7 @@ function getOrCreateGridGroupPopover() {
 
                 // 1b. 路径面包屑中的各级文件夹点击：按需内存查询直达对应文件夹
                 const pathPartEl = e.target.closest('.search-result-path-part');
-                if (pathPartEl && !e.target.closest('.search-result-path-ellipsis-toggle')) {
+                if (pathPartEl && !e.target.closest('.search-result-path-ellipsis, .search-result-path-ellipsis-toggle, .canvas-table-path-ellipsis-btn')) {
                     e.preventDefault();
                     e.stopPropagation();
                     const childRow = pathPartEl.closest('.canvas-grid-group-child-row, [data-bookmark-child-id]');
@@ -5220,7 +5220,7 @@ function showGridGroupPopover(targetBtn, groupId) {
                 sourceChipHtml = `<span class="canvas-bookmark-location-chip" style="--loc-color:${safeColor}; border-color:${safeColor}; color:${safeColor}; background:${safeColor}18; font-size:10px; padding:0 6px; border-radius:4px; font-weight:600;"><span class="canvas-bookmark-location-chip-text">${chipContent}</span></span>`;
             }
 
-            // Path (对齐列表模式路径规范)
+            // Path (对齐普通网格视图与表格视图规范：默认单行尾部预览，带有可点击展开的“...”按钮)
             let parentPath = '';
             if (typeof getBookmarkItemParentPathForSearchScope === 'function') {
                 parentPath = getBookmarkItemParentPathForSearchScope(child);
@@ -5229,16 +5229,55 @@ function showGridGroupPopover(targetBtn, groupId) {
                 if (child.parentPath) parentPath = child.parentPath;
                 else if (Array.isArray(child.parentPaths) && child.parentPaths.length > 0) parentPath = child.parentPaths.join(' / ');
             }
-            let pathPartsHtml = '';
             const rawParts = parentPath ? parentPath.split(/\s*[>/｜]\s*/).filter(Boolean) : [];
+            const rootLabel = isZh ? '根目录' : 'Root';
+            const ellipsisTitle = isZh ? '展开完整路径各级文件夹及书签说明信息' : 'Expand full path hierarchy';
+            let pathHtml = '';
             if (rawParts.length > 0) {
-                pathPartsHtml = rawParts.map((p, pIdx) => {
+                const maxDepth = 3;
+                const isPathDeep = rawParts.length > maxDepth;
+                const fullPartsHtml = rawParts.map((p, pIdx) => {
                     const safePart = `<span class="search-result-path-part" data-folder-name="${escapeHtml(p)}" title="${escapeHtml(isZh ? `定位至「${p}」` : `Locate "${p}"`)}">${(typeof highlightSearchKeywords === 'function' && query) ? highlightSearchKeywords(p, query) : escapeHtml(p)}</span>`;
                     if (pIdx >= rawParts.length - 1) return safePart;
                     return `${safePart}<span class="search-result-path-sep"> &gt; </span>`;
                 }).join('');
+
+                if (isPathDeep) {
+                    const visibleParts = rawParts.slice(rawParts.length - maxDepth);
+                    const collapsedVisibleHtml = visibleParts.map((p, pIdx) => {
+                        const safePart = `<span class="search-result-path-part" data-folder-name="${escapeHtml(p)}" title="${escapeHtml(isZh ? `定位至「${p}」` : `Locate "${p}"`)}">${(typeof highlightSearchKeywords === 'function' && query) ? highlightSearchKeywords(p, query) : escapeHtml(p)}</span>`;
+                        if (pIdx >= visibleParts.length - 1) return safePart;
+                        return `${safePart}<span class="search-result-path-sep"> &gt; </span>`;
+                    }).join('');
+
+                    const ellipsisBtnHtml = `<button class="canvas-table-path-ellipsis-btn search-result-path-ellipsis-toggle" type="button" data-item-id="${escapeHtml(childId)}" title="${escapeHtml(ellipsisTitle)}" aria-label="${escapeHtml(isZh ? '展开完整路径' : 'Show full path')}">...</button><span class="search-result-path-sep"> &gt; </span>`;
+
+                    pathHtml = `
+                        <div class="canvas-grid-group-child-path search-result-path-hint" data-path-expandable="true" title="${escapeHtml(parentPath)}">
+                            <i class="fas fa-folder" style="color:#2563eb; font-size:10px;"></i>
+                            <span class="canvas-grid-group-child-path-text search-result-path-text">
+                                <span class="search-result-path-preview">${ellipsisBtnHtml}${collapsedVisibleHtml}</span>
+                                <span class="search-result-path-full">${fullPartsHtml}</span>
+                            </span>
+                        </div>
+                    `;
+                } else {
+                    pathHtml = `
+                        <div class="canvas-grid-group-child-path search-result-path-hint" title="${escapeHtml(parentPath)}">
+                            <i class="fas fa-folder" style="color:#2563eb; font-size:10px;"></i>
+                            <span class="canvas-grid-group-child-path-text search-result-path-text">${fullPartsHtml}</span>
+                        </div>
+                    `;
+                }
             } else {
-                pathPartsHtml = `<span class="search-result-path-part" data-folder-name="${escapeHtml(isZh ? '根目录' : 'Root')}" title="${escapeHtml(isZh ? '定位至「根目录」' : 'Locate "Root"')}">${escapeHtml(isZh ? '根目录' : 'Root')}</span>`;
+                pathHtml = `
+                    <div class="canvas-grid-group-child-path search-result-path-hint" title="${escapeHtml(rootLabel)}">
+                        <i class="fas fa-folder" style="color:#2563eb; font-size:10px;"></i>
+                        <span class="canvas-grid-group-child-path-text search-result-path-text">
+                            <span class="search-result-path-part" data-folder-name="${escapeHtml(rootLabel)}" title="${escapeHtml(isZh ? `定位至「${rootLabel}」` : `Locate "${rootLabel}"`)}">${escapeHtml(rootLabel)}</span>
+                        </span>
+                    </div>
+                `;
             }
 
             // Note snippet if any
@@ -5273,10 +5312,7 @@ function showGridGroupPopover(targetBtn, groupId) {
                         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                             ${sourceChipHtml}
                         </div>
-                        <div class="canvas-grid-group-child-path">
-                            <i class="fas fa-folder" style="color:#2563eb; font-size:10px;"></i>
-                            <span>${pathPartsHtml}</span>
-                        </div>
+                        ${pathHtml}
                         ${childCreationTimeHtml}
                         ${noteHtml}
                     </div>
