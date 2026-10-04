@@ -2542,6 +2542,7 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     bookmarkTreeNotePosition: 'auto', // 书签树笔记标识位置：left / right / auto
     bookmarkTreeNotePositionThreshold: 420, // 自动切换阈值 (px)
     bookmarkTreeNoteHighlightEnabled: true, // 书签树笔记是否高亮标题与图标
+    globalLinearSmooth: false, // 全局线性平滑(包括触控板)
     useDefaultZoomCurve: true, // 使用默认曲线与默认阈值
     zoomCurve: {
         p0: { x: 0, y: __unscaleZoomCurveFactor(DEFAULT_ZOOM_CURVE_DISPLAY_FACTOR) },
@@ -3084,6 +3085,7 @@ function normalizeCanvasOtherSettings(input) {
     if (typeof input.bookmarkTreeNoteHighlightEnabled === 'boolean') {
         out.bookmarkTreeNoteHighlightEnabled = input.bookmarkTreeNoteHighlightEnabled;
     }
+    if (typeof input.globalLinearSmooth === 'boolean') out.globalLinearSmooth = input.globalLinearSmooth;
     if (typeof input.useDefaultZoomCurve === 'boolean') out.useDefaultZoomCurve = input.useDefaultZoomCurve;
     out.zoomCurve = __normalizeZoomCurve(input.zoomCurve);
     out.trackpadZoomRate = __clampNumber(input.trackpadZoomRate, TRACKPAD_ZOOM_RATE_MIN, TRACKPAD_ZOOM_RATE_MAX, out.trackpadZoomRate);
@@ -8481,16 +8483,25 @@ function setupCanvasZoomAndPan() {
                     };
                 }
             } else {
-                // 滚轮缩放：走曲线 + 磁矩
+                // 滚轮缩放：走曲线 + 磁矩（若开启全局线性平滑，则统一走纯线性恒定速率且不吃磁矩）
+                const isGlobalLinear = isCanvasGlobalLinearSmoothEnabled();
                 const nextDisplayZoomNoMagnet = (baseZoomForCalc * Math.exp(scaledDelta * zoomSpeed)) / base;
-                const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
-                const magnetFactor = isWindowsLikeDiscreteWheelZoom
-                    ? (1 + (magnet.factor - 1) * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND)
-                    : magnet.factor;
-                const magnetStrength = isWindowsLikeDiscreteWheelZoom
-                    ? (magnet.strength * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND)
-                    : magnet.strength;
-                const wheelCurveSpeedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
+                const magnet = isGlobalLinear
+                    ? { factor: 1, strength: 0 }
+                    : getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
+                const magnetFactor = isGlobalLinear
+                    ? 1
+                    : (isWindowsLikeDiscreteWheelZoom
+                        ? (1 + (magnet.factor - 1) * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND)
+                        : magnet.factor);
+                const magnetStrength = isGlobalLinear
+                    ? 0
+                    : (isWindowsLikeDiscreteWheelZoom
+                        ? (magnet.strength * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND)
+                        : magnet.strength);
+                const wheelCurveSpeedFactor = isGlobalLinear
+                    ? getCanvasTrackpadZoomRate()
+                    : getCanvasZoomSpeedFactor(displayZoomForCalc);
                 const effectiveDelta = scaledDelta * magnetFactor * wheelCurveSpeedFactor
                     * ZOOM_SPEED_GLOBAL_MULTIPLIER * SCROLLING_ZOOM_SPEED_BOOST
                     * (isWindowsLikeDiscreteWheelZoom ? WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST : 1);
@@ -8501,7 +8512,7 @@ function setupCanvasZoomAndPan() {
 
                 // 快速缩放时避免“一步跨过磁矩区”：在磁矩附近对每次事件的最大步进做限制
                 // 这样高速/普通速度都能感受到“缓慢区”，同时避免普通速度出现明显“顿挫停顿”。
-                if (magnet && magnetStrength > 0) {
+                if (!isGlobalLinear && magnet && magnetStrength > 0) {
                     const maxCap = isWindowsLikeDiscreteWheelZoom ? 1.16 : 1.10;
                     const minCap = isWindowsLikeDiscreteWheelZoom ? 1.05 : 1.02;
                     const capDrop = isWindowsLikeDiscreteWheelZoom ? 0.05 : 0.08;
@@ -33691,6 +33702,7 @@ function getCanvasZoomForScrollFactor() {
 }
 
 function isCanvasZoomMagnetEnabled() {
+    if (isCanvasGlobalLinearSmoothEnabled()) return false;
     const s = getCanvasZoomMagnetSettings();
     return !!(s && s.enabled);
 }
@@ -33748,6 +33760,7 @@ function __syncPerfMagnetTogglesFromSettings(settings) {
 function __syncOtherMagnetTogglesFromSettings(modal, settings) {
     const target = modal || document.getElementById('canvasOtherSettingsModal');
     if (!target || target.style.display === 'none') return;
+    if (target._globalLinearSmooth) return;
     const safeToggle = target.querySelector('#otherMagnetSafeToggle');
     const midToggle = target.querySelector('#otherMagnetMidToggle');
     if (safeToggle && typeof settings.enableSafeZone === 'boolean') safeToggle.checked = settings.enableSafeZone;
@@ -33882,6 +33895,11 @@ function __getZoomSpeedFactorFromCurve(displayZoom, curve) {
 function getCanvasZoomSpeedFactor(displayZoom) {
     const curve = getCanvasZoomCurveSettings();
     return __getZoomSpeedFactorFromCurve(displayZoom, curve);
+}
+
+function isCanvasGlobalLinearSmoothEnabled(settingsOverride = null) {
+    const settings = settingsOverride || getCanvasOtherSettings();
+    return !!(settings && settings.globalLinearSmooth);
 }
 
 function getCanvasTrackpadZoomRate(settingsOverride = null) {
@@ -34221,11 +34239,12 @@ function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
     // 与 Chromium 的 pinch->wheel 映射保持一致：scale = exp(-deltaY / 100)
     // 这里 rawDelta = -deltaY，因此 nativeLogDelta = rawDelta / 100
     const nativeLogDelta = delta / TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR;
-    // 触控板捏合遵循滚轮曲线与磁矩
-    const curveFactor = getCanvasZoomSpeedFactor(_displayZoom);
+    // 触控板捏合遵循滚轮曲线与磁矩（若开启全局线性平滑，则完全独立且不吃曲线与磁矩）
+    const isGlobalLinear = isCanvasGlobalLinearSmoothEnabled();
+    const curveFactor = isGlobalLinear ? 1 : getCanvasZoomSpeedFactor(_displayZoom);
     const nextDisplayZoomNoMagnet = _displayZoom * Math.exp(nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER);
-    const magnet = getCanvasZoomMagnetEffect(_displayZoom, nextDisplayZoomNoMagnet);
-    const magnetFactor = magnet.factor;
+    const magnet = isGlobalLinear ? { factor: 1, strength: 0 } : getCanvasZoomMagnetEffect(_displayZoom, nextDisplayZoomNoMagnet);
+    const magnetFactor = isGlobalLinear ? 1 : magnet.factor;
     let targetLogDelta = nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER * curveFactor * magnetFactor;
 
     const prevLogDelta = Number.isFinite(CanvasState.touchpadState.lastZoomDelta)
@@ -39896,15 +39915,20 @@ function __runCanvasSmoothWheelZoomStep() {
     const baseZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
     const displayCurrent = currentZoom / baseZoom;
     const displayTarget = targetZoom / baseZoom;
-    const curveFactor = Math.max(0.2, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, getCanvasZoomSpeedFactor(displayCurrent)));
-    const magnet = getCanvasZoomMagnetEffect(displayCurrent, displayTarget);
+    const isGlobalLinear = isCanvasGlobalLinearSmoothEnabled();
+    const curveFactor = isGlobalLinear
+        ? 1
+        : Math.max(0.2, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, getCanvasZoomSpeedFactor(displayCurrent)));
+    const magnet = isGlobalLinear
+        ? { factor: 1, strength: 0 }
+        : getCanvasZoomMagnetEffect(displayCurrent, displayTarget);
     const wheelStepMultiplierRaw = Number(smoothWheelZoomOptions && smoothWheelZoomOptions.wheelSmoothStepMultiplier);
     const wheelStepMultiplier = Number.isFinite(wheelStepMultiplierRaw)
         ? Math.max(0.7, Math.min(1.8, wheelStepMultiplierRaw))
         : 1;
-    const responseFromCurve = Math.pow(curveFactor, 0.32);
+    const responseFromCurve = isGlobalLinear ? 1 : Math.pow(curveFactor, 0.32);
     const clampedMagnetFactor = Math.max(0.35, Math.min(1.35, magnet.factor));
-    const responseFromMagnet = 0.84 + (0.16 * clampedMagnetFactor);
+    const responseFromMagnet = isGlobalLinear ? 1 : (0.84 + (0.16 * clampedMagnetFactor));
 
     const fastStep = 0.34;
     const slowStep = 0.26;
@@ -40023,11 +40047,20 @@ function __startWinWheelZoomPump() {
 
         const scaledDelta = rawDelta * WINDOWS_LINUX_WHEEL_ZOOM_SPEED_FACTOR;
 
+        const isGlobalLinear = isCanvasGlobalLinearSmoothEnabled();
         const nextDisplayZoomNoMagnet = (currentZoom * Math.exp(scaledDelta * zoomSpeed)) / base;
-        const magnet = getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
-        const magnetFactor = (1 + (magnet.factor - 1) * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
-        const magnetStrength = (magnet.strength * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
-        const wheelCurveSpeedFactor = getCanvasZoomSpeedFactor(displayZoomForCalc);
+        const magnet = isGlobalLinear
+            ? { factor: 1, strength: 0 }
+            : getCanvasZoomMagnetEffect(displayZoomForCalc, nextDisplayZoomNoMagnet);
+        const magnetFactor = isGlobalLinear
+            ? 1
+            : (1 + (magnet.factor - 1) * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
+        const magnetStrength = isGlobalLinear
+            ? 0
+            : (magnet.strength * WINDOWS_LINUX_WHEEL_ZOOM_MAGNET_BLEND);
+        const wheelCurveSpeedFactor = isGlobalLinear
+            ? getCanvasTrackpadZoomRate()
+            : getCanvasZoomSpeedFactor(displayZoomForCalc);
         const effectiveDelta = scaledDelta * magnetFactor * wheelCurveSpeedFactor
             * ZOOM_SPEED_GLOBAL_MULTIPLIER * SCROLLING_ZOOM_SPEED_BOOST
             * WINDOWS_LINUX_WHEEL_ZOOM_DELTA_BOOST;
@@ -40039,7 +40072,7 @@ function __startWinWheelZoomPump() {
         if (cappedFactor > limitCap) cappedFactor = limitCap;
         if (cappedFactor < (1 / limitCap)) cappedFactor = 1 / limitCap;
 
-        if (magnet && magnetStrength > 0) {
+        if (!isGlobalLinear && magnet && magnetStrength > 0) {
             const maxCap = 1.16;
             const minCap = 1.05;
             const capDrop = 0.05;
@@ -45771,6 +45804,80 @@ function openCanvasOtherSettingsModal() {
         __applyPerfDefaultBaselineToPerf();
     }
 
+    const globalLinearSmoothToggle = modal.querySelector('#otherGlobalLinearSmoothToggle');
+    const isLinearSmooth = !!(settings && settings.globalLinearSmooth);
+    if (globalLinearSmoothToggle) {
+        globalLinearSmoothToggle.checked = isLinearSmooth;
+    }
+    modal._globalLinearSmooth = isLinearSmooth;
+    const safeToggle = modal.querySelector('#otherMagnetSafeToggle');
+    const midToggle = modal.querySelector('#otherMagnetMidToggle');
+    const defaultCurveBtn = modal.querySelector('#otherUseDefaultZoomCurve');
+    const magnetToggleRow = modal.querySelector('#otherMagnetToggleRow');
+    const zoomCurveTitle = modal.querySelector('#otherZoomCurveTitle');
+    const linearRateControl = modal.querySelector('#otherLinearRateControl');
+    const linearRateInput = modal.querySelector('#otherTrackpadZoomRate');
+    if (isLinearSmooth) {
+        if (linearRateControl) {
+            linearRateControl.style.opacity = '';
+            linearRateControl.style.pointerEvents = '';
+            linearRateControl.classList.remove('is-disabled');
+        }
+        if (linearRateInput) {
+            linearRateInput.disabled = false;
+        }
+        if (safeToggle) {
+            safeToggle.checked = false;
+            safeToggle.disabled = true;
+        }
+        if (midToggle) {
+            midToggle.checked = false;
+            midToggle.disabled = true;
+        }
+        if (defaultCurveBtn) {
+            defaultCurveBtn.disabled = true;
+            defaultCurveBtn.style.opacity = '0.35';
+            defaultCurveBtn.style.pointerEvents = 'none';
+        }
+        if (magnetToggleRow) {
+            magnetToggleRow.style.opacity = '0.4';
+            magnetToggleRow.style.pointerEvents = 'none';
+        }
+        if (zoomCurveTitle) {
+            zoomCurveTitle.style.opacity = '0.5';
+        }
+    } else {
+        if (linearRateControl) {
+            linearRateControl.style.opacity = '0.35';
+            linearRateControl.style.pointerEvents = 'none';
+            linearRateControl.classList.add('is-disabled');
+        }
+        if (linearRateInput) {
+            linearRateInput.disabled = true;
+        }
+        const magnetSettings = getCanvasZoomMagnetSettings();
+        if (safeToggle) {
+            safeToggle.disabled = false;
+            safeToggle.checked = !!magnetSettings.enableSafeZone;
+        }
+        if (midToggle) {
+            midToggle.disabled = false;
+            midToggle.checked = !!magnetSettings.enableLowDetailMid;
+        }
+        if (defaultCurveBtn) {
+            defaultCurveBtn.disabled = false;
+            defaultCurveBtn.style.opacity = '';
+            defaultCurveBtn.style.pointerEvents = '';
+        }
+        if (magnetToggleRow) {
+            magnetToggleRow.style.opacity = '';
+            magnetToggleRow.style.pointerEvents = '';
+        }
+        if (zoomCurveTitle) {
+            zoomCurveTitle.style.opacity = '';
+        }
+    }
+
     const focus = CanvasState.otherSettingsFocus;
     const zoomTitle = modal.querySelector('#otherZoomMagnetTitle');
     if (zoomTitle) {
@@ -46085,6 +46192,9 @@ function saveCanvasOtherSettings(options = {}) {
         bookmarkTreeNoteHighlightEnabled: bookmarkNoteHighlightInput
             ? !!bookmarkNoteHighlightInput.checked
             : prevSettings.bookmarkTreeNoteHighlightEnabled !== false,
+        globalLinearSmooth: modal.querySelector('#otherGlobalLinearSmoothToggle')
+            ? !!modal.querySelector('#otherGlobalLinearSmoothToggle').checked
+            : (modal._globalLinearSmooth !== undefined ? !!modal._globalLinearSmooth : !!prevSettings.globalLinearSmooth),
         useDefaultZoomCurve: useDefault,
         zoomCurve: useDefault ? defaultCurve : (modal._zoomCurve || prevSettings.zoomCurve || getCanvasZoomCurveSettings()),
         trackpadZoomRate: trackpadRatePercent / 100,
@@ -46305,18 +46415,19 @@ function __renderOtherZoomMagnetCurve(modal) {
     const plotW = Math.max(1, cssWidth - paddingLeft - paddingRight);
     const plotH = Math.max(1, cssHeight - paddingTop - paddingBottom);
 
+    const isLinearMode = !!(modal ? modal._globalLinearSmooth : (getCanvasOtherSettings() && getCanvasOtherSettings().globalLinearSmooth));
     const tickCount = 4;
     if (modal) {
         const yTitle = modal.querySelector('#otherCurveYAxisTitle');
         if (yTitle) {
-            const label = isEn ? 'Wheel Zoom Speed' : '滚轮缩放速率';
+            const label = isLinearMode ? (isEn ? 'Linear Zoom Speed' : '线性缩放速率') : (isEn ? 'Wheel Zoom Speed' : '滚轮缩放速率');
             yTitle.innerHTML = `<span class="other-curve-axis-label">${label}</span><span class="other-curve-axis-indicator"><span class="other-curve-axis-paren">(</span><span class="other-curve-axis-letter">Y</span><span class="other-curve-axis-paren">)</span></span>`;
         }
         __updateOtherCurveXAxisTicks(modal, axis);
     }
     const percentToX = (p) => paddingLeft + ((p - minPercent) / range) * plotW;
     const normToX = (nx) => percentToX(__percentFromNormX(axis, nx));
-    let maxFactor = ZOOM_CURVE_CHART_Y_MAX;
+    let maxFactor = isLinearMode ? TRACKPAD_ZOOM_RATE_MAX : ZOOM_CURVE_CHART_Y_MAX;
     const factorToY = (factor) => {
         const f = Math.max(0, Math.min(maxFactor, factor));
         return paddingTop + (1 - (f / maxFactor)) * plotH;
@@ -46334,11 +46445,11 @@ function __renderOtherZoomMagnetCurve(modal) {
     const switchPercent = __percentFromNormX(axis, magnetPoints.m2.x);
     const formatPercent = (v) => Number.isFinite(v) ? `${Math.round(v * 10) / 10}%` : '--';
     const formatSpeed = (v) => Number.isFinite(v) ? `${Math.round(v * 100)}%` : '--';
-    const safePercentText = `${formatPercent(safePercent)} · ${formatSpeed(magnetPoints.m1.y)}`;
-    const midPercentText = `${formatPercent(switchPercent)} · ${formatSpeed(magnetPoints.m2.y)}`;
+    const safePercentText = isLinearMode ? '--' : `${formatPercent(safePercent)} · ${formatSpeed(magnetPoints.m1.y)}`;
+    const midPercentText = isLinearMode ? '--' : `${formatPercent(switchPercent)} · ${formatSpeed(magnetPoints.m2.y)}`;
     __updateOtherMagnetLegend(modal, {
-        safeEnabled,
-        midEnabled,
+        safeEnabled: isLinearMode ? false : safeEnabled,
+        midEnabled: isLinearMode ? false : midEnabled,
         safePercentText,
         midPercentText
     });
@@ -46384,7 +46495,7 @@ function __renderOtherZoomMagnetCurve(modal) {
     const p1 = curve && curve.p1 ? curve.p1 : { x: 0.25, y: 1 };
     const p2 = curve && curve.p2 ? curve.p2 : { x: 0.67, y: 1 };
     const p3 = curve && curve.p3 ? curve.p3 : { x: 1, y: 1 };
-    maxFactor = ZOOM_CURVE_CHART_Y_MAX;
+    maxFactor = isLinearMode ? TRACKPAD_ZOOM_RATE_MAX : ZOOM_CURVE_CHART_Y_MAX;
     if (modal) modal._curveMaxFactor = maxFactor;
     if (modal) {
         const yTickLabels = modal.querySelectorAll('#otherCurveYAxisTicks .other-curve-tick-label');
@@ -46396,6 +46507,66 @@ function __renderOtherZoomMagnetCurve(modal) {
                 yTickLabels[i].textContent = `${label}%`;
             }
         }
+    }
+
+    if (isLinearMode) {
+        const linearInput = modal ? modal.querySelector('#otherTrackpadZoomRate') : null;
+        const linearRatePercent = linearInput
+            ? (parseFloat(linearInput.value) || 100)
+            : Math.round(getCanvasTrackpadZoomRate() * 100);
+        const linearFactor = linearRatePercent / 100;
+        const linearY = factorToY(linearFactor);
+
+        // 绘制全局线性平滑水平速率线
+        ctx.save();
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft, linearY);
+        ctx.lineTo(paddingLeft + plotW, linearY);
+        ctx.stroke();
+
+        // 中心交互圆点与手柄
+        const midX = paddingLeft + plotW / 2;
+        ctx.fillStyle = '#3b82f6';
+        ctx.beginPath();
+        ctx.arc(midX, linearY, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(midX, linearY, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 速率文本标识
+        ctx.fillStyle = textColor;
+        ctx.font = '12px sans-serif';
+        const labelText = `${isEn ? 'Linear Speed' : '线性速率'}: ${Math.round(linearRatePercent)}%`;
+        ctx.fillText(labelText, paddingLeft + 12, Math.max(paddingTop + 16, linearY - 8));
+        ctx.restore();
+
+        if (noteEl) {
+            noteEl.textContent = isEn
+                ? 'Global linear smooth is active. Zoom speed is constant across all zoom levels.'
+                : '已启用全局线性平滑：所有缩放比例下速率恒定，曲线与磁矩已停用。上下拖动蓝线可调节速率。';
+            noteEl.style.display = 'block';
+        }
+
+        modal._curveLayout = {
+            paddingLeft,
+            paddingTop,
+            plotW,
+            plotH,
+            cssWidth,
+            cssHeight,
+            axis
+        };
+        if (modal) modal._curveZoomAxis = axis;
+        if (scrollEl) {
+            __syncOtherCurvePlotScroll(modal, axis, scrollEl, viewportCssWidth, cssWidth);
+            __updateOtherCurveXAxisTicks(modal, axis);
+        }
+        return;
     }
 
     const startX = normToX(0);
@@ -46752,6 +46923,20 @@ function __bindOtherCurveInteractions(modal, onChange) {
         const rect = canvas.getBoundingClientRect();
         const localX = clientX - rect.left;
         const localY = clientY - rect.top;
+        if (modal && modal._globalLinearSmooth) {
+            const layout = __getOtherCurveLayout(modal, canvas);
+            const linearInput = modal.querySelector('#otherTrackpadZoomRate');
+            const linearRatePercent = linearInput
+                ? (parseFloat(linearInput.value) || 100)
+                : Math.round(getCanvasTrackpadZoomRate() * 100);
+            const maxFactor = (modal && Number.isFinite(modal._curveMaxFactor)) ? modal._curveMaxFactor : TRACKPAD_ZOOM_RATE_MAX;
+            const clampedFactor = Math.max(0, Math.min(maxFactor, linearRatePercent / 100));
+            const linearY = layout.paddingTop + (1 - (clampedFactor / maxFactor)) * layout.plotH;
+            if (Math.abs(localY - linearY) <= 16 && localX >= layout.paddingLeft && localX <= layout.paddingLeft + layout.plotW) {
+                return 'linearRate';
+            }
+            return null;
+        }
         const { p0, p1, p2, p3, m1, m2 } = getPointPositions();
         const points = [
             { id: 'p0', d: Math.hypot(localX - p0.x, localY - p0.y) },
@@ -46769,13 +46954,30 @@ function __bindOtherCurveInteractions(modal, onChange) {
     const updateCursor = (clientX, clientY) => {
         if (dragState.active) return;
         const hit = hitTest(clientX, clientY);
-        canvas.style.cursor = hit ? 'grab' : 'default';
+        canvas.style.cursor = hit === 'linearRate' ? 'ns-resize' : (hit ? 'grab' : 'default');
     };
 
     const updateCurveFromPointer = (clientX, clientY) => {
         const rect = canvas.getBoundingClientRect();
         const localX = clientX - rect.left;
         const localY = clientY - rect.top;
+        if (modal && modal._globalLinearSmooth) {
+            if (dragState.point === 'linearRate') {
+                const layout = __getOtherCurveLayout(modal, canvas);
+                const axisMax = (modal && Number.isFinite(modal._curveMaxFactor)) ? modal._curveMaxFactor : TRACKPAD_ZOOM_RATE_MAX;
+                const nyRaw = 1 - (localY - layout.paddingTop) / layout.plotH;
+                const clampedY = Math.max(0, Math.min(1, nyRaw));
+                const rateFactor = clampedY * axisMax;
+                const minRate = TRACKPAD_ZOOM_RATE_MIN * 100;
+                const maxRate = TRACKPAD_ZOOM_RATE_MAX * 100;
+                const nextRate = Math.round(__clampNumber(rateFactor * 100, minRate, maxRate, 100));
+                const input = modal.querySelector('#otherTrackpadZoomRate');
+                if (input) input.value = String(nextRate);
+                __renderOtherZoomMagnetCurve(modal);
+                if (typeof onChange === 'function') onChange();
+            }
+            return;
+        }
         const { layout, curve, magnets } = getPointPositions();
         const axis = layout.axis || __getOtherCurveZoomAxis();
         const nx = __clamp01((localX - layout.paddingLeft) / layout.plotW);
@@ -46816,6 +47018,17 @@ function __bindOtherCurveInteractions(modal, onChange) {
     canvas.addEventListener('pointerdown', (e) => {
         const hit = hitTest(e.clientX, e.clientY);
         if (!hit) return;
+        if (hit === 'linearRate') {
+            dragState.active = true;
+            dragState.point = hit;
+            if (modal) modal._dragPoint = hit;
+            dragState.pointerId = e.pointerId;
+            canvas.setPointerCapture(e.pointerId);
+            canvas.style.cursor = 'ns-resize';
+            updateCurveFromPointer(e.clientX, e.clientY);
+            e.preventDefault();
+            return;
+        }
         if (hit === 'm1' || hit === 'm2') {
             const merged = __writeCanvasZoomMagnetSettings({
                 enabled: true,
@@ -46998,30 +47211,37 @@ function createCanvasOtherSettingsModal() {
                 <!-- 2.3 缩放速率调节 -->
                 <div class="detail-section">
                     <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? '2.3 Zoom Speed' : '2.3 缩放速率调节'}</div>
-                    <div class="other-zoom-input-title other-zoom-input-title-trackpad">${isEn ? '1. Trackpad' : '1. 触控板'} <span class="other-zoom-input-title-note" style="margin-left:8px;font-size:12px;color:rgba(var(--text-color-rgb),0.5);font-weight:normal;">${isEn ? '(Pinch)' : '（双指捏合）'}</span></div>
-                    <div class="other-settings-fields-row other-trackpad-speed-row">
-                        <div class="other-settings-field">
-                            <div class="other-settings-field-label">${isEn ? 'Pinch zoom speed (independent from pan scroll)' : '捏合缩放速率（独立于平面滚动）'}</div>
-                            <div class="other-settings-field-control">
-                                <input
-                                    type="number"
-                                    id="otherTrackpadZoomRate"
-                                    class="other-trackpad-speed-input"
-                                    min="${Math.round(TRACKPAD_ZOOM_RATE_MIN * 100)}"
-                                    max="${Math.round(TRACKPAD_ZOOM_RATE_MAX * 100)}"
-                                    step="5"
-                                >
-                                <span class="other-trackpad-speed-unit">%</span>
+                    <div class="other-zoom-input-title other-zoom-input-title-trackpad" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                        <span>${isEn ? '1. Global Linear Smooth (incl. Trackpad)' : '1. 全局线性平滑(包括触控板)'}</span>
+                        <div class="other-linear-smooth-header-controls" style="display: inline-flex; align-items: center; gap: 10px; margin-left: auto;">
+                            <div class="other-linear-rate-control is-disabled" id="otherLinearRateControl" style="display: inline-flex; align-items: center; gap: 6px; transition: opacity 0.2s ease;">
+                                <span class="other-settings-field-label" style="font-size: 12px; font-weight: normal; color: var(--text-secondary);">${isEn ? 'Linear Speed' : '线性速率'}</span>
+                                <div class="other-settings-field-control" style="display: inline-flex; align-items: center; gap: 3px;">
+                                    <input
+                                        type="number"
+                                        id="otherTrackpadZoomRate"
+                                        class="other-trackpad-speed-input"
+                                        min="${Math.round(TRACKPAD_ZOOM_RATE_MIN * 100)}"
+                                        max="${Math.round(TRACKPAD_ZOOM_RATE_MAX * 100)}"
+                                        step="5"
+                                        style="height: 22px; width: 62px; min-width: 62px; padding: 2px 4px; font-size: 12px;"
+                                    >
+                                    <span class="other-trackpad-speed-unit" style="font-size: 12px;">%</span>
+                                </div>
                             </div>
+                            <label class="other-toggle-switch other-magnet-toggle" style="margin: 0; transform: scale(0.85); transform-origin: right center;">
+                                <input type="checkbox" id="otherGlobalLinearSmoothToggle">
+                                <span class="other-toggle-slider"></span>
+                            </label>
                         </div>
                     </div>
-                    <div class="other-zoom-input-title" style="margin-top: 12px; display: flex; align-items: center; gap: 6px;">
-                        <span>${isEn ? '2. Magnet Points' : '2. 磁矩点'}</span>
+                    <div class="other-zoom-input-title" id="otherZoomCurveTitle" style="margin-top: 12px; display: flex; align-items: center; gap: 6px; transition: opacity 0.2s ease;">
+                        <span>${isEn ? '2. Zoom Curve & Magnet Points' : '2. 缩放曲线与磁矩点'}</span>
                         <button class="perf-help-btn" id="otherZoomMagnetHelpBtn" title="${isEn ? 'View help' : '查看说明'}" style="margin: 0; display: inline-flex; align-items: center; justify-content: center;">
                             <i class="fas fa-question-circle"></i>
                         </button>
                     </div>
-                    <div class="other-magnet-toggle-row">
+                    <div class="other-magnet-toggle-row" id="otherMagnetToggleRow" style="transition: opacity 0.2s ease;">
                         <div class="other-magnet-toggle-item" id="otherMagnetSafeLegend">
                             <span class="other-curve-dot dot-safe"></span>
                             <span>${isEn ? 'Magnet Point 1' : '磁矩点1'}</span>
@@ -47078,12 +47298,12 @@ function createCanvasOtherSettingsModal() {
                     </div>
                 </div>
             </div>
-            <!-- 缩放磁矩帮助弹层 -->
+            <!-- 缩放曲线与磁矩帮助弹层 -->
             <div class="perf-help-popover" id="otherZoomMagnetHelpPopover">
                 <div class="perf-help-popover-content">
                     ${isEn
-                ? '<b>Zoom Magnet</b>: Creates a slow zone around key zoom thresholds.<br>Magnet Point 1\'s X value is <b>synchronized</b> with the <b>"Auto-triggered Zoom Percentage"</b> in the Performance panel to slow down zoom when toggling low-detail cards.<br><br>${defaultMagnetHint}'
-                : `<b>缩放磁矩</b>：在关键缩放阈值附近创建“缓慢区”（来拒去留）。<br>磁矩点1的X值与<b>「性能」面板的「自动触发的缩放比例」</b>的值是<b>同步</b>的，在切换低细节模式时使缩放变慢。<br><br>${defaultMagnetHint}`}
+                ? '<b>Zoom Curve & Magnet</b>: The global zoom speed is driven by a cubic Bézier curve, with magnetic damping buffers overlaid at critical thresholds (magnet points).<br>Magnet Point 1\'s X value is <b>synchronized</b> with the <b>"Auto-triggered Zoom Percentage"</b> in the Performance panel to slow down zoom when toggling low-detail cards.<br><br>${defaultMagnetHint}'
+                : `<b>缩放曲线与磁矩</b>：由三阶贝塞尔曲线控制全局缩放速率，并在关键阈值（磁矩点）叠加磁吸阻尼缓冲。<br>磁矩点1的X值与<b>「性能」面板的「自动触发的缩放比例」</b>的值是<b>同步</b>的，在切换低细节模式时使缩放变慢。<br><br>${defaultMagnetHint}`}
                 </div>
             </div>
         </div>
@@ -47331,18 +47551,32 @@ function createCanvasOtherSettingsModal() {
             trackpadZoomRateInput.value = String(Math.round(normalized));
         };
 
+        trackpadZoomRateInput.addEventListener('input', () => {
+            if (modal._globalLinearSmooth) {
+                try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+            }
+        });
         trackpadZoomRateInput.addEventListener('change', () => {
             normalizeTrackpadRateInput();
+            if (modal._globalLinearSmooth) {
+                try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+            }
             scheduleOtherSave();
         });
         trackpadZoomRateInput.addEventListener('blur', () => {
             normalizeTrackpadRateInput();
+            if (modal._globalLinearSmooth) {
+                try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+            }
         });
         trackpadZoomRateInput.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
                 if (event.isComposing) return;
                 event.preventDefault();
                 normalizeTrackpadRateInput();
+                if (modal._globalLinearSmooth) {
+                    try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+                }
                 scheduleOtherSave();
                 trackpadZoomRateInput.blur();
             }
@@ -47383,6 +47617,90 @@ function createCanvasOtherSettingsModal() {
             modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
         }
     });
+
+    const globalLinearSmoothToggle = modal.querySelector('#otherGlobalLinearSmoothToggle');
+    const magnetToggleRow = modal.querySelector('#otherMagnetToggleRow');
+    const zoomCurveTitle = modal.querySelector('#otherZoomCurveTitle');
+    const defaultCurveBtn = modal.querySelector('#otherUseDefaultZoomCurve');
+
+    if (globalLinearSmoothToggle) {
+        globalLinearSmoothToggle.addEventListener('change', () => {
+            const isLinearSmooth = !!globalLinearSmoothToggle.checked;
+            modal._globalLinearSmooth = isLinearSmooth;
+
+            const linearRateControl = modal.querySelector('#otherLinearRateControl');
+            const linearRateInput = modal.querySelector('#otherTrackpadZoomRate');
+
+            if (isLinearSmooth) {
+                // 打开后「线性速率」启用高亮
+                if (linearRateControl) {
+                    linearRateControl.style.opacity = '';
+                    linearRateControl.style.pointerEvents = '';
+                    linearRateControl.classList.remove('is-disabled');
+                }
+                if (linearRateInput) {
+                    linearRateInput.disabled = false;
+                }
+                // 打开后「缩放曲线与磁矩点」两个点自动关闭，互斥
+                if (safeToggle) {
+                    safeToggle.checked = false;
+                    safeToggle.disabled = true;
+                }
+                if (midToggle) {
+                    midToggle.checked = false;
+                    midToggle.disabled = true;
+                }
+                if (defaultCurveBtn) {
+                    defaultCurveBtn.disabled = true;
+                    defaultCurveBtn.style.opacity = '0.35';
+                    defaultCurveBtn.style.pointerEvents = 'none';
+                }
+                if (magnetToggleRow) {
+                    magnetToggleRow.style.opacity = '0.4';
+                    magnetToggleRow.style.pointerEvents = 'none';
+                }
+                if (zoomCurveTitle) {
+                    zoomCurveTitle.style.opacity = '0.5';
+                }
+            } else {
+                // 关闭后「线性速率」变成阴影，不可点击
+                if (linearRateControl) {
+                    linearRateControl.style.opacity = '0.35';
+                    linearRateControl.style.pointerEvents = 'none';
+                    linearRateControl.classList.add('is-disabled');
+                }
+                if (linearRateInput) {
+                    linearRateInput.disabled = true;
+                }
+                // 关闭后恢复磁矩开关与曲线控制（从持久化设置回显，不覆写用户偏好）
+                const magnetSettings = getCanvasZoomMagnetSettings();
+                if (safeToggle) {
+                    safeToggle.disabled = false;
+                    safeToggle.checked = !!(magnetSettings && magnetSettings.enableSafeZone);
+                }
+                if (midToggle) {
+                    midToggle.disabled = false;
+                    midToggle.checked = !!(magnetSettings && magnetSettings.enableLowDetailMid);
+                }
+                if (defaultCurveBtn) {
+                    defaultCurveBtn.disabled = false;
+                    defaultCurveBtn.style.opacity = '';
+                    defaultCurveBtn.style.pointerEvents = '';
+                }
+                if (magnetToggleRow) {
+                    magnetToggleRow.style.opacity = '';
+                    magnetToggleRow.style.pointerEvents = '';
+                }
+                if (zoomCurveTitle) {
+                    zoomCurveTitle.style.opacity = '';
+                }
+            }
+
+            try { __renderOtherZoomMagnetCurve(modal); } catch (_) { }
+            scheduleOtherSave();
+        });
+    }
+
     const syncMagnetSettingsFromOther = () => {
         const cur = getCanvasZoomMagnetSettings();
         const next = {

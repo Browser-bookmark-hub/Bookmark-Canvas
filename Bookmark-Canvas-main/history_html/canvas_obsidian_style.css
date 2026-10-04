@@ -2986,6 +2986,23 @@ body.canvas-scrollbar-dragging * {
     margin-top: 8px;
 }
 
+.other-linear-rate-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.other-linear-rate-control.is-disabled {
+    opacity: 0.35;
+    pointer-events: none;
+    filter: grayscale(0.6);
+}
+
+.other-linear-rate-control.is-disabled input {
+    cursor: not-allowed;
+}
+
 .other-zoom-input-title-note {
     font-size: inherit;
     font-weight: inherit;
