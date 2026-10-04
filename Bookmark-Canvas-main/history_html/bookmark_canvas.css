@@ -5355,3 +5355,10 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
 .canvas-section-ctrl-overlay.active.ctrl-resize {
     cursor: nwse-resize;
 }
+
+/* 全局安全防护：保证所有 Toast 提示层永远穿透，绝不阻挡底层按钮悬浮高亮与点击 */
+.canvas-toast,
+.history-toast {
+    pointer-events: none !important;
+}
+

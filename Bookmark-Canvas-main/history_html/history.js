@@ -10379,6 +10379,10 @@ function resetCanvasFloatingToolsInteractionState() {
         clearCanvasFloatingDragVisualState();
     }
     suppressCanvasFloatingToolsToggleClick = false;
+    // 页面从休眠/冻结/切标签页恢复时，清理任何遗留的 Toast 幽灵节点
+    try {
+        document.querySelectorAll('.canvas-toast, .history-toast').forEach((t) => t.remove());
+    } catch (_) { }
 }
 
 function bindCanvasFloatingToolsLifecycleRecovery() {
@@ -17307,8 +17311,16 @@ function showToast(message, options = {}) {
     let animIn = 'slideIn';
     let animOut = 'slideOut';
 
+    // 移除之前的同位置提示（防止堆积残留）
+    try {
+        if (position === 'top-left') {
+            document.querySelectorAll('.canvas-toast, .history-toast').forEach((t) => t.remove());
+        }
+    } catch (_) { }
+
     if (position === 'top-left') {
-        positionCss = 'top: 20px; left: 20px;';
+        // 避开左上角悬浮工具窗（高度 98px），移至 120px 以下并靠左
+        positionCss = 'top: 120px; left: 16px;';
         animIn = 'slideInLeft';
         animOut = 'slideOutLeft';
     } else if (position === 'top-right') {
@@ -17320,6 +17332,7 @@ function showToast(message, options = {}) {
 
     const duration = options && typeof options.duration === 'number' ? options.duration : 2000;
     const toast = document.createElement('div');
+    toast.className = 'history-toast';
     toast.style.cssText = `
         position: fixed;
         ${positionCss}
@@ -17329,11 +17342,13 @@ function showToast(message, options = {}) {
         border-radius: 8px;
         box-shadow: var(--shadow-lg);
         z-index: 10000;
+        pointer-events: none !important;
         animation: ${animIn} 0.3s ease;
         display: flex;
         align-items: center;
         gap: 8px;
     `;
+    toast.style.pointerEvents = 'none';
 
     if (options && options.icon) {
         const icon = document.createElement('i');

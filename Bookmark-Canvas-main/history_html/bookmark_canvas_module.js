@@ -4895,11 +4895,10 @@ function applyTempSectionAutoSizeAll() {
  * @param {number} duration - 显示时长（毫秒），默认 3000
  */
 function showCanvasToast(message, type = 'info', duration = 3000) {
-    // 移除之前的同类提示（防止堆积）
-    const existingToast = document.querySelector('.canvas-toast');
-    if (existingToast) {
-        existingToast.remove();
-    }
+    // 移除之前的所有提示（防止堆积残留）
+    try {
+        document.querySelectorAll('.canvas-toast, .history-toast').forEach((t) => t.remove());
+    } catch (_) { }
 
     // 创建新的提示
     const toast = document.createElement('div');
@@ -4907,15 +4906,16 @@ function showCanvasToast(message, type = 'info', duration = 3000) {
 
     const oneLine = typeof message === 'string' && message.indexOf('\n') === -1 && message.length <= 120;
 
-    // 基础样式 - 左上角，在悬浮工具窗下方
+    // 基础样式 - 左上角，在悬浮工具窗（高度 98px）下方，保持充裕间距并强制穿透点击
     toast.style.cssText = `
         position: fixed;
-        top: 60px;
-        left: 12px;
+        top: 120px;
+        left: 16px;
         padding: 10px 16px;
         border-radius: 8px;
         font-size: 13px;
-        z-index: 100000;
+        z-index: 9999999;
+        pointer-events: none !important;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
         max-width: ${oneLine ? '520px' : '320px'};
         word-break: ${oneLine ? 'normal' : 'break-word'};
@@ -4968,14 +4968,19 @@ function showCanvasToast(message, type = 'info', duration = 3000) {
     messageEl.style.overflow = oneLine ? 'hidden' : 'visible';
     messageEl.style.textOverflow = oneLine ? 'ellipsis' : 'clip';
     messageEl.style.minWidth = '0';
+    messageEl.style.pointerEvents = 'none';
     toast.appendChild(messageEl);
     toast.style.zIndex = '9999999'; // Ensure it's on top of everything including overlays
+    toast.style.pointerEvents = 'none';
 
     // 添加动画样式（如果还没有）
     if (!document.getElementById('canvas-toast-styles')) {
         const style = document.createElement('style');
         style.id = 'canvas-toast-styles';
         style.textContent = `
+            .canvas-toast {
+                pointer-events: none !important;
+            }
             @keyframes canvasToastSlideDown {
                 from {
                     transform: translateY(-20px);
@@ -5003,15 +5008,27 @@ function showCanvasToast(message, type = 'info', duration = 3000) {
     const targetParent = getOverlayContainer();
     targetParent.appendChild(toast);
 
-    // 自动移除
+    // 自动安全移除（双重保障：animationend + 定时器兜底，避免切标签页或后台冻结遗留幽灵节点）
+    let isRemoved = false;
+    const safeRemove = () => {
+        if (isRemoved) return;
+        isRemoved = true;
+        if (toast.parentNode) {
+            toast.remove();
+        }
+    };
+
+    toast.addEventListener('animationend', (e) => {
+        if (e.animationName === 'canvasToastSlideUp') {
+            safeRemove();
+        }
+    });
+
+    const safeDuration = typeof duration === 'number' && duration > 0 ? duration : 3000;
     setTimeout(() => {
-        toast.style.animation = 'canvasToastSlideUp 0.3s ease';
-        setTimeout(() => {
-            if (toast.parentNode) {
-                toast.remove();
-            }
-        }, 300);
-    }, duration);
+        toast.style.animation = 'canvasToastSlideUp 0.3s ease forwards';
+        setTimeout(safeRemove, 350);
+    }, safeDuration);
 }
 
 /**
