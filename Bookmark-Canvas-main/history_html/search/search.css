@@ -27,7 +27,8 @@
     border: 1px solid var(--border-color);
     border-radius: 12px;
     box-shadow: var(--shadow-md);
-    max-height: min(var(--search-panel-height, 450px), var(--search-panel-max-allowed, calc(100vh - 80px)));
+    height: min(var(--search-panel-height, 520px), var(--search-panel-max-allowed, calc(100vh - 80px)));
+    max-height: min(var(--search-panel-height, 520px), var(--search-panel-max-allowed, calc(100vh - 80px)));
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: auto;
@@ -47,7 +48,8 @@
 body.header-dock-bottom:not(.header-compact) .search-results-panel {
     top: auto;
     bottom: calc(100% + 10px);
-    max-height: min(var(--search-panel-height, 450px), var(--search-panel-max-allowed, calc(100vh - 80px)));
+    height: min(var(--search-panel-height, 520px), var(--search-panel-max-allowed, calc(100vh - 80px)));
+    max-height: min(var(--search-panel-height, 520px), var(--search-panel-max-allowed, calc(100vh - 80px)));
 }
 
 /* 搜索候选结果面板的调整把手（完全位于面板内部边缘，背景纯透明，无模糊层，仅放置小白条） */
@@ -65,6 +67,7 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
     z-index: 60;
     user-select: none;
     pointer-events: auto;
+    touch-action: none !important;
     flex-shrink: 0;
     transition: none;
     backdrop-filter: none !important;
@@ -198,17 +201,18 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel:has(.search-h
 .search-panel-resize-handle.handle-right {
     position: absolute;
     top: calc(100% + 10px);
-    height: min(var(--search-panel-height, 450px), var(--search-panel-max-allowed, calc(100vh - 80px)));
-    width: 10px;
+    height: min(var(--search-panel-height, 520px), var(--search-panel-max-allowed, calc(100vh - 80px)));
+    width: 14px;
     min-height: 40px;
     cursor: ew-resize;
     display: none;
     align-items: center;
     justify-content: center;
     background: transparent !important;
-    z-index: 215; /* 确保高于面板 z-index: 200，在面板内侧上层清晰可见 */
+    z-index: 220; /* 确保高于面板 z-index: 200，在面板内侧上层清晰可见 */
     user-select: none;
     pointer-events: auto;
+    touch-action: none !important;
     flex-shrink: 0;
     transition: none;
     backdrop-filter: none !important;
@@ -222,7 +226,7 @@ body.header-dock-bottom:not(.header-compact) .search-panel-resize-handle.handle-
 }
 
 .search-panel-resize-handle.handle-left {
-    left: calc(var(--search-panel-left, 0px) - 4px);
+    left: calc(var(--search-panel-left, 0px) - 7px);
     transform: none;
     border-top-left-radius: 6px;
     border-bottom-left-radius: 6px;
@@ -231,7 +235,7 @@ body.header-dock-bottom:not(.header-compact) .search-panel-resize-handle.handle-
 }
 
 .search-panel-resize-handle.handle-right {
-    left: calc(var(--search-panel-left, 0px) + var(--search-panel-width, 100%) - 3px);
+    left: calc(var(--search-panel-left, 0px) + var(--search-panel-width, 100%) - 7px);
     transform: none;
     border-top-right-radius: 6px;
     border-bottom-right-radius: 6px;
@@ -621,6 +625,22 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     background: transparent !important;
     z-index: 60 !important;
     pointer-events: auto !important;
+    touch-action: none !important;
+}
+
+/* 上下调整把手：在底部停靠模式下贴附于面板顶端边缘，实现纯透明悬浮层，消除占用文档流高度导致的工具栏下移与小白条上下间距不一致 */
+body.header-dock-bottom .search-results-panel .search-panel-resize-handle.handle-top {
+    position: sticky !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    height: 14px !important;
+    margin-bottom: -14px !important;
+    background: transparent !important;
+    z-index: 60 !important;
+    pointer-events: auto !important;
+    touch-action: none !important;
 }
 
 body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-handle.handle-top {
@@ -630,9 +650,11 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     right: 0 !important;
     width: 100% !important;
     height: 14px !important;
+    margin-bottom: 0 !important;
     background: transparent !important;
     z-index: 60 !important;
     pointer-events: auto !important;
+    touch-action: none !important;
 }
 
 .search-results-panel.view-table .canvas-search-tabulator .tabulator-tableholder {
@@ -1499,7 +1521,8 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 }
 
 .canvas-bookmark-type-btn,
-.canvas-structure-type-btn {
+.canvas-structure-type-btn,
+.canvas-description-type-btn {
     transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
@@ -1568,6 +1591,55 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     background: rgba(124, 58, 237, 0.22) !important;
 }
 
+.canvas-description-type-btn:hover {
+    border-color: rgba(128, 128, 128, 0.45) !important;
+    background: rgba(128, 128, 128, 0.08) !important;
+}
+
+.canvas-description-type-btn[data-type="all"]:not(.active):hover {
+    border-color: rgba(59, 130, 246, 0.45) !important;
+    background: rgba(59, 130, 246, 0.1) !important;
+    color: #3b82f6 !important;
+}
+
+.canvas-description-type-btn[data-type="section"]:not(.active):hover {
+    border-color: rgba(5, 150, 105, 0.45) !important;
+    background: rgba(5, 150, 105, 0.1) !important;
+    color: #059669 !important;
+}
+
+.canvas-description-type-btn[data-type="card"]:not(.active):hover {
+    border-color: rgba(249, 115, 22, 0.45) !important;
+    background: rgba(249, 115, 22, 0.1) !important;
+    color: #f97316 !important;
+}
+
+.canvas-description-type-btn[data-type="edge"]:not(.active):hover {
+    border-color: rgba(16, 185, 129, 0.45) !important;
+    background: rgba(16, 185, 129, 0.1) !important;
+    color: #10b981 !important;
+}
+
+.canvas-description-type-btn[data-type="all"].active:hover {
+    border-color: rgba(59, 130, 246, 0.65) !important;
+    background: rgba(59, 130, 246, 0.22) !important;
+}
+
+.canvas-description-type-btn[data-type="section"].active:hover {
+    border-color: rgba(5, 150, 105, 0.65) !important;
+    background: rgba(5, 150, 105, 0.22) !important;
+}
+
+.canvas-description-type-btn[data-type="card"].active:hover {
+    border-color: rgba(249, 115, 22, 0.65) !important;
+    background: rgba(249, 115, 22, 0.22) !important;
+}
+
+.canvas-description-type-btn[data-type="edge"].active:hover {
+    border-color: rgba(16, 185, 129, 0.65) !important;
+    background: rgba(16, 185, 129, 0.22) !important;
+}
+
 .canvas-bookmark-domain-control-group {
     display: inline-flex;
     align-items: center;
@@ -1576,17 +1648,58 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 
 /* Keep bookmark/domain mode strip fixed at top while result list scrolls. */
 .canvas-bookmark-type-toggle,
-.canvas-structure-type-toggle {
+.canvas-structure-type-toggle,
+.canvas-description-type-toggle {
     position: sticky;
     top: 0;
     z-index: 8;
     background: var(--bg-elevated);
     border-bottom: 1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18));
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
 }
 
 [data-theme="dark"] .canvas-bookmark-type-toggle,
-[data-theme="dark"] .canvas-structure-type-toggle {
+[data-theme="dark"] .canvas-structure-type-toggle,
+[data-theme="dark"] .canvas-description-type-toggle {
     border-bottom: 1px solid var(--search-candidate-divider, rgba(255, 255, 255, 0.22));
+}
+
+.canvas-bookmark-toolbar-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    margin-left: auto !important;
+}
+
+/* 窄宽度/侧边栏模式自适应：隐藏结构模式文字标签与勾选导出文字，只保留图标与数量，依靠 hover 气泡识别，防止挤压右侧视图切换按钮 */
+html.side-panel-mode .canvas-structure-type-btn .canvas-structure-type-text,
+.canvas-structure-type-toggle-compact .canvas-structure-type-btn .canvas-structure-type-text,
+.search-results-panel.is-single-column .canvas-structure-type-btn .canvas-structure-type-text,
+html.side-panel-mode .canvas-bookmark-selection-confirm-btn .canvas-selection-confirm-text,
+.search-results-panel.is-single-column .canvas-bookmark-selection-confirm-btn .canvas-selection-confirm-text {
+    display: none !important;
+}
+
+@container search-panel (max-width: 520px) {
+    .canvas-structure-type-btn .canvas-structure-type-text {
+        display: none !important;
+    }
+    .canvas-bookmark-selection-confirm-btn .canvas-selection-confirm-text {
+        display: none !important;
+    }
+}
+
+@media (max-width: 520px) {
+    .canvas-structure-type-btn .canvas-structure-type-text {
+        display: none !important;
+    }
+    .canvas-bookmark-selection-confirm-btn .canvas-selection-confirm-text {
+        display: none !important;
+    }
 }
 
 .canvas-tag-browse-detail-header {
@@ -4979,12 +5092,47 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
 }
 
 
-/* ==================== 搜索结果空状态 ==================== */
-.search-result-empty {
-    padding: 16px;
-    text-align: center;
-    font-size: 13px;
-    color: var(--text-secondary);
+/* ==================== 搜索结果空状态与整体居中 ==================== */
+.search-results-panel.has-empty-results,
+.search-results-panel:has(.search-result-empty) {
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.search-results-panel.has-empty-results .canvas-bookmark-type-toggle,
+.search-results-panel.has-empty-results .canvas-structure-type-toggle,
+.search-results-panel.has-empty-results .canvas-description-type-toggle,
+.search-results-panel.has-empty-results .canvas-tag-browse-detail-header,
+.search-results-panel:has(.search-result-empty) .canvas-bookmark-type-toggle,
+.search-results-panel:has(.search-result-empty) .canvas-structure-type-toggle,
+.search-results-panel:has(.search-result-empty) .canvas-description-type-toggle,
+.search-results-panel:has(.search-result-empty) .canvas-tag-browse-detail-header {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.search-results-panel .search-result-empty {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    flex: 1 1 auto !important;
+    padding: 32px 16px !important;
+    box-sizing: border-box !important;
+    text-align: center !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: var(--text-secondary) !important;
+    user-select: none !important;
+    margin: 0 !important;
+}
+
+.search-results-panel.view-table .search-result-empty,
+.search-results-panel.view-grid .search-result-empty {
+    display: flex !important;
 }
 
 /* ==================== 连接线高亮动画 ==================== */
@@ -6941,13 +7089,14 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     line-height: 1.35;
 }
 
-/* 单个历史项的清理按钮：默认彻底隐藏，不占用任何条目空间；悬停时在右上角以小圆形气泡浮现 */
+/* 单个历史项的清理按钮：默认彻底隐藏，不占用任何条目空间；悬停时在右上角以极小圆形气泡浮现，避免误触主条目点击 */
 .search-history-item-del-btn {
     position: absolute;
-    top: -5px;
-    right: -5px;
-    width: 13px;
-    height: 13px;
+    top: -3px;
+    right: -3px;
+    width: 10px;
+    height: 10px;
+    box-sizing: border-box;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -6955,10 +7104,11 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     background: #ffffff;
     border: 1px solid var(--border-color, rgba(0, 0, 0, 0.18));
     color: var(--text-secondary, #64748b);
-    box-shadow: 0 1.5px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
     cursor: pointer;
     padding: 0;
-    font-size: 7px;
+    margin: 0;
+    line-height: 0;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -6967,21 +7117,16 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     z-index: 20;
 }
 
-/* 扩展点击感应区域，保持视觉小巧的同时保证点击便捷 */
+/* 严格限定感应区域在小按钮自身范围，不再外扩，彻底消除误触条目搜索的问题 */
 .search-history-item-del-btn::after {
-    content: '';
-    position: absolute;
-    top: -4px;
-    left: -4px;
-    right: -4px;
-    bottom: -4px;
+    display: none;
 }
 
 [data-theme="dark"] .search-history-item-del-btn {
     background: #2a2e39;
     border-color: rgba(255, 255, 255, 0.2);
     color: #cbd5e1;
-    box-shadow: 0 1.5px 4px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 /* 仅在鼠标悬浮在对应条目上时浮现圆形 x 按钮 */
@@ -6996,11 +7141,24 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     background: #ef4444 !important;
     border-color: #ef4444 !important;
     color: #ffffff !important;
-    transform: scale(1.12);
+    transform: scale(1.08);
+}
+
+.search-history-item-del-btn svg {
+    display: block;
+    width: 6px;
+    height: 6px;
+    pointer-events: none;
+    flex-shrink: 0;
 }
 
 .search-history-item-del-btn i {
-    font-size: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    font-size: 5.5px;
     line-height: 1;
     pointer-events: none;
 }

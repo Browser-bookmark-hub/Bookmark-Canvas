@@ -26,6 +26,10 @@ function isSidePanelModeInSearch() {
     try {
         if (typeof window !== 'undefined' && window.__SIDE_PANEL_MODE__ === true) return true;
         if (typeof document !== 'undefined' && document.documentElement && document.documentElement.classList.contains('side-panel-mode')) return true;
+        // 独立顶层页面（非 iframe 嵌入），若未明确标记为侧边栏模式，严格判定为标签页
+        if (typeof window !== 'undefined' && window.self === window.top && window.__SIDE_PANEL_MODE__ === false) {
+            return false;
+        }
         if (typeof window !== 'undefined' && window.location && window.location.search) {
             const params = new URLSearchParams(window.location.search);
             const flag = params.get('sidepanel') || params.get('side_panel') || params.get('panel');
@@ -76,19 +80,15 @@ function getSearchPanelViewModeStorageKey(mode, env) {
  * @returns {{ grid: string, table: string }}
  */
 function getSearchPanelViewToggleLabels(isZh = true, env = null) {
-    const targetEnv = env || getSearchPanelHostContext();
-    const isSide = targetEnv === 'sidepanel';
     if (isZh) {
-        const envLabel = isSide ? '侧边栏' : '标签页';
         return {
-            grid: `网格视图(${envLabel})`,
-            table: `表格视图(${envLabel})`
+            grid: '网格视图',
+            table: '表格视图'
         };
     } else {
-        const envLabel = isSide ? 'Side Panel' : 'Tab';
         return {
-            grid: `Grid View (${envLabel})`,
-            table: `Table View (${envLabel})`
+            grid: 'Grid View',
+            table: 'Table View'
         };
     }
 }
@@ -213,6 +213,10 @@ const searchUiState = {
     // Canvas card(group) search: whether to show cards/sections or groups
     // Values: 'card' | 'group' | null (auto)
     structureTypeFilter: null,
+
+    // Canvas description search: whether to show section / card / edge results
+    // Values: 'section' | 'card' | 'edge' | null (auto/all)
+    descriptionTypeFilter: null,
 
     // Cache for bookmark-domain grouping (per query)
     domainIndexCache: null,
@@ -660,6 +664,33 @@ function setSearchPanelViewMode(mode, options = {}) {
     const gridScroll = searchContainer ? searchContainer.querySelector('#canvasGridRightScrollbar') : null;
 
     const currentActiveMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+
+    const existingEmpty = panel.querySelector('.search-result-empty');
+    if (existingEmpty) {
+        if (existingTableWrapper) existingTableWrapper.style.display = 'none';
+        if (existingGridContainer) existingGridContainer.style.display = 'none';
+        if (existingGridLoadMore) existingGridLoadMore.style.display = 'none';
+        if (gridScroll) gridScroll.style.display = 'none';
+        existingEmpty.style.display = 'flex';
+
+        panel.classList.toggle('view-grid', nextMode === 'grid');
+        panel.classList.toggle('view-table', nextMode === 'table');
+        if (nextMode !== 'grid') {
+            panel.classList.remove('is-single-column');
+        } else {
+            updateSearchPanelColumnState(panel);
+        }
+        syncSearchPanelViewToggleButtonsState(panel, nextMode);
+        applySearchPanelWidth(getSearchPanelWidth(nextMode), panel, nextMode, { skipHandlesSync: true });
+        applySearchPanelHeight(getSearchPanelHeight(nextMode), panel, nextMode);
+        ensureSearchPanelResizeHandles(panel);
+        syncSearchPanelHandlesLayout(panel);
+
+        if (prevMode !== nextMode) {
+            triggerWidthHandlesViewSwitchFlash(panel);
+        }
+        return;
+    }
     const canFastSwitchToTable = (nextMode === 'table'
         && existingTableWrapper
         && canvasSearchTabulatorInstance
@@ -694,6 +725,7 @@ function setSearchPanelViewMode(mode, options = {}) {
             if (typeof syncCanvasTabulatorRightScrollbar === 'function') syncCanvasTabulatorRightScrollbar(true);
             updateSearchResultSelection(searchUiState.selectedIndex >= 0 ? searchUiState.selectedIndex : 0, { ensureVisible: false });
             if (typeof syncCanvasSearchItemSelectionVisuals === 'function') syncCanvasSearchItemSelectionVisuals();
+            syncSearchPanelHandlesLayout(panel);
         });
         return;
     }
@@ -723,6 +755,7 @@ function setSearchPanelViewMode(mode, options = {}) {
             syncCanvasGridRightScrollbar(panel);
             updateSearchResultSelection(searchUiState.selectedIndex >= 0 ? searchUiState.selectedIndex : 0, { ensureVisible: false });
             if (typeof syncCanvasSearchItemSelectionVisuals === 'function') syncCanvasSearchItemSelectionVisuals();
+            syncSearchPanelHandlesLayout(panel);
         });
         return;
     }
@@ -898,23 +931,36 @@ function syncSearchPanelHandlesLayout(panel) {
     const cRect = searchContainer.getBoundingClientRect();
     if (pRect.width <= 0 || pRect.height <= 0) return;
 
-    const relLeft = pRect.left - cRect.left;
-    const relTop = pRect.top - cRect.top;
-    const width = pRect.width;
-    const height = pRect.height;
-    const HANDLE_WIDTH = 10;
+    // 优先使用相对于 offsetParent (searchContainer) 的直接定位坐标，消除父容器边框与内边距造成的偏移累加
+    const hasOffsetParent = (panel.offsetParent === searchContainer);
+    const left = hasOffsetParent && Number.isFinite(panel.offsetLeft)
+        ? panel.offsetLeft
+        : Math.round(pRect.left - cRect.left);
+    const top = hasOffsetParent && Number.isFinite(panel.offsetTop)
+        ? panel.offsetTop
+        : Math.round(pRect.top - cRect.top);
+    const width = hasOffsetParent && panel.offsetWidth > 0
+        ? panel.offsetWidth
+        : Math.round(pRect.width);
+    const height = hasOffsetParent && panel.offsetHeight > 0
+        ? panel.offsetHeight
+        : Math.round(pRect.height);
+    const HANDLE_WIDTH = 14;
+    const HALF_HANDLE = 7;
 
     if (handleLeft) {
         handleLeft.style.display = 'flex';
-        handleLeft.style.left = `${Math.round(relLeft - 4)}px`;
-        handleLeft.style.top = `${Math.round(relTop)}px`;
+        handleLeft.style.left = `${Math.round(left - HALF_HANDLE)}px`;
+        handleLeft.style.top = `${Math.round(top)}px`;
+        handleLeft.style.bottom = 'auto';
         handleLeft.style.height = `${Math.round(height)}px`;
         handleLeft.style.width = `${HANDLE_WIDTH}px`;
     }
     if (handleRight) {
         handleRight.style.display = 'flex';
-        handleRight.style.left = `${Math.round(relLeft + width - 3)}px`;
-        handleRight.style.top = `${Math.round(relTop)}px`;
+        handleRight.style.left = `${Math.round(left + width - HALF_HANDLE)}px`;
+        handleRight.style.top = `${Math.round(top)}px`;
+        handleRight.style.bottom = 'auto';
         handleRight.style.height = `${Math.round(height)}px`;
         handleRight.style.width = `${HANDLE_WIDTH}px`;
     }
@@ -1168,7 +1214,7 @@ function getSearchPanelHeight(mode) {
 
     if (targetMode === 'table') {
         try {
-            const saved = localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_TABLE);
+            const saved = localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_TABLE) || localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_GRID) || localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY);
             if (saved !== null) {
                 const val = parseInt(saved, 10);
                 if (Number.isFinite(val) && val >= SEARCH_PANEL_HEIGHT_MIN && val <= SEARCH_PANEL_HEIGHT_MAX) {
@@ -1179,15 +1225,17 @@ function getSearchPanelHeight(mode) {
         try {
             if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
                 const other = window.CanvasState.otherSettings;
-                if (typeof other.searchPanelTableHeight === 'number' && Number.isFinite(other.searchPanelTableHeight)) {
-                    return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, other.searchPanelTableHeight));
+                const h = other.searchPanelTableHeight || other.searchPanelGridHeight || other.searchPanelHeight;
+                if (typeof h === 'number' && Number.isFinite(h)) {
+                    return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, h));
                 }
             }
             const rawOther = localStorage.getItem('canvas_other_settings');
             if (rawOther) {
                 const parsedOther = JSON.parse(rawOther);
-                if (parsedOther && typeof parsedOther.searchPanelTableHeight === 'number' && Number.isFinite(parsedOther.searchPanelTableHeight)) {
-                    return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, parsedOther.searchPanelTableHeight));
+                const h = parsedOther && (parsedOther.searchPanelTableHeight || parsedOther.searchPanelGridHeight || parsedOther.searchPanelHeight);
+                if (typeof h === 'number' && Number.isFinite(h)) {
+                    return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, h));
                 }
             }
         } catch (_) { }
@@ -1196,7 +1244,7 @@ function getSearchPanelHeight(mode) {
 
     // 网格/卡片视图（包括单纵行卡片与多纵行网格，兼容旧列表高度记忆）
     try {
-        const saved = localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_GRID) || localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY);
+        const saved = localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_GRID) || localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_TABLE) || localStorage.getItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY);
         if (saved !== null) {
             const val = parseInt(saved, 10);
             if (Number.isFinite(val) && val >= SEARCH_PANEL_HEIGHT_MIN && val <= SEARCH_PANEL_HEIGHT_MAX) {
@@ -1207,21 +1255,17 @@ function getSearchPanelHeight(mode) {
     try {
         if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
             const other = window.CanvasState.otherSettings;
-            if (typeof other.searchPanelGridHeight === 'number' && Number.isFinite(other.searchPanelGridHeight)) {
-                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, other.searchPanelGridHeight));
-            }
-            if (typeof other.searchPanelHeight === 'number' && Number.isFinite(other.searchPanelHeight)) {
-                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, other.searchPanelHeight));
+            const h = other.searchPanelGridHeight || other.searchPanelTableHeight || other.searchPanelHeight;
+            if (typeof h === 'number' && Number.isFinite(h)) {
+                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, h));
             }
         }
         const rawOther = localStorage.getItem('canvas_other_settings');
         if (rawOther) {
             const parsedOther = JSON.parse(rawOther);
-            if (parsedOther && typeof parsedOther.searchPanelGridHeight === 'number' && Number.isFinite(parsedOther.searchPanelGridHeight)) {
-                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, parsedOther.searchPanelGridHeight));
-            }
-            if (parsedOther && typeof parsedOther.searchPanelHeight === 'number' && Number.isFinite(parsedOther.searchPanelHeight)) {
-                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, parsedOther.searchPanelHeight));
+            const h = parsedOther && (parsedOther.searchPanelGridHeight || parsedOther.searchPanelTableHeight || parsedOther.searchPanelHeight);
+            if (typeof h === 'number' && Number.isFinite(h)) {
+                return Math.max(SEARCH_PANEL_HEIGHT_MIN, Math.min(SEARCH_PANEL_HEIGHT_MAX, h));
             }
         }
     } catch (_) { }
@@ -1314,7 +1358,9 @@ function applySearchPanelHeight(height, panel, mode) {
         document.documentElement.style.setProperty('--search-panel-height', `${preferred}px`);
         document.documentElement.style.setProperty('--search-panel-max-allowed', `${temporaryLimit}px`);
         if (panel) {
+            panel.style.height = `${effective}px`;
             panel.style.maxHeight = `${effective}px`;
+            panel.style.setProperty('--search-panel-height', `${preferred}px`);
         }
     } catch (_) { }
     return effective;
@@ -1344,30 +1390,22 @@ function setSearchPanelHeight(height, options = {}) {
                         localStorage.setItem('canvas_other_settings', JSON.stringify(parsedOther));
                     }
                 }
-            } else if (targetMode === 'table') {
+            } else {
                 localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_TABLE, String(preferred));
+                localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_GRID, String(preferred));
+                localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY, String(preferred));
                 if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
                     window.CanvasState.otherSettings.searchPanelTableHeight = preferred;
+                    window.CanvasState.otherSettings.searchPanelGridHeight = preferred;
+                    window.CanvasState.otherSettings.searchPanelHeight = preferred;
                 }
                 const rawOther = localStorage.getItem('canvas_other_settings');
                 if (rawOther) {
                     const parsedOther = JSON.parse(rawOther);
                     if (parsedOther && typeof parsedOther === 'object') {
                         parsedOther.searchPanelTableHeight = preferred;
-                        localStorage.setItem('canvas_other_settings', JSON.stringify(parsedOther));
-                    }
-                }
-            } else {
-                localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_GRID, String(preferred));
-                localStorage.setItem(SEARCH_PANEL_HEIGHT_PREF_KEY_LEGACY, String(preferred));
-                if (typeof window !== 'undefined' && window.CanvasState && window.CanvasState.otherSettings) {
-                    window.CanvasState.otherSettings.searchPanelGridHeight = preferred;
-                }
-                const rawOther = localStorage.getItem('canvas_other_settings');
-                if (rawOther) {
-                    const parsedOther = JSON.parse(rawOther);
-                    if (parsedOther && typeof parsedOther === 'object') {
                         parsedOther.searchPanelGridHeight = preferred;
+                        parsedOther.searchPanelHeight = preferred;
                         localStorage.setItem('canvas_other_settings', JSON.stringify(parsedOther));
                     }
                 }
@@ -1615,7 +1653,7 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
         } catch (_) { }
     });
 
-    const isTop = (direction === 'top');
+    const isTop = (direction === 'top') || (handle && handle.classList.contains('handle-top'));
     const DRAG_THRESHOLD = 3;
 
     const onPointerDown = (e) => {
@@ -1643,7 +1681,7 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
 
         const onPointerMove = (moveEvent) => {
             // Safety: if mouse button was released without pointerup, terminate
-            if (typeof moveEvent.buttons === 'number' && (moveEvent.buttons & 1) === 0) {
+            if (typeof moveEvent.buttons === 'number' && (moveEvent.buttons & 1) === 0 && moveEvent.pointerType === 'mouse') {
                 onPointerEnd();
                 return;
             }
@@ -1689,6 +1727,11 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
             });
         };
 
+        const onPointerCancel = (cancelEvent) => {
+            if (cancelEvent && cancelEvent.pointerType === 'mouse') return;
+            onPointerEnd();
+        };
+
         const onPointerEnd = () => {
             if (rafId) cancelAnimationFrame(rafId);
             try {
@@ -1699,7 +1742,7 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
 
             window.removeEventListener('pointermove', onPointerMove, true);
             window.removeEventListener('pointerup', onPointerEnd, true);
-            window.removeEventListener('pointercancel', onPointerEnd, true);
+            window.removeEventListener('pointercancel', onPointerCancel, true);
             window.removeEventListener('mousemove', onPointerMove, true);
             window.removeEventListener('mouseup', onPointerEnd, true);
             window.removeEventListener('blur', onPointerEnd);
@@ -1708,10 +1751,6 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
                 panel.classList.remove('resizing');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
-                // 清理拖拽中的临时内联 style.height 与元素私有变量，交由 applySearchPanelHeight 与系统样式统一规范接管
-                panel.style.height = '';
-                panel.style.maxHeight = '';
-                panel.style.removeProperty('--search-panel-height');
 
                 // 拖拽释放时单次提交并持久化（写入 localStorage 并同步 CSS 变量与事件）
                 const currentMode = getSearchPanelMode(panel);
@@ -1721,12 +1760,13 @@ function bindSearchPanelResizeHandle(handle, panel, direction = 'bottom') {
                 if (typeof syncCanvasTabulatorRightScrollbar === 'function') {
                     syncCanvasTabulatorRightScrollbar(true);
                 }
+                syncSearchPanelHandlesLayout(panel);
             }
         };
 
         window.addEventListener('pointermove', onPointerMove, true);
         window.addEventListener('pointerup', onPointerEnd, true);
-        window.addEventListener('pointercancel', onPointerEnd, true);
+        window.addEventListener('pointercancel', onPointerCancel, true);
         window.addEventListener('mousemove', onPointerMove, true);
         window.addEventListener('mouseup', onPointerEnd, true);
         window.addEventListener('blur', onPointerEnd);
@@ -1791,16 +1831,14 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
         } catch (_) { }
 
         const onPointerMove = (moveEvent) => {
-            if (typeof moveEvent.buttons === 'number' && (moveEvent.buttons & 1) === 0) {
+            if (typeof moveEvent.buttons === 'number' && (moveEvent.buttons & 1) === 0 && moveEvent.pointerType === 'mouse') {
                 onPointerEnd();
                 return;
             }
 
             const distX = Math.abs(moveEvent.clientX - startX);
-            const distY = Math.abs(moveEvent.clientY - startY);
             if (!hasStartedDrag) {
-                // 防误触保护：若位移未达标或纵向位移主导（用户实际意图为上下滚动或点击），坚决不激活横向宽度调整
-                if (distX < DRAG_THRESHOLD || distX < distY * 1.2) return;
+                if (distX < DRAG_THRESHOLD) return;
                 hasStartedDrag = true;
                 panel.classList.add('resizing-x');
                 document.body.style.cursor = 'ew-resize';
@@ -1847,6 +1885,15 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
                 document.documentElement.style.setProperty('--search-panel-width', `${newWidth}px`);
                 document.documentElement.style.setProperty('--search-panel-left', `${newLeft}px`);
 
+                const handleLeftEl = searchContainer ? searchContainer.querySelector('.search-panel-resize-handle.handle-left') : null;
+                const handleRightEl = searchContainer ? searchContainer.querySelector('.search-panel-resize-handle.handle-right') : null;
+                if (handleLeftEl) {
+                    handleLeftEl.style.left = `${newLeft - 7}px`;
+                }
+                if (handleRightEl) {
+                    handleRightEl.style.left = `${newLeft + newWidth - 7}px`;
+                }
+
                 const currentMode = getSearchPanelMode(panel);
                 const targetInputId = currentMode === 'root'
                     ? 'otherSearchPanelRootWidth'
@@ -1859,8 +1906,15 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
                     safeRedrawCanvasSearchTabulator(true);
                     if (typeof syncCanvasTabulatorTopScrollbar === 'function') syncCanvasTabulatorTopScrollbar();
                     if (typeof syncCanvasTabulatorRightScrollbar === 'function') syncCanvasTabulatorRightScrollbar(true);
+                } else if (panel.classList.contains('view-grid')) {
+                    if (typeof syncCanvasGridRightScrollbar === 'function') syncCanvasGridRightScrollbar(panel);
                 }
             });
+        };
+
+        const onPointerCancel = (cancelEvent) => {
+            if (cancelEvent && cancelEvent.pointerType === 'mouse') return;
+            onPointerEnd();
         };
 
         const onPointerEnd = () => {
@@ -1873,7 +1927,7 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
 
             window.removeEventListener('pointermove', onPointerMove, true);
             window.removeEventListener('pointerup', onPointerEnd, true);
-            window.removeEventListener('pointercancel', onPointerEnd, true);
+            window.removeEventListener('pointercancel', onPointerCancel, true);
             window.removeEventListener('mousemove', onPointerMove, true);
             window.removeEventListener('mouseup', onPointerEnd, true);
             window.removeEventListener('blur', onPointerEnd);
@@ -1889,12 +1943,13 @@ function bindSearchPanelWidthResizeHandle(handle, panel, direction = 'right') {
                     updateSearchPanelColumnState(panel);
                 }
                 safeRedrawCanvasSearchTabulator(true);
+                syncSearchPanelHandlesLayout(panel);
             }
         };
 
         window.addEventListener('pointermove', onPointerMove, true);
         window.addEventListener('pointerup', onPointerEnd, true);
-        window.addEventListener('pointercancel', onPointerEnd, true);
+        window.addEventListener('pointercancel', onPointerCancel, true);
         window.addEventListener('mousemove', onPointerMove, true);
         window.addEventListener('mouseup', onPointerEnd, true);
         window.addEventListener('blur', onPointerEnd);
@@ -2043,7 +2098,12 @@ function prepareSearchInputBeforeCanvasNavigate() {
     } catch (_) { }
 }
 
-function dismissMainSearchAfterCanvasNavigate() {
+/**
+ * 退出搜索模式（清空输入、失焦、关闭结果与建议面板、清除高亮、关闭所有气泡与菜单）
+ */
+function exitMainSearchMode(options = {}) {
+    const { clearInput = true } = options;
+
     try {
         if (typeof window.cancelPendingMainSearchDebounce === 'function') {
             window.cancelPendingMainSearchDebounce();
@@ -2051,22 +2111,69 @@ function dismissMainSearchAfterCanvasNavigate() {
     } catch (_) { }
 
     try {
+        if (typeof focusSearchTimeout !== 'undefined' && focusSearchTimeout) {
+            clearTimeout(focusSearchTimeout);
+            focusSearchTimeout = null;
+        }
+    } catch (_) { }
+
+    try {
         const input = document.getElementById('searchInput');
         if (input) {
-            input.value = '';
+            if (clearInput) input.value = '';
             try { input.blur(); } catch (_) { }
         }
     } catch (_) { }
 
     try {
-        hideSearchResultsPanel();
-        toggleSearchModeMenu(false);
-        toggleSearchHelpMenu(false);
+        const clearBtn = document.getElementById('searchClearBtn');
+        if (clearBtn && clearInput) {
+            clearBtn.style.display = 'none';
+        }
     } catch (_) { }
 
     try {
-        if (typeof performSearch === 'function') {
-            performSearch('');
+        if (typeof updateSearchPlaceholder === 'function') {
+            updateSearchPlaceholder('unfocused');
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof hideSearchResultsPanel === 'function') {
+            hideSearchResultsPanel();
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof hideTempSectionBubble === 'function') {
+            hideTempSectionBubble(true);
+        }
+        if (typeof hideGridGroupPopover === 'function') {
+            hideGridGroupPopover();
+        }
+        if (typeof hideGridDetailsBubble === 'function') {
+            hideGridDetailsBubble();
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+            exitCanvasSearchSelectionMode({ silent: true });
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof clearCanvasSearchHighlight === 'function') {
+            clearCanvasSearchHighlight();
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof toggleSearchModeMenu === 'function') {
+            toggleSearchModeMenu(false);
+        }
+        if (typeof toggleSearchHelpMenu === 'function') {
+            toggleSearchHelpMenu(false);
         }
     } catch (_) { }
 
@@ -2085,8 +2192,116 @@ function dismissMainSearchAfterCanvasNavigate() {
     } catch (_) { }
 
     try {
-        if (isSidePanelModeInSearch()) {
-            setSidePanelSearchExpanded(false);
+        if (typeof isSidePanelModeInSearch === 'function' && isSidePanelModeInSearch()) {
+            if (typeof setSidePanelSearchExpanded === 'function') {
+                setSidePanelSearchExpanded(false);
+            }
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof performSearch === 'function') {
+            performSearch('');
+        }
+    } catch (_) { }
+}
+
+function dismissMainSearchAfterCanvasNavigate() {
+    exitMainSearchMode({ clearInput: true });
+}
+
+/**
+ * 清空搜索输入框并彻底重置搜索状态（保留输入焦点与展开状态，方便用户继续输入）
+ */
+function clearMainSearchInput(options = {}) {
+    try {
+        if (typeof window.cancelPendingMainSearchDebounce === 'function') {
+            window.cancelPendingMainSearchDebounce();
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof focusSearchTimeout !== 'undefined' && focusSearchTimeout) {
+            clearTimeout(focusSearchTimeout);
+            focusSearchTimeout = null;
+        }
+    } catch (_) { }
+
+    const input = document.getElementById('searchInput');
+    if (input) {
+        input.value = '';
+        try { input.focus(); } catch (_) { }
+    }
+
+    try {
+        const clearBtn = document.getElementById('searchClearBtn');
+        if (clearBtn) {
+            clearBtn.style.display = 'none';
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof updateSearchPlaceholder === 'function') {
+            updateSearchPlaceholder('focused');
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof hideTempSectionBubble === 'function') {
+            hideTempSectionBubble(true);
+        }
+        if (typeof hideGridGroupPopover === 'function') {
+            hideGridGroupPopover();
+        }
+        if (typeof hideGridDetailsBubble === 'function') {
+            hideGridDetailsBubble();
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+            exitCanvasSearchSelectionMode({ silent: true });
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof clearCanvasSearchHighlight === 'function') {
+            clearCanvasSearchHighlight();
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof searchUiState === 'object' && searchUiState) {
+            searchUiState.query = '';
+            searchUiState.results = [];
+            searchUiState.resultSource = [];
+            searchUiState.resultAll = [];
+            searchUiState.resultPagingKey = '';
+            searchUiState.resultVisibleCount = 0;
+            searchUiState.resultHasMore = false;
+            searchUiState.selectedIndex = -1;
+            searchUiState.canvasSuggestionsVisible = false;
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof performSearch === 'function') {
+            performSearch('');
+        }
+    } catch (_) { }
+
+    try {
+        if (typeof shouldShowEmptyQuerySuggestions === 'function' && shouldShowEmptyQuerySuggestions()) {
+            if (typeof renderCanvasSearchSuggestions === 'function') {
+                renderCanvasSearchSuggestions();
+            }
+            if (typeof showSearchResultsPanel === 'function') {
+                showSearchResultsPanel();
+            }
+        } else {
+            if (typeof hideSearchResultsPanel === 'function') {
+                hideSearchResultsPanel();
+            }
         }
     } catch (_) { }
 }
@@ -2726,8 +2941,8 @@ function handleSearchResultsPanelClick(e) {
         const isControlAction = e.target.closest(
             '.canvas-bookmark-to-temp-btn, .canvas-bookmark-selection-confirm-btn, #searchTempSectionBubble, .canvas-temp-bubble-btn, .canvas-temp-bubble-chip, ' +
             '.canvas-bookmark-view-toggle-btn, .canvas-bookmark-toolbar-actions, ' +
-            '.canvas-bookmark-type-btn, .canvas-structure-type-btn, .canvas-bookmark-domain-granularity-btn, ' +
-            '.canvas-bookmark-type-toggle, .canvas-structure-type-toggle, ' +
+            '.canvas-bookmark-type-btn, .canvas-structure-type-btn, .canvas-description-type-btn, .canvas-bookmark-domain-granularity-btn, ' +
+            '.canvas-bookmark-type-toggle, .canvas-structure-type-toggle, .canvas-description-type-toggle, ' +
             '.search-view-mode-toggle, #searchViewModeToggle, #searchViewModeDropdown, ' +
             '.search-header-btn, .search-close-btn, .canvas-tabulator-load-more-btn'
         );
@@ -3387,6 +3602,38 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
+    const descriptionTypeBtn = e.target.closest('.canvas-description-type-btn');
+    if (descriptionTypeBtn) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const type = String(descriptionTypeBtn.dataset.type || '');
+        if (type !== 'all' && type !== 'section' && type !== 'card' && type !== 'edge') return;
+        if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
+
+        if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
+            const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+            exitCanvasSearchSelectionMode({
+                silent: false,
+                message: isZh ? '切换筛选已自动退出勾选模式' : 'Filter changed: exited selection mode'
+            });
+        }
+
+        if (type === 'all' || searchUiState.descriptionTypeFilter === type) {
+            searchUiState.descriptionTypeFilter = null;
+        } else {
+            searchUiState.descriptionTypeFilter = type;
+        }
+        renderCanvasSearchResults(searchUiState.resultSource || [], {
+            view: 'canvas',
+            query: searchUiState.query,
+            selectedIndex: 0
+        });
+        return;
+    }
+
     // 0b. Domain granularity toggle (Root / Subdomain)
     const domainGranularityBtn = e.target.closest('.canvas-bookmark-domain-granularity-btn');
     if (domainGranularityBtn) {
@@ -3760,13 +4007,13 @@ function highlightSearchKeywords(text, query) {
 }
 
 /**
- * 展示搜索结果完整标题浮层（带对应关键词高亮）
+ * 展示搜索结果完整标题浮层（带对应关键词高亮或纯文本模式）
  */
-function showSearchTitleTooltip(targetEl, text) {
+function showSearchTitleTooltip(targetEl, text, options = {}) {
     if (!targetEl || !text) return;
     const tooltip = getOrCreateSearchTitleTooltip();
     const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) ? searchUiState.query : '';
-    tooltip.innerHTML = highlightSearchKeywords(text, query);
+    tooltip.innerHTML = (options && options.highlight === false) ? escapeHtml(text) : highlightSearchKeywords(text, query);
     tooltip.classList.remove('visible');
     tooltip.style.left = '-9999px';
     tooltip.style.top = '-9999px';
@@ -3776,7 +4023,12 @@ function showSearchTitleTooltip(targetEl, text) {
     const tooltipWidth = tooltip.offsetWidth;
     const tooltipHeight = tooltip.offsetHeight;
 
-    let left = rect.left + 8;
+    let left;
+    if (targetEl.hasAttribute('data-tooltip')) {
+        left = rect.left + (rect.width / 2) - (tooltipWidth / 2);
+    } else {
+        left = rect.left + 8;
+    }
     if (left + tooltipWidth > window.innerWidth - 12) {
         left = Math.max(8, window.innerWidth - tooltipWidth - 12);
     }
@@ -3797,9 +4049,9 @@ function showSearchTitleTooltip(targetEl, text) {
 }
 
 /**
- * 计划 0.7s 延迟展示完整标题浮层（仅限包含「...」的候选）
+ * 计划延迟展示完整标题浮层（工具栏气泡响应更迅速，默认 150ms；若已在显示气泡并在相邻按钮滑动则 60ms 平滑过渡）
  */
-function scheduleSearchTitleTooltip(targetEl, fullTitle) {
+function scheduleSearchTitleTooltip(targetEl, fullTitle, delayMs = 700, options = {}) {
     if (!targetEl || !fullTitle) {
         hideSearchTitleTooltip();
         return;
@@ -3807,14 +4059,16 @@ function scheduleSearchTitleTooltip(targetEl, fullTitle) {
     if (currentTooltipTarget === targetEl) {
         return;
     }
+    const wasVisible = !!(currentTooltipTarget && (searchResultTooltipEl || document.getElementById('searchResultTitleTooltip'))?.classList.contains('visible'));
     hideSearchTitleTooltip();
     currentTooltipTarget = targetEl;
 
+    const timeout = wasVisible ? 60 : (typeof delayMs === 'number' ? delayMs : 700);
     searchResultTooltipTimer = setTimeout(() => {
         if (currentTooltipTarget === targetEl && document.body.contains(targetEl)) {
-            showSearchTitleTooltip(targetEl, fullTitle);
+            showSearchTitleTooltip(targetEl, fullTitle, options);
         }
-    }, 700); // 严格满足用户需求：鼠标悬停 0.7s 后出现完整标题
+    }, timeout);
 }
 
 // ==================== 搜索模式：特殊临时栏目勾选与前 N 项拓展系统 ====================
@@ -6515,6 +6769,16 @@ function handleSearchResultsPanelMouseOver(e) {
         return;
     }
 
+    // 0.5 工具栏快捷提示（data-tooltip 属性，如分类按钮、视图切换等），鼠标悬浮 150ms 迅速呈现
+    const tooltipTarget = e && e.target ? e.target.closest('[data-tooltip]') : null;
+    if (tooltipTarget) {
+        const tipText = tooltipTarget.getAttribute('data-tooltip');
+        if (tipText) {
+            scheduleSearchTitleTooltip(tooltipTarget, tipText, 150, { highlight: false });
+            return;
+        }
+    }
+
     // 1. 悬停 0.7s 浮层逻辑：仅限包含「...」的候选条目
     let targetWithEllipsis = e && e.target ? e.target.closest('[data-has-ellipsis="true"]') : null;
     if (!targetWithEllipsis && e && e.target) {
@@ -7157,20 +7421,16 @@ function initSearchClearButton() {
     searchInput.addEventListener('change', updateClearButton);
     searchInput.addEventListener('focus', updateClearButton);
 
+    searchClearBtn.addEventListener('mousedown', (e) => {
+        // 防止鼠标按下时导致搜索输入框产生意外焦点错乱
+        e.preventDefault();
+    });
+
     searchClearBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
 
-        searchInput.value = '';
-        updateClearButton();
-        searchInput.focus();
-        if (typeof updateSearchPlaceholder === 'function') {
-            updateSearchPlaceholder('focused');
-        }
-
-        if (typeof handleSearch === 'function') {
-            handleSearch({ target: searchInput });
-        }
+        clearMainSearchInput();
     });
 
     updateClearButton();
@@ -8141,6 +8401,7 @@ async function setSearchMode(modeKey, options = {}) {
     }
     searchUiState.activeMode = modeKey;
     searchUiState.showFullscreenDescriptionOthers = false;
+    searchUiState.descriptionTypeFilter = null;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
 
     // 同步立即刷新输入框占位符，消除在异步索引加载期间的闪烁与回退
@@ -8167,6 +8428,10 @@ async function setSearchMode(modeKey, options = {}) {
             updateSearchPanelColumnState(panel);
         }
         syncSearchPanelViewToggleButtonsState(panel, targetViewMode);
+        applySearchPanelWidth(getSearchPanelWidth(targetViewMode), panel, targetViewMode, { skipHandlesSync: true });
+        applySearchPanelHeight(getSearchPanelHeight(targetViewMode), panel, targetViewMode);
+        ensureSearchPanelResizeHandles(panel);
+        syncSearchPanelHandlesLayout(panel);
     }
     renderSearchModeUI();
     if (searchUiState.isMenuOpen) {
@@ -8784,7 +9049,7 @@ function buildSearchHistorySectionHtml(activeMode, options = {}) {
                 <div class="search-history-item" data-history-query="${escapedAttr}" title="${escapedAttr}">
                     <span class="search-history-item-text">${escapedText}</span>
                     <button type="button" class="search-history-item-del-btn" data-history-query="${escapedAttr}" aria-label="${isZh ? '删除此条' : 'Delete'}" title="${isZh ? '删除' : 'Delete'}">
-                        <i class="fas fa-times" aria-hidden="true"></i>
+                        <svg viewBox="0 0 10 10" width="6" height="6" aria-hidden="true" style="pointer-events:none; display:block;"><path d="M2.3 2.3L7.7 7.7M7.7 2.3L2.3 7.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
                     </button>
                 </div>
             `;
@@ -8945,6 +9210,16 @@ function bindSearchHistoryEvents(container, activeMode, onUpdate) {
             ev.stopPropagation();
             if (typeof toggleSearchModeMenu === 'function') toggleSearchModeMenu(false);
             if (typeof hideSearchResultsPanel === 'function') hideSearchResultsPanel();
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+                searchInput.blur();
+                if (typeof updateSearchPlaceholder === 'function') {
+                    updateSearchPlaceholder('unfocused');
+                }
+            }
+            if (typeof setSidePanelSearchExpanded === 'function') {
+                setSidePanelSearchExpanded(false);
+            }
             if (typeof onUpdate === 'function') onUpdate('close');
         };
         closeBtn.addEventListener('mousedown', doClose);
@@ -15271,6 +15546,7 @@ function searchCanvasAndRender(query, options = {}) {
         }
         if (triggerSource === 'input') {
             searchUiState.structureTypeFilter = null;
+            searchUiState.descriptionTypeFilter = null;
         }
     }
 
@@ -16605,10 +16881,19 @@ function syncCanvasGridRightScrollbar(panel) {
     const cRect = searchContainer.getBoundingClientRect();
     if (pRect.width <= 0 || pRect.height <= 0) return;
 
-    const relLeft = pRect.left - cRect.left;
-    const relTop = pRect.top - cRect.top;
-    const width = pRect.width;
-    const height = pRect.height;
+    const hasOffsetParent = (panel.offsetParent === searchContainer);
+    const left = hasOffsetParent && Number.isFinite(panel.offsetLeft)
+        ? panel.offsetLeft
+        : Math.round(pRect.left - cRect.left);
+    const top = hasOffsetParent && Number.isFinite(panel.offsetTop)
+        ? panel.offsetTop
+        : Math.round(pRect.top - cRect.top);
+    const width = hasOffsetParent && panel.offsetWidth > 0
+        ? panel.offsetWidth
+        : Math.round(pRect.width);
+    const height = hasOffsetParent && panel.offsetHeight > 0
+        ? panel.offsetHeight
+        : Math.round(pRect.height);
 
     // 避开搜索面板的圆角边框，紧贴内部右侧边缘
     const insetTop = 8;
@@ -16616,8 +16901,8 @@ function syncCanvasGridRightScrollbar(panel) {
     const trackH = Math.max(1, height - insetTop - insetBottom);
 
     rightScroll.style.display = 'block';
-    rightScroll.style.left = `${Math.round(relLeft + width - 11)}px`;
-    rightScroll.style.top = `${Math.round(relTop + insetTop)}px`;
+    rightScroll.style.left = `${Math.round(left + width - 11)}px`;
+    rightScroll.style.top = `${Math.round(top + insetTop)}px`;
     rightScroll.style.height = `${Math.round(trackH)}px`;
 
     const thumbH = Math.max(28, Math.round((clientH / scrollH) * trackH));
@@ -19872,12 +20157,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
     canvasSearchTabulatorActiveMode = activeMode;
     const tabulatorLayout = getCanvasTabulatorLayoutMode(activeMode);
 
-    let placeholderText = isZh ? "无匹配书签" : "No matching bookmarks";
-    if (activeMode === 'structure') {
-        placeholderText = isZh ? "无匹配卡片、组或锚点" : "No matching cards, groups or anchors";
-    } else if (activeMode === 'description') {
-        placeholderText = isZh ? "无匹配说明或文本" : "No matching descriptions or text";
-    }
+    let placeholderText = isZh ? "无结果" : "No results";
 
     try {
         canvasSearchTabulatorInstance = new Tabulator(containerEl, {
@@ -20206,8 +20486,8 @@ function renderCanvasSearchPanelViewToggleGroupHtml(compact = false, isZh = true
     const isGridActive = !isTableActive;
     const labels = getSearchPanelViewToggleLabels(isZh);
     return `<div class="canvas-bookmark-view-group${compact ? ' canvas-bookmark-view-group-compact' : ''}" role="group" aria-label="${isZh ? '视图模式' : 'View Mode'}">
-        <button class="canvas-bookmark-view-toggle-btn${isGridActive ? ' active' : ''}${compact ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${escapeHtml(labels.grid)}" title="${escapeHtml(labels.grid)}" data-view-mode="grid"><i class="fas fa-th-large" aria-hidden="true"></i></button>
-        <button class="canvas-bookmark-view-toggle-btn${isTableActive ? ' active' : ''}${compact ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${escapeHtml(labels.table)}" title="${escapeHtml(labels.table)}" data-view-mode="table"><i class="fas fa-table" aria-hidden="true"></i></button>
+        <button class="canvas-bookmark-view-toggle-btn${isGridActive ? ' active' : ''}${compact ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${escapeHtml(labels.grid)}" data-tooltip="${escapeHtml(labels.grid)}" data-view-mode="grid"><i class="fas fa-th-large" aria-hidden="true"></i></button>
+        <button class="canvas-bookmark-view-toggle-btn${isTableActive ? ' active' : ''}${compact ? ' canvas-bookmark-view-toggle-btn-compact' : ''}" type="button" aria-label="${escapeHtml(labels.table)}" data-tooltip="${escapeHtml(labels.table)}" data-view-mode="table"><i class="fas fa-table" aria-hidden="true"></i></button>
     </div>`;
 }
 
@@ -20220,7 +20500,7 @@ function renderOrUpdateSearchPanelHeader(panel, headerHtml) {
 
     // 1. 彻底清除所有已有的顶部详情头部与工具栏，杜绝任何历史残留或多行堆叠
     const staleHeaders = panel.querySelectorAll(
-        '.canvas-tag-browse-detail-header, .canvas-bookmark-type-toggle, .search-suggestions-header, .search-empty-suggestions-hint, .canvas-suggestion-mode-item, .canvas-tag-browse-section, .canvas-note-browse-section'
+        '.canvas-tag-browse-detail-header, .canvas-bookmark-type-toggle, .canvas-structure-type-toggle, .canvas-description-type-toggle, .search-suggestions-header, .search-empty-suggestions-hint, .canvas-suggestion-mode-item, .canvas-tag-browse-section, .canvas-note-browse-section'
     );
     staleHeaders.forEach(el => el.remove());
 
@@ -20296,8 +20576,10 @@ function renderCanvasSearchResults(results, options = {}) {
     // Canvas Bookmark Mode: count + filter (bookmark vs folder vs domain)
     const isBookmarkMode = searchUiState.activeMode === 'bookmark';
     const isStructureMode = searchUiState.activeMode === 'structure';
+    const isDescriptionMode = searchUiState.activeMode === 'description';
     let bookmarkModeCounts = null;
     let structureModeCounts = null;
+    let descriptionModeCounts = null;
     const sourceResults = Array.isArray(results) ? results : [];
     let displayResults = sourceResults;
     let domainResults = [];
@@ -20366,6 +20648,33 @@ function renderCanvasSearchResults(results, options = {}) {
             displayResults = sourceResults.filter(r => r && r.type === 'group');
         } else if (effectiveFilter === 'anchor') {
             displayResults = sourceResults.filter(r => r && r.type === 'anchor');
+        } else {
+            displayResults = sourceResults;
+        }
+    }
+
+    if (isDescriptionMode) {
+        const isSection = (r) => r && (r.type === 'temp-section' || r.type === 'permanent-section');
+        const isCard = (r) => r && (r.type === 'md-node' || r.type === 'card');
+        const isEdge = (r) => r && r.type === 'edge';
+
+        const sectionCount = sourceResults.filter(isSection).length;
+        const cardCount = sourceResults.filter(isCard).length;
+        const edgeCount = sourceResults.filter(isEdge).length;
+        descriptionModeCounts = { sectionCount, cardCount, edgeCount };
+
+        let effectiveFilter = searchUiState.descriptionTypeFilter;
+        if (effectiveFilter === 'section' && sectionCount === 0) effectiveFilter = null;
+        if (effectiveFilter === 'card' && cardCount === 0) effectiveFilter = null;
+        if (effectiveFilter === 'edge' && edgeCount === 0) effectiveFilter = null;
+        searchUiState.descriptionTypeFilter = effectiveFilter;
+
+        if (effectiveFilter === 'section') {
+            displayResults = sourceResults.filter(isSection);
+        } else if (effectiveFilter === 'card') {
+            displayResults = sourceResults.filter(isCard);
+        } else if (effectiveFilter === 'edge') {
+            displayResults = sourceResults.filter(isEdge);
         } else {
             displayResults = sourceResults;
         }
@@ -20513,6 +20822,7 @@ function renderCanvasSearchResults(results, options = {}) {
         renderQuery.trim().toLowerCase(),
         String(searchUiState.bookmarkTypeFilter || ''),
         String(searchUiState.structureTypeFilter || ''),
+        String(searchUiState.descriptionTypeFilter || ''),
         String(searchUiState.domainGrouping || '')
     ].join('|');
     const appendPage = options && options.append === true;
@@ -20549,28 +20859,7 @@ function renderCanvasSearchResults(results, options = {}) {
         searchUiState.selectedIndex = visibleResults.length > 0 ? 0 : -1;
     }
 
-    if (visibleResults.length === 0) {
-        if (typeof destroyCanvasSearchTabulator === 'function') destroyCanvasSearchTabulator();
-        panel.classList.remove('view-table');
-        // [Modified] Customize empty message for Bookmark mode
-        let msg = options.emptyText || (i18n.searchNoResults ? i18n.searchNoResults[currentLang] : '无结果');
-        if (searchUiState.activeMode === 'bookmark') {
-            // If we have no bookmarks indexed (maybe tree not loaded), prompt user?
-            // Or just standard no results.
-            // msg = "No bookmark matches found"; 
-        }
-        if (isBrowseSecondary) {
-            panel.innerHTML = `
-                ${renderBrowseDetailHeaderHtml('canvas-tag-browse-detail-header-empty')}
-                <div class="search-result-empty">${msg}</div>
-            `;
-        } else {
-            panel.innerHTML = `<div class="search-result-empty">${msg}</div>`;
-        }
-        panel.classList.toggle('view-grid', isSearchPanelGridView());
-        showSearchResultsPanel();
-        return;
-    }
+    // Note: Empty results handling moved below header construction so top toolbar is preserved
 
     const isZh = (typeof getCurrentLangSafe === 'function' ? getCurrentLangSafe() : (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN')) === 'zh_CN';
     let html = '';
@@ -21109,16 +21398,16 @@ function renderCanvasSearchResults(results, options = {}) {
         const { bookmarkCount, folderCount, domainCount } = bookmarkModeCounts;
         const active = searchUiState.bookmarkTypeFilter;
 
-        const showBookmarkBtn = bookmarkCount > 0;
-        const showFolderBtn = folderCount > 0;
-        const showDomainBtn = domainCount > 0;
+        const showBookmarkBtn = bookmarkCount > 0 || sourceResults.length === 0;
+        const showFolderBtn = folderCount > 0 || sourceResults.length === 0;
+        const showDomainBtn = domainCount > 0 || sourceResults.length === 0;
 
-        if (showBookmarkBtn || showFolderBtn || showDomainBtn) {
+        if (showBookmarkBtn || showFolderBtn || showDomainBtn || isBrowseSecondary || sourceResults.length === 0) {
             const isZh = currentLang === 'zh_CN';
             if (isBrowseSecondary) {
                 html += renderBrowseDetailHeaderHtml();
             }
-            const makeBtn = ({ type, icon, color, count, isActiveOverride = null }) => {
+            const makeBtn = ({ type, icon, color, count, label, isActiveOverride = null }) => {
                 const isActive = (typeof isActiveOverride === 'boolean') ? isActiveOverride : active === type;
                 const bg = isActive ? `${color}22` : 'transparent';
                 const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
@@ -21127,17 +21416,18 @@ function renderCanvasSearchResults(results, options = {}) {
                 const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
                 const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
                 const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
-                return `<button class="canvas-bookmark-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
+                const fullTitle = `${label} (${count})`;
+                return `<button class="canvas-bookmark-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-type-btn-compact' : ''}" data-type="${type}" data-tooltip="${escapeHtml(fullTitle)}" aria-label="${escapeHtml(fullTitle)}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
                         <i class="fas ${icon}" style="color:${color};"></i>
                         <span>${count}</span>
                     </button>`;
             };
 
             const bookmarkBtn = showBookmarkBtn
-                ? makeBtn({ type: 'bookmark', icon: 'fa-bookmark', color: '#f59e0b', count: bookmarkCount })
+                ? makeBtn({ type: 'bookmark', icon: 'fa-bookmark', color: '#f59e0b', count: bookmarkCount, label: isZh ? '书签' : (bookmarkCount > 1 ? 'Bookmarks' : 'Bookmark') })
                 : '';
             const folderBtn = showFolderBtn
-                ? makeBtn({ type: 'folder', icon: 'fa-folder', color: '#2563eb', count: folderCount })
+                ? makeBtn({ type: 'folder', icon: 'fa-folder', color: '#2563eb', count: folderCount, label: isZh ? '文件夹' : (folderCount > 1 ? 'Folders' : 'Folder') })
                 : '';
             const domainGrouping = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
             const subdomainLabel = isZh ? '子域名' : 'Subdomain';
@@ -21147,11 +21437,11 @@ function renderCanvasSearchResults(results, options = {}) {
             const subActive = active === 'domain' && domainGrouping === 'host';
             const rootActive = active === 'domain' && domainGrouping === 'root';
             const domainBtn = showDomainBtn
-                ? makeBtn({ type: 'domain', icon: 'fa-globe', color: '#0ea5e9', count: domainCount, isActiveOverride: rootActive })
+                ? makeBtn({ type: 'domain', icon: 'fa-globe', color: '#0ea5e9', count: domainCount, label: isZh ? '域名' : (domainCount > 1 ? 'Domains' : 'Domain'), isActiveOverride: rootActive })
                 : '';
             const shouldShowDomainGranularity = showDomainBtn && active === 'domain';
             const domainGranularityBtn = shouldShowDomainGranularity
-                ? `<button class="canvas-bookmark-domain-granularity-btn ${subActive ? 'active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-domain-granularity-btn-compact' : ''}" type="button" data-domain-group="host" title="${escapeHtml(domainGroupingTitle)}"${compactBookmarkToolbar ? ' style="padding:4px 7px; font-size:10px;"' : ''}>${escapeHtml(subdomainLabel)}</button>`
+                ? `<button class="canvas-bookmark-domain-granularity-btn ${subActive ? 'active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-domain-granularity-btn-compact' : ''}" type="button" data-domain-group="host" data-tooltip="${escapeHtml(domainGroupingTitle)}" aria-label="${escapeHtml(domainGroupingTitle)}"${compactBookmarkToolbar ? ' style="padding:4px 7px; font-size:10px;"' : ''}>${escapeHtml(subdomainLabel)}</button>`
                 : '';
             const domainControls = domainBtn
                 ? `<div class="canvas-bookmark-domain-control-group${compactBookmarkToolbar ? ' canvas-bookmark-domain-control-group-compact' : ''}">${domainBtn}${domainGranularityBtn}</div>`
@@ -21178,7 +21468,7 @@ function renderCanvasSearchResults(results, options = {}) {
 
             const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
 
-            const rightActionsHtml = `<div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px;">
+            const rightActionsHtml = `<div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px; margin-left:auto;">
                 ${confirmSelectionBtnHtml}
                 ${exportBtnHtml}
                 ${viewGroupHtml}
@@ -21188,103 +21478,180 @@ function renderCanvasSearchResults(results, options = {}) {
             const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
             const controlGap = compactBookmarkToolbar ? 6 : 8;
 
-            html += `<div class="canvas-bookmark-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:${justifyStyle}; gap:${toolbarGap}px; padding:${toolbarPadding};">
+            html += `<div class="canvas-bookmark-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:${justifyStyle}; gap:${toolbarGap}px; padding:${toolbarPadding}; width:100%; box-sizing:border-box;">
                 <div style="display:flex; align-items:center; gap:${controlGap}px;">${bookmarkBtn}${folderBtn}${domainControls}</div>
                 ${rightActionsHtml}
             </div>`;
         }
     }
 
-    if (isStructureMode) {
-        const totalCount = sourceResults.length;
-        const cardCount = structureModeCounts ? structureModeCounts.cardCount : 0;
-        const groupCount = structureModeCounts ? structureModeCounts.groupCount : 0;
-        const anchorCount = structureModeCounts ? structureModeCounts.anchorCount : 0;
+    if (isStructureMode && structureModeCounts) {
+        const cardCount = structureModeCounts.cardCount;
+        const groupCount = structureModeCounts.groupCount;
+        const anchorCount = structureModeCounts.anchorCount;
         const active = searchUiState.structureTypeFilter;
-        const showCardBtn = cardCount > 0;
-        const showGroupBtn = groupCount > 0;
-        const showAnchorBtn = anchorCount > 0;
+        const showCardBtn = cardCount > 0 || sourceResults.length === 0;
+        const showGroupBtn = groupCount > 0 || sourceResults.length === 0;
+        const showAnchorBtn = anchorCount > 0 || sourceResults.length === 0;
 
-        const makeStructureBtn = ({ type, icon, color, label, count }) => {
-            const isActive = (!active && type === 'all') || (active === type);
-            const bg = isActive ? `${color}22` : 'transparent';
-            const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
-            const text = isActive ? color : 'var(--text-secondary)';
-            const gapPx = compactBookmarkToolbar ? 5 : 6;
-            const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
-            const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
-            const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
-            const iconHtml = icon ? `<i class="fas ${icon}" style="color:${color};"></i>` : '';
-            return `<button class="canvas-structure-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
-                    ${iconHtml}
-                    <span>${escapeHtml(label)}</span>
-                    <span>${count}</span>
-                </button>`;
-        };
-        const categoriesWithResults = (cardCount > 0 ? 1 : 0) + (groupCount > 0 ? 1 : 0) + (anchorCount > 0 ? 1 : 0);
-        const allBtn = categoriesWithResults > 1
-            ? makeStructureBtn({ type: 'all', icon: '', color: '#3b82f6', label: isZh ? '全部' : 'All', count: totalCount })
-            : '';
-        const cardBtn = showCardBtn
-            ? makeStructureBtn({ type: 'card', icon: 'fa-layer-group', color: '#f97316', label: isZh ? '卡片' : 'Card', count: cardCount })
-            : '';
-        const groupBtn = showGroupBtn
-            ? makeStructureBtn({ type: 'group', icon: 'fa-object-group', color: '#7c3aed', label: isZh ? '组' : 'Group', count: groupCount })
-            : '';
-        const anchorBtn = showAnchorBtn
-            ? makeStructureBtn({ type: 'anchor', icon: 'fa-anchor', color: '#2563eb', label: isZh ? '锚点' : 'Anchor', count: anchorCount })
-            : '';
-        const toolbarGap = compactBookmarkToolbar ? 6 : 8;
-        const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
-        const controlGap = compactBookmarkToolbar ? 6 : 8;
+        if (showCardBtn || showGroupBtn || showAnchorBtn || sourceResults.length === 0) {
+            const isZh = currentLang === 'zh_CN';
+            const makeStructureBtn = ({ type, icon, color, label, count }) => {
+                const isActive = active === type;
+                const bg = isActive ? `${color}22` : 'transparent';
+                const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
+                const text = isActive ? color : 'var(--text-secondary)';
+                const gapPx = compactBookmarkToolbar ? 5 : 6;
+                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+                const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
+                const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+                const iconHtml = icon ? `<i class="fas ${icon}" style="color:${color};"></i>` : '';
+                const fullTitle = `${label} (${count})`;
+                return `<button class="canvas-structure-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" data-tooltip="${escapeHtml(fullTitle)}" aria-label="${escapeHtml(fullTitle)}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
+                        ${iconHtml}
+                        <span class="canvas-structure-type-count">${count}</span>
+                    </button>`;
+            };
 
-        const leftControls = (cardBtn || groupBtn || anchorBtn)
-            ? `<div style="display:flex; align-items:center; gap:${controlGap}px;">${allBtn}${cardBtn}${groupBtn}${anchorBtn}</div>`
-            : `<div style="display:flex; align-items:center; gap:${controlGap}px; font-size:12px; font-weight:600; color:var(--text-secondary);"><i class="fas fa-layer-group" style="color:#f97316;"></i><span>${isZh ? '卡片、组与锚点' : 'Cards, Groups & Anchors'}</span></div>`;
+            const cardBtn = showCardBtn
+                ? makeStructureBtn({ type: 'card', icon: 'fa-layer-group', color: '#f97316', label: isZh ? '卡片' : (cardCount > 1 ? 'Cards' : 'Card'), count: cardCount })
+                : '';
+            const groupBtn = showGroupBtn
+                ? makeStructureBtn({ type: 'group', icon: 'fa-object-group', color: '#7c3aed', label: isZh ? '组' : (groupCount > 1 ? 'Groups' : 'Group'), count: groupCount })
+                : '';
+            const anchorBtn = showAnchorBtn
+                ? makeStructureBtn({ type: 'anchor', icon: 'fa-anchor', color: '#2563eb', label: isZh ? '锚点' : (anchorCount > 1 ? 'Anchors' : 'Anchor'), count: anchorCount })
+                : '';
 
-        const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
+            const toolbarGap = compactBookmarkToolbar ? 6 : 8;
+            const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
+            const controlGap = compactBookmarkToolbar ? 6 : 8;
+            const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
 
-        html += `<div class="canvas-bookmark-type-toggle canvas-structure-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact canvas-structure-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:space-between; gap:${toolbarGap}px; padding:${toolbarPadding};">
-            ${leftControls}
-            <div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px;">
-                ${viewGroupHtml}
-            </div>
-        </div>`;
+            html += `<div class="canvas-bookmark-type-toggle canvas-structure-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact canvas-structure-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:space-between; gap:${toolbarGap}px; padding:${toolbarPadding}; width:100%; box-sizing:border-box;">
+                <div style="display:flex; align-items:center; gap:${controlGap}px;">${cardBtn}${groupBtn}${anchorBtn}</div>
+                <div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px; margin-left:auto;">
+                    ${viewGroupHtml}
+                </div>
+            </div>`;
+        }
     }
 
-    if (searchUiState.activeMode === 'description') {
+    if (searchUiState.activeMode === 'description' && descriptionModeCounts) {
         const othersCount = (fullscreenScope && Array.isArray(searchUiState.fullscreenDescriptionOthers))
             ? searchUiState.fullscreenDescriptionOthers.length
             : 0;
         const showingOthers = !!searchUiState.showFullscreenDescriptionOthers;
 
-        let leftControls = '';
-        if (fullscreenScope && othersCount > 0 && !showingOthers) {
-            const otherBtnLabel = isZh ? '其他' : 'Other';
-            leftControls = `<button class="canvas-description-others-btn" type="button" style="border:1px solid var(--border-color); background:var(--bg-secondary); padding:4px 10px; border-radius:999px; font-size:11px; color:var(--text-secondary); cursor:pointer; font-weight:600; white-space:nowrap;">
-                ${escapeHtml(otherBtnLabel)} (${othersCount})
-            </button>`;
-        } else {
-            leftControls = `<div style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--text-secondary);">
-                <i class="fas fa-align-left" style="color:var(--accent-primary, #3b82f6);"></i>
-                <span>${isZh ? '说明与连线' : 'Descriptions & Edges'}</span>
+        const sectionCount = descriptionModeCounts.sectionCount;
+        const cardCount = descriptionModeCounts.cardCount;
+        const edgeCount = descriptionModeCounts.edgeCount;
+        const active = searchUiState.descriptionTypeFilter;
+
+        const showSectionBtn = sectionCount > 0 || sourceResults.length === 0;
+        const showCardBtn = cardCount > 0 || sourceResults.length === 0;
+        const showEdgeBtn = edgeCount > 0 || sourceResults.length === 0;
+
+        if (showSectionBtn || showCardBtn || showEdgeBtn || (fullscreenScope && othersCount > 0 && !showingOthers) || sourceResults.length === 0) {
+            const isZh = currentLang === 'zh_CN';
+            const makeDescriptionBtn = ({ type, icon, color, label, count }) => {
+                const isActive = active === type;
+                const bg = isActive ? `${color}22` : 'transparent';
+                const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
+                const text = isActive ? color : 'var(--text-secondary)';
+                const gapPx = compactBookmarkToolbar ? 5 : 6;
+                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+                const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
+                const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+                const iconHtml = icon ? `<i class="fas ${icon}" style="color:${color};"></i>` : '';
+                const fullTitle = `${label} (${count})`;
+                return `<button class="canvas-description-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-description-type-btn-compact' : ''}" data-type="${type}" data-tooltip="${escapeHtml(fullTitle)}" aria-label="${escapeHtml(fullTitle)}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
+                        ${iconHtml}
+                        <span class="canvas-description-type-count">${count}</span>
+                    </button>`;
+            };
+
+            const sectionBtn = showSectionBtn
+                ? makeDescriptionBtn({ type: 'section', icon: 'fa-columns', color: '#059669', label: isZh ? '栏目' : (sectionCount > 1 ? 'Sections' : 'Section'), count: sectionCount })
+                : '';
+            const cardBtn = showCardBtn
+                ? makeDescriptionBtn({ type: 'card', icon: 'fa-layer-group', color: '#f97316', label: isZh ? '卡片' : (cardCount > 1 ? 'Cards' : 'Card'), count: cardCount })
+                : '';
+            const edgeBtn = showEdgeBtn
+                ? makeDescriptionBtn({ type: 'edge', icon: 'fa-project-diagram', color: '#10b981', label: isZh ? '连线' : (edgeCount > 1 ? 'Edges' : 'Edge'), count: edgeCount })
+                : '';
+
+            let leftControls = '';
+            if (fullscreenScope && othersCount > 0 && !showingOthers) {
+                const otherBtnLabel = isZh ? '其他' : 'Other';
+                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+                const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+                leftControls = `<button class="canvas-description-others-btn" type="button" style="border:1px solid var(--border-color); background:var(--bg-secondary); padding:${paddingValue}; border-radius:8px; font-size:${fontSizeValue}; color:var(--text-secondary); cursor:pointer; font-weight:600; white-space:nowrap;">
+                    ${escapeHtml(otherBtnLabel)} (${othersCount})
+                </button>`;
+            } else {
+                const controlGap = compactBookmarkToolbar ? 6 : 8;
+                leftControls = `<div style="display:flex; align-items:center; gap:${controlGap}px;">${sectionBtn}${cardBtn}${edgeBtn}</div>`;
+            }
+
+            const toolbarGap = compactBookmarkToolbar ? 6 : 8;
+            const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
+            const controlGap = compactBookmarkToolbar ? 6 : 8;
+            const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
+
+            html += `<div class="canvas-bookmark-type-toggle canvas-description-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact canvas-description-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:space-between; gap:${toolbarGap}px; padding:${toolbarPadding}; width:100%; box-sizing:border-box;">
+                ${leftControls}
+                <div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px; margin-left:auto;">
+                    ${viewGroupHtml}
+                </div>
             </div>`;
         }
-
-        const toolbarGap = compactBookmarkToolbar ? 6 : 8;
-        const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
-        const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
-
-        html += `<div class="canvas-bookmark-type-toggle canvas-description-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:space-between; gap:${toolbarGap}px; padding:${toolbarPadding}; border-bottom:1px solid var(--search-candidate-divider, rgba(0, 0, 0, 0.18));">
-            <div style="display:flex; align-items:center; gap:6px;">${leftControls}</div>
-            <div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px;">
-                ${viewGroupHtml}
-            </div>
-        </div>`;
     }
 
     const isTableView = isSearchPanelTableView();
     const isGridView = !isTableView && isSearchPanelGridView();
+    const activeMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+
+    if (visibleResults.length === 0) {
+        let msg = options.emptyText || (i18n.searchNoResults ? i18n.searchNoResults[currentLang] : '无结果');
+        if (typeof destroyCanvasSearchTabulator === 'function') destroyCanvasSearchTabulator();
+
+        panel.classList.add('has-empty-results');
+        panel.classList.toggle('view-grid', isGridView);
+        panel.classList.toggle('view-table', isTableView);
+
+        const oldWrapper = panel.querySelector('.search-results-table-view-wrapper');
+        if (oldWrapper) oldWrapper.remove();
+        const oldContainer = panel.querySelector('.search-results-items-container');
+        if (oldContainer) oldContainer.remove();
+        const oldLoadMore = panel.querySelector('.search-results-load-more-row');
+        if (oldLoadMore) oldLoadMore.remove();
+        const oldEmpty = panel.querySelectorAll('.search-result-empty, .search-results-empty');
+        oldEmpty.forEach(el => el.remove());
+
+        const emptyHtml = `<div class="search-result-empty" data-role="empty-view">${msg}</div>`;
+
+        const handleBottom = panel.querySelector('.search-panel-resize-handle.handle-bottom');
+        if (handleBottom) {
+            handleBottom.insertAdjacentHTML('beforebegin', emptyHtml);
+        } else {
+            panel.insertAdjacentHTML('beforeend', emptyHtml);
+        }
+
+        renderOrUpdateSearchPanelHeader(panel, html);
+        syncSearchPanelViewToggleButtonsState(panel, isTableView ? 'table' : 'grid');
+
+        panel.classList.toggle('mode-structure', isStructureMode);
+        panel.classList.toggle('mode-description', isDescriptionMode);
+        panel.classList.toggle('mode-bookmark', isBookmarkMode);
+        panel.setAttribute('data-search-mode', activeMode);
+        showSearchResultsPanel();
+        ensureSearchPanelResizeHandles(panel);
+        syncSearchPanelHandlesLayout(panel);
+        return;
+    }
+
+    panel.classList.remove('has-empty-results');
 
     if (isTableView) {
         searchUiState.results = displayResults;
@@ -21366,6 +21733,7 @@ function renderCanvasSearchResults(results, options = {}) {
             safeRedrawCanvasSearchTabulator(false);
             if (typeof syncCanvasTabulatorTopScrollbar === 'function') syncCanvasTabulatorTopScrollbar();
             if (typeof syncCanvasTabulatorRightScrollbar === 'function') syncCanvasTabulatorRightScrollbar(true);
+            syncSearchPanelHandlesLayout(panel);
         });
         return;
     }
@@ -21408,7 +21776,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const defaultTypeName = isZh
                     ? (isSpecial ? '特殊临时栏目' : '常规链式')
                     : (isSpecial ? 'Special temporary' : 'General Chain');
-                const isCardGrid = isGridView && (searchUiState.activeMode === 'structure' || !searchUiState.activeMode || searchUiState.activeMode === 'card');
+                const isCardGrid = isGridView && (searchUiState.activeMode === 'structure' || searchUiState.activeMode === 'description' || !searchUiState.activeMode || searchUiState.activeMode === 'card');
                 const seqLabel = item.label ? String(item.label).trim() : '';
                 const typeName = (isCardGrid && seqLabel) ? seqLabel : defaultTypeName;
                 const dirIconHtml = getCanvasDirectoryItemIconHtml('temp-section', item);
@@ -21611,7 +21979,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const alpha = toAlpha(item.displayIndex || 1);
                 const isCopy = item.displayIndex > 1;
                 const defaultTypeName = isCopy ? (isZh ? '永久栏目副本' : 'Permanent Copy') : (isZh ? '永久栏目' : 'Permanent');
-                const isCardGrid = isGridView && (searchUiState.activeMode === 'structure' || !searchUiState.activeMode || searchUiState.activeMode === 'card');
+                const isCardGrid = isGridView && (searchUiState.activeMode === 'structure' || searchUiState.activeMode === 'description' || !searchUiState.activeMode || searchUiState.activeMode === 'card');
                 const seqLabel = `#${alpha}`;
                 const typeName = (isCardGrid && seqLabel) ? seqLabel : defaultTypeName;
                 const dirIconHtml = getCanvasDirectoryItemIconHtml('permanent-section', item);
@@ -22263,8 +22631,7 @@ function renderCanvasSearchResults(results, options = {}) {
         return;
     }
 
-    const activeMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
-    const isDescriptionMode = activeMode === 'description';
+    // activeMode already declared above in renderCanvasSearchResults
 
     const wrappedItemsHtml = `<div class="search-results-items-container${isGridView ? ' view-grid' : ''}" data-search-mode="${activeMode}">${itemsHtml}</div>`;
 
@@ -22309,7 +22676,9 @@ function renderCanvasSearchResults(results, options = {}) {
         syncCanvasSearchItemSelectionVisuals();
         updateCanvasSearchTempButtonState();
     }
-
+    requestAnimationFrame(() => {
+        syncSearchPanelHandlesLayout(panel);
+    });
 }
 
 function collectBookmarkItemsForTempSection(targetCount = null) {
@@ -22607,7 +22976,7 @@ function yieldToMainThread() {
 
 function rerenderCanvasBookmarkResults(selectedIndex = 0) {
     const query = String(searchUiState && searchUiState.query || '').trim();
-    if (searchUiState && Array.isArray(searchUiState.resultSource) && searchUiState.resultSource.length > 0) {
+    if (searchUiState && Array.isArray(searchUiState.resultSource)) {
         renderCanvasSearchResults(searchUiState.resultSource, {
             view: 'canvas',
             query,
@@ -25380,6 +25749,8 @@ if (typeof window !== 'undefined') {
     window.handleSearchResultsPanelMouseOver = handleSearchResultsPanelMouseOver;
     window.handleSearchOutsideClick = handleSearchOutsideClick;
     window.hideTempSectionBubble = hideTempSectionBubble;
+    window.exitMainSearchMode = exitMainSearchMode;
+    window.clearMainSearchInput = clearMainSearchInput;
 
     // Phase 3.5 Export
     window.setSearchMode = setSearchMode;
@@ -25408,6 +25779,8 @@ if (typeof window !== 'undefined') {
         resetCanvas: resetCanvasSearchDb,
         locateCanvasElement: locateCanvasElement,
         clearCanvasHighlight: clearCanvasSearchHighlight,
+        clearInput: clearMainSearchInput,
+        exitMode: exitMainSearchMode,
         getPanelHeight: getSearchPanelHeight,
         setPanelHeight: setSearchPanelHeight
     };
