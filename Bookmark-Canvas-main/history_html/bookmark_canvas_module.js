@@ -4465,6 +4465,9 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong>Bookmark Canvas</strong> (书签画布):<br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> 问题反馈</a></li>
+<li><strong>Bookmark Research</strong> (书签聚合研究):<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Research" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Research</a><br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Research/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> 问题反馈</a></li>
 </ul>
 <hr>
 <h3>关联生态项目</h3>
@@ -4486,6 +4489,9 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong>Bookmark Canvas</strong>:<br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> Feedback / Issues</a></li>
+<li><strong>Bookmark Research</strong>:<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Research" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Research</a><br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Research/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> Feedback / Issues</a></li>
 </ul>
 <hr>
 <h3>Ecosystem Projects</h3>
@@ -4505,6 +4511,8 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 ### 主项目
 - **Bookmark Canvas** (书签画布):
   [GitHub 仓库](https://github.com/Browser-bookmark-hub/Bookmark-Canvas) / [问题反馈](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues)
+- **Bookmark Research** (书签聚合研究):
+  [GitHub 仓库](https://github.com/Browser-bookmark-hub/Bookmark-Research) / [问题反馈](https://github.com/Browser-bookmark-hub/Bookmark-Research/issues)
 
 ---
 
@@ -4525,6 +4533,8 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 ### Main Project
 - **Bookmark Canvas**:
   [GitHub Repository](https://github.com/Browser-bookmark-hub/Bookmark-Canvas) / [Feedback & Issues](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues)
+- **Bookmark Research**:
+  [GitHub Repository](https://github.com/Browser-bookmark-hub/Bookmark-Research) / [Feedback & Issues](https://github.com/Browser-bookmark-hub/Bookmark-Research/issues)
 
 ---
 

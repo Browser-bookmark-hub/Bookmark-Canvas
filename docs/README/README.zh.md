@@ -6,7 +6,7 @@
 
 ### 书签聚合研究插件
 
-[插件仓库与安装说明（Codex、Claude Code、Pi、DSH）→](https://github.com/kwenxu/Bookmark-Research)
+[插件仓库与安装说明（Codex、Claude Code、Pi、DSH）→](https://github.com/Browser-bookmark-hub/Bookmark-Research)
 
 ### AI 编辑数据的约束文件
 

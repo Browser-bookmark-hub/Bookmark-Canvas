@@ -3843,6 +3843,9 @@ const i18n = {
 <li><strong>Bookmark Canvas</strong> (书签画布):<br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> 问题反馈</a></li>
+<li><strong>Bookmark Research</strong> (书签聚合研究):<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Research" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Research</a><br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Research/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> 问题反馈</a></li>
 </ul>
 <hr>
 <h3>关联生态项目</h3>
@@ -3862,6 +3865,9 @@ const i18n = {
 <li><strong>Bookmark Canvas</strong>:<br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> Feedback / Issues</a></li>
+<li><strong>Bookmark Research</strong>:<br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Research" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Research</a><br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Research/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> Feedback / Issues</a></li>
 </ul>
 <hr>
 <h3>Ecosystem Projects</h3>

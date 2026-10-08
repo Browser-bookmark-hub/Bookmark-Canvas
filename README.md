@@ -6,7 +6,7 @@
 
 ### Bookmark Research plugin
 
-[Plugin repository and installation guide (Codex, Claude Code, Pi, DSH) →](https://github.com/kwenxu/Bookmark-Research)
+[Plugin repository and installation guide (Codex, Claude Code, Pi, DSH) →](https://github.com/Browser-bookmark-hub/Bookmark-Research)
 
 ### Rules for AI-assisted data editing
 
