@@ -4931,147 +4931,162 @@ function applyTempSectionAutoSizeAll() {
 }
 
 /**
- * 在 Canvas UI 中显示 Toast 通知
- * 显示在左上角悬浮工具窗下方
+ * 全局统一 Toast 提示系统
+ * 保持左上角避障位置（top: 120px; left: 16px），与标题栏/悬浮工具栏同款设计语言，
+ * 支持高频防抖复用、全穿透安全防护、纯静态 CSS 类驱动
  * @param {string} message - 通知消息
- * @param {string} type - 类型：'success' | 'error' | 'info' | 'warning'
- * @param {number} duration - 显示时长（毫秒），默认 3000
+ * @param {string|object} typeOrOptions - 类型或配置项
+ * @param {number} [durationOverride] - 显示时长（毫秒）
+ * @returns {{update: Function, close: Function}}
  */
-function showCanvasToast(message, type = 'info', duration = 3000) {
-    // 移除之前的所有提示（防止堆积残留）
+function showCanvasToast(message, typeOrOptions = 'info', durationOverride = undefined) {
+    let type = 'info';
+    let duration = 2500;
+    let position = 'top-center';
+    let customIcon = '';
+    let spin = false;
+
+    if (typeof typeOrOptions === 'string') {
+        type = typeOrOptions;
+        if (typeof durationOverride === 'number') {
+            duration = durationOverride;
+        }
+    } else if (typeOrOptions && typeof typeOrOptions === 'object') {
+        if (typeOrOptions.type) type = typeOrOptions.type;
+        if (typeof typeOrOptions.duration === 'number') duration = typeOrOptions.duration;
+        if (typeOrOptions.position) position = typeOrOptions.position;
+        if (typeOrOptions.icon) customIcon = typeOrOptions.icon;
+        if (typeOrOptions.spin) spin = true;
+    }
+
+    const safeMessage = String(message ?? '');
+    const isMultiline = safeMessage.includes('\n') || safeMessage.length > 60;
+
+    const targetParent = (typeof getOverlayContainer === 'function')
+        ? getOverlayContainer()
+        : ((typeof window !== 'undefined' && typeof window.getOverlayContainer === 'function')
+            ? window.getOverlayContainer()
+            : (document.body || document.documentElement));
+
+    if (!targetParent) return { update: () => {}, close: () => {} };
+
+    // 高频连续触发时的 DOM 复用（如快捷键快速切换锚点），原地更新文本与图标，避免反复销毁重排
+    const existing = targetParent.querySelector('.canvas-toast, .history-toast, .app-toast');
+    if (existing && existing._toastState && existing._toastState.position === position && !existing._toastState.isClosing) {
+        return existing._toastState.update(safeMessage, type, duration, customIcon, spin);
+    }
+
+    // 清理可能残留的失效节点
     try {
-        document.querySelectorAll('.canvas-toast, .history-toast').forEach((t) => t.remove());
-    } catch (_) { }
+        targetParent.querySelectorAll('.canvas-toast, .history-toast, .app-toast').forEach((t) => t.remove());
+    } catch (_) {}
 
-    // 创建新的提示
     const toast = document.createElement('div');
-    toast.className = 'canvas-toast';
+    toast.className = `canvas-toast history-toast app-toast${position !== 'top-center' ? ' pos-' + position : ''}`;
 
-    const oneLine = typeof message === 'string' && message.indexOf('\n') === -1 && message.length <= 120;
+    const iconEl = document.createElement('i');
+    iconEl.className = 'toast-icon';
+    toast.appendChild(iconEl);
 
-    // 基础样式 - 左上角，在悬浮工具窗（高度 98px）下方，保持充裕间距并强制穿透点击
-    toast.style.cssText = `
-        position: fixed;
-        top: 120px;
-        left: 16px;
-        padding: 10px 16px;
-        border-radius: 8px;
-        font-size: 13px;
-        z-index: 9999999;
-        pointer-events: none !important;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-        max-width: ${oneLine ? '520px' : '320px'};
-        word-break: ${oneLine ? 'normal' : 'break-word'};
-        white-space: ${oneLine ? 'nowrap' : 'normal'};
-        overflow: ${oneLine ? 'hidden' : 'visible'};
-        text-overflow: ${oneLine ? 'ellipsis' : 'clip'};
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        animation: canvasToastSlideDown 0.3s ease;
-        backdrop-filter: blur(8px);
-    `;
-
-    // 根据类型设置颜色和图标
-    let icon = '';
-    const iconTopMargin = oneLine ? '0px' : '3px';
-    switch (type) {
-        case 'success':
-            toast.style.backgroundColor = 'rgba(16, 185, 129, 0.95)';
-            toast.style.color = '#ffffff';
-            toast.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-            icon = `<i class="fas fa-check-circle" style="font-size: 14px; margin-top: ${iconTopMargin};"></i>`;
-            break;
-        case 'error':
-            toast.style.backgroundColor = 'rgba(239, 68, 68, 0.95)';
-            toast.style.color = '#ffffff';
-            toast.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-            icon = `<i class="fas fa-exclamation-circle" style="font-size: 14px; margin-top: ${iconTopMargin};"></i>`;
-            break;
-        case 'warning':
-            toast.style.backgroundColor = 'rgba(245, 158, 11, 0.95)';
-            toast.style.color = '#ffffff';
-            toast.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-            icon = `<i class="fas fa-exclamation-triangle" style="font-size: 14px; margin-top: ${iconTopMargin};"></i>`;
-            break;
-        case 'info':
-        default:
-            toast.style.backgroundColor = 'rgba(59, 130, 246, 0.95)';
-            toast.style.color = '#ffffff';
-            toast.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-            icon = `<i class="fas fa-info-circle" style="font-size: 14px; margin-top: ${iconTopMargin};"></i>`;
-            break;
-    }
-
-    toast.innerHTML = icon;
-    const messageEl = document.createElement('div');
-    messageEl.innerHTML = String(message ?? '');
-    messageEl.style.lineHeight = oneLine ? '1.25' : '1.5';
-    messageEl.style.whiteSpace = oneLine ? 'nowrap' : 'normal';
-    messageEl.style.overflow = oneLine ? 'hidden' : 'visible';
-    messageEl.style.textOverflow = oneLine ? 'ellipsis' : 'clip';
-    messageEl.style.minWidth = '0';
-    messageEl.style.pointerEvents = 'none';
+    const messageEl = document.createElement('span');
+    messageEl.className = `toast-message${isMultiline ? ' multiline' : ''}`;
+    messageEl.textContent = safeMessage;
     toast.appendChild(messageEl);
-    toast.style.zIndex = '9999999'; // Ensure it's on top of everything including overlays
-    toast.style.pointerEvents = 'none';
 
-    // 添加动画样式（如果还没有）
-    if (!document.getElementById('canvas-toast-styles')) {
-        const style = document.createElement('style');
-        style.id = 'canvas-toast-styles';
-        style.textContent = `
-            .canvas-toast {
-                pointer-events: none !important;
-            }
-            @keyframes canvasToastSlideDown {
-                from {
-                    transform: translateY(-20px);
-                    opacity: 0;
-                }
-                to {
-                    transform: translateY(0);
-                    opacity: 1;
-                }
-            }
-            @keyframes canvasToastSlideUp {
-                from {
-                    transform: translateY(0);
-                    opacity: 1;
-                }
-                to {
-                    transform: translateY(-20px);
-                    opacity: 0;
-                }
-            }
-        `;
-        document.head.appendChild(style);
-    }
+    const applyType = (tType) => {
+        toast.classList.remove('toast-type-success', 'toast-type-error', 'toast-type-warning', 'toast-type-info');
+        const normalized = ['success', 'error', 'warning', 'info'].includes(tType) ? tType : 'info';
+        toast.classList.add(`toast-type-${normalized}`);
+    };
+    applyType(type);
 
-    const targetParent = getOverlayContainer();
-    targetParent.appendChild(toast);
+    const applyIcon = (tType, cIcon, cSpin) => {
+        iconEl.className = 'toast-icon';
+        if (cIcon) {
+            iconEl.className = `toast-icon ${cIcon}${cSpin ? ' fa-spin' : ''}`;
+            iconEl.classList.add(`toast-icon-${tType || 'info'}`);
+        } else {
+            switch (tType) {
+                case 'success':
+                    iconEl.className = 'toast-icon fas fa-check-circle toast-icon-success';
+                    break;
+                case 'error':
+                    iconEl.className = 'toast-icon fas fa-exclamation-circle toast-icon-error';
+                    break;
+                case 'warning':
+                    iconEl.className = 'toast-icon fas fa-exclamation-triangle toast-icon-warning';
+                    break;
+                case 'info':
+                default:
+                    iconEl.className = 'toast-icon fas fa-info-circle toast-icon-info';
+                    break;
+            }
+        }
+    };
+    applyIcon(type, customIcon, spin);
 
-    // 自动安全移除（双重保障：animationend + 定时器兜底，避免切标签页或后台冻结遗留幽灵节点）
-    let isRemoved = false;
-    const safeRemove = () => {
-        if (isRemoved) return;
-        isRemoved = true;
-        if (toast.parentNode) {
-            toast.remove();
+    let hideTimer = null;
+    let isClosing = false;
+
+    const closeToast = () => {
+        if (isClosing) return;
+        isClosing = true;
+        if (hideTimer) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+        }
+        toast.classList.add('toast-slide-out');
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.remove();
+            }
+        }, 200);
+    };
+
+    const scheduleHide = (d) => {
+        if (hideTimer) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+        }
+        if (typeof d === 'number' && d > 0) {
+            hideTimer = setTimeout(closeToast, d);
         }
     };
 
-    toast.addEventListener('animationend', (e) => {
-        if (e.animationName === 'canvasToastSlideUp') {
-            safeRemove();
-        }
-    });
+    scheduleHide(duration);
 
-    const safeDuration = typeof duration === 'number' && duration > 0 ? duration : 3000;
-    setTimeout(() => {
-        toast.style.animation = 'canvasToastSlideUp 0.3s ease forwards';
-        setTimeout(safeRemove, 350);
-    }, safeDuration);
+    const state = {
+        position,
+        get isClosing() { return isClosing; },
+        update: (newMsg, newType = type, newDuration = duration, newIcon = customIcon, newSpin = spin) => {
+            if (isClosing) return handle;
+            messageEl.textContent = String(newMsg ?? '');
+            const newMultiline = messageEl.textContent.includes('\n') || messageEl.textContent.length > 60;
+            messageEl.classList.toggle('multiline', newMultiline);
+            applyType(newType);
+            applyIcon(newType, newIcon, newSpin);
+            // 微缩放反馈，指示已更新内容
+            toast.classList.remove('toast-pulse');
+            void toast.offsetWidth;
+            toast.classList.add('toast-pulse');
+            scheduleHide(newDuration);
+            return handle;
+        },
+        close: closeToast
+    };
+
+    toast._toastState = state;
+    targetParent.appendChild(toast);
+
+    const handle = {
+        update: (msg) => state.update(msg),
+        close: () => state.close()
+    };
+    return handle;
+}
+
+if (typeof window !== 'undefined') {
+    window.showCanvasToast = showCanvasToast;
 }
 
 /**

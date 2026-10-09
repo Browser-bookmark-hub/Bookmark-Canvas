@@ -17333,82 +17333,20 @@ function showError(message) {
 }
 
 function showToast(message, options = {}) {
-    // 简单的提示功能
-    const position = options && options.position ? options.position : 'top-left';
-    let positionCss = '';
-    let animIn = 'slideIn';
-    let animOut = 'slideOut';
-
-    // 移除之前的同位置提示（防止堆积残留）
-    try {
-        if (position === 'top-left') {
-            document.querySelectorAll('.canvas-toast, .history-toast').forEach((t) => t.remove());
-        }
-    } catch (_) { }
-
-    if (position === 'top-left') {
-        // 避开左上角悬浮工具窗（高度 98px），移至 120px 以下并靠左
-        positionCss = 'top: 120px; left: 16px;';
-        animIn = 'slideInLeft';
-        animOut = 'slideOutLeft';
-    } else if (position === 'top-right') {
-        positionCss = 'top: 20px; right: 20px;';
-    } else {
-        // bottom-right
-        positionCss = 'bottom: 20px; right: 20px;';
+    if (typeof showCanvasToast === 'function') {
+        return showCanvasToast(message, options);
     }
-
-    const duration = options && typeof options.duration === 'number' ? options.duration : 2000;
+    // 兜底降级处理
+    const duration = options && typeof options.duration === 'number' ? options.duration : 2500;
     const toast = document.createElement('div');
-    toast.className = 'history-toast';
-    toast.style.cssText = `
-        position: fixed;
-        ${positionCss}
-        padding: 12px 20px;
-        background: var(--accent-primary);
-        color: white;
-        border-radius: 8px;
-        box-shadow: var(--shadow-lg);
-        z-index: 10000;
-        pointer-events: none !important;
-        animation: ${animIn} 0.3s ease;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    `;
-    toast.style.pointerEvents = 'none';
-
-    if (options && options.icon) {
-        const icon = document.createElement('i');
-        icon.className = options.icon;
-        if (options.spin) icon.style.animation = 'spin 1s linear infinite';
-        toast.appendChild(icon);
-    }
-
-    const textSpan = document.createElement('span');
-    textSpan.textContent = message;
-    toast.appendChild(textSpan);
-
-    const targetParent = (typeof window.getOverlayContainer === 'function') ? window.getOverlayContainer() : document.body;
-    targetParent.appendChild(toast);
-
-    if (duration > 0) {
-        setTimeout(() => {
-            toast.style.animation = `${animOut} 0.3s ease`;
-            setTimeout(() => toast.remove(), 300);
-        }, duration);
-    }
-
-    return {
-        update: (msg) => {
-            textSpan.textContent = msg;
-        },
-        close: () => {
-            toast.style.animation = `${animOut} 0.3s ease`;
-            setTimeout(() => toast.remove(), 300);
-        }
-    };
+    toast.className = 'canvas-toast history-toast app-toast';
+    toast.textContent = String(message || '');
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), duration);
+    return { update: () => {}, close: () => toast.remove() };
 }
+
+window.showToast = showToast;
 
 window.showLoadingToast = function(initialMessage) {
     return showToast(initialMessage, {
@@ -17418,27 +17356,3 @@ window.showLoadingToast = function(initialMessage) {
     });
 };
 
-// 添加动画样式
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOut {
-        from { transform: translateX(0); opacity: 1; }
-        to { transform: translateX(100%); opacity: 0; }
-    }
-    @keyframes slideInLeft {
-        from { transform: translateX(-100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOutLeft {
-        from { transform: translateX(0); opacity: 1; }
-        to { transform: translateX(-100%); opacity: 0; }
-    }
-    @keyframes spin {
-        100% { transform: rotate(360deg); }
-    }
-`;
-document.head.appendChild(style);

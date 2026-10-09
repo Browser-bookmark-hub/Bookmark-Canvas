@@ -1133,6 +1133,7 @@
         opacity: 0;
         transform: scale(0.96) translateY(-4px);
     }
+
     to {
         opacity: 1;
         transform: scale(1) translateY(0);
@@ -2639,11 +2640,11 @@ html[data-theme='dark'] #canvasExportModeDialog .canvas-export-primary-option {
     will-change: auto;
 }
 
-.canvas-node-maximized > .resize-handle,
+.canvas-node-maximized>.resize-handle,
 .canvas-node-maximized .resize-handle,
 .canvas-node-maximized .canvas-node-anchor,
 .canvas-node-maximized .canvas-anchor-zone,
-.canvas-node-maximized > .canvas-section-ctrl-overlay {
+.canvas-node-maximized>.canvas-section-ctrl-overlay {
     display: none !important;
     pointer-events: none !important;
 }
@@ -3200,9 +3201,9 @@ body.canvas-node-maximized-active .canvas-edge-label {
  * 选中连接线后必须越过临时栏目/空白栏目/卡片组的层叠上下文，
  * 其二级色盘和方向面板也随父工具窗保持在最上层。
  */
-.canvas-content > #edge-toolbar.edge-toolbar-selected,
-.canvas-content > #edge-toolbar.edge-toolbar-selected:has(.md-color-popover.open),
-.canvas-content > #edge-toolbar.edge-toolbar-selected:has(.md-direction-popover.open) {
+.canvas-content>#edge-toolbar.edge-toolbar-selected,
+.canvas-content>#edge-toolbar.edge-toolbar-selected:has(.md-color-popover.open),
+.canvas-content>#edge-toolbar.edge-toolbar-selected:has(.md-direction-popover.open) {
     z-index: 20000 !important;
 }
 
@@ -5690,9 +5691,299 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     cursor: nwse-resize;
 }
 
-/* 全局安全防护：保证所有 Toast 提示层永远穿透，绝不阻挡底层按钮悬浮高亮与点击 */
+/* ==================== 全局统一 Toast 提示样式 ==================== */
+/* 极简简单直接：纯实色背景 + 状态彩色实体四边边框（蓝/绿/红/橙），不使用任何毛玻璃滤镜，不受明暗主题干扰 */
 .canvas-toast,
-.history-toast {
+.history-toast,
+.app-toast {
+    position: fixed;
+    top: calc(var(--header-height, 54px) + 16px);
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: #ffffff;
+    background: #1e1e20;
+    border: 1.5px solid #3b82f6;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+    z-index: 9999999;
     pointer-events: none !important;
+    max-width: 420px;
+    box-sizing: border-box;
+    will-change: transform, opacity;
+    animation: toastSlideInTop 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* 状态对应四边边框颜色：绿色、红色、橙色、蓝色 */
+.canvas-toast.toast-type-success,
+.history-toast.toast-type-success,
+.app-toast.toast-type-success {
+    border-color: #10b981;
+}
+
+.canvas-toast.toast-type-error,
+.history-toast.toast-type-error,
+.app-toast.toast-type-error {
+    border-color: #ef4444;
+}
+
+.canvas-toast.toast-type-warning,
+.history-toast.toast-type-warning,
+.app-toast.toast-type-warning {
+    border-color: #f59e0b;
+}
+
+.canvas-toast.toast-type-info,
+.history-toast.toast-type-info,
+.app-toast.toast-type-info {
+    border-color: #3b82f6;
+}
+
+/* 当标题栏收起（header-compact）或停靠在底部（header-dock-bottom）时，贴近顶部 20px 呈现 */
+body.header-compact .canvas-toast,
+body.header-compact .history-toast,
+body.header-compact .app-toast,
+body.header-dock-bottom .canvas-toast,
+body.header-dock-bottom .history-toast,
+body.header-dock-bottom .app-toast {
+    top: 20px;
+}
+
+.canvas-toast.toast-slide-out,
+.history-toast.toast-slide-out,
+.app-toast.toast-slide-out {
+    animation: toastSlideOutTop 0.18s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+/* 高频更新时的微弹反馈（如快捷键快速切换锚点） */
+.canvas-toast.toast-pulse,
+.history-toast.toast-pulse,
+.app-toast.toast-pulse {
+    animation: toastPulseTop 0.16s ease-out;
+}
+
+/* 兼容可选：左上角位置选项 */
+.canvas-toast.pos-top-left,
+.history-toast.pos-top-left,
+.app-toast.pos-top-left {
+    top: 120px;
+    left: 16px;
+    transform: none;
+    animation-name: toastSlideInLeft;
+}
+
+.canvas-toast.pos-top-left.toast-slide-out,
+.history-toast.pos-top-left.toast-slide-out,
+.app-toast.pos-top-left.toast-slide-out {
+    animation-name: toastSlideOutLeft;
+}
+
+.canvas-toast.pos-top-left.toast-pulse,
+.history-toast.pos-top-left.toast-pulse,
+.app-toast.pos-top-left.toast-pulse {
+    animation-name: toastPulse;
+}
+
+/* 兼容可选：右上角位置选项 */
+.canvas-toast.pos-top-right,
+.history-toast.pos-top-right,
+.app-toast.pos-top-right {
+    top: calc(var(--header-height, 54px) + 16px);
+    right: 20px;
+    left: auto;
+    transform: none;
+    animation-name: toastSlideInRight;
+}
+
+body.header-compact .canvas-toast.pos-top-right,
+body.header-compact .history-toast.pos-top-right,
+body.header-compact .app-toast.pos-top-right,
+body.header-dock-bottom .canvas-toast.pos-top-right,
+body.header-dock-bottom .history-toast.pos-top-right,
+body.header-dock-bottom .app-toast.pos-top-right {
+    top: 20px;
+}
+
+.canvas-toast.pos-top-right.toast-slide-out,
+.history-toast.pos-top-right.toast-slide-out,
+.app-toast.pos-top-right.toast-slide-out {
+    animation-name: toastSlideOutRight;
+}
+
+/* 兼容可选：右下角位置选项 */
+.canvas-toast.pos-bottom-right,
+.history-toast.pos-bottom-right,
+.app-toast.pos-bottom-right {
+    top: auto;
+    bottom: 20px;
+    right: 20px;
+    left: auto;
+    transform: none;
+    animation-name: toastSlideInRight;
+}
+
+.canvas-toast.pos-bottom-right.toast-slide-out,
+.history-toast.pos-bottom-right.toast-slide-out,
+.app-toast.pos-bottom-right.toast-slide-out {
+    animation-name: toastSlideOutRight;
+}
+
+/* 图标与文字水平对齐优化：解决矢量图标与汉字排版视觉轴线不一致的问题 */
+.toast-icon {
+    font-size: 13px;
+    line-height: 1;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    transform: translateY(0.5px);
+}
+
+.toast-icon-success {
+    color: #34d399;
+    /* 柔和鲜明翠绿 */
+}
+
+.toast-icon-error {
+    color: #f87171;
+    /* 柔和鲜明珊瑚红 */
+}
+
+.toast-icon-warning {
+    color: #fbbf24;
+    /* 暖琥珀橙 */
+}
+
+.toast-icon-info {
+    color: #60a5fa;
+    /* 清爽晴空蓝 */
+}
+
+.toast-message {
+    min-width: 0;
+    word-break: break-word;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.35;
+    display: inline-flex;
+    align-items: center;
+}
+
+.toast-message.multiline {
+    white-space: normal;
+    display: block;
+}
+
+/* 顶部居中进入/离开动画 */
+@keyframes toastSlideInTop {
+    from {
+        transform: translate(-50%, -16px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translate(-50%, 0);
+        opacity: 1;
+    }
+}
+
+@keyframes toastSlideOutTop {
+    from {
+        transform: translate(-50%, 0);
+        opacity: 1;
+    }
+
+    to {
+        transform: translate(-50%, -16px);
+        opacity: 0;
+    }
+}
+
+@keyframes toastPulseTop {
+    0% {
+        transform: translate(-50%, 0) scale(1);
+    }
+
+    50% {
+        transform: translate(-50%, 0) scale(1.04);
+    }
+
+    100% {
+        transform: translate(-50%, 0) scale(1);
+    }
+}
+
+/* 左侧进入/离开动画 */
+@keyframes toastSlideInLeft {
+    from {
+        transform: translateX(-16px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes toastSlideOutLeft {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    to {
+        transform: translateX(-16px);
+        opacity: 0;
+    }
+}
+
+/* 右侧进入/离开动画 */
+@keyframes toastSlideInRight {
+    from {
+        transform: translateX(16px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes toastSlideOutRight {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    to {
+        transform: translateX(16px);
+        opacity: 0;
+    }
+}
+
+@keyframes toastPulse {
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.03);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
