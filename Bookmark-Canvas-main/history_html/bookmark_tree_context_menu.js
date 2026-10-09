@@ -19599,6 +19599,11 @@ function __handleBookmarkTreeObjectMenuAction(action, target, options = {}) {
         }
         if (canvas.locatePermanent) return canvas.locatePermanent();
     }
+    if (action === 'edit-special-label') {
+        if (type === 'temporary' && canvas.openSpecialTempSectionLabelPopover) return canvas.openSpecialTempSectionLabelPopover(target.sectionId, {
+            anchorPoint: options.anchorPoint || null
+        });
+    }
     if (action === 'rename') {
         if (type === 'temporary' && canvas.openTempSectionRename) return canvas.openTempSectionRename(target.sectionId, {
             anchorPoint: options.anchorPoint || null
@@ -19703,6 +19708,18 @@ function showBookmarkTreeObjectContextMenu(e, target) {
         { action: 'locate', label: labels.locate, icon: 'crosshairs' }
     ];
     if (type === 'temporary') {
+        const canvas = window.CanvasModule || {};
+        const section = (canvas.temp && typeof canvas.temp.getSection === 'function')
+            ? canvas.temp.getSection(target.sectionId)
+            : (typeof getTempSection === 'function' ? getTempSection(target.sectionId) : null);
+        const isSpecial = section && (
+            (typeof __isSpecialTempSection === 'function' && __isSpecialTempSection(section)) ||
+            (canvas.isSpecialTempSection && canvas.isSpecialTempSection(section)) ||
+            section.tempKind === 'special'
+        );
+        if (isSpecial) {
+            items.push({ action: 'edit-special-label', label: ((currentLang || 'zh_CN') === 'en' ? 'Edit label' : '修改标签'), icon: 'tag' });
+        }
         items.push({ action: 'rename', label: labels.rename, icon: 'edit' });
     }
     if (type === 'md-node') {
@@ -19774,7 +19791,7 @@ function showBookmarkTreeObjectContextMenu(e, target) {
             event.preventDefault();
             event.stopPropagation();
             const action = item.dataset.action;
-            const actionPoint = action === 'rename'
+            const actionPoint = (action === 'rename' || action === 'edit-special-label')
                 ? target.contextMenuRenamePoint
                 : (action === 'color' ? target.contextMenuColorPoint : null);
             const anchorPoint = actionPoint || (target && target.contextMenuPoint ? target.contextMenuPoint : null);

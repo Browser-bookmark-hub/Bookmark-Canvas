@@ -3380,6 +3380,9 @@ function __isSpecialTempSection(section) {
     const label = labelRaw.toLowerCase();
     return label === 'drop' || label === 'search' || label === 'batch' || label === 'add' || label === 'import file' || label === 'import';
 }
+if (typeof window !== 'undefined') {
+    window.__isSpecialTempSection = __isSpecialTempSection;
+}
 
 function __isTempSectionColorLocked(section) {
     if (!section) return true;
@@ -5281,7 +5284,8 @@ function isDescendantLabel(parentLabel, candidateLabel) {
         return /^\d/.test(rest);
     }
     if (!candidate.startsWith(base)) return false;
-    const rest = candidate.slice(base.length);
+    let rest = candidate.slice(base.length);
+    if (rest.startsWith('-')) rest = rest.slice(1);
     return /^\d/.test(rest);
 }
 
@@ -22488,6 +22492,15 @@ function __renderTempNodeImpl(section, options = {}) {
         const sequenceBadge = document.createElement('span');
         sequenceBadge.className = 'temp-node-sequence-badge';
         applyTempSectionBadge(sequenceBadge, sectionLabel);
+        if (__isSpecialTempSection(section)) {
+            sequenceBadge.classList.add('is-special-temp-badge');
+            const isEn = (typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : '') === 'en';
+            const editTip = isEn ? 'Click to edit label' : '点击修改栏目标签';
+            sequenceBadge.title = editTip;
+            sequenceBadge.setAttribute('aria-label', editTip);
+            sequenceBadge.setAttribute('role', 'button');
+            sequenceBadge.setAttribute('tabindex', '0');
+        }
         titleContainer.appendChild(sequenceBadge);
     }
 
@@ -23814,6 +23827,21 @@ function __patchTempSectionBadgeInPlace(section, nodeElement) {
         }
     }
     applyTempSectionBadge(badge, label);
+    if (__isSpecialTempSection(section)) {
+        badge.classList.add('is-special-temp-badge');
+        const isEn = (typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : '') === 'en';
+        const editTip = isEn ? 'Click to edit label' : '点击修改栏目标签';
+        badge.title = editTip;
+        badge.setAttribute('aria-label', editTip);
+        badge.setAttribute('role', 'button');
+        badge.setAttribute('tabindex', '0');
+    } else {
+        badge.classList.remove('is-special-temp-badge');
+        badge.removeAttribute('role');
+        badge.removeAttribute('tabindex');
+        badge.title = '';
+        badge.removeAttribute('aria-label');
+    }
 }
 
 function __ensureTempSectionLowDetailOverlay(section, nodeElement) {
@@ -25547,6 +25575,7 @@ function makeNodeDraggable(element, section) {
         if (element.classList.contains('canvas-node-maximized')) return;
 
         if (target.closest('.temp-node-action-btn') ||
+            target.closest('.temp-node-sequence-badge.is-special-temp-badge') ||
             target.closest('.canvas-layout-zoom-controls') ||
             target.closest('.temp-color-popover') ||
             target.classList.contains('temp-node-color-input') ||
@@ -32676,6 +32705,452 @@ function openTempSectionColorPicker(sectionId, options = {}) {
         return true;
     }
     return false;
+}
+
+function updateSpecialTempSectionLabel(sectionId, targetLabel) {
+    const section = getTempSection(sectionId);
+    if (!section) return false;
+    if (!__isSpecialTempSection(section)) {
+        console.warn('[Canvas] Only special temporary sections can have their label modified.');
+        return false;
+    }
+
+    const trimmed = String(targetLabel || '').trim().slice(0, 10);
+    if (!trimmed) return false;
+
+    section.label = trimmed;
+    section.tempKind = 'special'; // 明确保持 special 类别，防止修改为自定义文本后丢失特殊栏目属性
+
+    const nodeElement = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(String(sectionId || ''))}"]`);
+    if (nodeElement) {
+        __patchTempSectionBadgeInPlace(section, nodeElement);
+        const lowDetailBadge = nodeElement.querySelector('.temp-node-low-detail-badge');
+        if (lowDetailBadge) {
+            lowDetailBadge.textContent = [trimmed, __getTempLowDetailOriginText(section)].filter(Boolean).join(' ');
+        }
+    }
+
+    try { saveTempSectionsPatch(section); } catch (_) { }
+    try { saveCanvasNodeUiState(); } catch (_) { }
+
+    if (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.refresh === 'function') {
+        try { window.CanvasSidebarDirectory.refresh({ force: true }); } catch (_) { }
+    }
+
+    const isEn = (typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : '') === 'en';
+    const msg = isEn ? `Updated label to "${trimmed}"` : `已修改栏目标签为「${trimmed}」`;
+    if (typeof showToast === 'function') {
+        showToast(msg);
+    }
+    return true;
+}
+
+function openSpecialTempSectionLabelPopover(sectionId, options = {}) {
+    try { ensureTempSectionRendered(sectionId); } catch (_) { }
+    const section = getTempSection(sectionId);
+    if (!section) return false;
+    if (!__isSpecialTempSection(section)) {
+        return false;
+    }
+
+    document.querySelectorAll('.special-temp-label-popover').forEach(pop => {
+        try { pop.remove(); } catch (_) { }
+    });
+    document.querySelectorAll('.temp-section-rename-popover').forEach(pop => {
+        try { pop.remove(); } catch (_) { }
+    });
+
+    const isEn = (typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : '') === 'en';
+    const currentLabel = getTempSectionLabel(section);
+
+    const popover = document.createElement('div');
+    popover.className = 'special-temp-label-popover';
+    popover.dataset.sectionId = section.id;
+
+    const header = document.createElement('div');
+    header.className = 'special-temp-label-popover-header';
+    header.innerHTML = `
+        <span class="special-temp-label-popover-title">
+            <i class="fas fa-tag"></i> <span>${isEn ? 'Edit Special Section Label' : '修改特殊栏目标签'}</span>
+        </span>
+        <button type="button" class="special-temp-label-popover-close" aria-label="${isEn ? 'Close' : '关闭'}">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+    popover.appendChild(header);
+
+    const inputRow = document.createElement('div');
+    inputRow.className = 'special-temp-label-popover-input-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'special-temp-label-popover-input';
+    input.value = currentLabel === 'unknown' ? '' : currentLabel;
+    input.placeholder = isEn ? 'Enter custom label...' : '输入自定义标签或在下方选择...';
+    input.maxLength = 10;
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'special-temp-label-popover-confirm';
+    confirmBtn.title = isEn ? 'Confirm' : '确认';
+    confirmBtn.setAttribute('aria-label', confirmBtn.title);
+    confirmBtn.innerHTML = '<i class="fas fa-check"></i>';
+
+    inputRow.appendChild(input);
+    inputRow.appendChild(confirmBtn);
+    popover.appendChild(inputRow);
+
+    const body = document.createElement('div');
+    body.className = 'special-temp-label-popover-body';
+
+    const safeEscapeHtml = (text) => String(text || '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+
+    const resolveSpecialTempBucketKey = (label) => {
+        if (typeof getTagBrowseBucketKey === 'function') {
+            try { return getTagBrowseBucketKey(label); } catch (_) { }
+        }
+        const text = String(label || '').trim();
+        if (!text) return '#';
+        const first = text.charAt(0);
+        if (/^[0-9]$/.test(first)) return '0-9';
+        if (/^[A-Za-z]$/.test(first)) return first.toUpperCase();
+        if (/^[\u4e00-\u9fff]$/.test(first)) {
+            const pinyinBoundaries = [
+                { letter: 'A', marker: '阿' }, { letter: 'B', marker: '芭' }, { letter: 'C', marker: '擦' },
+                { letter: 'D', marker: '搭' }, { letter: 'E', marker: '蛾' }, { letter: 'F', marker: '发' },
+                { letter: 'G', marker: '噶' }, { letter: 'H', marker: '哈' }, { letter: 'J', marker: '击' },
+                { letter: 'K', marker: '喀' }, { letter: 'L', marker: '垃' }, { letter: 'M', marker: '妈' },
+                { letter: 'N', marker: '拿' }, { letter: 'O', marker: '哦' }, { letter: 'P', marker: '啪' },
+                { letter: 'Q', marker: '期' }, { letter: 'R', marker: '然' }, { letter: 'S', marker: '撒' },
+                { letter: 'T', marker: '塌' }, { letter: 'W', marker: '挖' }, { letter: 'X', marker: '昔' },
+                { letter: 'Y', marker: '压' }, { letter: 'Z', marker: '匝' }
+            ];
+            try {
+                const collator = typeof Intl !== 'undefined' && Intl.Collator ? new Intl.Collator('zh-CN') : null;
+                if (collator) {
+                    let bucket = 'A';
+                    for (let i = 0; i < pinyinBoundaries.length; i += 1) {
+                        if (collator.compare(first, pinyinBoundaries[i].marker) >= 0) {
+                            bucket = pinyinBoundaries[i].letter;
+                        } else {
+                            break;
+                        }
+                    }
+                    return bucket;
+                }
+            } catch (_) { }
+            return 'A';
+        }
+        return '#';
+    };
+
+    // 1. 上方：预设标签 (Preset Labels)
+    const presetsSection = document.createElement('div');
+    presetsSection.className = 'special-temp-label-section';
+    const presetLabels = isEn
+        ? ['Drop', 'Search', 'Batch', 'Add', 'Import', 'New']
+        : ['拖入', '搜索', '批量', '添加', '导入', '新建'];
+
+    let presetChipsHtml = '';
+    presetLabels.forEach(pLabel => {
+        const isActive = pLabel.toLowerCase() === currentLabel.toLowerCase() ? ' is-active' : '';
+        presetChipsHtml += `
+            <button type="button" class="special-temp-chip${isActive}" data-label="${safeEscapeHtml(pLabel)}">
+                <span class="special-temp-chip-text">${safeEscapeHtml(pLabel)}</span>
+            </button>
+        `;
+    });
+
+    presetsSection.innerHTML = `
+        <div class="special-temp-label-section-header">
+            <span class="special-temp-label-section-title">
+                <i class="fas fa-th-large" style="font-size: 11px; opacity: 0.7;"></i>
+                <span>${isEn ? 'Preset Labels' : '预设标签'}</span>
+            </span>
+        </div>
+        <div class="special-temp-label-chips-list special-temp-presets-list">
+            ${presetChipsHtml}
+        </div>
+    `;
+    body.appendChild(presetsSection);
+
+    // 分隔线
+    const divider = document.createElement('div');
+    divider.className = 'special-temp-label-divider';
+    body.appendChild(divider);
+
+    // 收集当前画布所有卡片的顶级父集标签（去除类似「添加-1」的子集编号，保留「添加」）
+    const getRootParentLabel = (label) => {
+        let current = String(label || '').trim();
+        if (!current || current === 'unknown') return '';
+        while (true) {
+            // e.g. "添加-1" -> "添加", "A-1" -> "A", "添加-1-2" -> "添加-1"
+            const dashMatch = current.match(/^(.*)-(\d+)$/);
+            if (dashMatch) {
+                current = dashMatch[1].trim();
+                continue;
+            }
+            // e.g. "A1" -> "A" (仅针对历史单字母链式编号，如 A1, B2，避免误伤 Release1, V2 等)
+            const alphaNumMatch = current.match(/^([A-Za-z])\d+$/);
+            if (alphaNumMatch) {
+                current = alphaNumMatch[1].trim();
+                continue;
+            }
+            break;
+        }
+        return current;
+    };
+
+    const canvasRootLabelsSet = new Set();
+    const seenLower = new Set();
+
+    const addLabelIfValid = (rawLabel) => {
+        const root = getRootParentLabel(rawLabel);
+        if (!root || root === 'unknown') return;
+        const lower = root.toLowerCase();
+        if (!seenLower.has(lower)) {
+            seenLower.add(lower);
+            canvasRootLabelsSet.add(root);
+        }
+    };
+
+    // 1. 遍历 CanvasState.tempSections，严格仅保留特殊临时栏目，剔除永久栏目及其副本、常规链式临时栏目
+    if (typeof CanvasState !== 'undefined' && Array.isArray(CanvasState.tempSections)) {
+        CanvasState.tempSections.forEach(sec => {
+            if (!sec) return;
+            if (sec.copyId || sec.permanentCopyId || sec.source === 'permanent-copy' || sec.source === 'permanent') return;
+            if (sec.tempKind === 'regular') return;
+            if (!__isSpecialTempSection(sec)) return;
+            const l = (typeof sec.label === 'string') ? sec.label.trim() : '';
+            if (l) addLabelIfValid(l);
+        });
+    }
+
+    // 2. 遍历 DOM 中的 .temp-canvas-node（双重保障，严格限定为特殊临时栏目徽标）
+    if (typeof document !== 'undefined') {
+        document.querySelectorAll('.temp-canvas-node').forEach(node => {
+            const badge = node.querySelector('.temp-node-sequence-badge.is-special-temp-badge');
+            if (!badge) return;
+            const sectionId = node.dataset && node.dataset.sectionId;
+            const sec = sectionId && typeof getTempSection === 'function' ? getTempSection(sectionId) : null;
+            if (sec) {
+                if (sec.copyId || sec.permanentCopyId || sec.source === 'permanent-copy' || sec.source === 'permanent') return;
+                if (sec.tempKind === 'regular') return;
+                if (!__isSpecialTempSection(sec)) return;
+            }
+            const text = String(badge.textContent || '').trim();
+            if (text) addLabelIfValid(text);
+        });
+    }
+
+    // 3. 当前编辑的卡片自身的原始/顶级标签也加入（若为特殊栏目标签）
+    if (currentLabel && currentLabel !== 'unknown' && section && __isSpecialTempSection(section)) {
+        addLabelIfValid(currentLabel);
+    }
+
+    // 2. 下方：全局标签 (Global Labels) - 仅展示特殊临时栏目的顶级标签，按 A-Z 分桶排序
+    const globalSection = document.createElement('div');
+    globalSection.className = 'special-temp-label-section special-temp-global-labels-section';
+
+    let globalContentHtml = '';
+    if (!canvasRootLabelsSet.size) {
+        globalContentHtml = `<div class="special-temp-empty-hint">${isEn ? 'No global labels yet' : '暂无全局标签'}</div>`;
+    } else {
+        const bucketsMap = new Map();
+        canvasRootLabelsSet.forEach(labelText => {
+            const bKey = resolveSpecialTempBucketKey(labelText);
+            if (!bucketsMap.has(bKey)) {
+                bucketsMap.set(bKey, []);
+            }
+            bucketsMap.get(bKey).push(labelText);
+        });
+
+        const alphaKeys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+        const bucketOrder = ['0-9'].concat(alphaKeys).concat(['#']);
+
+        const activeBucketKeys = bucketOrder.filter(key => bucketsMap.has(key) && bucketsMap.get(key).length > 0);
+        bucketsMap.forEach((_, key) => {
+            if (!activeBucketKeys.includes(key)) {
+                activeBucketKeys.push(key);
+            }
+        });
+
+        let sortCollator = null;
+        try {
+            if (typeof getTagBrowseSortCollator === 'function') {
+                sortCollator = getTagBrowseSortCollator(!isEn);
+            } else if (typeof Intl !== 'undefined' && Intl.Collator) {
+                sortCollator = new Intl.Collator(isEn ? 'en' : 'zh-CN', { numeric: true, sensitivity: 'base' });
+            }
+        } catch (_) { }
+
+        const compareItems = (a, b) => {
+            if (sortCollator) {
+                try {
+                    const delta = sortCollator.compare(a, b);
+                    if (delta !== 0) return delta;
+                } catch (_) { }
+            }
+            return a.localeCompare(b, isEn ? 'en' : 'zh-CN', { numeric: true, sensitivity: 'base' });
+        };
+
+        activeBucketKeys.forEach(k => {
+            bucketsMap.get(k).sort(compareItems);
+        });
+
+        activeBucketKeys.forEach(bucketKey => {
+            const bucketItems = bucketsMap.get(bucketKey);
+            let chipsHtml = '';
+            bucketItems.forEach(lblText => {
+                const isActive = lblText.toLowerCase() === currentLabel.toLowerCase() ? ' is-active' : '';
+                chipsHtml += `
+                    <button type="button" class="special-temp-chip${isActive}" data-label="${safeEscapeHtml(lblText)}">
+                        <span class="special-temp-chip-text">${safeEscapeHtml(lblText)}</span>
+                    </button>
+                `;
+            });
+
+            globalContentHtml += `
+                <div class="special-temp-bucket">
+                    <div class="special-temp-bucket-title">${safeEscapeHtml(bucketKey)}</div>
+                    <div class="special-temp-bucket-chips">
+                        ${chipsHtml}
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    globalSection.innerHTML = `
+        <div class="special-temp-label-section-header">
+            <span class="special-temp-label-section-title">
+                <i class="fas fa-layer-group" style="font-size: 11px; opacity: 0.7;"></i>
+                <span>${isEn ? 'Global Labels' : '全局标签'}</span>
+            </span>
+        </div>
+        <div class="special-temp-global-labels-list">
+            ${globalContentHtml}
+        </div>
+    `;
+    body.appendChild(globalSection);
+
+    popover.appendChild(body);
+    getOverlayContainer().appendChild(popover);
+    preventCanvasEventsPropagation(popover);
+
+    let anchorPoint = options && options.anchorPoint ? options.anchorPoint : null;
+    if (!anchorPoint && options.anchorElement) {
+        const r = options.anchorElement.getBoundingClientRect();
+        anchorPoint = { x: r.left, y: r.bottom + 6 };
+    }
+    if (!anchorPoint) {
+        const el = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(String(sectionId || ''))}"]`);
+        const badge = el ? el.querySelector('.temp-node-sequence-badge') : null;
+        if (badge) {
+            const r = badge.getBoundingClientRect();
+            anchorPoint = { x: r.left, y: r.bottom + 6 };
+        }
+    }
+    __positionTempFloatingPopoverAtPoint(popover, anchorPoint);
+
+    let closed = false;
+    const close = (commit, commitLabel) => {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('mousedown', onDoc, true);
+        input.removeEventListener('keydown', onKeydown);
+        confirmBtn.removeEventListener('click', onConfirm);
+        closeBtn.removeEventListener('click', onClose);
+        popover.removeEventListener('click', onPopoverClick);
+        if (commit) {
+            const targetLabel = String(commitLabel !== undefined ? commitLabel : input.value || '').trim();
+            if (targetLabel) {
+                updateSpecialTempSectionLabel(section.id, targetLabel);
+            }
+        }
+        try { popover.remove(); } catch (_) { }
+    };
+
+    const onDoc = (event) => {
+        if (popover.contains(event.target)) return;
+        close(false);
+    };
+    const onKeydown = (event) => {
+        if (event.key === 'Enter') {
+            if (event.isComposing) return;
+            event.preventDefault();
+            close(true);
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            close(false);
+        }
+    };
+    const onConfirm = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        close(true);
+    };
+    const onClose = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        close(false);
+    };
+    const onPopoverClick = (event) => {
+        const chip = event.target.closest('.special-temp-chip');
+        if (chip && chip.dataset.label) {
+            event.preventDefault();
+            event.stopPropagation();
+            const selectedLabel = chip.dataset.label;
+            close(true, selectedLabel);
+        }
+    };
+
+    input.addEventListener('keydown', onKeydown);
+    confirmBtn.addEventListener('click', onConfirm);
+    const closeBtn = header.querySelector('.special-temp-label-popover-close');
+    closeBtn.addEventListener('click', onClose);
+    popover.addEventListener('click', onPopoverClick);
+
+    setTimeout(() => document.addEventListener('mousedown', onDoc, true), 0);
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 0);
+    return true;
+}
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('click', (event) => {
+        const badge = event.target.closest('.temp-node-sequence-badge.is-special-temp-badge');
+        if (!badge) return;
+        const node = badge.closest('.temp-canvas-node');
+        if (!node || !node.dataset || !node.dataset.sectionId) return;
+        const section = getTempSection(node.dataset.sectionId);
+        if (!section || !__isSpecialTempSection(section)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = badge.getBoundingClientRect();
+        openSpecialTempSectionLabelPopover(section.id, {
+            anchorElement: badge,
+            anchorPoint: { x: rect.left, y: rect.bottom + 6 }
+        });
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const badge = event.target.closest && event.target.closest('.temp-node-sequence-badge.is-special-temp-badge');
+        if (!badge || document.activeElement !== badge) return;
+        const node = badge.closest('.temp-canvas-node');
+        if (!node || !node.dataset || !node.dataset.sectionId) return;
+        const section = getTempSection(node.dataset.sectionId);
+        if (!section || !__isSpecialTempSection(section)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = badge.getBoundingClientRect();
+        openSpecialTempSectionLabelPopover(section.id, {
+            anchorElement: badge,
+            anchorPoint: { x: rect.left, y: rect.bottom + 6 }
+        });
+    });
 }
 
 function getMdNodeById(nodeId) {
@@ -43905,6 +44380,9 @@ window.CanvasModule = {
     toggleTempSectionPin,
     openTempSectionRename,
     openTempSectionColorPicker,
+    openSpecialTempSectionLabelPopover,
+    updateSpecialTempSectionLabel,
+    isSpecialTempSection: __isSpecialTempSection,
     removeTempSection: removeTempSectionById,
     getMdNode: getMdNodeById,
     locateMdNode: locateAndZoomToMdNode,
