@@ -4049,6 +4049,13 @@ _Tip: This card can be freely edited or deleted_
 
 ---
 
+### 手动锚点快捷键
+
+- **\`Ctrl / Command + Shift + A\`**：切换到上一手动锚点（首次使用为第一槽位，后续按记忆槽位切换）
+- **\`Ctrl / Command + Shift + D\`**：切换到下一手动锚点（按记忆槽位切换）
+
+---
+
 ### 触控板操作
 
 - **\`双指捏合\`**：缩放画布
@@ -4100,6 +4107,13 @@ _快捷键可在左上角「管理」中自定义_
 - **\`Ctrl / Command + X\`**: Cut selected items
 - **\`Ctrl / Command + C\`**: Copy selected items
 - **\`Ctrl / Command + V\`**: Paste at the cursor location. Inside a folder; below a bookmark at the same level; at a temp card root; at the Bookmarks Bar root for a blank permanent card; or in a new “Paste” temp card on blank canvas. Text keeps native browser paste behavior.
+
+---
+
+### Manual Anchor Shortcuts
+
+- **\`Ctrl / Command + Shift + A\`**: Switch to previous manual anchor (slot 1 on first use, then by remembered slot)
+- **\`Ctrl / Command + Shift + D\`**: Switch to next manual anchor (navigates by remembered slot)
 
 ---
 
@@ -4259,6 +4273,13 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 </ul>
 
 <hr>
+<h3>手动锚点快捷键</h3>
+<ul>
+<li><strong><code>Ctrl / Command + Shift + A</code></strong>：切换到上一手动锚点（首次使用为第一槽位，后续按记忆槽位切换）</li>
+<li><strong><code>Ctrl / Command + Shift + D</code></strong>：切换到下一手动锚点（按记忆槽位切换）</li>
+</ul>
+
+<hr>
 <h3>触控板操作</h3>
 <ul>
 <li><strong><code>双指捏合</code></strong>：缩放画布</li>
@@ -4309,6 +4330,13 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong><code>Ctrl / Command + X</code></strong>: Cut selected items</li>
 <li><strong><code>Ctrl / Command + C</code></strong>: Copy selected items</li>
 <li><strong><code>Ctrl / Command + V</code></strong>: Paste at the cursor location. Inside a folder; below a bookmark at the same level; at a temp card root; at the Bookmarks Bar root for a blank permanent card; or in a new “Paste” temp card on blank canvas. Text keeps native browser paste behavior.</li>
+</ul>
+
+<hr>
+<h3>Manual Anchor Shortcuts</h3>
+<ul>
+<li><strong><code>Ctrl / Command + Shift + A</code></strong>: Switch to previous manual anchor (slot 1 on first use, then by remembered slot)</li>
+<li><strong><code>Ctrl / Command + Shift + D</code></strong>: Switch to next manual anchor (navigates by remembered slot)</li>
 </ul>
 
 <hr>

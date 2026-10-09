@@ -5782,6 +5782,19 @@ html:fullscreen body.header-compact .canvas-main-container {
     box-shadow: 0 0 0 1px var(--accent-color);
 }
 
+/* 当前记忆中的手动锚点槽位高亮（灰色高亮框） */
+.anchor-slot-row.active-slot {
+    background: rgba(128, 128, 128, 0.16) !important;
+    border-color: rgba(160, 160, 160, 0.65) !important;
+    box-shadow: 0 0 0 1px rgba(160, 160, 160, 0.35) !important;
+}
+
+.anchor-slot-row.active-slot:hover {
+    background: rgba(128, 128, 128, 0.24) !important;
+    border-color: rgba(180, 180, 180, 0.85) !important;
+    box-shadow: 0 0 0 1px rgba(180, 180, 180, 0.45) !important;
+}
+
 .anchor-slot-header {
     display: flex;
     justify-content: space-between;

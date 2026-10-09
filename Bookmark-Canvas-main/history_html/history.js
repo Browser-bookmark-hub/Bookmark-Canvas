@@ -3718,6 +3718,11 @@ const i18n = {
 <li><strong>Ctrl / Command + C</strong>：复制已选项目</li>
 <li><strong>Ctrl / Command + V</strong>：粘贴到光标所在位置。文件夹内；书签同级位置下方；临时栏目根部；永久栏目书签栏根部；画布空白会新建“粘贴”临时栏目。文本保持浏览器原生粘贴。</li>
 </ul>
+<h3>手动锚点快捷键</h3>
+<ul>
+<li><strong>Ctrl / Command + Shift + A</strong>：切换到上一手动锚点（首次使用为第一槽位）</li>
+<li><strong>Ctrl / Command + Shift + D</strong>：切换到下一手动锚点（按记忆槽位切换）</li>
+</ul>
 <h3>触控板操作</h3>
 <ul>
 <li><strong>双指捏合</strong>：缩放画布</li>
@@ -3743,6 +3748,11 @@ const i18n = {
 <li><strong>Ctrl / Command + X</strong>: Cut selected items</li>
 <li><strong>Ctrl / Command + C</strong>: Copy selected items</li>
 <li><strong>Ctrl / Command + V</strong>: Paste at the cursor location. Inside a folder; below a bookmark at the same level; at a temp card root; at the Bookmarks Bar root for a blank permanent card; or in a new “Paste” temp card on blank canvas. Text keeps native browser paste behavior.</li>
+</ul>
+<h3>Manual Anchor Shortcuts</h3>
+<ul>
+<li><strong>Ctrl / Command + Shift + A</strong>: Switch to previous manual anchor (slot 1 on first use)</li>
+<li><strong>Ctrl / Command + Shift + D</strong>: Switch to next manual anchor (navigates by remembered slot)</li>
 </ul>
 <h3>Touchpad Operations</h3>
 <ul>
@@ -4100,6 +4110,18 @@ const i18n = {
     canvasHelpPointerInfoButton: {
         'zh_CN': '查看光标落点说明',
         'en': 'Show cursor placement rules'
+    },
+    canvasHelpAnchorShortcutsTitle: {
+        'zh_CN': '手动锚点快捷键',
+        'en': 'Manual Anchor Shortcuts'
+    },
+    canvasHelpAnchorShortcutsPrev: {
+        'zh_CN': '切换到上一手动锚点（首次使用为第一槽位）',
+        'en': 'Switch to previous manual anchor (slot 1 on first use)'
+    },
+    canvasHelpAnchorShortcutsNext: {
+        'zh_CN': '切换到下一手动锚点（按记忆槽位切换）',
+        'en': 'Switch to next manual anchor (navigates by remembered slot)'
     },
     canvasHelpSpaceKey: {
         'zh_CN': '空格',

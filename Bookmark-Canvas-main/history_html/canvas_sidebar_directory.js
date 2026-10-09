@@ -4426,6 +4426,7 @@
         timestamp: Date.now()
       };
       highlightSlotIndex = index;
+      rememberedSlotIndex = index;
       saveAnchorSlots(slots);
       renderHistoryPanel();
       if (typeof global.showToast === 'function') {
@@ -4435,6 +4436,7 @@
     else if (action === 'locate') {
       const slot = slots[index];
       if (!slot) return;
+      rememberedSlotIndex = index;
       navigateToViewportFromAnchor(slot).then(() => {
         setTimeout(renderHistoryPanel, 50);
       });
@@ -4511,6 +4513,9 @@
       });
     } 
     else if (action === 'delete') {
+      if (rememberedSlotIndex === index) {
+        rememberedSlotIndex = null;
+      }
       slots[index] = null;
       saveAnchorSlots(slots);
       renderHistoryPanel();
@@ -4545,22 +4550,121 @@
   } catch (_) {}
   
   let highlightSlotIndex = null;
+  let rememberedSlotIndex = null;
+
+  function isMacPlatform() {
+    return /Mac|iPod|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+  }
+
+  function navigateManualAnchorSlot(direction) {
+    const slots = loadAnchorSlots();
+    const validIndices = [];
+    slots.forEach((s, idx) => {
+      if (s && typeof s === 'object') {
+        validIndices.push(idx);
+      }
+    });
+
+    const isEn = isEnglish();
+
+    if (validIndices.length === 0) {
+      if (typeof global.showToast === 'function') {
+        global.showToast(isEn ? 'No manual anchors yet' : '暂无手动锚点');
+      }
+      return false;
+    }
+
+    let targetIndex = null;
+    // 第一个次使用这个是第一槽位锚点 后续就是记忆中的锚点
+    if (rememberedSlotIndex === null || !validIndices.includes(rememberedSlotIndex)) {
+      targetIndex = validIndices[0];
+    } else {
+      const currentPos = validIndices.indexOf(rememberedSlotIndex);
+      if (direction === 'prev') {
+        const prevPos = (currentPos - 1 + validIndices.length) % validIndices.length;
+        targetIndex = validIndices[prevPos];
+      } else {
+        const nextPos = (currentPos + 1) % validIndices.length;
+        targetIndex = validIndices[nextPos];
+      }
+    }
+
+    rememberedSlotIndex = targetIndex;
+    const targetSlot = slots[targetIndex];
+    if (!targetSlot) return false;
+
+    const targetSlotOrder = validIndices.indexOf(targetIndex) + 1;
+    if (manualAnchorVisibleLimit < targetSlotOrder) {
+      manualAnchorVisibleLimit = Math.max(manualAnchorVisibleLimit, targetSlotOrder);
+      try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
+    }
+
+    highlightSlotIndex = targetIndex;
+
+    navigateToViewportFromAnchor(targetSlot).then(() => {
+      renderHistoryPanel();
+    });
+
+    const slotNum = targetIndex + 1;
+    const displayName = targetSlot.name || (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
+    if (typeof global.showToast === 'function') {
+      global.showToast(isEn ? `Anchor: ${displayName}` : `已切换至锚点：${displayName}`);
+    }
+
+    return true;
+  }
+
+  function handleAnchorShortcutKeydown(e) {
+    if (e.isComposing) return;
+
+    // Check modifier: Command on Mac (metaKey), Ctrl on Windows/Linux (ctrlKey).
+    const hasModifier = (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey;
+    if (!hasModifier) return;
+
+    const keyLower = (e.key || '').toLowerCase();
+    const code = e.code || '';
+
+    const isKeyA = (keyLower === 'a' || code === 'KeyA');
+    const isKeyD = (keyLower === 'd' || code === 'KeyD');
+
+    if (!isKeyA && !isKeyD) return;
+
+    // Ignore if typing in text inputs
+    const activeEl = document.activeElement;
+    if (activeEl) {
+      const tag = (activeEl.tagName || '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || activeEl.isContentEditable) {
+        return;
+      }
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (isKeyA) {
+      navigateManualAnchorSlot('prev');
+    } else if (isKeyD) {
+      navigateManualAnchorSlot('next');
+    }
+  }
 
   function saveManualSettingsOnCollapse() {
     const manualPanel = document.getElementById('manualAnchorInlineSettings');
     if (!manualPanel) return;
     const input = manualPanel.querySelector('#inlineManualAnchorLimitInput');
-    if (!input) return;
-    
-    const rawVal = input.value.trim();
-    let val = 5; // default
-    if (/^[1-9]\d*$/.test(rawVal)) {
-      const parsed = parseInt(rawVal, 10);
-      val = Math.max(1, Math.min(50, parsed));
-    }
     
     const currentSettings = getCanvasOtherSettingsSafe();
-    currentSettings.manualAnchorLimit = val;
+
+    if (input) {
+      const rawVal = input.value.trim();
+      let val = 5; // default
+      if (/^[1-9]\d*$/.test(rawVal)) {
+        const parsed = parseInt(rawVal, 10);
+        val = Math.max(1, Math.min(50, parsed));
+      }
+      currentSettings.manualAnchorLimit = val;
+    }
+
     saveCanvasOtherSettingsInline(currentSettings);
     
     let slots = loadAnchorSlots();
@@ -4697,6 +4801,20 @@
             <span class="settings-inline-span">${isEn ? 'Max capacity:' : '最大记录数量：'}</span>
             <input type="number" id="inlineManualAnchorLimitInput" min="1" max="50" value="${manualAnchorLimit}" />
           </div>
+          <div class="manual-anchor-shortcuts-help" style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
+            <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary);">${isEn ? 'Shortcut Navigation' : '快捷键说明'}</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+              <span>${isEn ? 'Prev anchor:' : '上一锚点：'}</span>
+              <kbd class="canvas-shortcut-key" style="font-size: 10px; padding: 1px 5px;">${isMacPlatform() ? 'Cmd + Shift + A' : 'Ctrl + Shift + A'}</kbd>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+              <span>${isEn ? 'Next anchor:' : '下一锚点：'}</span>
+              <kbd class="canvas-shortcut-key" style="font-size: 10px; padding: 1px 5px;">${isMacPlatform() ? 'Cmd + Shift + D' : 'Ctrl + Shift + D'}</kbd>
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted, #888); margin-top: 3px;">
+              ${isEn ? 'First use targets slot 1, then follows remembered slot.' : '首次使用切换至第一槽位，后续按记忆槽位切换'}
+            </div>
+          </div>
         </div>
         
         <div class="anchor-slots-container">
@@ -4717,9 +4835,10 @@
         const displayName = slot.name || (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
         const zoomPercent = formatAnchorZoomPercent(slot.zoom);
         const absoluteTimeStr = slot.timestamp ? formatAbsoluteTime(slot.timestamp, isEn) : '';
+        const isRemembered = (rememberedSlotIndex === index);
         
         html += `
-          <div class="anchor-slot-row" data-index="${index}">
+          <div class="anchor-slot-row${isRemembered ? ' active-slot' : ''}" data-index="${index}" title="${isRemembered ? (isEn ? 'Current remembered anchor' : '当前记忆中的锚点') : ''}">
             <div class="anchor-slot-header">
               <span class="anchor-slot-name" title="${displayName}">${displayName}</span>
               <div class="anchor-slot-actions">
@@ -5004,6 +5123,20 @@
       });
     }
 
+    panel.querySelectorAll('.anchor-slots-container .anchor-slot-row').forEach(row => {
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.anchor-slot-btn') || e.target.closest('.anchor-slot-rename-input')) return;
+        const index = parseInt(row.dataset.index, 10);
+        const currentSlots = loadAnchorSlots();
+        const slot = currentSlots[index];
+        if (!slot) return;
+        rememberedSlotIndex = index;
+        navigateToViewportFromAnchor(slot).then(() => {
+          setTimeout(renderHistoryPanel, 50);
+        });
+      });
+    });
+
     panel.querySelectorAll('.anchor-slots-container .anchor-slot-btn').forEach(btn => {
       const index = parseInt(btn.dataset.index, 10);
       const action = btn.classList.contains('locate-btn') ? 'locate' :
@@ -5073,6 +5206,7 @@
         renderHistoryPanel();
       });
     }
+
     
     const inlineCheck = panel.querySelector('#inlineAutoRecordCheck');
     const intervalInput = panel.querySelector('#inlineAutoRecordIntervalInput');
@@ -5365,6 +5499,7 @@
     queueRefresh({ force: true });
     consumePostReloadLocateRequest();
     global.addEventListener('pointerdown', handleGlobalPointerDown, true);
+    global.addEventListener('keydown', handleAnchorShortcutKeydown, true);
 
     try { setupSidebarTabs(); } catch (_) {}
 
@@ -5491,6 +5626,7 @@
   global.CanvasSidebarDirectory = {
     init,
     refresh,
+    navigateManualAnchorSlot,
     locateCardGroup,
     renderPreviewDirectory,
     getMdNodeTitle,
