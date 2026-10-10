@@ -2075,7 +2075,7 @@ async function showManualWindowGroupSelector(context) {
                 <div class="manual-selector-drag-btn" title="${lang === 'zh_CN' ? '拖动移动' : 'Drag to move'}">
                     <i class="fas fa-hand-paper"></i>
                 </div>
-                <button class="manual-selector-close" style="margin: 0;">×</button>
+                <button class="manual-selector-close" style="margin: 0;"><i class="fas fa-times"></i></button>
             </div>
         `;
 
@@ -15598,7 +15598,7 @@ async function showBatchManualWindowGroupSelector(selectionInfo, lang) {
                         </select>
                     </div>
                 ` : ''}
-                <button class="manual-selector-close">&times;</button>
+                <button class="manual-selector-close"><i class="fas fa-times"></i></button>
             </div>
         `;
 

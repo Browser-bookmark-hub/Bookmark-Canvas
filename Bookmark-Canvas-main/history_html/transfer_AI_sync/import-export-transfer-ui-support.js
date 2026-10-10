@@ -614,7 +614,7 @@ async function showImportChoiceDialog(bookmark, parentFolder, dropX, dropY) {
         <div class="import-dialog-content" style="max-width: 420px;">
             <div class="import-dialog-header">
                 <h3>${isEn ? 'Import Options' : '导入选项'}</h3>
-                <button class="import-dialog-close">&times;</button>
+                <button class="import-dialog-close"><i class="fas fa-times"></i></button>
             </div>
             <div class="import-dialog-body">
                 <p style="margin-bottom: 16px; color: var(--text-secondary);">
@@ -1145,7 +1145,7 @@ async function showFolderSelectionDialog(folders, dropX, dropY) {
         <div class="import-dialog-content" style="max-width: 500px;">
             <div class="import-dialog-header">
                 <h3>${isEn ? 'Multiple folders found' : '找到多个同名文件夹'}</h3>
-                <button class="import-dialog-close">&times;</button>
+                <button class="import-dialog-close"><i class="fas fa-times"></i></button>
             </div>
             <div class="import-dialog-body">
                 <p style="margin-bottom: 16px; color: var(--text-secondary);">
@@ -1564,7 +1564,7 @@ async function showBackupDialog() {
             <div class="import-dialog-content">
                 <div class="import-dialog-header">
                     <h3>${isEn ? 'Backup' : '备份'}</h3>
-                    <button class="import-dialog-close" id="closeBackupDialog">&times;</button>
+                    <button class="import-dialog-close" id="closeBackupDialog"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body" style="padding: 16px; display: flex; flex-direction: column; min-height: 220px;">
                     <div style="margin-bottom: 10px;">

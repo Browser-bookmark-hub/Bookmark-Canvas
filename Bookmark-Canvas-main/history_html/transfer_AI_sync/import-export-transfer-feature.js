@@ -585,7 +585,7 @@ function showImportModeConfirmDialog(options = {}) {
             <div class="import-dialog-content import-mode-dialog-content">
                 <div class="import-dialog-header">
                     <h3>${title}</h3>
-                    <button class="import-dialog-close" id="closeImportModeDialog">&times;</button>
+                    <button class="import-dialog-close" id="closeImportModeDialog" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body import-mode-dialog-body">
                     ${sourceText ? `<div class="import-mode-source">${sourceText}</div>` : ''}
@@ -2427,7 +2427,7 @@ function showImportDialog(options = {}) {
                         <i class="fas fa-info-circle" style="font-size: 14px;"></i>
                     </button>
                 </h3>
-                <button class="import-dialog-close" id="closeImportDialog">&times;</button>
+                <button class="import-dialog-close" id="closeImportDialog" type="button"><i class="fas fa-times"></i></button>
             </div>
             <!-- Popover -->
             <div id="importInfoPopover" style="display: none; position: absolute; left: 16px; top: 52px; right: 16px; background: var(--bg-elevated, #ffffff); border: 1px solid var(--accent-primary, #7c3aed); border-radius: 8px; padding: 12px; box-shadow: var(--shadow-lg, 0 6px 16px rgba(0,0,0,0.15)); z-index: 1000; font-size: 12px; line-height: 1.5; color: var(--text-primary); text-align: left;">
@@ -4122,9 +4122,9 @@ function showExportModeDialog(options = {}) {
 
     dialog.innerHTML = `
         <div class="import-dialog-content canvas-export-dialog-content" style="max-width: 430px; width: 90vw; position: relative;">
-            <div class="import-dialog-header" style="padding: 10px 16px;">
-                <h3 style="margin-left: 4px;">${dialogTitle}</h3>
-                <button class="import-dialog-close" id="closeExportModeDialog" style="margin-top: 1px;">&times;</button>
+            <div class="import-dialog-header">
+                <h3>${dialogTitle}</h3>
+                <button class="import-dialog-close" id="closeExportModeDialog" type="button"><i class="fas fa-times"></i></button>
             </div>
             <div class="import-dialog-body" style="padding: 16px;">
                 ${fullscreenTargetLabel ? `<div class="canvas-export-current-target">${fullscreenHintPrefix} ${fullscreenTargetLabel}</div>` : ''}
@@ -4831,7 +4831,7 @@ async function exportCanvasPackage(options = {}) {
 		            <div class="import-dialog-content" style="width:max-content;max-width:min(92vw, ${contentMaxWidthPx}px);box-sizing:border-box;">
 			                <div class="import-dialog-header">
 			                    <h3>${title}</h3>
-			                    <button class="import-dialog-close" id="closeCanvasExportVaultPrefixDialog" style="transform: translateY(1px);">&times;</button>
+			                    <button class="import-dialog-close" id="closeCanvasExportVaultPrefixDialog" type="button"><i class="fas fa-times"></i></button>
 			                </div>
 	                <div class="import-dialog-body" style="padding: 18px;">
 	                    <div style="margin: 0 0 6px; font-weight: 600;">${inputLabel}</div>

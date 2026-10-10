@@ -101,7 +101,7 @@
             <div class="import-dialog-content github-path-help-content" style="width: min(92vw, 500px);">
                 <div class="import-dialog-header" style="padding-left: 14px; padding-right: 14px;">
                     <h3>${escapeHtml(t('AI 指南文件说明', 'AI Guide File'))}</h3>
-                    <button class="import-dialog-close" id="githubAiGuideHelpClose" type="button">&times;</button>
+                    <button class="import-dialog-close" id="githubAiGuideHelpClose" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body github-confirm-body" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">
                     <div style="color: var(--text-secondary); line-height: 1.65; padding: 10px; border-radius: 6px; background: var(--bg-secondary, rgba(0, 0, 0, 0.03)); border: 1px dashed var(--border-color, rgba(0, 0, 0, 0.15)); text-align: left;">
@@ -681,7 +681,7 @@
             <div class="import-dialog-content github-path-help-content">
                 <div class="import-dialog-header" style="padding-left: 14px; padding-right: 14px;">
                     <h3>${escapeHtml(t('推送：「.canvas」内部路径', 'Push: ".canvas" Internal Path'))}</h3>
-                    <button class="import-dialog-close" id="githubPathHelpClose" type="button">&times;</button>
+                    <button class="import-dialog-close" id="githubPathHelpClose" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body github-confirm-body">
                     <div class="github-path-detail-editor">
@@ -760,7 +760,7 @@
             <div class="import-dialog-content github-path-help-content" style="width: min(92vw, 540px);">
                 <div class="import-dialog-header" style="padding-left: 14px; padding-right: 14px;">
                     <h3>${escapeHtml(t('拉取数据包方式说明', 'Pull Package Method Explanation'))}</h3>
-                    <button class="import-dialog-close" id="githubPullMethodHelpClose" type="button">&times;</button>
+                    <button class="import-dialog-close" id="githubPullMethodHelpClose" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body github-confirm-body" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">
                     <div style="display: flex; flex-direction: column; gap: 12px; text-align: left;">
@@ -867,7 +867,7 @@
             <div class="import-dialog-content github-path-help-content" style="width: min(92vw, 500px);">
                 <div class="import-dialog-header" style="padding-left: 14px; padding-right: 14px;">
                     <h3>${escapeHtml(t('安全警示', 'Safety Warning'))}</h3>
-                    <button class="import-dialog-close" id="githubWarningClose" type="button">&times;</button>
+                    <button class="import-dialog-close" id="githubWarningClose" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body github-confirm-body" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">
                     <div style="line-height: 1.6; padding: 12px; border-radius: 6px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: var(--text-primary); text-align: left; word-break: break-all;">
@@ -937,7 +937,7 @@ ${isEn()
             <div class="import-dialog-content github-config-content">
                 <div class="import-dialog-header">
                     <h3>${escapeHtml(title)}</h3>
-                    <button class="import-dialog-close" id="githubConfigClose" type="button">&times;</button>
+                    <button class="import-dialog-close" id="githubConfigClose" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body github-config-body">
                     <div class="github-config-section">
@@ -1425,7 +1425,7 @@ ${isEn()
             <div class="import-dialog-content github-confirm-content">
                 <div class="import-dialog-header">
                     <h3>${escapeHtml(title)}</h3>
-                    <button class="import-dialog-close" id="githubConfirmClose" type="button">&times;</button>
+                    <button class="import-dialog-close" id="githubConfirmClose" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body github-confirm-body">
                     <div class="github-confirm-message">${messageHtml}</div>
@@ -1969,7 +1969,7 @@ ${isEn()
             <div class="import-dialog-content github-confirm-content" style="width: min(94vw, 480px);">
                 <div class="import-dialog-header">
                     <h3>${escapeHtml(t('推送确认 & 提交信息', 'Push Confirm & Commit Details'))}</h3>
-                    <button class="import-dialog-close" id="githubPushDetailsClose" type="button">&times;</button>
+                    <button class="import-dialog-close" id="githubPushDetailsClose" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body github-confirm-body" style="display: flex; flex-direction: column; gap: 12px;">
                     <!-- Push Summary Card -->
@@ -2866,7 +2866,7 @@ ${isEn()
             <div class="import-dialog-content github-confirm-content" style="max-width: 780px;">
                 <div class="import-dialog-header">
                     <h3>${escapeHtml(t('选择拉取', 'Selective Pull'))}</h3>
-                    <button class="import-dialog-close" id="githubSelectivePullClose" type="button">&times;</button>
+                    <button class="import-dialog-close" id="githubSelectivePullClose" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body github-confirm-body">
                     <div class="github-confirm-message github-pull-mode-message">
@@ -3106,7 +3106,7 @@ ${isEn()
             <div class="import-dialog-content github-confirm-content">
                 <div class="import-dialog-header">
                     <h3>${escapeHtml(t('选择拉取方式', 'Choose Pull Mode'))}</h3>
-                    <button class="import-dialog-close" id="githubPullModeClose" type="button">&times;</button>
+                    <button class="import-dialog-close" id="githubPullModeClose" type="button"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="import-dialog-body github-confirm-body">
                     <div class="github-confirm-message github-pull-mode-message">

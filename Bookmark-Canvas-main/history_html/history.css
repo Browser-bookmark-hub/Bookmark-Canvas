@@ -3045,8 +3045,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 }
 
 .shortcuts-header .modal-close {
-    margin-top: 4px;
-    /* 略向下对齐标题基线 */
+    margin: 0;
 }
 
 .shortcuts-section {
@@ -4793,21 +4792,73 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 .modal-close {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border: none;
-    border-radius: 50%;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    transition: all 0.15s ease;
 }
 
 .modal-close:hover {
     background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.modal-close i {
+    font-size: inherit;
+}
+
+/* 统一紧凑型弹窗头部规格（向「配置」页看齐） */
+.modal-header.compact {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 44px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header.compact h3 {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.modal-header.compact .modal-close {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1;
+    transition: all 0.15s ease;
+}
+
+.modal-header.compact .modal-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.modal-header.compact .modal-close i {
+    font-size: inherit;
 }
 
 .modal-body {
@@ -4838,11 +4889,12 @@ a.tree-label.tree-bookmark-link:hover {
 }
 
 #editBookmarkModal .modal-header.compact {
-    padding: 14px 18px;
+    min-height: 44px;
+    padding: 10px 18px;
 }
 
 #editBookmarkModal .modal-body {
-    padding: 18px;
+    padding: 16px 18px;
 }
 
 /* 侧边栏模式：优化尺寸，更紧凑 */
@@ -4852,7 +4904,8 @@ html.side-panel-mode #editBookmarkModal .modal-content {
 }
 
 html.side-panel-mode #editBookmarkModal .modal-header.compact {
-    padding: 12px 14px;
+    min-height: 42px;
+    padding: 8px 14px;
 }
 
 html.side-panel-mode #editBookmarkModal .modal-body {
@@ -4875,6 +4928,7 @@ html.side-panel-mode #editBookmarkModal .modal-body {
     font-size: 11px;
     font-weight: 600;
     color: var(--text-secondary);
+    line-height: 1.2;
 }
 
 .edit-bookmark-input {
@@ -4896,35 +4950,60 @@ html.side-panel-mode #editBookmarkModal .modal-body {
 }
 
 .edit-bookmark-actions {
-    margin-top: 16px;
+    margin-top: 19px;
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
+    align-items: center;
+    gap: 8px;
 }
 
-#editBookmarkModal .modal-btn {
-    min-width: 84px;
-    height: 36px;
+html.side-panel-mode #editBookmarkModal .edit-bookmark-actions {
+    margin-top: 16px;
+}
+
+#editBookmarkModal .modal-btn,
+.bookmark-add-secondary-actions .modal-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-width: 76px;
+    height: 30px;
+    padding: 0 12px;
     border: 1px solid var(--border-color);
-    border-radius: 10px;
+    border-radius: 7px;
     background: var(--bg-secondary);
     color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    box-sizing: border-box;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all 0.16s ease;
 }
 
-#editBookmarkModal .modal-btn:hover {
+#editBookmarkModal .modal-btn:hover,
+.bookmark-add-secondary-actions .modal-btn:hover {
     border-color: var(--border-hover);
     background: var(--bg-tertiary);
 }
 
-#editBookmarkModal .modal-btn.primary {
+#editBookmarkModal .modal-btn:focus-visible,
+.bookmark-add-secondary-actions .modal-btn:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+#editBookmarkModal .modal-btn.primary,
+.bookmark-add-secondary-actions .modal-btn.primary {
     border-color: var(--accent-primary);
     background: var(--accent-primary);
     color: #fff;
 }
 
-#editBookmarkModal .modal-btn.primary:hover {
+#editBookmarkModal .modal-btn.primary:hover,
+.bookmark-add-secondary-actions .modal-btn.primary:hover {
     filter: brightness(0.95);
 }
 
@@ -4935,7 +5014,8 @@ html.side-panel-mode #editBookmarkModal .modal-body {
 }
 
 #bookmarkAddSecondaryModal .modal-header.compact {
-    padding: 14px 18px;
+    min-height: 44px;
+    padding: 10px 18px;
 }
 
 #bookmarkAddSecondaryModal .modal-body {
@@ -4951,6 +5031,9 @@ html.side-panel-mode #editBookmarkModal .modal-body {
 
 #bookmarkAddSecondaryModal .bookmark-add-secondary-title-row h3 {
     margin: 0;
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 600;
 }
 
 #bookmarkAddSecondaryModal .bookmark-add-secondary-help-btn {
@@ -5014,7 +5097,8 @@ html.side-panel-mode #bookmarkAddSecondaryModal .modal-content {
 }
 
 html.side-panel-mode #bookmarkAddSecondaryModal .modal-header.compact {
-    padding: 12px 14px;
+    min-height: 42px;
+    padding: 8px 14px;
 }
 
 html.side-panel-mode #bookmarkAddSecondaryModal .modal-body {
@@ -5176,49 +5260,20 @@ html.side-panel-mode #bookmarkAddSecondaryModal .modal-body {
 .bookmark-add-secondary-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
-    margin-top: 18px;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
 }
 
-#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn {
-    min-width: 88px;
-    height: 36px;
-    padding: 0 14px;
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.16s ease;
+html.side-panel-mode .bookmark-add-secondary-actions {
+    margin-top: 14px;
 }
 
-#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn:hover {
-    border-color: var(--border-hover);
-    background: var(--bg-tertiary);
-}
-
-#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn:focus-visible {
-    outline: none;
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
-}
-
-#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn.primary {
-    border-color: var(--accent-primary);
-    background: var(--accent-primary);
-    color: #fff;
-}
-
-#bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn.primary:hover {
-    filter: brightness(0.95);
-}
-
-html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions .modal-btn {
-    min-width: 82px;
-    height: 34px;
-    padding: 0 12px;
+html.side-panel-mode #editBookmarkModal .modal-btn,
+html.side-panel-mode .bookmark-add-secondary-actions .modal-btn {
+    min-width: 70px;
+    height: 30px;
+    padding: 0 10px;
 }
 
 /* Clear Canvas secondary UI */
@@ -5235,30 +5290,45 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 #clearCanvasModal .clear-canvas-modal-header {
-    padding: 14px 18px;
+    min-height: 44px;
+    padding: 10px 18px;
 }
 
 #clearCanvasModal .clear-canvas-modal-title {
-    margin-left: 0;
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 600;
 }
 
 #clearCanvasModal .clear-canvas-modal-close {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-secondary);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
     color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: all 0.15s ease;
 }
 
 #clearCanvasModal .clear-canvas-modal-close:hover {
-    color: var(--text-primary);
-    border-color: var(--border-hover);
     background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+#clearCanvasModal .clear-canvas-modal-close i {
+    font-size: inherit;
 }
 
 #clearCanvasModal .clear-canvas-modal-body {
-    padding: 16px 20px;
+    padding: 16px 18px;
 }
 
 #clearCanvasModal .clear-canvas-modal-desc {
@@ -5300,23 +5370,31 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 #clearCanvasModal .clear-canvas-modal-footer {
-    margin-top: 14px;
+    margin-top: 16px;
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
+    align-items: center;
+    gap: 8px;
 }
 
 #clearCanvasModal .clear-canvas-btn {
-    min-width: 88px;
-    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-width: 76px;
+    height: 30px;
+    padding: 0 12px;
     border: 1px solid var(--border-color);
-    border-radius: 10px;
+    border-radius: 7px;
     background: var(--bg-secondary);
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
+    line-height: 1;
+    box-sizing: border-box;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all 0.16s ease;
 }
 
 #clearCanvasModal .clear-canvas-btn:hover {
@@ -5349,30 +5427,45 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 #clearUnlabeledModal .clear-unlabeled-modal-header {
-    padding: 14px 18px;
+    min-height: 44px;
+    padding: 10px 18px;
 }
 
 #clearUnlabeledModal .clear-unlabeled-modal-title {
-    margin-left: 0;
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.3;
+    font-weight: 600;
 }
 
 #clearUnlabeledModal .clear-unlabeled-modal-close {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-secondary);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
     color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: all 0.15s ease;
 }
 
 #clearUnlabeledModal .clear-unlabeled-modal-close:hover {
     color: var(--text-primary);
-    border-color: var(--border-hover);
     background: var(--bg-tertiary);
 }
 
+#clearUnlabeledModal .clear-unlabeled-modal-close i {
+    font-size: inherit;
+}
+
 #clearUnlabeledModal .clear-unlabeled-modal-body {
-    padding: 16px 20px;
+    padding: 16px 18px;
 }
 
 #clearUnlabeledModal .clear-unlabeled-lead {
@@ -5399,23 +5492,31 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 #clearUnlabeledModal .clear-unlabeled-modal-footer {
-    margin-top: 14px;
+    margin-top: 16px;
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
+    align-items: center;
+    gap: 8px;
 }
 
 #clearUnlabeledModal .clear-unlabeled-btn {
-    min-width: 88px;
-    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-width: 76px;
+    height: 30px;
+    padding: 0 12px;
     border: 1px solid var(--border-color);
-    border-radius: 10px;
+    border-radius: 7px;
     background: var(--bg-secondary);
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
+    line-height: 1;
+    box-sizing: border-box;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all 0.16s ease;
 }
 
 #clearUnlabeledModal .clear-unlabeled-btn:hover {
@@ -6398,21 +6499,46 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .batch-note-edit-modal .batch-note-edit-header {
-    min-height: 38px;
-    padding: 8px 14px 7px 16px;
+    min-height: 44px;
+    padding: 10px 18px;
 }
 
 .batch-note-edit-modal .batch-note-edit-header h3 {
+    margin: 0;
     font-size: 15px;
-    line-height: 1.25;
+    line-height: 1.3;
+    font-weight: 600;
 }
 
 .batch-note-edit-modal .batch-note-edit-close {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: all 0.15s ease;
     flex: 0 0 auto;
 }
 
+.batch-note-edit-modal .batch-note-edit-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.batch-note-edit-modal .batch-note-edit-close i {
+    font-size: inherit;
+}
+
 .batch-note-edit-modal .batch-note-edit-body {
-    padding: 14px 16px 16px;
+    padding: 16px 18px;
 }
 
 .batch-note-edit-modal .info-note-heading {
@@ -6444,10 +6570,18 @@ html.side-panel-mode #bookmarkAddSecondaryModal .bookmark-add-secondary-actions 
 }
 
 .batch-note-edit-modal .batch-note-edit-btn {
-    min-width: 64px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-width: 76px;
     height: 30px;
-    padding: 6px 12px;
+    padding: 0 12px;
+    border-radius: 7px;
     font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    box-sizing: border-box;
     white-space: nowrap;
 }
 
