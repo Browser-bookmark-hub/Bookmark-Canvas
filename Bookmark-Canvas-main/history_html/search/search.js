@@ -5544,8 +5544,11 @@ function showGridGroupPopover(targetBtn, groupId) {
             }
 
             const childCreationTimeInfo = getBookmarkItemCreationTime(child);
+            const highlightedChildTime = (childCreationTimeInfo && childCreationTimeInfo.text && typeof highlightSearchKeywords === 'function' && query)
+                ? highlightSearchKeywords(childCreationTimeInfo.text, query)
+                : escapeHtml(childCreationTimeInfo ? childCreationTimeInfo.text : '');
             const childCreationTimeHtml = childCreationTimeInfo && childCreationTimeInfo.text
-                ? `<div class="canvas-grid-group-child-time" style="display:flex; align-items:center; gap:4px; font-size:10px; color:var(--text-secondary); line-height:1.3; opacity:0.85;"><i class="far fa-clock" style="font-size:9.5px; opacity:0.75;"></i><span>${isZh ? '创建时间: ' : 'Created: '}${escapeHtml(childCreationTimeInfo.text)}</span></div>`
+                ? `<div class="canvas-grid-group-child-time" style="display:flex; align-items:center; gap:4px; font-size:10px; color:var(--text-secondary); line-height:1.3; opacity:0.85;"><i class="far fa-clock" style="font-size:9.5px; opacity:0.75;"></i><span>${isZh ? '创建时间: ' : 'Created: '}${highlightedChildTime}</span></div>`
                 : '';
 
             listHtml += `
@@ -6628,7 +6631,10 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
                                 if (timeSpan) {
                                     const timeInfo = getBookmarkItemCreationTime({ dateAdded: ts });
                                     if (timeInfo && timeInfo.text) {
-                                        timeSpan.textContent = timeInfo.text;
+                                        const q = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                                        timeSpan.innerHTML = (typeof highlightSearchKeywords === 'function' && q)
+                                            ? highlightSearchKeywords(timeInfo.text, q)
+                                            : escapeHtml(timeInfo.text);
                                     }
                                 }
                             }
@@ -12833,6 +12839,15 @@ function scoreCanvasSearchItem(item, query, options = {}) {
                     if (item.__path.startsWith(t)) tokenScore = Math.max(tokenScore, 105);
                     else if (item.__path.includes(t)) tokenScore = Math.max(tokenScore, isSingleToken ? 70 : 95);
                 }
+                if (!isTagToken && item.dateAdded) {
+                    if (!item.__dateText) {
+                        const timeInfo = getBookmarkItemCreationTime(item);
+                        item.__dateText = (timeInfo && timeInfo.text) ? timeInfo.text.toLowerCase() : '';
+                    }
+                    if (item.__dateText && item.__dateText.includes(t)) {
+                        tokenScore = Math.max(tokenScore, isSingleToken ? 60 : 85);
+                    }
+                }
                 if (isTagToken && doesCanvasBookmarkItemTagsMatchQuery(item, t)) {
                     tokenScore = Math.max(tokenScore, 135);
                 }
@@ -13284,11 +13299,13 @@ function getBookmarkItemCreationTimesList(item) {
     return results;
 }
 
-function renderBookmarkCreationTimeHtml(item, isZh = true) {
+function renderBookmarkCreationTimeHtml(item, isZh = true, customQuery = null) {
     const timeInfo = (item && typeof item === 'object' && item.text) ? item : getBookmarkItemCreationTime(item);
     if (!timeInfo || !timeInfo.text) return '';
     const label = isZh ? '创建时间:' : 'Created:';
-    const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+    const query = (customQuery !== null && customQuery !== undefined)
+        ? customQuery
+        : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '');
     const safeText = (typeof highlightSearchKeywords === 'function' && query)
         ? highlightSearchKeywords(timeInfo.text, query)
         : escapeHtml(timeInfo.text);
@@ -19815,13 +19832,17 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 const d = cell.getData();
                 const timeText = d.dateAddedText || '';
                 if (!timeText) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                const highlightedTime = (typeof highlightSearchKeywords === 'function' && query)
+                    ? highlightSearchKeywords(timeText, query)
+                    : escapeHtml(timeText);
                 const datesList = getBookmarkItemCreationTimesList(d.rawItem || d);
                 let moreBtnHtml = '';
                 if (datesList.length > 1) {
                     const remainCount = datesList.length - 1;
                     moreBtnHtml = `<button type="button" class="canvas-grid-location-more-btn canvas-table-loc-more-btn canvas-table-date-more-btn" data-item-id="${escapeHtml(String((d && d.id) || ''))}" data-item-index="${escapeHtml(String((d && d.index) || ''))}" title="${escapeHtml(isZh ? `查看全部 ${datesList.length} 项创建时间` : `View all ${datesList.length} creation times`)}" aria-label="${escapeHtml(isZh ? `还有 ${remainCount} 项创建时间` : `${remainCount} more creation times`)}">+${remainCount}</button>`;
                 }
-                return `<div class="canvas-table-date-cell">${moreBtnHtml}<span class="canvas-table-date-text" title="${escapeHtml(timeText)}">${escapeHtml(timeText)}</span></div>`;
+                return `<div class="canvas-table-date-cell">${moreBtnHtml}<span class="canvas-table-date-text" title="${escapeHtml(timeText)}">${highlightedTime}</span></div>`;
             },
             cellClick: (e, cell) => {
                 const dateMoreBtn = e.target.closest('.canvas-table-date-more-btn, .canvas-grid-date-more-btn');
@@ -21294,14 +21315,17 @@ function renderCanvasSearchResults(results, options = {}) {
         const childNoteSnippetHtml = renderBookmarkResultNoteSnippet(child);
 
         const detailsExpanded = isBookmarkDetailsExpanded(childKey);
+        const childCreationTimeHtml = renderBookmarkCreationTimeHtml(child, isZh, queryText);
 
         const hasPathMatch = isPlainBookmarkDetailsQuery && pathHtml && pathHtml.includes('<mark>');
+        const hasTimeMatch = isPlainBookmarkDetailsQuery && childCreationTimeHtml && childCreationTimeHtml.includes('<mark>');
         const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
         const hasTagMatch = isTagDetailsQuery && childTagMarkersHtml && childTagMarkersHtml.includes('<mark>');
         const hasNoteMatch = isNoteDetailsQuery && childNoteSnippetHtml && childNoteSnippetHtml.includes('<mark>');
 
         const preview = buildMatchedDetailsPreviewHtml([
             { matched: hasPathMatch, html: pathHtml },
+            { matched: hasTimeMatch, html: childCreationTimeHtml },
             { matched: hasUrlMatch, html: urlHtml },
             { matched: hasTagMatch, html: childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '' },
             { matched: hasNoteMatch, html: childNoteSnippetHtml }
@@ -21320,7 +21344,6 @@ function renderCanvasSearchResults(results, options = {}) {
         `;
 
         const childTagsHtml = childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '';
-        const childCreationTimeHtml = renderBookmarkCreationTimeHtml(child, isZh);
 
         let childDetailsContentHtml = '';
         childDetailsContentHtml += pathHtml;
@@ -22173,14 +22196,17 @@ function renderCanvasSearchResults(results, options = {}) {
 
                 const childrenHtml = renderBookmarkGroupChildren(item);
                 const noteSnippetHtml = renderBookmarkResultNoteSnippet(item);
+                const creationTimeHtml = renderBookmarkCreationTimeHtml(item, isZh, searchUiState.query);
 
                 const hasPathMatch = isPlainBookmarkDetailsQuery && parentPathHtml && parentPathHtml.includes('<mark>');
+                const hasTimeMatch = isPlainBookmarkDetailsQuery && creationTimeHtml && creationTimeHtml.includes('<mark>');
                 const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
                 const hasTagMatch = isTagDetailsQuery && tagsRowHtml && tagsRowHtml.includes('<mark>');
                 const hasNoteMatch = isNoteDetailsQuery && noteSnippetHtml && noteSnippetHtml.includes('<mark>');
 
                 const preview = buildMatchedDetailsPreviewHtml([
                     { matched: hasPathMatch, html: parentPathHtml },
+                    { matched: hasTimeMatch, html: creationTimeHtml },
                     { matched: hasUrlMatch, html: urlHtml },
                     { matched: hasTagMatch, html: tagsRowHtml },
                     { matched: hasNoteMatch, html: noteSnippetHtml }
@@ -22198,8 +22224,6 @@ function renderCanvasSearchResults(results, options = {}) {
                         ${previewContextHtml}
                     </div>
                 `;
-
-                const creationTimeHtml = renderBookmarkCreationTimeHtml(item, isZh);
 
                 const detailsHtml = `
                     <div class="canvas-bookmark-details-collapsible" style="display: ${detailsExpanded ? 'flex' : 'none'}; flex-direction: column; width: 100%; min-width: 0; margin-top: 4px; gap: 4px;">
@@ -22489,12 +22513,14 @@ function renderCanvasSearchResults(results, options = {}) {
             if (itemNoteSnippetHtml) detailsContentHtml += itemNoteSnippetHtml;
 
             const hasPathMatch = isPlainBookmarkDetailsQuery && pathHtml && pathHtml.includes('<mark>');
+            const hasTimeMatch = isPlainBookmarkDetailsQuery && creationTimeHtml && creationTimeHtml.includes('<mark>');
             const hasUrlMatch = isPlainBookmarkDetailsQuery && linkHtml && linkHtml.includes('<mark>');
             const hasTagMatch = isTagDetailsQuery && tagsRowHtml && tagsRowHtml.includes('<mark>');
             const hasNoteMatch = isNoteDetailsQuery && itemNoteSnippetHtml && itemNoteSnippetHtml.includes('<mark>');
 
             const preview = buildMatchedDetailsPreviewHtml([
                 { matched: hasPathMatch, html: pathHtml },
+                { matched: hasTimeMatch, html: creationTimeHtml },
                 { matched: hasUrlMatch, html: linkHtml },
                 { matched: hasTagMatch, html: tagsRowHtml },
                 { matched: hasNoteMatch, html: itemNoteSnippetHtml }
