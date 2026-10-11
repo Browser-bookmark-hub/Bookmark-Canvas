@@ -23571,8 +23571,12 @@ function __renderTempNodeImpl(section, options = {}) {
     // 绑定指针拖拽事件（支持滚轮滚动）
     if (typeof attachPointerDragEvents === 'function') {
         attachPointerDragEvents(treeContainer);
-        ;
     }
+    try {
+        if (typeof window.__flushTagAndNoteForElement === 'function' && treeContainer && !treeStartsUnloaded) {
+            window.__flushTagAndNoteForElement(treeContainer);
+        }
+    } catch (_) { }
 
     // 恢复滚动位置（在所有事件绑定之后，使用多次尝试确保成功）
     // 即使滚动位置是0也需要恢复，因为可能从非0位置变为0
@@ -24954,6 +24958,11 @@ function collapseFolderChildren(section, parentItemId, childrenContainer) {
         }
 
         childrenContainer.appendChild(fragment);
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(childrenContainer);
+            }
+        } catch (_) { }
 
         // 更新父节点状态
         if (parentTreeItem) {
@@ -37887,6 +37896,11 @@ function refreshTempSectionTreeInPlace(section, options = {}) {
     try { if (typeof attachDragEvents === 'function' && treeContainer.querySelector('.tree-item[data-node-id]')) attachDragEvents(treeContainer); } catch (_) { }
     try { if (typeof attachPointerDragEvents === 'function') attachPointerDragEvents(treeContainer); } catch (_) { }
     try { if (typeof window.__updateTraceHighlights === 'function') window.__updateTraceHighlights(); } catch (_) { }
+    try {
+        if (typeof window.__flushTagAndNoteForElement === 'function') {
+            window.__flushTagAndNoteForElement(treeContainer);
+        }
+    } catch (_) { }
 
     return true;
 }

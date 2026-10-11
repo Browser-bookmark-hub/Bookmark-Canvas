@@ -13746,6 +13746,11 @@ function applyPermanentChangeDomPatch(id, changeInfo) {
                 }
                 treeNode.replaceWith(replacement);
                 bindPermanentDomPatchNode(replacement);
+                try {
+                    if (typeof window.__flushTagAndNoteForElement === 'function') {
+                        window.__flushTagAndNoteForElement(replacement);
+                    }
+                } catch (_) { }
                 return;
             }
             if (typeof changeInfo.title !== 'undefined') {
@@ -13820,6 +13825,11 @@ function applyPermanentCreateDomPatch(id, bookmark) {
                 failed = true;
                 return;
             }
+            try {
+                if (typeof window.__flushTagAndNoteForElement === 'function') {
+                    window.__flushTagAndNoteForElement(treeNode);
+                }
+            } catch (_) { }
             refreshPermanentLoadMoreState(tree, parentId);
         });
         return !failed;
@@ -13881,6 +13891,11 @@ function applyPermanentMoveDomPatch(id, moveInfo) {
                 failed = true;
                 return;
             }
+            try {
+                if (typeof window.__flushTagAndNoteForElement === 'function') {
+                    window.__flushTagAndNoteForElement(sourceNode);
+                }
+            } catch (_) { }
             refreshPermanentLoadMoreState(tree, newParentId);
         });
         return !failed;
@@ -14392,6 +14407,11 @@ async function collapsePermanentFolderChildren(parentId, childrenContainer, isRe
         }
 
         childrenContainer.appendChild(fragment);
+        try {
+            if (typeof window.__flushTagAndNoteForElement === 'function') {
+                window.__flushTagAndNoteForElement(childrenContainer);
+            }
+        } catch (_) { }
 
         // 更新父节点状态
         if (item) {
