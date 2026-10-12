@@ -10534,15 +10534,21 @@ function getCanvasManualAnchorSlotsSafe() {
     return [];
 }
 
-function getCanvasAutoAnchorHistorySafe() {
+function getCanvasTempAnchorSlotsSafe() {
     try {
-        const raw = localStorage.getItem('canvasNavigationHistory');
-        if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) return parsed;
+        if (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.getTempAnchorSlots === 'function') {
+            const slots = window.CanvasSidebarDirectory.getTempAnchorSlots();
+            if (Array.isArray(slots)) return slots;
+        }
+        if (typeof window !== 'undefined' && Array.isArray(window.__canvasTempAnchorSlots)) {
+            return window.__canvasTempAnchorSlots;
         }
     } catch (_) { }
     return [];
+}
+
+function getCanvasAutoAnchorHistorySafe() {
+    return getCanvasTempAnchorSlotsSafe();
 }
 
 function formatSearchAnchorZoomPercent(zoom) {
@@ -10638,38 +10644,41 @@ function getCanvasAnchorSearchItems() {
         });
     });
 
-    // 2. 自动记录锚点 (Auto-saved Anchors)
-    const historyList = getCanvasAutoAnchorHistorySafe();
-    historyList.forEach((histItem, idx) => {
-        if (!histItem || typeof histItem !== 'object') return;
-        const zoom = (Number.isFinite(Number(histItem.zoom)) && Number(histItem.zoom) > 0) ? Number(histItem.zoom) : 1;
-        const zoomPercent = formatSearchAnchorZoomPercent(zoom);
-        const isWorld = histItem.coordType === 'world';
-        const rawX = Number(histItem.x) || 0;
-        const rawY = Number(histItem.y) || 0;
-        // 自动历史同样归一化为世界中心坐标
-        const worldX = isWorld ? rawX : Math.round(((wsW / 2 - rawX) / zoom) * 100) / 100;
-        const worldY = isWorld ? rawY : Math.round(((wsH / 2 - rawY) / zoom) * 100) / 100;
-        const coordText = `X: ${Math.round(worldX)} | Y: ${Math.round(worldY)} | ${zoomPercent}`;
-        const timeText = histItem.timestamp ? formatSearchAnchorTime(histItem.timestamp, isEn) : '';
-        const defaultTimeTitle = timeText || (isZh ? `自动锚点 ${idx + 1}` : `Auto Anchor ${idx + 1}`);
-        const rawName = String(histItem.name || '').trim();
+    // 2. 临时锚点槽位 (Temporary Anchor Slots)
+    const tempSlots = getCanvasTempAnchorSlotsSafe();
+    tempSlots.forEach((slot, idx) => {
+        if (!slot || typeof slot !== 'object') return;
+        const slotNum = idx + 1;
+        const defaultSlotTitle = isZh ? `临时槽位${slotNum}` : `Temp Slot ${slotNum}`;
+        const rawName = String(slot.name || '').trim();
         let title = '';
-        if (!rawName || /^\[?(?:自动锚点|自动视口|auto\s*anchor|viewport)\s*\d+\]?$/i.test(rawName)) {
-            title = defaultTimeTitle;
-        } else if (/^\[?(?:自动锚点|自动视口|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i.test(rawName)) {
-            const cleanSubName = rawName.replace(/^\[?(?:自动锚点|自动视口|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i, '').trim();
-            title = cleanSubName || defaultTimeTitle;
+        if (!rawName) {
+            title = defaultSlotTitle;
+        } else if (/^\[?(?:临时锚点|临时槽位|自动锚点|自动视口|temp\s*anchor|temp\s*slot|viewport)\s*\d+\]?$/i.test(rawName)) {
+            title = defaultSlotTitle;
+        } else if (/^\[?(?:临时锚点|临时槽位|自动锚点|自动视口|temp\s*anchor|temp\s*slot|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i.test(rawName)) {
+            const cleanSubName = rawName.replace(/^\[?(?:临时锚点|临时槽位|自动锚点|自动视口|temp\s*anchor|temp\s*slot|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i, '').trim();
+            title = cleanSubName || defaultSlotTitle;
         } else {
             title = rawName;
         }
-        const id = `auto-anchor-${histItem.timestamp || idx}`;
+        const zoom = (Number.isFinite(Number(slot.zoom)) && Number(slot.zoom) > 0) ? Number(slot.zoom) : 1;
+        const zoomPercent = formatSearchAnchorZoomPercent(zoom);
+        const isWorld = slot.coordType === 'world';
+        const rawX = Number(slot.x) || 0;
+        const rawY = Number(slot.y) || 0;
+        const worldX = isWorld ? rawX : Math.round(((wsW / 2 - rawX) / zoom) * 100) / 100;
+        const worldY = isWorld ? rawY : Math.round(((wsH / 2 - rawY) / zoom) * 100) / 100;
+        const coordText = `X: ${Math.round(worldX)} | Y: ${Math.round(worldY)} | ${zoomPercent}`;
+        const timeText = slot.timestamp ? formatSearchAnchorTime(slot.timestamp, isEn) : '';
+        const id = `temp-anchor-${idx}`;
 
         items.push({
             id,
             type: 'anchor',
-            anchorType: 'auto',
-            historyIndex: idx,
+            anchorType: 'temp',
+            slotIndex: idx,
+            slotNumber: slotNum,
             title,
             rawName,
             x: worldX,
@@ -10679,15 +10688,16 @@ function getCanvasAnchorSearchItems() {
             zoomPercent,
             coordText,
             timeText,
-            timestamp: Number(histItem.timestamp) || 0,
+            timestamp: Number(slot.timestamp) || 0,
             color: '#10b981',
-            locationLabel: isZh ? `自动锚点 ${idx + 1}` : `Auto Anchor ${idx + 1}`,
+            locationLabel: defaultSlotTitle,
             description: timeText ? `${coordText} · ${timeText}` : coordText,
             __title: title.toLowerCase(),
             __rawName: rawName.toLowerCase(),
             __coords: coordText.toLowerCase(),
             __time: timeText.toLowerCase(),
-            __type: (isZh ? '自动锚点 自动视口 历史' : 'auto anchor history viewport').toLowerCase()
+            __slot: (isZh ? `临时槽位${slotNum} 临时槽位 ${slotNum} 临时${slotNum} temp slot${slotNum} slot${slotNum} 临时锚点` : `temp slot${slotNum} temp slot ${slotNum} temporary anchor`).toLowerCase(),
+            __type: (isZh ? '临时锚点 临时 临时视口 锚点 自动锚点' : 'temp temporary anchor viewport auto anchor').toLowerCase()
         });
     });
 
@@ -12755,28 +12765,30 @@ function scoreCanvasSearchItem(item, query, options = {}) {
 
         case 'anchor': {
             const isManual = item.anchorType === 'manual';
-            const isAuto = item.anchorType === 'auto';
+            const isTemp = item.anchorType === 'temp' || item.anchorType === 'auto';
             const slotNum = item.slotNumber;
 
             // 1. 精确槽位匹配：如 #1, #2 或 slot1, slot 1, 槽位1, 槽位 1, 1, 一, 一号槽位
             const chineseDigits = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '十一': 11, '十二': 12 };
             const cleanQ = q.replace(/^#/, '');
             const qDigit = chineseDigits[cleanQ] || (cleanQ.match(/^\d+$/) ? parseInt(cleanQ, 10) : null);
-            if (isManual && slotNum) {
+            if (slotNum) {
                 if (cleanQ === String(slotNum) || qDigit === slotNum) {
-                    score = Math.max(score, 300);
+                    score = Math.max(score, isManual ? 300 : 280);
                 } else if (q === `槽位${slotNum}` || q === `槽位 ${slotNum}` || q === `slot${slotNum}` || q === `slot ${slotNum}` ||
                     (qDigit && (q === `槽位${cleanQ}` || q === `槽位 ${cleanQ}` || q === `槽位${slotNum}`))) {
+                    score = Math.max(score, 320);
+                } else if (isTemp && (q === `临时槽位${slotNum}` || q === `临时槽位 ${slotNum}` || q === `临时${slotNum}`)) {
                     score = Math.max(score, 320);
                 }
             }
 
-            // 2. 关键词匹配类别（支持单汉字如“槽”、“位”、“锚”、“视”、“口”）
+            // 2. 关键词匹配类别（支持单汉字如“槽”、“位”、“锚”、“视”、“口”、“临”）
             if (q === '锚点' || q === 'anchor' || q === 'anchors') {
                 score = Math.max(score, isManual ? 260 : 200);
             } else if (isManual && (q === '手动锚点' || q === '固定锚点' || q === 'manual' || q === 'manual anchor' || q === 'pinned' || q === 'pinned anchor' || q === '槽位' || q === 'slot' || q === '锚' || q === '槽' || q === '位' || q === '固')) {
                 score = Math.max(score, 260);
-            } else if (isAuto && (q === '自动锚点' || q === '自动视口' || q === 'auto' || q === 'auto anchor' || q === 'viewport' || q === '视口' || q === '视' || q === '口' || q === '历史' || q === '自')) {
+            } else if (isTemp && (q === '临时锚点' || q === '临时' || q === '临时槽位' || q === 'temp' || q === 'temp anchor' || q === 'temporary' || q === 'temporary anchor' || q === '临' || q === '自动锚点' || q === 'auto' || q === 'auto anchor' || q === 'viewport' || q === '视口' || q === '视' || q === '口' || q === '历史' || q === '自')) {
                 score = Math.max(score, 200);
             }
 
@@ -15489,9 +15501,9 @@ function isSpecialTempSectionItem(item) {
 }
 
 /**
- * 获取搜索项排序阶元（核心规则：锚点优先置顶（手动置顶于自动上方）-> 卡片组紧随锚点之后 -> 其他栏目与卡片）
+ * 获取搜索项排序阶元（核心规则：锚点优先置顶（手动置顶于临时上方）-> 卡片组紧随锚点之后 -> 其他栏目与卡片）
  * 1: 手动锚点
- * 2: 自动锚点
+ * 2: 临时锚点
  * 3: 卡片组
  * 4: 其他栏目、卡片与连线
  */
@@ -18384,17 +18396,17 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             const isManual = item.anchorType === 'manual';
             const slotNum = item.slotNumber || (item.slotIndex !== undefined ? item.slotIndex + 1 : 1);
             const defaultSlotTitle = isZh ? `槽位${slotNum}` : `Slot ${slotNum}`;
-            const defaultAutoTitle = item.timeText || (isZh ? `自动锚点 ${Number(item.historyIndex >= 0 ? item.historyIndex + 1 : 1)}` : `Auto Anchor ${Number(item.historyIndex >= 0 ? item.historyIndex + 1 : 1)}`);
+            const defaultTempTitle = item.locationLabel || (isZh ? `临时槽位${slotNum}` : `Temp Slot ${slotNum}`);
             if (!rawTitle || /^\[?(?:手动锚点|固定锚点|槽位|slot|manual\s*anchor)\s*\d+\]?$/i.test(rawTitle.trim())) {
                 rawTitle = defaultSlotTitle;
-            } else if (/^\[?(?:自动锚点|自动视口|auto\s*anchor|viewport)\s*\d+\]?$/i.test(rawTitle.trim())) {
-                rawTitle = defaultAutoTitle;
+            } else if (/^\[?(?:临时锚点|临时槽位|自动锚点|自动视口|temp\s*anchor|temp\s*slot|auto\s*anchor|viewport)\s*\d+\]?$/i.test(rawTitle.trim())) {
+                rawTitle = isManual ? defaultSlotTitle : defaultTempTitle;
             } else if (/^\[?(?:手动锚点|固定锚点|槽位|slot|manual\s*anchor)\s*\d+\]?\s*[:：\-—]?\s*/i.test(rawTitle.trim())) {
                 const clean = rawTitle.replace(/^\[?(?:手动锚点|固定锚点|槽位|slot|manual\s*anchor)\s*\d+\]?\s*[:：\-—]?\s*/i, '').trim();
                 rawTitle = clean || defaultSlotTitle;
-            } else if (/^\[?(?:自动锚点|自动视口|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i.test(rawTitle.trim())) {
-                const clean = rawTitle.replace(/^\[?(?:自动锚点|自动视口|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i, '').trim();
-                rawTitle = clean || defaultAutoTitle;
+            } else if (/^\[?(?:临时锚点|临时槽位|自动锚点|自动视口|temp\s*anchor|temp\s*slot|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i.test(rawTitle.trim())) {
+                const clean = rawTitle.replace(/^\[?(?:临时锚点|临时槽位|自动锚点|自动视口|temp\s*anchor|temp\s*slot|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i, '').trim();
+                rawTitle = clean || (isManual ? defaultSlotTitle : defaultTempTitle);
             }
         } else if (!rawTitle) {
             if (item.type === 'temp-section') rawTitle = isZh ? (isSpecialTempSectionItem(item) ? '特殊临时栏目' : '常规链式') : (isSpecialTempSectionItem(item) ? 'Special temporary' : 'General Chain');
@@ -18560,8 +18572,8 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             descText = item.text || item.description || '';
         } else if (item.type === 'anchor') {
             const isManual = item.anchorType === 'manual';
-            typeLabel = isManual ? (isZh ? '手动锚点' : 'Manual Anchor') : (isZh ? '自动锚点' : 'Auto Anchor');
-            locationLabel = item.locationLabel || (isManual ? (isZh ? `槽位${item.slotNumber}` : `Slot ${item.slotNumber}`) : (item.timeText || (isZh ? `自动锚点 ${Number(item.historyIndex >= 0 ? item.historyIndex + 1 : 1)}` : `Auto Anchor ${Number(item.historyIndex >= 0 ? item.historyIndex + 1 : 1)}`)));
+            typeLabel = isManual ? (isZh ? '手动锚点' : 'Manual Anchor') : (isZh ? '临时锚点' : 'Temp Anchor');
+            locationLabel = item.locationLabel || (isManual ? (isZh ? `槽位${item.slotNumber}` : `Slot ${item.slotNumber}`) : (isZh ? `临时槽位${item.slotNumber || 1}` : `Temp Slot ${item.slotNumber || 1}`));
             summaryText = item.coordText || '';
             descText = item.description || '';
         } else if (item.type === 'edge') {
@@ -18600,7 +18612,7 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             color: isCardGroup ? (item.color || '#7c3aed')
                 : (item.type === 'permanent-section' ? '#059669'
                     : (item.type === 'edge' ? (item.color || ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode === 'description') ? '#10b981' : '#f59e0b'))
-                        : (item.type === 'anchor' ? (item.anchorType === 'auto' ? '#10b981' : '#2563eb')
+                        : (item.type === 'anchor' ? ((item.anchorType === 'temp' || item.anchorType === 'auto') ? '#10b981' : '#2563eb')
                             : (item.type === 'temp-section' ? (item.color || (isSpecialTempSectionItem(item) ? '#e9973f' : '#2563eb'))
                                 : (item.color || '#2563eb')))))
         });
@@ -18660,7 +18672,7 @@ function getCanvasDirectoryItemIconHtml(type, item = {}) {
         }
         case 'anchor': {
             const isManual = item && item.anchorType === 'manual';
-            const iconClass = isManual ? 'fa-anchor' : 'fa-history';
+            const iconClass = isManual ? 'fa-anchor' : 'fa-clock';
             const defaultColor = isManual ? '#2563eb' : '#10b981';
             return `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-right:0; flex-shrink:0;">
                 <i class="fas ${iconClass}" style="color:${color || defaultColor}; font-size:12px;"></i>
@@ -18803,8 +18815,9 @@ function renderCanvasTableItemLocationChipHtml(d, query = '') {
         iconPrefix = '<i class="fas fa-link" style="margin-right:3px; font-size:10px;"></i>';
     } else if (type === 'anchor') {
         attr = `data-loc-id="${escapeHtml(String(item.id))}" data-loc-source="anchor"`;
-        chipColor = item.anchorType === 'auto' ? '#10b981' : '#2563eb';
-        iconPrefix = item.anchorType === 'auto' ? '<i class="fas fa-history" style="margin-right:3px;"></i>' : '<i class="fas fa-anchor" style="margin-right:3px;"></i>';
+        const isTemp = item.anchorType === 'temp' || item.anchorType === 'auto';
+        chipColor = isTemp ? '#10b981' : '#2563eb';
+        iconPrefix = isTemp ? '<i class="fas fa-clock" style="margin-right:3px;"></i>' : '<i class="fas fa-anchor" style="margin-right:3px;"></i>';
     } else {
         chipColor = item.color || d.color || '#2563eb';
     }
@@ -19081,9 +19094,9 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
                 if (isAnchor) {
                     const isManual = item.anchorType === 'manual';
-                    const typeText = isManual ? (isZh ? '手动锚点' : 'Manual Anchor') : (isZh ? '自动锚点' : 'Auto Anchor');
+                    const typeText = isManual ? (isZh ? '手动锚点' : 'Manual Anchor') : (isZh ? '临时锚点' : 'Temp Anchor');
                     const anchorColor = isManual ? '#2563eb' : '#10b981';
-                    const iconClass = isManual ? 'fa-anchor' : 'fa-history';
+                    const iconClass = isManual ? 'fa-anchor' : 'fa-clock';
                     const iconHtml = `<span class="canvas-dir-icon" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-right:0; flex-shrink:0;"><i class="fas ${iconClass}" style="color:${anchorColor}; font-size:12px;"></i></span>`;
                     const highlightedType = (typeof highlightSearchKeywords === 'function' && query)
                         ? highlightSearchKeywords(typeText, query)
@@ -19146,17 +19159,17 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                         const isManual = item.anchorType === 'manual';
                         const slotNum = item.slotNumber || (item.slotIndex !== undefined ? item.slotIndex + 1 : 1);
                         const defaultSlotTitle = isZh ? `槽位${slotNum}` : `Slot ${slotNum}`;
-                        const defaultAutoTitle = item.timeText || (isZh ? `自动锚点 ${Number(item.historyIndex >= 0 ? item.historyIndex + 1 : 1)}` : `Auto Anchor ${Number(item.historyIndex >= 0 ? item.historyIndex + 1 : 1)}`);
+                        const defaultTempTitle = item.locationLabel || (isZh ? `临时槽位${slotNum}` : `Temp Slot ${slotNum}`);
                         if (!displayTitle || /^\[?(?:手动锚点|固定锚点|槽位|slot|manual\s*anchor)\s*\d+\]?$/i.test(displayTitle.trim())) {
-                            displayTitle = isManual ? defaultSlotTitle : defaultAutoTitle;
-                        } else if (/^\[?(?:自动锚点|自动视口|auto\s*anchor|viewport)\s*\d+\]?$/i.test(displayTitle.trim())) {
-                            displayTitle = defaultAutoTitle;
+                            displayTitle = isManual ? defaultSlotTitle : defaultTempTitle;
+                        } else if (/^\[?(?:临时锚点|临时槽位|自动锚点|自动视口|temp\s*anchor|temp\s*slot|auto\s*anchor|viewport)\s*\d+\]?$/i.test(displayTitle.trim())) {
+                            displayTitle = isManual ? defaultSlotTitle : defaultTempTitle;
                         } else if (/^\[?(?:手动锚点|固定锚点|槽位|slot|manual\s*anchor)\s*\d+\]?\s*[:：\-—]?\s*/i.test(displayTitle.trim())) {
                             const clean = displayTitle.replace(/^\[?(?:手动锚点|固定锚点|槽位|slot|manual\s*anchor)\s*\d+\]?\s*[:：\-—]?\s*/i, '').trim();
-                            displayTitle = clean || (isManual ? defaultSlotTitle : defaultAutoTitle);
-                        } else if (/^\[?(?:自动锚点|自动视口|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i.test(displayTitle.trim())) {
-                            const clean = displayTitle.replace(/^\[?(?:自动锚点|自动视口|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i, '').trim();
-                            displayTitle = clean || defaultAutoTitle;
+                            displayTitle = clean || (isManual ? defaultSlotTitle : defaultTempTitle);
+                        } else if (/^\[?(?:临时锚点|临时槽位|自动锚点|自动视口|temp\s*anchor|temp\s*slot|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i.test(displayTitle.trim())) {
+                            const clean = displayTitle.replace(/^\[?(?:临时锚点|临时槽位|自动锚点|自动视口|temp\s*anchor|temp\s*slot|auto\s*anchor|viewport)\s*\d+\]?\s*[:：\-—]?\s*/i, '').trim();
+                            displayTitle = clean || (isManual ? defaultSlotTitle : defaultTempTitle);
                         }
                     }
                     const titleHtml = (typeof highlightSearchKeywords === 'function' && query)
@@ -19168,9 +19181,9 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     let fullTooltip = displayTitle;
                     if (isAnchor) {
                         const isManual = item.anchorType === 'manual';
-                        const prefixName = isZh ? '锚点' : 'Anchor';
+                        const prefixName = isZh ? (isManual ? '手动锚点' : '临时锚点') : (isManual ? 'Manual Anchor' : 'Temp Anchor');
                         const anchorColor = isManual ? '#2563eb' : '#10b981';
-                        const iconClass = isManual ? 'fa-anchor' : 'fa-history';
+                        const iconClass = isManual ? 'fa-anchor' : 'fa-clock';
                         const prefixText = (typeof highlightSearchKeywords === 'function' && query)
                             ? highlightSearchKeywords(prefixName, query)
                             : escapeHtml(prefixName);
@@ -19216,7 +19229,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                         const timeFormatted = (rawTime && typeof highlightSearchKeywords === 'function' && query)
                             ? highlightSearchKeywords(rawTime, query)
                             : escapeHtml(rawTime);
-                        const anchorCoordColor = (d.rawItem && d.rawItem.anchorType === 'auto') ? '#10b981' : '#2563eb';
+                        const anchorCoordColor = (d.rawItem && (d.rawItem.anchorType === 'temp' || d.rawItem.anchorType === 'auto')) ? '#10b981' : '#2563eb';
                         const coordHtml = `<span class="anchor-table-coords" style="display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:var(--text-secondary);"><i class="fas fa-crosshairs" style="color:${anchorCoordColor}; font-size:10px;"></i>${coordFormatted}</span>`;
                         const isTimeInTitle = d.title && rawTime && (d.title.trim() === rawTime.trim());
                         const timeHtml = (rawTime && !isTimeInTitle) ? `<span class="anchor-table-time" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--text-secondary); opacity:0.8; margin-left:auto;"><i class="far fa-clock" style="font-size:10px;"></i>${timeFormatted}</span>` : '';
@@ -21958,7 +21971,7 @@ function renderCanvasSearchResults(results, options = {}) {
 
             case 'anchor': {
                 const isManual = item.anchorType === 'manual';
-                const typeName = isManual ? (isZh ? '手动锚点' : 'Manual Anchor') : (isZh ? '自动锚点' : 'Auto Anchor');
+                const typeName = isManual ? (isZh ? '手动锚点' : 'Manual Anchor') : (isZh ? '临时锚点' : 'Temp Anchor');
                 const dirIconHtml = getCanvasDirectoryItemIconHtml('anchor', item);
                 const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
                 const typeText = (typeof highlightSearchKeywords === 'function' && query)

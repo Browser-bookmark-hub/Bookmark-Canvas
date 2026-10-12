@@ -5704,6 +5704,7 @@ html:fullscreen body.header-compact .canvas-main-container {
 }
 
 .auto-record-settings-panel,
+.temp-anchor-settings-panel,
 .manual-anchor-settings-panel {
     background: var(--bg-secondary, rgba(0, 0, 0, 0.15));
     border: 1px dashed var(--border-color);
@@ -5760,13 +5761,14 @@ html:fullscreen body.header-compact .canvas-main-container {
     margin: 0;
 }
 
-.anchor-slots-container {
+.anchor-slots-container,
+.temp-anchor-slots-container {
     display: flex;
     flex-direction: column;
     gap: 6px;
     overflow-y: auto;
     overflow-x: hidden;
-    flex: 6.5 6.5 0%;
+    flex: 1 1 0%;
     min-height: 0;
     scrollbar-width: thin;
     scrollbar-color: rgba(140, 140, 140, 0.25) transparent;
@@ -5775,16 +5777,19 @@ html:fullscreen body.header-compact .canvas-main-container {
     padding-bottom: 4px;
 }
 
-.sidebar-anchor-container.auto-inactive .anchor-slots-container {
+.sidebar-anchor-container.auto-inactive .anchor-slots-container,
+.sidebar-anchor-container.temp-inactive .anchor-slots-container {
     flex: 1 1 0%;
 }
-.sidebar-anchor-container.auto-inactive .history-items-container {
+.sidebar-anchor-container.auto-inactive .history-items-container,
+.sidebar-anchor-container.temp-inactive .temp-anchor-slots-container {
     flex: 0 0 auto;
     max-height: 35%;
     padding-bottom: 8px;
 }
 
 .anchor-slot-row {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -5806,17 +5811,36 @@ html:fullscreen body.header-compact .canvas-main-container {
     box-shadow: 0 0 0 1px var(--accent-color);
 }
 
-/* 当前记忆中的手动锚点槽位高亮（灰色高亮框） */
+/* 激活槽位四角高亮（极细轻盈「」直角微标，极简无感，完全不干扰正常视觉） */
 .anchor-slot-row.active-slot {
-    background: rgba(128, 128, 128, 0.16) !important;
-    border-color: rgba(160, 160, 160, 0.65) !important;
-    box-shadow: 0 0 0 1px rgba(160, 160, 160, 0.35) !important;
+    border-color: var(--border-color);
+    --corner-color: rgba(175, 175, 175, 0.65);
 }
 
 .anchor-slot-row.active-slot:hover {
-    background: rgba(128, 128, 128, 0.24) !important;
-    border-color: rgba(180, 180, 180, 0.85) !important;
-    box-shadow: 0 0 0 1px rgba(180, 180, 180, 0.45) !important;
+    --corner-color: rgba(215, 215, 215, 0.9);
+}
+
+.anchor-slot-row.active-slot::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: 0;
+    pointer-events: none;
+    z-index: 2;
+    background-image:
+        linear-gradient(to right, var(--corner-color) 7px, transparent 7px),
+        linear-gradient(to bottom, var(--corner-color) 7px, transparent 7px),
+        linear-gradient(to left, var(--corner-color) 7px, transparent 7px),
+        linear-gradient(to bottom, var(--corner-color) 7px, transparent 7px),
+        linear-gradient(to right, var(--corner-color) 7px, transparent 7px),
+        linear-gradient(to top, var(--corner-color) 7px, transparent 7px),
+        linear-gradient(to left, var(--corner-color) 7px, transparent 7px),
+        linear-gradient(to top, var(--corner-color) 7px, transparent 7px);
+    background-size: 7px 1px, 1px 7px, 7px 1px, 1px 7px, 7px 1px, 1px 7px, 7px 1px, 1px 7px;
+    background-position: 0 0, 0 0, 100% 0, 100% 0, 0 100%, 0 100%, 100% 100%, 100% 100%;
+    background-repeat: no-repeat;
+    transition: opacity 0.2s ease;
 }
 
 .anchor-slot-header {
@@ -5989,33 +6013,25 @@ html:fullscreen body.header-compact .canvas-main-container {
 
 /* Custom scrollbars for independent scrollable lists (Always visible thin gray thumb, transparent track) */
 .anchor-slots-container::-webkit-scrollbar,
+.temp-anchor-slots-container::-webkit-scrollbar,
 .history-items-container::-webkit-scrollbar {
     width: 4px;
 }
 .anchor-slots-container::-webkit-scrollbar-track,
+.temp-anchor-slots-container::-webkit-scrollbar-track,
 .history-items-container::-webkit-scrollbar-track {
     background: transparent;
 }
 .anchor-slots-container::-webkit-scrollbar-thumb,
+.temp-anchor-slots-container::-webkit-scrollbar-thumb,
 .history-items-container::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb-color, rgba(140, 140, 140, 0.25));
     border-radius: 2px;
 }
 
-/* Flash highlight animation for slot rows */
+/* Flash highlight animation for slot rows (已移除黄色闪烁背景，保持直接纯粹切换) */
 .slot-highlight-flash {
-    animation: slot-flash-animation 2.2s ease-out;
-}
-
-@keyframes slot-flash-animation {
-    0% {
-        background-color: rgba(255, 193, 7, 0.3);
-        box-shadow: inset 0 0 0 1.5px #ffc107;
-    }
-    100% {
-        background-color: transparent;
-        box-shadow: inset 0 0 0 0 transparent;
-    }
+    /* 直接切换，无黄色闪烁背景 */
 }
 
 /* Responsive adjustments for narrow sidebar layouts (hide action buttons by default, show on hover) */

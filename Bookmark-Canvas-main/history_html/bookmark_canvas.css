@@ -5719,7 +5719,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
     z-index: 9999999;
     pointer-events: none !important;
-    max-width: 420px;
+    max-width: min(420px, calc(100vw - 24px));
     box-sizing: border-box;
     will-change: transform, opacity;
     animation: toastSlideInTop 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -5771,6 +5771,13 @@ body.header-dock-bottom .app-toast {
 .history-toast.toast-pulse,
 .app-toast.toast-pulse {
     animation: toastPulseTop 0.16s ease-out;
+}
+
+/* 重复/警告时的明显晃动震颤反馈（解决重复点击时视觉不明显的问题） */
+.canvas-toast.toast-shake,
+.history-toast.toast-shake,
+.app-toast.toast-shake {
+    animation: toastShakeTop 0.24s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
 
 /* 兼容可选：左上角位置选项 */
@@ -5926,6 +5933,18 @@ body.header-dock-bottom .app-toast.pos-top-right {
 
     100% {
         transform: translate(-50%, 0) scale(1);
+    }
+}
+
+@keyframes toastShakeTop {
+    0%, 100% {
+        transform: translate(-50%, 0);
+    }
+    15%, 45%, 75% {
+        transform: translate(calc(-50% - 6px), 0);
+    }
+    30%, 60%, 90% {
+        transform: translate(calc(-50% + 6px), 0);
     }
 }
 

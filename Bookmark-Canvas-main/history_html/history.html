@@ -65,10 +65,10 @@
     <script src="search/search_index_db.js" defer></script>
     <script src="search/search.js" defer></script>
     <script src="sidepanel_toggle_bridge.js" defer></script>
-    <script src="canvas_sidebar_directory.js?v=1.0" defer></script>
+    <script src="canvas_sidebar_directory.js?v=2.6" defer></script>
     <script src="tag_system/tag_system.js?v=1.0" defer></script>
     <script src="canvas_clipboard.js?v=1.0" defer></script>
-    <script src="history.js" defer></script>
+    <script src="history.js?v=2.6" defer></script>
 </head>
 
 <body>
@@ -566,12 +566,31 @@
                             <div class="canvas-help-section">
                                 <div class="canvas-help-section-title" data-i18n-key="canvasHelpAnchorShortcutsTitle">手动锚点快捷键</div>
                                 <div class="canvas-help-row">
+                                    <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">J</kbd></span>
+                                    <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsPrev">上一个</span>
+                                </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">K</kbd></span>
+                                    <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsAdd">添加</span>
+                                </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">L</kbd></span>
+                                    <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsNext">下一个</span>
+                                </div>
+                            </div>
+                            <div class="canvas-help-section">
+                                <div class="canvas-help-section-title" data-i18n-key="canvasHelpTempAnchorShortcutsTitle">临时锚点快捷键</div>
+                                <div class="canvas-help-row">
                                     <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">A</kbd></span>
-                                    <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsPrev">切换到上一手动锚点（首次使用为第一槽位）</span>
+                                    <span class="canvas-help-desc" data-i18n-key="canvasHelpTempAnchorShortcutsPrev">上一个</span>
+                                </div>
+                                <div class="canvas-help-row">
+                                    <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">S</kbd></span>
+                                    <span class="canvas-help-desc" data-i18n-key="canvasHelpTempAnchorShortcutsAdd">添加</span>
                                 </div>
                                 <div class="canvas-help-row">
                                     <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">D</kbd></span>
-                                    <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsNext">切换到下一手动锚点（按记忆槽位切换）</span>
+                                    <span class="canvas-help-desc" data-i18n-key="canvasHelpTempAnchorShortcutsNext">下一个</span>
                                 </div>
                             </div>
                             <div class="canvas-help-section">
@@ -868,12 +887,31 @@
                                                     <div class="canvas-help-section">
                                                         <div class="canvas-help-section-title" data-i18n-key="canvasHelpAnchorShortcutsTitle">手动锚点快捷键</div>
                                                         <div class="canvas-help-row">
+                                                            <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">J</kbd></span>
+                                                            <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsPrev">上一个</span>
+                                                        </div>
+                                                        <div class="canvas-help-row">
+                                                            <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">K</kbd></span>
+                                                            <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsAdd">添加</span>
+                                                        </div>
+                                                        <div class="canvas-help-row">
+                                                            <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">L</kbd></span>
+                                                            <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsNext">下一个</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="canvas-help-section">
+                                                        <div class="canvas-help-section-title" data-i18n-key="canvasHelpTempAnchorShortcutsTitle">临时锚点快捷键</div>
+                                                        <div class="canvas-help-row">
                                                             <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">A</kbd></span>
-                                                            <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsPrev">切换到上一手动锚点（首次使用为第一槽位）</span>
+                                                            <span class="canvas-help-desc" data-i18n-key="canvasHelpTempAnchorShortcutsPrev">上一个</span>
+                                                        </div>
+                                                        <div class="canvas-help-row">
+                                                            <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">S</kbd></span>
+                                                            <span class="canvas-help-desc" data-i18n-key="canvasHelpTempAnchorShortcutsAdd">添加</span>
                                                         </div>
                                                         <div class="canvas-help-row">
                                                             <span class="canvas-help-key"><kbd class="canvas-shortcut-key">Ctrl</kbd> / <kbd class="canvas-shortcut-key">Command</kbd> + <kbd class="canvas-shortcut-key">Shift</kbd> + <kbd class="canvas-shortcut-key">D</kbd></span>
-                                                            <span class="canvas-help-desc" data-i18n-key="canvasHelpAnchorShortcutsNext">切换到下一手动锚点（按记忆槽位切换）</span>
+                                                            <span class="canvas-help-desc" data-i18n-key="canvasHelpTempAnchorShortcutsNext">下一个</span>
                                                         </div>
                                                     </div>
                                                     <div class="canvas-help-section">

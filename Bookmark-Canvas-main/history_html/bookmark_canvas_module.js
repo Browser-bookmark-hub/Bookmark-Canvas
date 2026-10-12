@@ -4051,8 +4051,17 @@ _Tip: This card can be freely edited or deleted_
 
 ### 手动锚点快捷键
 
-- **\`Ctrl / Command + Shift + A\`**：切换到上一手动锚点（首次使用为第一槽位，后续按记忆槽位切换）
-- **\`Ctrl / Command + Shift + D\`**：切换到下一手动锚点（按记忆槽位切换）
+- **\`Ctrl / Command + Shift + J\`**：上一个
+- **\`Ctrl / Command + Shift + K\`**：添加
+- **\`Ctrl / Command + Shift + L\`**：下一个
+
+---
+
+### 临时锚点快捷键
+
+- **\`Ctrl / Command + Shift + A\`**：上一个
+- **\`Ctrl / Command + Shift + S\`**：添加
+- **\`Ctrl / Command + Shift + D\`**：下一个
 
 ---
 
@@ -4112,8 +4121,17 @@ _快捷键可在左上角「管理」中自定义_
 
 ### Manual Anchor Shortcuts
 
-- **\`Ctrl / Command + Shift + A\`**: Switch to previous manual anchor (slot 1 on first use, then by remembered slot)
-- **\`Ctrl / Command + Shift + D\`**: Switch to next manual anchor (navigates by remembered slot)
+- **\`Ctrl / Command + Shift + J\`**: Prev
+- **\`Ctrl / Command + Shift + K\`**: Add
+- **\`Ctrl / Command + Shift + L\`**: Next
+
+---
+
+### Temporary Anchor Shortcuts
+
+- **\`Ctrl / Command + Shift + A\`**: Prev
+- **\`Ctrl / Command + Shift + S\`**: Add
+- **\`Ctrl / Command + Shift + D\`**: Next
 
 ---
 
@@ -4275,8 +4293,17 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <hr>
 <h3>手动锚点快捷键</h3>
 <ul>
-<li><strong><code>Ctrl / Command + Shift + A</code></strong>：切换到上一手动锚点（首次使用为第一槽位，后续按记忆槽位切换）</li>
-<li><strong><code>Ctrl / Command + Shift + D</code></strong>：切换到下一手动锚点（按记忆槽位切换）</li>
+<li><strong><code>Ctrl / Command + Shift + J</code></strong>：上一个</li>
+<li><strong><code>Ctrl / Command + Shift + K</code></strong>：添加</li>
+<li><strong><code>Ctrl / Command + Shift + L</code></strong>：下一个</li>
+</ul>
+
+<hr>
+<h3>临时锚点快捷键</h3>
+<ul>
+<li><strong><code>Ctrl / Command + Shift + A</code></strong>：上一个</li>
+<li><strong><code>Ctrl / Command + Shift + S</code></strong>：添加</li>
+<li><strong><code>Ctrl / Command + Shift + D</code></strong>：下一个</li>
 </ul>
 
 <hr>
@@ -4335,8 +4362,17 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <hr>
 <h3>Manual Anchor Shortcuts</h3>
 <ul>
-<li><strong><code>Ctrl / Command + Shift + A</code></strong>: Switch to previous manual anchor (slot 1 on first use, then by remembered slot)</li>
-<li><strong><code>Ctrl / Command + Shift + D</code></strong>: Switch to next manual anchor (navigates by remembered slot)</li>
+<li><strong><code>Ctrl / Command + Shift + J</code></strong>: Prev</li>
+<li><strong><code>Ctrl / Command + Shift + K</code></strong>: Add</li>
+<li><strong><code>Ctrl / Command + Shift + L</code></strong>: Next</li>
+</ul>
+
+<hr>
+<h3>Temporary Anchor Shortcuts</h3>
+<ul>
+<li><strong><code>Ctrl / Command + Shift + A</code></strong>: Prev</li>
+<li><strong><code>Ctrl / Command + Shift + S</code></strong>: Add</li>
+<li><strong><code>Ctrl / Command + Shift + D</code></strong>: Next</li>
 </ul>
 
 <hr>
@@ -4405,7 +4441,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <h3>搜索</h3>
 <ul>
 <li><strong>书签模式</strong>：搜索书签标题、URL、文件夹名称和 #标签</li>
-<li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（手动槽位/自动锚点）等元素的序号、标题、组名、坐标和时间</li>
+<li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（手动槽位/临时锚点）等元素的序号、标题、组名、坐标和时间</li>
 <li><strong>说明模式</strong>：搜索栏目说明、空白卡片文本和连接线标签</li>
 </ul>
 
@@ -4465,7 +4501,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <h3>Search</h3>
 <ul>
 <li><strong>Bookmark mode</strong>: Search bookmark titles, URLs, folder names, and #tags</li>
-<li><strong>Card (Group) mode</strong>: Search element indexes, titles, group names, and time for permanent sections and copies, temporary sections, blank cards, and card groups</li>
+<li><strong>Card (Group) mode</strong>: Search element indexes, titles, group names, and time for permanent sections and copies, temporary sections, blank cards, card groups, and anchors (manual/temp slots)</li>
 <li><strong>Description mode</strong>: Search section descriptions, blank card text, and connection line labels</li>
 </ul>
 
@@ -4697,7 +4733,7 @@ JSON or HTML backup files exported by these projects can be directly **dragged**
 
 ### 搜索
 - **书签模式**：搜索书签标题、URL、文件夹名称和 #标签
-- **卡片（组）模式**：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（手动槽位/自动锚点）等元素的序号、标题、组名、坐标和时间
+- **卡片（组）模式**：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（手动槽位/临时锚点）等元素的序号、标题、组名、坐标和时间
 - **说明模式**：搜索栏目说明、空白卡片文本和连接线标签
 
 ---
@@ -4751,7 +4787,7 @@ _提示：此卡片可自由编辑或删除_
 
 ### Search
 - **Bookmark mode**: Search bookmark titles, URLs, folder names, and #tags
-- **Card (Group) mode**: Search element indexes, titles, group names, and time for permanent sections and copies, temporary sections, blank cards, and card groups
+- **Card (Group) mode**: Search element indexes, titles, group names, and time for permanent sections and copies, temporary sections, blank cards, card groups, and anchors (manual/temp slots)
 - **Description mode**: Search section descriptions, blank card text, and connection line labels
 
 ---
@@ -4945,6 +4981,7 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
     let position = 'top-center';
     let customIcon = '';
     let spin = false;
+    let forceFresh = false;
 
     if (typeof typeOrOptions === 'string') {
         type = typeOrOptions;
@@ -4957,6 +4994,7 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
         if (typeOrOptions.position) position = typeOrOptions.position;
         if (typeOrOptions.icon) customIcon = typeOrOptions.icon;
         if (typeOrOptions.spin) spin = true;
+        if (typeOrOptions.forceFresh) forceFresh = true;
     }
 
     const safeMessage = String(message ?? '');
@@ -4970,9 +5008,10 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
 
     if (!targetParent) return { update: () => {}, close: () => {} };
 
-    // 高频连续触发时的 DOM 复用（如快捷键快速切换锚点），原地更新文本与图标，避免反复销毁重排
+    // 高频连续触发时的 DOM 复用（如快捷键快速切换锚点），原地更新文本与图标，避免反复销毁重排。
+    // 如果显式要求 forceFresh，则跳过复用，直接销毁旧节点重建，确保入场动画与视觉反馈完整触发
     const existing = targetParent.querySelector('.canvas-toast, .history-toast, .app-toast');
-    if (existing && existing._toastState && existing._toastState.position === position && !existing._toastState.isClosing) {
+    if (!forceFresh && existing && existing._toastState && existing._toastState.position === position && !existing._toastState.isClosing) {
         return existing._toastState.update(safeMessage, type, duration, customIcon, spin);
     }
 
@@ -5060,15 +5099,20 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
         get isClosing() { return isClosing; },
         update: (newMsg, newType = type, newDuration = duration, newIcon = customIcon, newSpin = spin) => {
             if (isClosing) return handle;
+            const isWarnOrError = newType === 'warning' || newType === 'error';
             messageEl.textContent = String(newMsg ?? '');
             const newMultiline = messageEl.textContent.includes('\n') || messageEl.textContent.length > 60;
             messageEl.classList.toggle('multiline', newMultiline);
             applyType(newType);
             applyIcon(newType, newIcon, newSpin);
-            // 微缩放反馈，指示已更新内容
-            toast.classList.remove('toast-pulse');
+            // 微缩放/晃动反馈：警告与报错使用明显的 toast-shake 左右晃动，信息提示使用 toast-pulse
+            toast.classList.remove('toast-pulse', 'toast-shake');
             void toast.offsetWidth;
-            toast.classList.add('toast-pulse');
+            if (isWarnOrError) {
+                toast.classList.add('toast-shake');
+            } else {
+                toast.classList.add('toast-pulse');
+            }
             scheduleHide(newDuration);
             return handle;
         },
@@ -10222,20 +10266,7 @@ function locateToPermanentSection(targetZoom = null) {
 }
 
 function __updateLastAutoRecordAnchor() {
-    const workspace = document.getElementById('canvasWorkspace');
-    const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
-    const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
-    const z = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
-    CanvasState.lastAutoRecordAnchor = {
-        x: Math.round(((wsW / 2 - CanvasState.panOffsetX) / z) * 100) / 100,
-        y: Math.round(((wsH / 2 - CanvasState.panOffsetY) / z) * 100) / 100,
-        zoom: z,
-        coordType: 'world',
-        timestamp: Date.now()
-    };
-    if (canvasViewportAutoRecordTimer) {
-        clearTimeout(canvasViewportAutoRecordTimer);
-    }
+    // 自动记录锚点功能已移除
 }
 
 // 首次打开 Canvas（演示模板）时：定位并放大到「快捷操作」卡片
@@ -34035,104 +34066,6 @@ function applyCanvasContentTransform(content, panX, panY, scale) {
         window.__BCSLassoTempGroup.isDragging() &&
         typeof window.__BCSLassoTempGroup.updateDragPositionForScroll === 'function') {
         window.__BCSLassoTempGroup.updateDragPositionForScroll();
-    }
-    try { triggerCanvasViewportAutoRecord(x, y, s); } catch (_) { }
-}
-
-let canvasViewportAutoRecordTimer = null;
-function __isCanvasNodeMaximizedActiveForAnchorGuard() {
-    if (CanvasState.nodeMaximizedActive) return true;
-    try {
-        return !!document.querySelector('.canvas-node-maximized');
-    } catch (_) {
-        return false;
-    }
-}
-
-function triggerCanvasViewportAutoRecord(x, y, zoom) {
-    if (__isCanvasNodeMaximizedActiveForAnchorGuard()) {
-        return;
-    }
-    const settings = getCanvasOtherSettings();
-    if (!settings || settings.autoRecordAnchor !== true) {
-        return;
-    }
-    if (canvasViewportAutoRecordTimer) {
-        clearTimeout(canvasViewportAutoRecordTimer);
-    }
-    const intervalS = settings.autoRecordAnchorInterval || 15;
-    canvasViewportAutoRecordTimer = setTimeout(() => {
-        try {
-            checkAndRecordCanvasViewport(x, y, zoom);
-        } catch (_) {}
-    }, intervalS * 1000);
-}
-
-function checkAndRecordCanvasViewport(panX, panY, zoom) {
-    if (__isCanvasNodeMaximizedActiveForAnchorGuard()) {
-        return;
-    }
-    const workspace = document.getElementById('canvasWorkspace');
-    const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
-    const wsH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 600);
-    const z = (typeof zoom === 'number' && zoom > 0) ? zoom : 1;
-    const worldX = Math.round(((wsW / 2 - panX) / z) * 100) / 100;
-    const worldY = Math.round(((wsH / 2 - panY) / z) * 100) / 100;
-
-    const last = CanvasState.lastAutoRecordAnchor;
-    if (last) {
-        const lastX = last.coordType === 'world' ? last.x : Math.round(((wsW / 2 - (Number(last.x) || 0)) / (last.zoom || 1)) * 100) / 100;
-        const lastY = last.coordType === 'world' ? last.y : Math.round(((wsH / 2 - (Number(last.y) || 0)) / (last.zoom || 1)) * 100) / 100;
-        const dx = Math.abs(worldX - lastX);
-        const dy = Math.abs(worldY - lastY);
-        const dz = Math.abs(z - (last.zoom || 1));
-        if (dx <= 1.0 && dy <= 1.0 && dz <= 0.001) {
-            return;
-        }
-    }
-
-    const anchor = {
-        x: worldX,
-        y: worldY,
-        zoom: z,
-        coordType: 'world',
-        timestamp: Date.now()
-    };
-
-    CanvasState.lastAutoRecordAnchor = anchor;
-    saveSharedState('canvasAutoRecordedAnchor', anchor);
-
-    try {
-        let historyList = [];
-        const rawHistory = localStorage.getItem('canvasNavigationHistory');
-        if (rawHistory) {
-            historyList = JSON.parse(rawHistory);
-        }
-        if (!Array.isArray(historyList)) {
-            historyList = [];
-        }
-
-        historyList = historyList.filter(item => {
-            if (!item) return false;
-            const itemX = item.coordType === 'world' ? item.x : Math.round(((wsW / 2 - (Number(item.x) || 0)) / (item.zoom || 1)) * 100) / 100;
-            const itemY = item.coordType === 'world' ? item.y : Math.round(((wsH / 2 - (Number(item.y) || 0)) / (item.zoom || 1)) * 100) / 100;
-            const dx = Math.abs(itemX - worldX);
-            const dy = Math.abs(itemY - worldY);
-            const dz = Math.abs((item.zoom || 1) - z);
-            return !(dx <= 1.0 && dy <= 1.0 && dz <= 0.001);
-        });
-
-        historyList.unshift(anchor);
-        const settings = getCanvasOtherSettings();
-        const limit = settings ? (settings.autoRecordAnchorLimit || 5) : 5;
-        if (historyList.length > limit) {
-            historyList = historyList.slice(0, limit);
-        }
-
-        localStorage.setItem('canvasNavigationHistory', JSON.stringify(historyList));
-        window.dispatchEvent(new CustomEvent('canvas-navigation-history-updated', { detail: { list: historyList, newAnchor: anchor } }));
-    } catch (e) {
-        console.error('Failed to save navigation history:', e);
     }
 }
 

@@ -3720,8 +3720,15 @@ const i18n = {
 </ul>
 <h3>手动锚点快捷键</h3>
 <ul>
-<li><strong>Ctrl / Command + Shift + A</strong>：切换到上一手动锚点（首次使用为第一槽位）</li>
-<li><strong>Ctrl / Command + Shift + D</strong>：切换到下一手动锚点（按记忆槽位切换）</li>
+<li><strong>Ctrl / Command + Shift + J</strong>：上一个</li>
+<li><strong>Ctrl / Command + Shift + K</strong>：添加</li>
+<li><strong>Ctrl / Command + Shift + L</strong>：下一个</li>
+</ul>
+<h3>临时锚点快捷键</h3>
+<ul>
+<li><strong>Ctrl / Command + Shift + A</strong>：上一个</li>
+<li><strong>Ctrl / Command + Shift + S</strong>：添加</li>
+<li><strong>Ctrl / Command + Shift + D</strong>：下一个</li>
 </ul>
 <h3>触控板操作</h3>
 <ul>
@@ -3751,8 +3758,15 @@ const i18n = {
 </ul>
 <h3>Manual Anchor Shortcuts</h3>
 <ul>
-<li><strong>Ctrl / Command + Shift + A</strong>: Switch to previous manual anchor (slot 1 on first use)</li>
-<li><strong>Ctrl / Command + Shift + D</strong>: Switch to next manual anchor (navigates by remembered slot)</li>
+<li><strong>Ctrl / Command + Shift + J</strong>: Prev</li>
+<li><strong>Ctrl / Command + Shift + K</strong>: Add</li>
+<li><strong>Ctrl / Command + Shift + L</strong>: Next</li>
+</ul>
+<h3>Temporary Anchor Shortcuts</h3>
+<ul>
+<li><strong>Ctrl / Command + Shift + A</strong>: Prev</li>
+<li><strong>Ctrl / Command + Shift + S</strong>: Add</li>
+<li><strong>Ctrl / Command + Shift + D</strong>: Next</li>
 </ul>
 <h3>Touchpad Operations</h3>
 <ul>
@@ -3925,7 +3939,7 @@ const i18n = {
 <h3>搜索</h3>
 <ul>
 <li><strong>书签模式</strong>：搜索书签标题、URL、文件夹名称和 #标签</li>
-<li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（手动槽位/自动锚点）等元素的序号、标题、组名、坐标和时间</li>
+<li><strong>卡片（组）模式</strong>：搜索永久栏目及其副本、临时栏目、空白栏目、卡片组、锚点（手动槽位/临时锚点）等元素的序号、标题、组名、坐标和时间</li>
 <li><strong>说明模式</strong>：搜索栏目说明、空白卡片文本和连接线标签</li>
 </ul>
 <hr>
@@ -3975,7 +3989,7 @@ const i18n = {
 <h3>Search</h3>
 <ul>
 <li><strong>Bookmark mode</strong>: Search bookmark titles, URLs, folder names, and #tags</li>
-<li><strong>Card (Group) mode</strong>: Search element indexes, titles, group names, and time for permanent sections and copies, temporary sections, blank cards, and card groups</li>
+<li><strong>Card (Group) mode</strong>: Search element indexes, titles, group names, and time for permanent sections and copies, temporary sections, blank cards, card groups, and anchors (manual/temp slots)</li>
 <li><strong>Description mode</strong>: Search section descriptions, blank card text, and connection line labels</li>
 </ul>
 <hr>
@@ -4116,12 +4130,32 @@ const i18n = {
         'en': 'Manual Anchor Shortcuts'
     },
     canvasHelpAnchorShortcutsPrev: {
-        'zh_CN': '切换到上一手动锚点（首次使用为第一槽位）',
-        'en': 'Switch to previous manual anchor (slot 1 on first use)'
+        'zh_CN': '上一个',
+        'en': 'Prev'
+    },
+    canvasHelpAnchorShortcutsAdd: {
+        'zh_CN': '添加',
+        'en': 'Add'
     },
     canvasHelpAnchorShortcutsNext: {
-        'zh_CN': '切换到下一手动锚点（按记忆槽位切换）',
-        'en': 'Switch to next manual anchor (navigates by remembered slot)'
+        'zh_CN': '下一个',
+        'en': 'Next'
+    },
+    canvasHelpTempAnchorShortcutsTitle: {
+        'zh_CN': '临时锚点快捷键',
+        'en': 'Temporary Anchor Shortcuts'
+    },
+    canvasHelpTempAnchorShortcutsPrev: {
+        'zh_CN': '上一个',
+        'en': 'Prev'
+    },
+    canvasHelpTempAnchorShortcutsAdd: {
+        'zh_CN': '添加',
+        'en': 'Add'
+    },
+    canvasHelpTempAnchorShortcutsNext: {
+        'zh_CN': '下一个',
+        'en': 'Next'
     },
     canvasHelpSpaceKey: {
         'zh_CN': '空格',
