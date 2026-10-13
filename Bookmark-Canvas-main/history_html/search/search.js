@@ -12130,19 +12130,42 @@ function matchGroupPrefix(title, prefix) {
  */
 function generateSearchSnippet(text, query) {
     if (!text || !query) return '';
+    const rawQuery = String(query || '').trim();
+    if (!rawQuery) return '';
+
     const lowerText = text.toLowerCase();
-    const lowerQuery = query.toLowerCase();
+    const lowerQuery = rawQuery.toLowerCase();
 
-    // 查找第一个匹配位置
-    const idx = lowerText.indexOf(lowerQuery);
-    if (idx === -1) return '';
+    // 提取有效分词 tokens
+    const rawTokens = lowerQuery.split(/\s+/)
+        .map(t => t.trim())
+        .filter(Boolean)
+        .map(t => (t.startsWith('#') || t.startsWith('*')) ? t.slice(1) : t)
+        .filter(Boolean);
 
-    const SNIPPET_LEN = 60; // 摘要总长度
-    const HALF_LEN = Math.floor(SNIPPET_LEN / 2);
+    if (rawTokens.length === 0) return '';
+
+    // 1. 优先尝试完整连续短语匹配位置；若无完整短语，寻找最早命中的 token 位置
+    let matchIdx = lowerText.indexOf(lowerQuery);
+    let matchedLen = lowerQuery.length;
+
+    if (matchIdx === -1) {
+        for (const token of rawTokens) {
+            const idx = lowerText.indexOf(token);
+            if (idx !== -1 && (matchIdx === -1 || idx < matchIdx)) {
+                matchIdx = idx;
+                matchedLen = token.length;
+            }
+        }
+    }
+
+    if (matchIdx === -1) return '';
+
+    const SNIPPET_LEN = 80; // 摘要总长度
 
     // 计算截取范围
-    let start = Math.max(0, idx - 10); // 匹配处往前留一点上下文
-    let end = Math.min(text.length, idx + query.length + 40); // 往后多留一点
+    let start = Math.max(0, matchIdx - 15); // 匹配处往前留一点上下文
+    let end = Math.min(text.length, matchIdx + matchedLen + 50); // 往后多留一点
 
     // 如果截取太长，进行修剪
     if (end - start > SNIPPET_LEN) {
@@ -12154,12 +12177,16 @@ function generateSearchSnippet(text, query) {
 
     const rawSnippet = text.substring(start, end);
 
-    // 在截取的片段中进行正则替换高亮（保留原大小写）
-    // 简单转义正则特殊字符
-    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const highlightRe = new RegExp(`(${escapedQuery})`, 'gi');
-
-    const highlightedSnippet = escapeHtml(rawSnippet).replace(highlightRe, '<mark>$1</mark>');
+    // 复用 highlightSearchKeywords 进行多关键词安全高亮与 HTML 转义
+    let highlightedSnippet = '';
+    if (typeof highlightSearchKeywords === 'function') {
+        highlightedSnippet = highlightSearchKeywords(rawSnippet, rawQuery);
+    } else {
+        const escaped = escapeHtml(rawSnippet);
+        const escapedTokens = rawTokens.map(t => escapeHtml(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const highlightRe = new RegExp(`(${escapedTokens.join('|')})`, 'gi');
+        highlightedSnippet = escaped.replace(highlightRe, '<mark>$1</mark>');
+    }
 
     return `${prefix}${highlightedSnippet}${suffix}`;
 }
@@ -12638,277 +12665,343 @@ function scoreCanvasSearchItem(item, query, options = {}) {
         return -Infinity;
     }
 
-    // 3. 普通文本匹配
-    // [Optim] Single letter query: strict prefix matching only to avoid noise (e.g. searching 'A' finding 'B-1' via 'a' in date/text)
+    // 3. 普通文本匹配与分词 AND 机制
+    const tokens = queryContext.tokens;
+    if (!tokens || !tokens.length) return -Infinity;
     const isSingleChar = queryContext.isSingleChar;
+    const activeMode = (options && options.mode) ||
+        ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || '');
+    const normalizedPhrase = q.replace(/\s+/g, ' ');
+    const matchesPhrase = (text) => Boolean(text && (text.includes(q) || text.includes(normalizedPhrase)));
 
-    // Description Mode Multi-word AND Match
-    if (searchUiState.activeMode === 'description') {
-        const tokens = queryContext.tokens;
-        if (!tokens.length) return -Infinity;
+    // ==================== Description Mode 说明模式 ====================
+    if (activeMode === 'description') {
+        const itemDesc = String(item.__description || item.description || '').toLowerCase();
+        const itemTitle = String(item.__title || item.title || '').toLowerCase();
+        const itemLabel = String(item.__label || item.label || '').toLowerCase();
+        const itemText = String(item.__text || item.text || '').toLowerCase();
+
         let totalScore = 0;
 
         for (const t of tokens) {
             let tokenScore = 0;
             if (item.type === 'temp-section') {
-                if (item.__description && item.__description.includes(t)) {
+                if (itemDesc && itemDesc.includes(t)) {
                     tokenScore = Math.max(tokenScore, 80);
                 }
+                if (itemTitle && itemTitle.includes(t)) {
+                    tokenScore = Math.max(tokenScore, 100);
+                }
+                if (itemLabel && itemLabel.includes(t)) {
+                    tokenScore = Math.max(tokenScore, 100);
+                }
             } else if (item.type === 'permanent-section') {
-                if (item.__description && item.__description.includes(t)) {
+                if (itemDesc && itemDesc.includes(t)) {
                     tokenScore = Math.max(tokenScore, 70);
                 }
+                if (itemTitle && itemTitle.includes(t)) {
+                    tokenScore = Math.max(tokenScore, 100);
+                }
+                if (itemLabel && itemLabel.includes(t)) {
+                    tokenScore = Math.max(tokenScore, 100);
+                }
             } else if (item.type === 'md-node') {
-                if (item.__title) {
-                    if (item.__title.startsWith(t)) {
+                if (itemTitle) {
+                    if (itemTitle.startsWith(t)) {
                         tokenScore = Math.max(tokenScore, 150);
-                    } else if (item.__title.includes(t)) {
+                    } else if (itemTitle.includes(t)) {
                         tokenScore = Math.max(tokenScore, 120);
                     }
                 }
-                if (item.__text && item.__text.includes(t)) {
+                if (itemText && itemText.includes(t)) {
                     tokenScore = Math.max(tokenScore, 90);
                 }
             } else if (item.type === 'edge') {
-                if (item.__label) {
-                    if (item.__label.startsWith(t)) {
+                if (itemLabel) {
+                    if (itemLabel.startsWith(t)) {
                         tokenScore = Math.max(tokenScore, 140);
-                    } else if (item.__label.includes(t)) {
+                    } else if (itemLabel.includes(t)) {
                         tokenScore = Math.max(tokenScore, 110);
                     }
                 }
             }
-            if (tokenScore === 0) return -Infinity;
+            if (tokenScore === 0) return -Infinity; // 严格 AND：任一关键词未命中则排除
             totalScore += tokenScore;
         }
+
+        // 连续短语加权 (Phrase Bonus)
+        if (tokens.length > 1) {
+            if (matchesPhrase(itemText)) totalScore += 30;
+            if (matchesPhrase(itemDesc)) totalScore += 30;
+            if (matchesPhrase(itemTitle)) totalScore += 40;
+            if (matchesPhrase(itemLabel)) totalScore += 40;
+        }
+
         return totalScore;
     }
 
-    const checkMatch = (text, scoreValPrefix, scoreValContains) => {
-        if (!text) return -Infinity;
-        const low = text.toLowerCase(); // Assuming text is already normalized if intended, but safe to re-lower or assume passed args are checked
-        // Note: In existing logic below, we check item.__label etc which are already lowercase.
-        // We will adapt the logic to use the specific fields.
-        return -Infinity;
-    };
-
-    switch (item.type) {
-        case 'temp-section':
-            // 标签匹配（如 A-1, A-1-1）- 最高优先级
-            if (item.__label) {
-                if (item.__label.startsWith(q)) score = Math.max(score, 160);
-                else if (item.__label.includes(q)) score = Math.max(score, 130);
-            }
-            // 标题匹配
-            if (item.__title) {
-                if (item.__title.startsWith(q)) score = Math.max(score, 150);
-                else if (item.__title.includes(q)) score = Math.max(score, 120);
-            }
-            // 说明匹配
-            if (item.__description && item.__description.includes(q)) score = Math.max(score, isSingleChar ? 50 : 80);
-            break;
-
-        case 'md-node':
-            // 标题匹配（含单字母/单汉字包含匹配）
-            if (item.__title) {
-                if (item.__title.startsWith(q)) score = Math.max(score, 150);
-                else if (item.__title.includes(q)) score = Math.max(score, 120);
-            }
-            // 文本内容匹配
-            if (item.__text && item.__text.includes(q)) score = Math.max(score, isSingleChar ? 60 : 90);
-            break;
-
-        case 'edge':
-            // 标签匹配
-            if (item.__label) {
-                if (item.__label.startsWith(q)) score = Math.max(score, 140);
-                else if (item.__label.includes(q)) score = Math.max(score, 110);
-            }
-            break;
-
-        case 'permanent-section': {
-            const itemAlpha = toAlpha(item.displayIndex || 1).toLowerCase();
-            const cleanQ = q.replace(/^#/, '');
-            if (cleanQ === itemAlpha || q === `#${itemAlpha}`) {
-                score = Math.max(score, 300);
-            }
-            if (item.__label) {
-                if (item.__label === q || item.__label === `#${q}`) score = Math.max(score, 250);
-                else if (item.__label.startsWith(q) || item.__label.startsWith(`#${q}`)) score = Math.max(score, 180);
-                else if (item.__label.includes(q)) score = Math.max(score, 130);
-            }
-            if (item.__alpha) {
-                if (item.__alpha === cleanQ) score = Math.max(score, 300);
-                else if (item.__alpha.startsWith(cleanQ)) score = Math.max(score, 180);
-            }
-            // 标题匹配
-            if (item.__title) {
-                if (item.__title.startsWith(q)) score = Math.max(score, 150);
-                else if (item.__title.includes(q)) score = Math.max(score, 130);
-            }
-            // 说明匹配 (Only if in Description Mode or index contains it)
-            if (item.__description && item.__description.includes(q)) score = Math.max(score, isSingleChar ? 50 : 70);
-            break;
+    // ==================== Bookmark Mode 书签模式 ====================
+    if (item.type === 'bookmark-item') {
+        if (queryContext.isBookmarkMode && isCanvasNoteSearchQuery(q)) {
+            return doesCanvasBookmarkItemNoteMatchQuery(item, q) ? 132 : -Infinity;
         }
 
-        case 'group':
-            // 卡片组：按 label/title 命中（#7）
-            if (item.__title) {
-                if (item.__title.startsWith(q)) score = Math.max(score, 140);
-                else if (item.__title.includes(q)) score = Math.max(score, 115);
-            }
-            if (item.__label) {
-                if (item.__label.startsWith(q)) score = Math.max(score, 140);
-                else if (item.__label.includes(q)) score = Math.max(score, 115);
-            }
-            break;
+        const itemTitle = String(item.__title || item.title || '').toLowerCase();
+        const itemUrl = String(item.__url || item.url || '').toLowerCase();
+        const itemPath = String(item.__path || item.path || '').toLowerCase();
 
-        case 'anchor': {
-            const isManual = item.anchorType === 'manual';
-            const isTemp = item.anchorType === 'temp' || item.anchorType === 'auto';
-            const slotNum = item.slotNumber;
+        let tokenScoreSum = 0;
+        for (const t of tokens) {
+            const isSingleToken = t.length === 1;
+            const isTagToken = t.startsWith('#');
+            const isNoteToken = t.startsWith('*');
+            let tokenScore = 0;
 
-            // 1. 精确槽位匹配：如 #1, #2 或 slot1, slot 1, 槽位1, 槽位 1, 1, 一, 一号槽位
-            const chineseDigits = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '十一': 11, '十二': 12 };
-            const cleanQ = q.replace(/^#/, '');
-            const qDigit = chineseDigits[cleanQ] || (cleanQ.match(/^\d+$/) ? parseInt(cleanQ, 10) : null);
-            if (slotNum) {
-                if (cleanQ === String(slotNum) || qDigit === slotNum) {
-                    score = Math.max(score, isManual ? 300 : 280);
-                } else if (q === `槽位${slotNum}` || q === `槽位 ${slotNum}` || q === `slot${slotNum}` || q === `slot ${slotNum}` ||
-                    (qDigit && (q === `槽位${cleanQ}` || q === `槽位 ${cleanQ}` || q === `槽位${slotNum}`))) {
-                    score = Math.max(score, 320);
-                } else if (isTemp && (q === `临时槽位${slotNum}` || q === `临时槽位 ${slotNum}` || q === `临时${slotNum}`)) {
-                    score = Math.max(score, 320);
+            if (!isTagToken && !isNoteToken && itemTitle) {
+                if (itemTitle.startsWith(t)) tokenScore = Math.max(tokenScore, 140);
+                else if (itemTitle.includes(t)) tokenScore = Math.max(tokenScore, 110);
+            }
+            if (!isTagToken && !isNoteToken && itemUrl && itemUrl.includes(t)) {
+                tokenScore = Math.max(tokenScore, isSingleToken ? 70 : 90);
+            }
+            if (!isTagToken && !isNoteToken && itemPath) {
+                if (itemPath.startsWith(t)) tokenScore = Math.max(tokenScore, 105);
+                else if (itemPath.includes(t)) tokenScore = Math.max(tokenScore, isSingleToken ? 70 : 95);
+            }
+            if (!isTagToken && !isNoteToken && item.dateAdded) {
+                if (!item.__dateText) {
+                    const timeInfo = getBookmarkItemCreationTime(item);
+                    item.__dateText = (timeInfo && timeInfo.text) ? timeInfo.text.toLowerCase() : '';
+                }
+                if (item.__dateText && item.__dateText.includes(t)) {
+                    tokenScore = Math.max(tokenScore, isSingleToken ? 60 : 85);
                 }
             }
-
-            // 2. 关键词匹配类别（支持单汉字如“槽”、“位”、“锚”、“视”、“口”、“临”）
-            if (q === '锚点' || q === 'anchor' || q === 'anchors') {
-                score = Math.max(score, isManual ? 260 : 200);
-            } else if (isManual && (q === '手动锚点' || q === '固定锚点' || q === 'manual' || q === 'manual anchor' || q === 'pinned' || q === 'pinned anchor' || q === '槽位' || q === 'slot' || q === '锚' || q === '槽' || q === '位' || q === '固')) {
-                score = Math.max(score, 260);
-            } else if (isTemp && (q === '临时锚点' || q === '临时' || q === '临时槽位' || q === 'temp' || q === 'temp anchor' || q === 'temporary' || q === 'temporary anchor' || q === '临' || q === '自动锚点' || q === 'auto' || q === 'auto anchor' || q === 'viewport' || q === '视口' || q === '视' || q === '口' || q === '历史' || q === '自')) {
-                score = Math.max(score, 200);
+            // 标签匹配：显式 #tag 优先（135分），普通关键词也直接匹配标签（120分）
+            if (isTagToken && doesCanvasBookmarkItemTagsMatchQuery(item, t)) {
+                tokenScore = Math.max(tokenScore, 135);
+            } else if (!isTagToken && !isNoteToken && doesCanvasBookmarkItemTagsMatchQuery(item, t)) {
+                tokenScore = Math.max(tokenScore, 120);
+            }
+            // 笔记匹配：显式 *note 优先（135分），普通关键词也直接匹配笔记（115分）
+            if (isNoteToken && doesCanvasBookmarkItemNoteMatchQuery(item, t)) {
+                tokenScore = Math.max(tokenScore, 135);
+            } else if (!isTagToken && !isNoteToken && doesCanvasBookmarkItemNoteMatchQuery(item, t)) {
+                tokenScore = Math.max(tokenScore, 115);
             }
 
-            // 3. 标题与自定义名称匹配（支持单字母、单汉字及其包含匹配）
-            if (item.__title) {
-                if (item.__title === q) {
-                    score = Math.max(score, 260);
-                } else if (item.__title.startsWith(q)) {
-                    score = Math.max(score, 200);
-                } else if (item.__title.includes(q)) {
-                    score = Math.max(score, 150);
-                }
-            }
-            if (item.__rawName) {
-                if (item.__rawName === q) {
-                    score = Math.max(score, 260);
-                } else if (item.__rawName.startsWith(q)) {
-                    score = Math.max(score, 200);
-                } else if (item.__rawName.includes(q)) {
-                    score = Math.max(score, 150);
-                }
-            }
-
-            // 4. 坐标 / 缩放匹配 (如 100%, 80%, x: 100, y: 200)
-            if (item.__coords && item.__coords.includes(q)) {
-                score = Math.max(score, isSingleChar ? 70 : 110);
-            }
-
-            // 5. 时间匹配 (如 14:20, 09月, Sep)
-            if (item.__time && item.__time.includes(q)) {
-                score = Math.max(score, isSingleChar ? 70 : 100);
-            }
-            break;
+            if (tokenScore === 0) return -Infinity; // 严格 AND：任一关键词未命中则排除
+            tokenScoreSum += tokenScore;
         }
 
-        case 'bookmark-item': {
-            // 书签/文件夹匹配（支持多关键词，以空格分隔）；
-            // 普通关键词只匹配标题、URL、路径；#... 专门匹配标签，*... 专门匹配笔记。
-            if (queryContext.isBookmarkMode && isCanvasNoteSearchQuery(q)) {
-                return doesCanvasBookmarkItemNoteMatchQuery(item, q) ? 132 : -Infinity;
-            }
+        score = Math.max(score, tokenScoreSum);
 
-            const tokens = queryContext.tokens;
-            if (!tokens.length) return -Infinity;
-
-            let tokenScoreSum = 0;
-            for (const t of tokens) {
-                const isSingleToken = t.length === 1;
-                const isTagToken = t.startsWith('#');
-                let tokenScore = 0;
-
-                if (!isTagToken && item.__title) {
-                    if (item.__title.startsWith(t)) tokenScore = Math.max(tokenScore, 140);
-                    else if (item.__title.includes(t)) tokenScore = Math.max(tokenScore, 110);
-                }
-                if (!isTagToken && item.__url && item.__url.includes(t)) {
-                    tokenScore = Math.max(tokenScore, isSingleToken ? 70 : 90);
-                }
-                if (!isTagToken && item.__path) {
-                    if (item.__path.startsWith(t)) tokenScore = Math.max(tokenScore, 105);
-                    else if (item.__path.includes(t)) tokenScore = Math.max(tokenScore, isSingleToken ? 70 : 95);
-                }
-                if (!isTagToken && item.dateAdded) {
-                    if (!item.__dateText) {
-                        const timeInfo = getBookmarkItemCreationTime(item);
-                        item.__dateText = (timeInfo && timeInfo.text) ? timeInfo.text.toLowerCase() : '';
-                    }
-                    if (item.__dateText && item.__dateText.includes(t)) {
-                        tokenScore = Math.max(tokenScore, isSingleToken ? 60 : 85);
-                    }
-                }
-                if (isTagToken && doesCanvasBookmarkItemTagsMatchQuery(item, t)) {
-                    tokenScore = Math.max(tokenScore, 135);
-                }
-
-                if (tokenScore === 0) return -Infinity;
-                tokenScoreSum += tokenScore;
-            }
-
-            score = Math.max(score, tokenScoreSum);
-
-            // 用户意图加权（笔记 +20分，标签 +15分及梯度递增）与时间时效辅助
-            if (score > 0) {
-                try {
-                    // 1. 笔记加权 (+20分)
-                    const noteMeta = (typeof __getItemNoteMetaForSearch === 'function') ? __getItemNoteMetaForSearch(item) : null;
-                    const hasNote = Boolean(noteMeta && noteMeta.note && String(noteMeta.note).trim());
-                    if (hasNote) {
-                        score += 20;
-                    }
-
-                    // 2. 标签加权 (基础 +15分，每额外1个标签 +3分，最高 +24分)
-                    const tagState = (typeof getCanvasBookmarkTagSearchState === 'function') ? getCanvasBookmarkTagSearchState(item) : null;
-                    const tagCount = (tagState && Array.isArray(tagState.tags)) ? tagState.tags.length : 0;
-                    if (tagCount > 0) {
-                        score += 15 + Math.min(3 * (tagCount - 1), 9);
-                    }
-
-                    // 3. 时间时效辅助 (近30天 +10分，近半年 +5分)
-                    const dateVal = Number(item.dateAdded) || 0;
-                    if (dateVal > 0) {
-                        const ageMs = Date.now() - dateVal;
-                        const THIRTY_DAYS_MS = 30 * 86400 * 1000;
-                        const HALF_YEAR_MS = 180 * 86400 * 1000;
-                        if (ageMs > 0 && ageMs <= THIRTY_DAYS_MS) {
-                            score += 10;
-                        } else if (ageMs > 0 && ageMs <= HALF_YEAR_MS) {
-                            score += 5;
-                        }
-                    }
-                } catch (_) { }
-            }
-            break;
+        // 连续短语加权 (Phrase Bonus)
+        if (tokens.length > 1) {
+            if (matchesPhrase(itemTitle)) score += 30;
+            if (matchesPhrase(itemUrl)) score += 15;
+            if (matchesPhrase(itemPath)) score += 15;
+            const noteState = getCanvasBookmarkNoteSearchState(item);
+            if (noteState && noteState.lower && matchesPhrase(noteState.lower)) score += 20;
         }
+
+        // 用户意图加权（笔记 +20分，标签 +15分及梯度递增）与时间时效辅助
+        if (score > 0) {
+            try {
+                // 1. 笔记加权 (+20分)
+                const noteMeta = (typeof __getItemNoteMetaForSearch === 'function') ? __getItemNoteMetaForSearch(item) : null;
+                const hasNote = Boolean(noteMeta && noteMeta.note && String(noteMeta.note).trim());
+                if (hasNote) {
+                    score += 20;
+                }
+
+                // 2. 标签加权 (基础 +15分，每额外1个标签 +3分，最高 +24分)
+                const tagState = (typeof getCanvasBookmarkTagSearchState === 'function') ? getCanvasBookmarkTagSearchState(item) : null;
+                const tagCount = (tagState && Array.isArray(tagState.tags)) ? tagState.tags.length : 0;
+                if (tagCount > 0) {
+                    score += 15 + Math.min(3 * (tagCount - 1), 9);
+                }
+
+                // 3. 时间时效辅助 (近30天 +10分，近半年 +5分)
+                const dateVal = Number(item.dateAdded) || 0;
+                if (dateVal > 0) {
+                    const ageMs = Date.now() - dateVal;
+                    const THIRTY_DAYS_MS = 30 * 86400 * 1000;
+                    const HALF_YEAR_MS = 180 * 86400 * 1000;
+                    if (ageMs > 0 && ageMs <= THIRTY_DAYS_MS) {
+                        score += 10;
+                    } else if (ageMs > 0 && ageMs <= HALF_YEAR_MS) {
+                        score += 5;
+                    }
+                }
+            } catch (_) { }
+        }
+
+        return score > 0 ? score : -Infinity;
     }
 
-    if (score === 0) return -Infinity;
-    return score;
-}
+    // ==================== Structure Mode 卡片（组）结构模式 ====================
+    const itemLabel = String(item.__label || item.label || '').toLowerCase();
+    const itemTitle = String(item.__title || item.title || '').toLowerCase();
+    const itemDesc = String(item.__description || item.description || '').toLowerCase();
+    const itemText = String(item.__text || item.text || '').toLowerCase();
+    const itemRawName = String(item.__rawName || item.rawName || '').toLowerCase();
+    const itemCoords = String(item.__coords || item.coords || '').toLowerCase();
+    const itemTime = String(item.__time || item.time || '').toLowerCase();
 
+    const cnDigits = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '十一': 11, '十二': 12 };
+
+    const scoreStructureToken = (t) => {
+        const isSingleToken = t.length === 1;
+        let tokenScore = 0;
+
+        switch (item.type) {
+            case 'temp-section': {
+                if (itemLabel) {
+                    if (itemLabel === t) tokenScore = Math.max(tokenScore, 180);
+                    else if (itemLabel.startsWith(t)) tokenScore = Math.max(tokenScore, 160);
+                    else if (itemLabel.includes(t)) tokenScore = Math.max(tokenScore, 130);
+                }
+                if (itemTitle) {
+                    if (itemTitle === t) tokenScore = Math.max(tokenScore, 170);
+                    else if (itemTitle.startsWith(t)) tokenScore = Math.max(tokenScore, 150);
+                    else if (itemTitle.includes(t)) tokenScore = Math.max(tokenScore, 120);
+                }
+                if (itemDesc && itemDesc.includes(t)) {
+                    tokenScore = Math.max(tokenScore, isSingleToken ? 50 : 80);
+                }
+                break;
+            }
+
+            case 'md-node': {
+                if (itemTitle) {
+                    if (itemTitle === t) tokenScore = Math.max(tokenScore, 170);
+                    else if (itemTitle.startsWith(t)) tokenScore = Math.max(tokenScore, 150);
+                    else if (itemTitle.includes(t)) tokenScore = Math.max(tokenScore, 120);
+                }
+                if (itemText && itemText.includes(t)) {
+                    tokenScore = Math.max(tokenScore, isSingleToken ? 60 : 90);
+                }
+                break;
+            }
+
+            case 'edge': {
+                if (itemLabel) {
+                    if (itemLabel === t) tokenScore = Math.max(tokenScore, 160);
+                    else if (itemLabel.startsWith(t)) tokenScore = Math.max(tokenScore, 140);
+                    else if (itemLabel.includes(t)) tokenScore = Math.max(tokenScore, 110);
+                }
+                break;
+            }
+
+            case 'permanent-section': {
+                const itemAlpha = toAlpha(item.displayIndex || 1).toLowerCase();
+                const cleanT = t.replace(/^#/, '');
+                if (cleanT === itemAlpha || t === `#${itemAlpha}`) {
+                    tokenScore = Math.max(tokenScore, 300);
+                }
+                if (itemLabel) {
+                    if (itemLabel === t || itemLabel === `#${t}`) tokenScore = Math.max(tokenScore, 250);
+                    else if (itemLabel.startsWith(t) || itemLabel.startsWith(`#${t}`)) tokenScore = Math.max(tokenScore, 180);
+                    else if (itemLabel.includes(t)) tokenScore = Math.max(tokenScore, 130);
+                }
+                if (item.__alpha) {
+                    const alphaLower = String(item.__alpha).toLowerCase();
+                    if (alphaLower === cleanT) tokenScore = Math.max(tokenScore, 300);
+                    else if (alphaLower.startsWith(cleanT)) tokenScore = Math.max(tokenScore, 180);
+                }
+                if (itemTitle) {
+                    if (itemTitle === t) tokenScore = Math.max(tokenScore, 170);
+                    else if (itemTitle.startsWith(t)) tokenScore = Math.max(tokenScore, 150);
+                    else if (itemTitle.includes(t)) tokenScore = Math.max(tokenScore, 130);
+                }
+                if (itemDesc && itemDesc.includes(t)) {
+                    tokenScore = Math.max(tokenScore, isSingleToken ? 50 : 70);
+                }
+                break;
+            }
+
+            case 'group': {
+                if (itemTitle) {
+                    if (itemTitle === t) tokenScore = Math.max(tokenScore, 160);
+                    else if (itemTitle.startsWith(t)) tokenScore = Math.max(tokenScore, 140);
+                    else if (itemTitle.includes(t)) tokenScore = Math.max(tokenScore, 115);
+                }
+                if (itemLabel) {
+                    if (itemLabel === t) tokenScore = Math.max(tokenScore, 160);
+                    else if (itemLabel.startsWith(t)) tokenScore = Math.max(tokenScore, 140);
+                    else if (itemLabel.includes(t)) tokenScore = Math.max(tokenScore, 115);
+                }
+                break;
+            }
+
+            case 'anchor': {
+                const isManual = item.anchorType === 'manual';
+                const isTemp = item.anchorType === 'temp' || item.anchorType === 'auto';
+                const slotNum = item.slotNumber;
+                const cleanT = t.replace(/^#/, '');
+                const cnSlotMatch = cleanT.match(/^(?:槽位|slot)\s*([一二三四五六七八九十\d]+)$/);
+                const cnSlotDigit = cnSlotMatch ? (cnDigits[cnSlotMatch[1]] || (cnSlotMatch[1].match(/^\d+$/) ? parseInt(cnSlotMatch[1], 10) : null)) : null;
+                const tDigit = cnDigits[cleanT] || (cleanT.match(/^\d+$/) ? parseInt(cleanT, 10) : null);
+
+                if (slotNum) {
+                    if (cleanT === String(slotNum) || tDigit === slotNum) {
+                        tokenScore = Math.max(tokenScore, isManual ? 300 : 280);
+                    } else if (cnSlotDigit === slotNum || t === `槽位${slotNum}` || t === `slot${slotNum}`) {
+                        tokenScore = Math.max(tokenScore, 320);
+                    } else if (isTemp && (t === `临时槽位${slotNum}` || t === `临时${slotNum}`)) {
+                        tokenScore = Math.max(tokenScore, 320);
+                    }
+                }
+
+                if (t === '锚点' || t === 'anchor' || t === 'anchors') {
+                    tokenScore = Math.max(tokenScore, isManual ? 260 : 200);
+                } else if (isManual && (t === '手动锚点' || t === '固定锚点' || t === 'manual' || t === 'manual anchor' || t === 'pinned' || t === 'pinned anchor' || t === '槽位' || t === 'slot' || t === '锚' || t === '槽' || t === '位' || t === '固')) {
+                    tokenScore = Math.max(tokenScore, 260);
+                } else if (isTemp && (t === '临时锚点' || t === '临时' || t === '临时槽位' || t === 'temp' || t === 'temp anchor' || t === 'temporary' || t === 'temporary anchor' || t === '临' || t === '自动锚点' || t === 'auto' || t === 'auto anchor' || t === 'viewport' || t === '视口' || t === '视' || t === '口' || t === '历史' || t === '自')) {
+                    tokenScore = Math.max(tokenScore, 200);
+                }
+
+                if (itemTitle) {
+                    if (itemTitle === t) tokenScore = Math.max(tokenScore, 260);
+                    else if (itemTitle.startsWith(t)) tokenScore = Math.max(tokenScore, 200);
+                    else if (itemTitle.includes(t)) tokenScore = Math.max(tokenScore, 150);
+                }
+                if (itemRawName) {
+                    if (itemRawName === t) tokenScore = Math.max(tokenScore, 260);
+                    else if (itemRawName.startsWith(t)) tokenScore = Math.max(tokenScore, 200);
+                    else if (itemRawName.includes(t)) tokenScore = Math.max(tokenScore, 150);
+                }
+                if (itemCoords && itemCoords.includes(t)) {
+                    tokenScore = Math.max(tokenScore, isSingleToken ? 70 : 110);
+                }
+                if (itemTime && itemTime.includes(t)) {
+                    tokenScore = Math.max(tokenScore, isSingleToken ? 70 : 100);
+                }
+                break;
+            }
+        }
+
+        return tokenScore;
+    };
+
+    let totalStructureScore = 0;
+    for (const t of tokens) {
+        const tokenScore = scoreStructureToken(t);
+        if (tokenScore === 0) return -Infinity; // 严格 AND：任一关键词未命中则排除
+        totalStructureScore += tokenScore;
+    }
+
+    // 连续短语加权 (Phrase Bonus)
+    if (tokens.length > 1) {
+        if (matchesPhrase(itemTitle)) totalStructureScore += 50;
+        if (matchesPhrase(itemLabel)) totalStructureScore += 50;
+        if (matchesPhrase(itemText)) totalStructureScore += 30;
+        if (matchesPhrase(itemDesc)) totalStructureScore += 25;
+    }
+
+    return totalStructureScore > 0 ? totalStructureScore : -Infinity;
+}
 function getCanvasBookmarkSearchOrderValue(item) {
     const raw = Number(item && item.bookmarkSearchOrder);
     return Number.isFinite(raw) ? raw : Number.POSITIVE_INFINITY;
@@ -14288,6 +14381,28 @@ function getSearchContextualActiveTagFilter() {
                 textLower: rawLower
             };
         }
+    } else if (q && !(typeof isCanvasNoteSearchQuery === 'function' && isCanvasNoteSearchQuery(q))) {
+        // 普通关键词搜索时，若输入词命中标签，也激活标签排序上下文
+        const cleanTokens = q.split(/\s+/).map(t => t.trim()).filter(Boolean).filter(t => !t.startsWith('*')).map(t => t.startsWith('#') ? t.slice(1) : t).filter(Boolean);
+        if (cleanTokens.length > 0) {
+            const raw = cleanTokens[0];
+            const rawLower = raw.toLowerCase();
+            const aliasColor = resolveTagSearchColorFromAlias(rawLower);
+            if (aliasColor) {
+                return {
+                    kind: 'color',
+                    color: aliasColor,
+                    text: '',
+                    textLower: ''
+                };
+            }
+            return {
+                kind: 'tag',
+                color: '',
+                text: raw,
+                textLower: rawLower
+            };
+        }
     }
 
     return null;
@@ -14452,6 +14567,12 @@ function doesCanvasBookmarkItemTagsMatchQuery(item, query) {
     const state = getCanvasBookmarkTagSearchState(item);
     const q = String(query || '').trim().toLowerCase();
     if (!q) return state.tags.length > 0;
+    if (q.includes(' ')) {
+        const subTokens = q.split(/\s+/).filter(Boolean);
+        if (subTokens.length > 1) {
+            return subTokens.every(st => doesCanvasBookmarkItemTagsMatchQuery(item, st));
+        }
+    }
     if (q.startsWith('#')) {
         const rawTagQuery = q.slice(1);
         const tagQuery = rawTagQuery.startsWith('/') ? rawTagQuery.slice(1) : rawTagQuery;
@@ -14590,22 +14711,25 @@ function getCanvasBookmarkNoteMetaForSearchCached(item) {
 }
 
 function doesCanvasBookmarkItemNoteMatchQuery(item, query) {
-    const needle = getCanvasNoteSearchNeedle(query);
-    if (needle === null) return false;
+    let needle = getCanvasNoteSearchNeedle(query);
+    if (needle === null) {
+        const raw = String(query || '').trim();
+        if (!raw) return false;
+        needle = raw.toLowerCase();
+    }
+    const noteTokens = needle.split(/\s+/).map(t => t.trim().toLowerCase()).filter(Boolean);
     const notesList = (typeof getBookmarkItemNotesList === 'function')
         ? getBookmarkItemNotesList(item)
         : [];
     if (notesList && notesList.length > 0) {
-        if (!needle) return true;
-        return notesList.some((n) => {
-            const text = (typeof n === 'string' ? n : (n && n.note ? n.note : '')).toLowerCase();
-            return text.includes(needle);
-        });
+        if (!noteTokens.length) return true;
+        const combinedText = notesList.map((n) => (typeof n === 'string' ? n : (n && n.note ? n.note : ''))).join(' ').toLowerCase();
+        return noteTokens.every(t => combinedText.includes(t));
     }
     const state = getCanvasBookmarkNoteSearchState(item);
     if (!state.note) return false;
-    if (!needle) return true;
-    return state.lower.includes(needle);
+    if (!noteTokens.length) return true;
+    return noteTokens.every(t => state.lower.includes(t));
 }
 
 function normalizeNoteBrowseColor(rawColor) {
@@ -21116,27 +21240,27 @@ function renderCanvasSearchResults(results, options = {}) {
             const label = tag.text || tag.color;
             let highlightedLabel = escapeHtml(label);
             const tagDetailToken = (activeTagBrowseDetail && activeTagBrowseDetail.kind === 'tag' && activeTagBrowseDetail.text) ? [activeTagBrowseDetail.text] : [];
-            if (isTagDetailsQuery || tagDetailToken.length > 0) {
-                const queryTokens = isTagDetailsQuery ? queryText.split(/\s+/).map(s => {
-                    let t = s.trim();
-                    if (t.startsWith('#')) {
-                        t = t.slice(1);
-                        if (t.startsWith('/')) t = t.slice(1);
-                    }
-                    return t;
-                }).filter(Boolean) : [];
-                const tokens = [...queryTokens, ...tagDetailToken].filter(Boolean);
-
-                if (tokens.length > 0) {
-                    tokens.sort((a, b) => b.length - a.length);
-                    let safe = escapeHtml(label);
-                    tokens.forEach((token) => {
-                        const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        const re = new RegExp(`(${escapedToken})(?![^<>]*>)`, 'gi');
-                        safe = safe.replace(re, '<mark>$1</mark>');
-                    });
-                    highlightedLabel = safe;
+            const queryTokens = queryText.split(/\s+/).map(s => {
+                let t = s.trim();
+                if (t.startsWith('#')) {
+                    t = t.slice(1);
+                    if (t.startsWith('/')) t = t.slice(1);
+                } else if (t.startsWith('*')) {
+                    return '';
                 }
+                return t;
+            }).filter(Boolean);
+            const tokens = [...queryTokens, ...tagDetailToken].filter(Boolean);
+
+            if (tokens.length > 0) {
+                tokens.sort((a, b) => b.length - a.length);
+                let safe = escapeHtml(label);
+                tokens.forEach((token) => {
+                    const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const re = new RegExp(`(${escapedToken})(?![^<>]*>)`, 'gi');
+                    safe = safe.replace(re, '<mark>$1</mark>');
+                });
+                highlightedLabel = safe;
             }
             return `<span class="search-result-tag-chip" title="${escapeHtml(label)}"><span class="tag-dot tag-dot-${safeColorClass(tag.color)}"></span><span class="search-result-tag-chip-text">${highlightedLabel}</span></span>`;
         }).join('');
@@ -21177,10 +21301,33 @@ function renderCanvasSearchResults(results, options = {}) {
             : getBookmarkResultNotes(item);
         if (!notes.length) return '';
         let first = notes[0];
-        const note = first.note;
-        const needle = getCanvasNoteSearchNeedle(queryText);
+        let needle = getCanvasNoteSearchNeedle(queryText);
+        if (needle === null && queryText) {
+            // 普通关键词搜索：提取非 #tag 的关键词作为笔记检索高亮词
+            const cleanTokens = queryText.split(/\s+/)
+                .map(t => t.trim())
+                .filter(Boolean)
+                .filter(t => !t.startsWith('#'))
+                .map(t => t.startsWith('*') ? t.slice(1) : t)
+                .filter(Boolean);
+            if (cleanTokens.length > 0) {
+                needle = cleanTokens.join(' ');
+            }
+        }
+
+        // 若有多条笔记，优先选择命中 needle 的笔记
+        if (notes.length > 1 && needle) {
+            const needleTokens = needle.toLowerCase().split(/\s+/).filter(Boolean);
+            const matchedNote = notes.find((n) => {
+                const text = (typeof n === 'string' ? n : (n && n.note ? n.note : '')).toLowerCase();
+                return needleTokens.some((t) => text.includes(t));
+            });
+            if (matchedNote) first = matchedNote;
+        }
+
+        const note = (typeof first === 'string' ? first : (first && first.note ? first.note : ''));
         let snippet = needle ? generateSearchSnippet(note, needle) : escapeHtml(note);
-        let matchClass = needle ? ' is-note-match-snippet' : '';
+        let matchClass = (snippet && snippet.includes('<mark>')) ? ' is-note-match-snippet' : (needle ? ' is-note-match-snippet' : '');
 
         if (isNoteBrowseSecondary && activeNoteBrowseDetail) {
             const collator = getTagBrowseSortCollator(isZh);
@@ -21295,13 +21442,32 @@ function renderCanvasSearchResults(results, options = {}) {
         }
         return searchUiState.bookmarkDetailsExpanded.has(String(itemId));
     };
+    const DETAILS_PREVIEW_PRIORITY_ORDER = {
+        tag: 1,
+        note: 2,
+        path: 3,
+        url: 4,
+        time: 5
+    };
     const buildMatchedDetailsPreviewHtml = (entries) => {
-        const lines = (Array.isArray(entries) ? entries : [])
-            .filter((entry) => entry && entry.matched && entry.html)
-            .map((entry) => `<div class="search-result-details-preview-line">${entry.html}</div>`);
+        const matched = (Array.isArray(entries) ? entries : [])
+            .filter((entry) => entry && entry.matched && entry.html);
+        if (!matched.length) {
+            return {
+                html: '',
+                count: 0
+            };
+        }
+        // 网格模式信息预览只显示最高优先级的单项，优先顺序：tag > note > path > url > time
+        const sorted = matched.slice().sort((a, b) => {
+            const pA = (a.type && DETAILS_PREVIEW_PRIORITY_ORDER[a.type]) || 99;
+            const pB = (b.type && DETAILS_PREVIEW_PRIORITY_ORDER[b.type]) || 99;
+            return pA - pB;
+        });
+        const topEntry = sorted[0];
         return {
-            html: lines.join(''),
-            count: lines.length
+            html: `<div class="search-result-details-preview-line">${topEntry.html}</div>`,
+            count: 1
         };
     };
     const renderBookmarkGroupChildRow = (child, groupItem, childIndex) => {
@@ -21333,15 +21499,15 @@ function renderCanvasSearchResults(results, options = {}) {
         const hasPathMatch = isPlainBookmarkDetailsQuery && pathHtml && pathHtml.includes('<mark>');
         const hasTimeMatch = isPlainBookmarkDetailsQuery && childCreationTimeHtml && childCreationTimeHtml.includes('<mark>');
         const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
-        const hasTagMatch = isTagDetailsQuery && childTagMarkersHtml && childTagMarkersHtml.includes('<mark>');
-        const hasNoteMatch = isNoteDetailsQuery && childNoteSnippetHtml && childNoteSnippetHtml.includes('<mark>');
+        const hasTagMatch = childTagMarkersHtml && childTagMarkersHtml.includes('<mark>');
+        const hasNoteMatch = childNoteSnippetHtml && childNoteSnippetHtml.includes('<mark>');
 
         const preview = buildMatchedDetailsPreviewHtml([
-            { matched: hasPathMatch, html: pathHtml },
-            { matched: hasTimeMatch, html: childCreationTimeHtml },
-            { matched: hasUrlMatch, html: urlHtml },
-            { matched: hasTagMatch, html: childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '' },
-            { matched: hasNoteMatch, html: childNoteSnippetHtml }
+            { type: 'tag', matched: hasTagMatch, html: childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '' },
+            { type: 'note', matched: hasNoteMatch, html: childNoteSnippetHtml },
+            { type: 'path', matched: hasPathMatch, html: pathHtml },
+            { type: 'url', matched: hasUrlMatch, html: urlHtml },
+            { type: 'time', matched: hasTimeMatch, html: childCreationTimeHtml }
         ]);
 
         const previewContextHtml = renderDetailsPreviewContextHtml(child, preview, detailsExpanded);
@@ -22214,15 +22380,15 @@ function renderCanvasSearchResults(results, options = {}) {
                 const hasPathMatch = isPlainBookmarkDetailsQuery && parentPathHtml && parentPathHtml.includes('<mark>');
                 const hasTimeMatch = isPlainBookmarkDetailsQuery && creationTimeHtml && creationTimeHtml.includes('<mark>');
                 const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
-                const hasTagMatch = isTagDetailsQuery && tagsRowHtml && tagsRowHtml.includes('<mark>');
-                const hasNoteMatch = isNoteDetailsQuery && noteSnippetHtml && noteSnippetHtml.includes('<mark>');
+                const hasTagMatch = tagsRowHtml && tagsRowHtml.includes('<mark>');
+                const hasNoteMatch = noteSnippetHtml && noteSnippetHtml.includes('<mark>');
 
                 const preview = buildMatchedDetailsPreviewHtml([
-                    { matched: hasPathMatch, html: parentPathHtml },
-                    { matched: hasTimeMatch, html: creationTimeHtml },
-                    { matched: hasUrlMatch, html: urlHtml },
-                    { matched: hasTagMatch, html: tagsRowHtml },
-                    { matched: hasNoteMatch, html: noteSnippetHtml }
+                    { type: 'tag', matched: hasTagMatch, html: tagsRowHtml },
+                    { type: 'note', matched: hasNoteMatch, html: noteSnippetHtml },
+                    { type: 'path', matched: hasPathMatch, html: parentPathHtml },
+                    { type: 'url', matched: hasUrlMatch, html: urlHtml },
+                    { type: 'time', matched: hasTimeMatch, html: creationTimeHtml }
                 ]);
 
                 const detailsExpanded = isBookmarkDetailsExpanded(item.id);
@@ -22528,15 +22694,15 @@ function renderCanvasSearchResults(results, options = {}) {
             const hasPathMatch = isPlainBookmarkDetailsQuery && pathHtml && pathHtml.includes('<mark>');
             const hasTimeMatch = isPlainBookmarkDetailsQuery && creationTimeHtml && creationTimeHtml.includes('<mark>');
             const hasUrlMatch = isPlainBookmarkDetailsQuery && linkHtml && linkHtml.includes('<mark>');
-            const hasTagMatch = isTagDetailsQuery && tagsRowHtml && tagsRowHtml.includes('<mark>');
-            const hasNoteMatch = isNoteDetailsQuery && itemNoteSnippetHtml && itemNoteSnippetHtml.includes('<mark>');
+            const hasTagMatch = tagsRowHtml && tagsRowHtml.includes('<mark>');
+            const hasNoteMatch = itemNoteSnippetHtml && itemNoteSnippetHtml.includes('<mark>');
 
             const preview = buildMatchedDetailsPreviewHtml([
-                { matched: hasPathMatch, html: pathHtml },
-                { matched: hasTimeMatch, html: creationTimeHtml },
-                { matched: hasUrlMatch, html: linkHtml },
-                { matched: hasTagMatch, html: tagsRowHtml },
-                { matched: hasNoteMatch, html: itemNoteSnippetHtml }
+                { type: 'tag', matched: hasTagMatch, html: tagsRowHtml },
+                { type: 'note', matched: hasNoteMatch, html: itemNoteSnippetHtml },
+                { type: 'path', matched: hasPathMatch, html: pathHtml },
+                { type: 'url', matched: hasUrlMatch, html: linkHtml },
+                { type: 'time', matched: hasTimeMatch, html: creationTimeHtml }
             ]);
 
             const detailsExpanded = isBookmarkDetailsExpanded(item.id);
@@ -24886,7 +25052,11 @@ async function locateCanvasBookmarkTreeItem(target) {
  */
 function highlightAndScrollToText(container, queryText) {
     if (!container || !queryText) return;
-    const terms = queryText.split(/\s+/).filter(Boolean);
+    const terms = queryText.split(/\s+/)
+        .map(t => t.trim())
+        .filter(Boolean)
+        .map(t => (t.startsWith('#') || t.startsWith('*')) ? t.slice(1) : t)
+        .filter(Boolean);
     if (terms.length === 0) return;
 
     function findTextNodes(node, nodesList = []) {
