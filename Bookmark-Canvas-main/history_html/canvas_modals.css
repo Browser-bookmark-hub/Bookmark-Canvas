@@ -494,7 +494,7 @@
 
 .canvas-help-row {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     padding: 4px 0;
     gap: 12px;
@@ -540,6 +540,10 @@
     max-width: 50%;
     flex-shrink: 1;
     word-break: break-word;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
 }
 
 .canvas-help-batch-operations {
@@ -1358,7 +1362,17 @@ html[lang="en"] #canvasManageModal .canvas-manage-split-group.canvas-manage-hori
     gap: 6px;
 }
 
-.canvas-help-section-header-left .canvas-shortcut-key {
+.canvas-shortcut-combo {
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+    letter-spacing: 0.2px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.canvas-shortcut-key {
     font-size: 11px;
     padding: 2px 5px;
     background: var(--bg-tertiary);
@@ -1382,11 +1396,22 @@ html[lang="en"] #canvasManageModal .canvas-manage-split-group.canvas-manage-hori
     padding: 2px 6px;
     border-radius: 4px;
     transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .canvas-shortcut-edit-btn:hover {
     color: var(--accent-primary);
     background: var(--bg-tertiary);
+}
+
+.canvas-shortcut-edit-btn.recording,
+.canvas-shortcut-edit-btn.active {
+    color: #ffffff !important;
+    background: var(--accent-primary) !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
 }
 
 .canvas-shortcut-key {
@@ -1416,14 +1441,7 @@ html[lang="en"] #canvasManageModal .canvas-manage-split-group.canvas-manage-hori
 }
 
 .canvas-shortcut-recorder {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--accent-primary);
-    color: white;
-    padding: 10px 14px;
-    border-radius: 0 0 10px 10px;
+    display: none !important;
 }
 
 .recorder-content {
@@ -5701,6 +5719,19 @@ html:fullscreen body.header-compact .canvas-main-container {
 .sidebar-action-btn.is-full:hover {
     background: transparent;
     color: var(--text-muted, #888888);
+}
+
+.sidebar-action-btn.edit-anchor-shortcuts-btn {
+    width: 20px;
+    height: 20px;
+    font-size: 11px;
+    opacity: 0.75;
+    transition: all 0.15s ease;
+}
+
+.sidebar-action-btn.edit-anchor-shortcuts-btn:hover {
+    opacity: 1;
+    color: var(--accent-primary, #3b82f6) !important;
 }
 
 .auto-record-settings-panel,

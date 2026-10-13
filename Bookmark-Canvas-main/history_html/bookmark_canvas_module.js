@@ -8726,7 +8726,7 @@ function setupCanvasZoomAndPan() {
     };
 
     function isCustomCtrlKeyCode(code) {
-        const key = canvasShortcuts.ctrlKey;
+        const key = canvasShortcuts.ctrlKey || canvasShortcuts.ctrl || 'Control';
         const codes = MODIFIER_KEY_CODES[key];
         // 修饰键匹配左右键
         if (codes) return codes.includes(code);
@@ -8735,7 +8735,7 @@ function setupCanvasZoomAndPan() {
     }
 
     function isCustomSpaceKeyCode(code) {
-        const key = canvasShortcuts.spaceKey;
+        const key = canvasShortcuts.spaceKey || canvasShortcuts.space || 'Space';
         const codes = MODIFIER_KEY_CODES[key];
         // 修饰键匹配左右键
         if (codes) return codes.includes(code);
@@ -33590,7 +33590,7 @@ function openCanvasShortcutsModal(options = {}) {
     if (!modal) return;
     setupCanvasShortcutsModal();
 
-    const { anchorToSettings = true } = options;
+    const { anchorToSettings = true, scrollToTarget = null } = options;
 
     // 先关闭帮助弹窗和管理弹窗
     try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
@@ -33613,10 +33613,29 @@ function openCanvasShortcutsModal(options = {}) {
     if (typeof updateShortcutsDisplay === 'function') {
         updateShortcutsDisplay();
     }
+
+    if (scrollToTarget) {
+        window.requestAnimationFrame(() => {
+            const isTemp = scrollToTarget === 'temp';
+            const targetEl = isTemp
+                ? modal.querySelector('[data-shortcut-display="tempAnchorPrev"]')
+                : modal.querySelector('[data-shortcut-display="manualAnchorPrev"]');
+            if (targetEl) {
+                const section = targetEl.closest('.canvas-help-section') || targetEl;
+                section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        });
+    }
 }
 
 function closeCanvasShortcutsModal() {
     const modal = document.getElementById('canvasShortcutsModal');
+    if (modal) modal.style.display = 'none';
+    stopShortcutRecording(null);
+}
+
+function closeCanvasHelpModal() {
+    const modal = document.getElementById('canvasHelpModal');
     if (modal) modal.style.display = 'none';
     stopShortcutRecording(null);
 }
@@ -33661,14 +33680,139 @@ function setupCanvasOpenSourceModal() {
 // =============================================================================
 
 const CANVAS_SHORTCUTS_KEY = 'canvas-custom-shortcuts';
+
+function isMacEnvironment() {
+    return typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+}
+
+function getDefaultAnchorCombo(code) {
+    const isMac = isMacEnvironment();
+    return {
+        meta: isMac,
+        ctrl: !isMac,
+        alt: false,
+        shift: true,
+        code: code
+    };
+}
+
+function normalizeAnchorShortcut(val, defaultKey) {
+    const isMac = isMacEnvironment();
+    const defaultCombo = {
+        meta: isMac,
+        ctrl: !isMac,
+        alt: false,
+        shift: true,
+        code: defaultKey
+    };
+
+    if (!val) return defaultCombo;
+
+    // 兼容历史纯字符串（如 'KeyJ'）
+    if (typeof val === 'string') {
+        return {
+            meta: isMac,
+            ctrl: !isMac,
+            alt: false,
+            shift: true,
+            code: val
+        };
+    }
+
+    if (typeof val === 'object') {
+        return {
+            meta: Boolean(val.meta),
+            ctrl: Boolean(val.ctrl),
+            alt: Boolean(val.alt),
+            shift: Boolean(val.shift),
+            code: val.code || defaultKey,
+            key: val.key || ''
+        };
+    }
+
+    return defaultCombo;
+}
+
+function areAnchorCombosEqual(comboA, comboB) {
+    if (!comboA || !comboB) return false;
+    return Boolean(comboA.meta) === Boolean(comboB.meta) &&
+           Boolean(comboA.ctrl) === Boolean(comboB.ctrl) &&
+           Boolean(comboA.alt) === Boolean(comboB.alt) &&
+           Boolean(comboA.shift) === Boolean(comboB.shift) &&
+           comboA.code === comboB.code;
+}
+
+function formatShortcutCombo(combo, lang) {
+    if (!combo || typeof combo !== 'object') return '?';
+    const isMac = isMacEnvironment();
+    const parts = [];
+
+    if (isMac) {
+        if (combo.meta) parts.push('Cmd');
+        if (combo.ctrl) parts.push('Control');
+        if (combo.alt) parts.push('Option');
+        if (combo.shift) parts.push('Shift');
+    } else {
+        if (combo.ctrl) parts.push('Ctrl');
+        if (combo.alt) parts.push('Alt');
+        if (combo.shift) parts.push('Shift');
+        if (combo.meta) parts.push('Win');
+    }
+
+    const code = combo.code || '';
+    let keyName = '';
+    if (code.startsWith('Key') && code.length === 4) {
+        keyName = code.slice(3).toUpperCase();
+    } else if (code.startsWith('Digit') && code.length === 6) {
+        keyName = code.slice(5);
+    } else {
+        const specialKeyMap = {
+            ArrowUp: '↑',
+            ArrowDown: '↓',
+            ArrowLeft: '←',
+            ArrowRight: '→',
+            BracketLeft: '[',
+            BracketRight: ']',
+            Semicolon: ';',
+            Quote: "'",
+            Comma: ',',
+            Period: '.',
+            Slash: '/',
+            Minus: '-',
+            Equal: '=',
+            Backquote: '`',
+            Backslash: '\\',
+            Enter: 'Enter',
+            Space: 'Space',
+            Tab: 'Tab'
+        };
+        keyName = specialKeyMap[code] || combo.key || code;
+    }
+
+    if (keyName) {
+        parts.push(keyName);
+    }
+
+    return parts.length ? parts.join(' + ') : '?';
+}
+
 const DEFAULT_SHORTCUTS = {
-    ctrlKey: 'Control',  // Control, Alt, Shift, Meta
-    spaceKey: 'Space'    // Space, or any other key
+    ctrlKey: 'Control',       // Control, Alt, Shift, Meta
+    spaceKey: 'Space',        // Space, or any other key
+    ctrl: 'Control',
+    space: 'Space',
+    manualAnchorPrev: getDefaultAnchorCombo('KeyJ'), // 手动锚点 - 上一个
+    manualAnchorAdd: getDefaultAnchorCombo('KeyK'),  // 手动锚点 - 添加
+    manualAnchorNext: getDefaultAnchorCombo('KeyL'), // 手动锚点 - 下一个
+    tempAnchorPrev: getDefaultAnchorCombo('KeyA'),   // 临时锚点 - 上一个
+    tempAnchorAdd: getDefaultAnchorCombo('KeyS'),    // 临时锚点 - 添加
+    tempAnchorNext: getDefaultAnchorCombo('KeyD')    // 临时锚点 - 下一个
 };
 
 let canvasShortcuts = { ...DEFAULT_SHORTCUTS };
 let isRecordingShortcut = false;
-let recordingTarget = null; // 'ctrl' or 'space'
+let recordingTarget = null; // 'ctrl', 'space', 或锚点目标 key
+let shortcutRecordingToastHandle = null;
 
 function loadCanvasShortcuts() {
     try {
@@ -33676,16 +33820,33 @@ function loadCanvasShortcuts() {
         if (saved) {
             const parsed = JSON.parse(saved);
             // 如果之前保存的是旧默认值 Alt，自动升级到新的默认值 Control，避免旧缓存导致冲突
-            if (parsed.ctrlKey === 'Alt') {
+            if (parsed.ctrlKey === 'Alt' || parsed.ctrl === 'Alt') {
                 parsed.ctrlKey = 'Control';
+                parsed.ctrl = 'Control';
                 try {
                     localStorage.setItem(CANVAS_SHORTCUTS_KEY, JSON.stringify(parsed));
                 } catch (_) {}
             }
-            canvasShortcuts = { ...DEFAULT_SHORTCUTS, ...parsed };
+            const ctrlVal = parsed.ctrlKey || parsed.ctrl || DEFAULT_SHORTCUTS.ctrlKey;
+            const spaceVal = parsed.spaceKey || parsed.space || DEFAULT_SHORTCUTS.spaceKey;
+            canvasShortcuts = {
+                ctrlKey: ctrlVal,
+                ctrl: ctrlVal,
+                spaceKey: spaceVal,
+                space: spaceVal,
+                manualAnchorPrev: normalizeAnchorShortcut(parsed.manualAnchorPrev, 'KeyJ'),
+                manualAnchorAdd: normalizeAnchorShortcut(parsed.manualAnchorAdd, 'KeyK'),
+                manualAnchorNext: normalizeAnchorShortcut(parsed.manualAnchorNext, 'KeyL'),
+                tempAnchorPrev: normalizeAnchorShortcut(parsed.tempAnchorPrev, 'KeyA'),
+                tempAnchorAdd: normalizeAnchorShortcut(parsed.tempAnchorAdd, 'KeyS'),
+                tempAnchorNext: normalizeAnchorShortcut(parsed.tempAnchorNext, 'KeyD')
+            };
+        } else {
+            canvasShortcuts = { ...DEFAULT_SHORTCUTS };
         }
     } catch (e) {
         console.warn('[Canvas] 加载快捷键设置失败:', e);
+        canvasShortcuts = { ...DEFAULT_SHORTCUTS };
     }
     updateShortcutDisplays();
 }
@@ -33693,6 +33854,7 @@ function loadCanvasShortcuts() {
 function saveCanvasShortcuts() {
     try {
         saveSharedState(CANVAS_SHORTCUTS_KEY, canvasShortcuts);
+        window.dispatchEvent(new CustomEvent('canvas-shortcuts-updated', { detail: canvasShortcuts }));
     } catch (e) {
         console.warn('[Canvas] 保存快捷键设置失败:', e);
     }
@@ -33700,27 +33862,70 @@ function saveCanvasShortcuts() {
 
 function getKeyDisplayName(keyCode, lang) {
     const isZh = lang === 'zh_CN';
-    const isMac = /Mac|iPod|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+    const isMac = isMacEnvironment();
     const keyMap = {
         'Control': 'Ctrl',
         'Alt': isMac ? 'Option' : 'Alt',
         'Shift': 'Shift',
         'Meta': isMac ? 'Cmd' : 'Win',
         'Space': isZh ? '空格' : 'Space',
-        'Tab': 'Tab'
+        'Tab': 'Tab',
+        'ArrowUp': '↑',
+        'ArrowDown': '↓',
+        'ArrowLeft': '←',
+        'ArrowRight': '→',
+        'BracketLeft': '[',
+        'BracketRight': ']',
+        'Semicolon': ';',
+        'Quote': "'",
+        'Comma': ',',
+        'Period': '.',
+        'Slash': '/',
+        'Minus': '-',
+        'Equal': '='
     };
     if (keyMap[keyCode]) return keyMap[keyCode];
     // KeyA -> A, Digit1 -> 1
-    if (/^Key([A-Z])$/.test(keyCode)) return keyCode.slice(3);
+    if (/^Key([A-Z])$/i.test(keyCode)) return keyCode.slice(3).toUpperCase();
     if (/^Digit([0-9])$/.test(keyCode)) return keyCode.slice(5);
     return keyCode;
+}
+
+function getAnchorShortcutDisplayName(targetKey, lang) {
+    const raw = canvasShortcuts[targetKey] || DEFAULT_SHORTCUTS[targetKey];
+    const defaultKeys = {
+        manualAnchorPrev: 'KeyJ',
+        manualAnchorAdd: 'KeyK',
+        manualAnchorNext: 'KeyL',
+        tempAnchorPrev: 'KeyA',
+        tempAnchorAdd: 'KeyS',
+        tempAnchorNext: 'KeyD'
+    };
+    const combo = normalizeAnchorShortcut(raw, defaultKeys[targetKey] || 'KeyJ');
+    return formatShortcutCombo(combo, lang);
+}
+
+function getShortcutTargetLabel(target, lang) {
+    const isZh = lang === 'zh_CN';
+    const labels = {
+        ctrl: isZh ? 'Ctrl 键' : 'Ctrl Key',
+        space: isZh ? '拖动画布' : 'Pan Canvas',
+        manualAnchorPrev: isZh ? '手动锚点 - 上一个' : 'Manual Anchor - Prev',
+        manualAnchorAdd: isZh ? '手动锚点 - 添加' : 'Manual Anchor - Add',
+        manualAnchorNext: isZh ? '手动锚点 - 下一个' : 'Manual Anchor - Next',
+        tempAnchorPrev: isZh ? '临时锚点 - 上一个' : 'Temp Anchor - Prev',
+        tempAnchorAdd: isZh ? '临时锚点 - 添加' : 'Temp Anchor - Add',
+        tempAnchorNext: isZh ? '临时锚点 - 下一个' : 'Temp Anchor - Next'
+    };
+    return labels[target] || target;
 }
 
 function updateShortcutDisplays() {
     const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
 
     // 更新 Ctrl 键显示
-    const ctrlName = getKeyDisplayName(canvasShortcuts.ctrlKey, lang);
+    const ctrlVal = canvasShortcuts.ctrlKey || canvasShortcuts.ctrl || 'Control';
+    const ctrlName = getKeyDisplayName(ctrlVal, lang);
     document.querySelectorAll('[data-shortcut-display="ctrl"]').forEach(el => {
         el.textContent = ctrlName;
     });
@@ -33730,7 +33935,8 @@ function updateShortcutDisplays() {
     });
 
     // 更新 Space 键显示
-    const spaceName = getKeyDisplayName(canvasShortcuts.spaceKey, lang);
+    const spaceVal = canvasShortcuts.spaceKey || canvasShortcuts.space || 'Space';
+    const spaceName = getKeyDisplayName(spaceVal, lang);
     document.querySelectorAll('[data-shortcut-display="space"]').forEach(el => {
         el.textContent = spaceName;
     });
@@ -33738,53 +33944,154 @@ function updateShortcutDisplays() {
     document.querySelectorAll('[data-shortcut-title="space"]').forEach(el => {
         el.textContent = `${spaceName}${spaceTitleSuffix}`;
     });
+
+    // 更新手动锚点与临时锚点快捷键显示（整体胶囊显示完整组合键，无断裂符号）
+    const anchorKeys = [
+        'manualAnchorPrev', 'manualAnchorAdd', 'manualAnchorNext',
+        'tempAnchorPrev', 'tempAnchorAdd', 'tempAnchorNext'
+    ];
+    anchorKeys.forEach(targetKey => {
+        const comboText = getAnchorShortcutDisplayName(targetKey, lang);
+        document.querySelectorAll(`[data-shortcut-display="${targetKey}"]`).forEach(el => {
+            el.textContent = comboText;
+        });
+    });
 }
 
 function startShortcutRecording(target) {
+    // 严格互斥：如果再次点击正在录制的目标按钮，则切换为取消录制（Toggle 行为）
+    if (isRecordingShortcut && recordingTarget === target) {
+        stopShortcutRecording(null);
+        return;
+    }
+
+    // 关闭上一个录制提示 Toast
+    if (shortcutRecordingToastHandle && typeof shortcutRecordingToastHandle.close === 'function') {
+        try { shortcutRecordingToastHandle.close(); } catch (_) {}
+    }
+    shortcutRecordingToastHandle = null;
+
+    // 彻底清除所有已有的键位和修改按钮高亮状态，确保任何时刻只有单目标录制激活
+    document.querySelectorAll('[data-shortcut-display]').forEach(el => {
+        el.classList.remove('recording');
+    });
+    document.querySelectorAll('.canvas-shortcut-edit-btn').forEach(el => {
+        el.classList.remove('recording', 'active');
+    });
+
     isRecordingShortcut = true;
     recordingTarget = target;
 
     const recorder = document.getElementById('canvasShortcutRecorder');
-    const recorderText = document.getElementById('recorderText');
-    const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
-
     if (recorder) {
-        recorder.style.display = 'block';
-        if (recorderText) {
-            recorderText.textContent = lang === 'zh_CN' ? '请按下新的快捷键...' : 'Press a new shortcut key...';
-        }
+        recorder.style.display = 'none';
     }
 
-    // 高亮对应的键
+    const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
+    const targetName = getShortcutTargetLabel(target, lang);
+    const isAnchorTarget = target.startsWith('manualAnchor') || target.startsWith('tempAnchor');
+
+    const promptMsg = lang === 'zh_CN'
+        ? `正在修改【${targetName}】快捷键，请按下新按键...（按 Esc 取消）`
+        : `Recording [${targetName}] shortcut, press a new key... (Esc to cancel)`;
+
+    if (typeof showCanvasToast === 'function') {
+        shortcutRecordingToastHandle = showCanvasToast(promptMsg, {
+            type: 'info',
+            icon: 'fas fa-keyboard',
+            duration: 30000,
+            forceFresh: true
+        });
+    }
+
+    // 仅高亮当前目标键位显示元素
+    document.querySelectorAll(`[data-shortcut-display="${target}"]`).forEach(el => {
+        el.classList.add('recording');
+    });
+    // 仅高亮对应的修改按钮
+    document.querySelectorAll(`.canvas-shortcut-edit-btn[data-shortcut-target="${target}"]`).forEach(btn => {
+        btn.classList.add('recording', 'active');
+    });
     if (target === 'ctrl') {
-        document.querySelectorAll('[data-shortcut-display="ctrl"]').forEach(el => {
-            el.classList.add('recording');
-        });
+        const btn1 = document.getElementById('editCtrlKeyBtn');
+        const btn2 = document.getElementById('editCtrlKeyBtnHelp');
+        if (btn1) btn1.classList.add('recording', 'active');
+        if (btn2) btn2.classList.add('recording', 'active');
     } else if (target === 'space') {
-        document.querySelectorAll('[data-shortcut-display="space"]').forEach(el => {
-            el.classList.add('recording');
-        });
+        const btn1 = document.getElementById('editSpaceKeyBtn');
+        const btn2 = document.getElementById('editSpaceKeyBtnHelp');
+        if (btn1) btn1.classList.add('recording', 'active');
+        if (btn2) btn2.classList.add('recording', 'active');
     }
 }
 
 function stopShortcutRecording(newKey) {
     if (!isRecordingShortcut) return;
 
+    if (shortcutRecordingToastHandle && typeof shortcutRecordingToastHandle.close === 'function') {
+        try { shortcutRecordingToastHandle.close(); } catch (_) {}
+    }
+    shortcutRecordingToastHandle = null;
+
+    // 清空全部高亮与激活样式
     document.querySelectorAll('[data-shortcut-display]').forEach(el => {
         el.classList.remove('recording');
+    });
+    document.querySelectorAll('.canvas-shortcut-edit-btn').forEach(el => {
+        el.classList.remove('recording', 'active');
     });
 
     const recorder = document.getElementById('canvasShortcutRecorder');
     if (recorder) recorder.style.display = 'none';
 
-    if (newKey && recordingTarget) {
-        if (recordingTarget === 'ctrl') {
+    const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
+    const currentTarget = recordingTarget;
+
+    if (newKey && currentTarget) {
+        if (currentTarget === 'ctrl') {
             canvasShortcuts.ctrlKey = newKey;
-        } else if (recordingTarget === 'space') {
+            canvasShortcuts.ctrl = newKey;
+        } else if (currentTarget === 'space') {
             canvasShortcuts.spaceKey = newKey;
+            canvasShortcuts.space = newKey;
+        } else {
+            canvasShortcuts[currentTarget] = newKey;
         }
         saveCanvasShortcuts();
         updateShortcutDisplays();
+
+        const targetName = getShortcutTargetLabel(currentTarget, lang);
+        let displayKeyStr = '';
+        if (currentTarget.startsWith('manualAnchor') || currentTarget.startsWith('tempAnchor')) {
+            displayKeyStr = formatShortcutCombo(newKey, lang);
+        } else {
+            displayKeyStr = getKeyDisplayName(newKey, lang);
+        }
+
+        const successMsg = lang === 'zh_CN'
+            ? `【${targetName}】快捷键已更新为：${displayKeyStr}`
+            : `[${targetName}] shortcut updated to: ${displayKeyStr}`;
+        if (typeof showCanvasToast === 'function') {
+            showCanvasToast(successMsg, {
+                type: 'success',
+                icon: 'fas fa-check-circle',
+                duration: 2500,
+                forceFresh: true
+            });
+        }
+    } else {
+        const targetName = getShortcutTargetLabel(currentTarget, lang);
+        const cancelMsg = lang === 'zh_CN'
+            ? `已取消修改【${targetName}】快捷键`
+            : `Cancelled changing [${targetName}] shortcut`;
+        if (typeof showCanvasToast === 'function') {
+            showCanvasToast(cancelMsg, {
+                type: 'info',
+                icon: 'fas fa-info-circle',
+                duration: 1800,
+                forceFresh: true
+            });
+        }
     }
 
     isRecordingShortcut = false;
@@ -33792,7 +34099,7 @@ function stopShortcutRecording(newKey) {
 }
 
 function isCustomCtrlKeyPressed(e) {
-    const key = canvasShortcuts.ctrlKey;
+    const key = canvasShortcuts.ctrlKey || canvasShortcuts.ctrl || 'Control';
     const now = Date.now();
     const isModifierKey = ['Control', 'Alt', 'Shift', 'Meta'].includes(key);
     if (isModifierKey && !CanvasState.physicalModifiers[key] && (now - (CanvasState.lastModifierKeyReleaseTime || 0) < 800)) {
@@ -33811,16 +34118,16 @@ function isCustomCtrlKeyPressed(e) {
 }
 
 function isCustomSpaceKeyPressed(keyCode) {
-    const key = canvasShortcuts.spaceKey;
+    const key = canvasShortcuts.spaceKey || canvasShortcuts.space || 'Space';
     return keyCode === key;
 }
 
 function getCustomCtrlKeyCode() {
-    return canvasShortcuts.ctrlKey;
+    return canvasShortcuts.ctrlKey || canvasShortcuts.ctrl || 'Control';
 }
 
 function getCustomSpaceKeyCode() {
-    return canvasShortcuts.spaceKey;
+    return canvasShortcuts.spaceKey || canvasShortcuts.space || 'Space';
 }
 
 function setupCanvasHelpModal() {
@@ -33850,6 +34157,14 @@ function setupCanvasHelpModal() {
     tabs.forEach(tab => {
         tab.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (isRecordingShortcut) {
+                stopShortcutRecording(null);
+            }
+            if (tab.dataset.helpTab === 'shortcuts') {
+                closeCanvasHelpModal();
+                openCanvasShortcutsModal({ anchorToSettings: true });
+                return;
+            }
             setActiveTab(tab.dataset.helpTab);
         });
     });
@@ -33863,23 +34178,23 @@ function setupCanvasHelpModal() {
         }
         // 切换帮助弹窗
         const isVisible = helpModal.style.display === 'block';
-        helpModal.style.display = isVisible ? 'none' : 'block';
-        if (!isVisible) {
+        if (isVisible) {
+            closeCanvasHelpModal();
+        } else {
+            helpModal.style.display = 'block';
             if (typeof updateShortcutDisplays === 'function') {
                 updateShortcutDisplays();
             }
             if (typeof updateShortcutsDisplay === 'function') {
                 updateShortcutsDisplay();
             }
-        }
-        if (!isVisible && tabs.length && !tabs.some(tab => tab.classList.contains('active'))) {
-            setActiveTab(tabs[0].dataset.helpTab);
+            setActiveTab('release');
         }
     });
 
     if (helpModalClose) {
         helpModalClose.addEventListener('click', () => {
-            helpModal.style.display = 'none';
+            closeCanvasHelpModal();
         });
     }
 
@@ -33889,20 +34204,6 @@ function setupCanvasHelpModal() {
     const editCtrlBtnHelp = document.getElementById('editCtrlKeyBtnHelp');
     const editSpaceBtnHelp = document.getElementById('editSpaceKeyBtnHelp');
     const recorderCancelBtn = document.getElementById('recorderCancelBtn');
-
-    if (editCtrlBtn) {
-        editCtrlBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            startShortcutRecording('ctrl');
-        });
-    }
-
-    if (editSpaceBtn) {
-        editSpaceBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            startShortcutRecording('space');
-        });
-    }
 
     if (editCtrlBtnHelp) {
         editCtrlBtnHelp.addEventListener('click', (e) => {
@@ -33919,6 +34220,17 @@ function setupCanvasHelpModal() {
             startShortcutRecording('space');
         });
     }
+
+    // 统一绑定所有带 data-shortcut-target 的快捷键修改按钮（避免与独立 ID 重复绑定导致单击即自取消）
+    document.querySelectorAll('.canvas-shortcut-edit-btn[data-shortcut-target]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const target = btn.dataset.shortcutTarget;
+            if (target) {
+                startShortcutRecording(target);
+            }
+        });
+    });
 
     if (recorderCancelBtn) {
         recorderCancelBtn.addEventListener('click', (e) => {
@@ -33949,8 +34261,31 @@ function setupCanvasHelpModal() {
         });
     }
 
-    // 监听键盘事件进行录制
+    // 监听键盘事件进行录制与弹窗 Esc 退出
     document.addEventListener('keydown', (e) => {
+        // 支持 Esc 键取消录制或直接关闭说明弹窗
+        if (e.key === 'Escape' || e.code === 'Escape') {
+            if (isRecordingShortcut) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopShortcutRecording(null);
+                return;
+            }
+
+            // 非录制状态下，Esc 直接退出说明弹窗或快捷键弹窗
+            if (helpModal && helpModal.style.display === 'block') {
+                closeCanvasHelpModal();
+                return;
+            }
+            const shortcutsModal = document.getElementById('canvasShortcutsModal');
+            if (shortcutsModal && shortcutsModal.style.display === 'block') {
+                closeCanvasShortcutsModal();
+                return;
+            }
+            return;
+        }
+
         if (!isRecordingShortcut) return;
 
         e.preventDefault();
@@ -33958,43 +34293,174 @@ function setupCanvasHelpModal() {
         e.stopImmediatePropagation();
 
         const modifierKeys = ['Control', 'Alt', 'Shift', 'Meta'];
+        const isAnchorTarget = recordingTarget && (recordingTarget.startsWith('manualAnchor') || recordingTarget.startsWith('tempAnchor'));
+
+        if (isAnchorTarget) {
+            // 如果用户单按修饰键（如仅按下了 Cmd 或 Ctrl），不单独保存，等待用户配合按下具体字符/数字键
+            if (modifierKeys.includes(e.key)) {
+                return;
+            }
+
+            // 锚点快捷键必须配合至少一个修饰键（支持两个键如 Cmd+1，或三个键如 Cmd+Shift+J 等）
+            const hasModifier = Boolean(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey);
+            const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
+            if (!hasModifier) {
+                const warnMsg = lang === 'zh_CN'
+                    ? '锚点快捷键需要配合修饰键（如 Cmd/Ctrl/Alt/Shift + 按键），请同时按住修饰键'
+                    : 'Anchor shortcut requires a modifier key (e.g. Cmd/Ctrl/Alt/Shift + Key)';
+                if (typeof showCanvasToast === 'function') {
+                    showCanvasToast(warnMsg, {
+                        type: 'warning',
+                        icon: 'fas fa-exclamation-triangle',
+                        duration: 2500,
+                        forceFresh: true
+                    });
+                }
+                return;
+            }
+
+            const isValidKey = /^(Key[A-Z]|Digit[0-9]|Bracket[A-Za-z]+|Semicolon|Quote|Comma|Period|Slash|Minus|Equal|Backquote|Backslash|Arrow[A-Za-z]+)$/.test(e.code);
+            if (!isValidKey) {
+                const warnMsg = lang === 'zh_CN'
+                    ? '不支持此按键，请使用字母、数字、方向键或常用标点键（按 Esc 取消）'
+                    : 'Unsupported key. Use letter, digit, arrow or punctuation (Esc to cancel)';
+                if (typeof showCanvasToast === 'function') {
+                    showCanvasToast(warnMsg, {
+                        type: 'warning',
+                        icon: 'fas fa-exclamation-triangle',
+                        duration: 2500,
+                        forceFresh: true
+                    });
+                }
+                return;
+            }
+
+            const newCombo = {
+                meta: Boolean(e.metaKey),
+                ctrl: Boolean(e.ctrlKey),
+                alt: Boolean(e.altKey),
+                shift: Boolean(e.shiftKey),
+                code: e.code,
+                key: e.key
+            };
+
+            // 锚点类快捷键之间的互斥冲突检查
+            const anchorKeys = [
+                'manualAnchorPrev', 'manualAnchorAdd', 'manualAnchorNext',
+                'tempAnchorPrev', 'tempAnchorAdd', 'tempAnchorNext'
+            ];
+            const defaultKeys = {
+                manualAnchorPrev: 'KeyJ',
+                manualAnchorAdd: 'KeyK',
+                manualAnchorNext: 'KeyL',
+                tempAnchorPrev: 'KeyA',
+                tempAnchorAdd: 'KeyS',
+                tempAnchorNext: 'KeyD'
+            };
+            let conflictTarget = null;
+            for (const ak of anchorKeys) {
+                if (ak !== recordingTarget) {
+                    const otherCombo = normalizeAnchorShortcut(canvasShortcuts[ak], defaultKeys[ak]);
+                    if (areAnchorCombosEqual(newCombo, otherCombo)) {
+                        conflictTarget = ak;
+                        break;
+                    }
+                }
+            }
+
+            if (conflictTarget) {
+                const conflictName = getShortcutTargetLabel(conflictTarget, lang);
+                const warnMsg = lang === 'zh_CN'
+                    ? `该按键组合已被【${conflictName}】占用，请更换其他组合（按 Esc 取消）`
+                    : `Key combo already used by [${conflictName}], please choose another (Esc to cancel)`;
+                if (typeof showCanvasToast === 'function') {
+                    showCanvasToast(warnMsg, {
+                        type: 'warning',
+                        icon: 'fas fa-exclamation-triangle',
+                        duration: 2500,
+                        forceFresh: true
+                    });
+                }
+                return;
+            }
+
+            stopShortcutRecording(newCombo);
+            return;
+        }
+
+        // 非锚点录制（Ctrl / Space 键）
         const specialKeys = ['Space', 'Tab'];
-
         let newKey = null;
-
-        // 修饰键直接使用 e.key
         if (modifierKeys.includes(e.key)) {
             newKey = e.key;
-        }
-        // 特殊键使用 e.code
-        else if (specialKeys.includes(e.code)) {
+        } else if (specialKeys.includes(e.code)) {
             newKey = e.code;
-        }
-        // 普通字母/数字键使用 e.code (如 KeyA, KeyB, Digit1)
-        else if (/^(Key[A-Z]|Digit[0-9])$/.test(e.code)) {
+        } else if (/^(Key[A-Z]|Digit[0-9]|Bracket[A-Za-z]+|Semicolon|Quote|Comma|Period|Slash|Minus|Equal|Arrow[A-Za-z]+)$/.test(e.code)) {
             newKey = e.code;
         }
 
-        if (newKey) stopShortcutRecording(newKey);
+        if (newKey) {
+            const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
+            const otherKey = (recordingTarget === 'ctrl') ? canvasShortcuts.spaceKey : canvasShortcuts.ctrlKey;
+            const otherName = (recordingTarget === 'ctrl')
+                ? (lang === 'zh_CN' ? '拖动画布' : 'Pan Canvas')
+                : (lang === 'zh_CN' ? 'Ctrl 键' : 'Ctrl Key');
+
+            if (newKey === otherKey) {
+                const warnMsg = lang === 'zh_CN'
+                    ? `该按键已被【${otherName}】占用，请使用其他按键（按 Esc 取消）`
+                    : `Key already used by [${otherName}], please choose another key (Esc to cancel)`;
+                if (typeof showCanvasToast === 'function') {
+                    showCanvasToast(warnMsg, {
+                        type: 'warning',
+                        icon: 'fas fa-exclamation-triangle',
+                        duration: 2500,
+                        forceFresh: true
+                    });
+                }
+                return;
+            }
+
+            stopShortcutRecording(newKey);
+        } else {
+            const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
+            const warnMsg = lang === 'zh_CN'
+                ? '不支持此按键，请使用修饰键、字母、数字或空格（按 Esc 取消）'
+                : 'Unsupported key. Use modifier, letter, digit or Space (Esc to cancel).';
+            if (typeof showCanvasToast === 'function') {
+                showCanvasToast(warnMsg, {
+                    type: 'warning',
+                    icon: 'fas fa-exclamation-triangle',
+                    duration: 2500,
+                    forceFresh: true
+                });
+            }
+        }
     }, true);
 
     // 点击其他地方关闭弹窗
     document.addEventListener('click', (e) => {
-        if (helpModal.style.display === 'block' &&
+        if (helpModal && helpModal.style.display === 'block' &&
             !helpModal.contains(e.target) &&
             e.target !== helpBtn &&
             !helpBtn.contains(e.target)) {
-            helpModal.style.display = 'none';
+            closeCanvasHelpModal();
         }
     });
 }
 
-function openCanvasHelpModal(tabName = 'shortcuts') {
+function openCanvasHelpModal(tabName = 'release') {
     const helpModal = document.getElementById('canvasHelpModal');
     const manageModal = document.getElementById('canvasManageModal');
     const shortcutsModal = document.getElementById('canvasShortcutsModal');
     const otherManageModal = document.getElementById('canvasOtherManageModal');
     if (!helpModal) return;
+
+    if (tabName === 'shortcuts') {
+        if (helpModal) helpModal.style.display = 'none';
+        openCanvasShortcutsModal({ anchorToSettings: true });
+        return;
+    }
 
     if (manageModal) {
         stopShortcutRecording(null);
@@ -44321,6 +44787,7 @@ function resetCanvasCtrlState() {
 window.getTempItemNote = getTempItemNote;
 window.getTempItemNoteMeta = getTempItemNoteMeta;
 window.setTempItemNote = setTempItemNote;
+window.openCanvasShortcutsModal = openCanvasShortcutsModal;
 
 window.CanvasModule = {
     init: initCanvasView,

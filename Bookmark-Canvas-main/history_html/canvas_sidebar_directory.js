@@ -5032,29 +5032,160 @@
     return true;
   }
 
+  function normalizeAnchorShortcut(val, defaultKey) {
+    const isMac = isMacPlatform();
+    const defaultCombo = {
+      meta: isMac,
+      ctrl: !isMac,
+      alt: false,
+      shift: true,
+      code: defaultKey
+    };
+    if (!val) return defaultCombo;
+    if (typeof val === 'string') {
+      return {
+        meta: isMac,
+        ctrl: !isMac,
+        alt: false,
+        shift: true,
+        code: val
+      };
+    }
+    if (typeof val === 'object') {
+      return {
+        meta: Boolean(val.meta),
+        ctrl: Boolean(val.ctrl),
+        alt: Boolean(val.alt),
+        shift: Boolean(val.shift),
+        code: val.code || defaultKey,
+        key: val.key || ''
+      };
+    }
+    return defaultCombo;
+  }
+
+  function getCustomAnchorShortcuts() {
+    try {
+      const raw = localStorage.getItem('canvas-custom-shortcuts');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return {
+          manualAnchorPrev: normalizeAnchorShortcut(parsed.manualAnchorPrev, 'KeyJ'),
+          manualAnchorAdd: normalizeAnchorShortcut(parsed.manualAnchorAdd, 'KeyK'),
+          manualAnchorNext: normalizeAnchorShortcut(parsed.manualAnchorNext, 'KeyL'),
+          tempAnchorPrev: normalizeAnchorShortcut(parsed.tempAnchorPrev, 'KeyA'),
+          tempAnchorAdd: normalizeAnchorShortcut(parsed.tempAnchorAdd, 'KeyS'),
+          tempAnchorNext: normalizeAnchorShortcut(parsed.tempAnchorNext, 'KeyD')
+        };
+      }
+    } catch (_) {}
+    return {
+      manualAnchorPrev: normalizeAnchorShortcut(null, 'KeyJ'),
+      manualAnchorAdd: normalizeAnchorShortcut(null, 'KeyK'),
+      manualAnchorNext: normalizeAnchorShortcut(null, 'KeyL'),
+      tempAnchorPrev: normalizeAnchorShortcut(null, 'KeyA'),
+      tempAnchorAdd: normalizeAnchorShortcut(null, 'KeyS'),
+      tempAnchorNext: normalizeAnchorShortcut(null, 'KeyD')
+    };
+  }
+
+  function formatCustomAnchorKeyDisplay(combo) {
+    if (!combo) return '?';
+    if (typeof combo === 'string') {
+      combo = normalizeAnchorShortcut(combo, 'KeyJ');
+    }
+    const isMac = isMacPlatform();
+    const parts = [];
+    if (isMac) {
+      if (combo.meta) parts.push('Cmd');
+      if (combo.ctrl) parts.push('Control');
+      if (combo.alt) parts.push('Option');
+      if (combo.shift) parts.push('Shift');
+    } else {
+      if (combo.ctrl) parts.push('Ctrl');
+      if (combo.alt) parts.push('Alt');
+      if (combo.shift) parts.push('Shift');
+      if (combo.meta) parts.push('Win');
+    }
+    const code = combo.code || '';
+    let keyName = '';
+    if (code.startsWith('Key') && code.length === 4) {
+      keyName = code.slice(3).toUpperCase();
+    } else if (code.startsWith('Digit') && code.length === 6) {
+      keyName = code.slice(5);
+    } else {
+      const map = {
+        ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+        BracketLeft: '[', BracketRight: ']', Semicolon: ';', Quote: "'",
+        Comma: ',', Period: '.', Slash: '/', Minus: '-', Equal: '=',
+        Backquote: '`', Backslash: '\\', Enter: 'Enter', Space: 'Space', Tab: 'Tab'
+      };
+      keyName = map[code] || combo.key || code;
+    }
+    if (keyName) parts.push(keyName);
+    return parts.length ? parts.join(' + ') : '?';
+  }
+
+  function matchesAnchorShortcut(combo, e) {
+    if (!combo || !combo.code) return false;
+    // 严格匹配修饰键标志（允许2键组合如 Cmd+1，或3键组合如 Cmd+Shift+J）
+    if (Boolean(combo.meta) !== Boolean(e.metaKey)) return false;
+    if (Boolean(combo.ctrl) !== Boolean(e.ctrlKey)) return false;
+    if (Boolean(combo.alt) !== Boolean(e.altKey)) return false;
+    if (Boolean(combo.shift) !== Boolean(e.shiftKey)) return false;
+
+    // 匹配按键 code
+    const eCode = e.code || '';
+    if (eCode === combo.code) return true;
+
+    // 回退匹配按键 key
+    const keyLower = (e.key || '').toLowerCase();
+    if (combo.code.startsWith('Key') && combo.code.length === 4) {
+      return keyLower === combo.code.slice(3).toLowerCase();
+    }
+    if (combo.code.startsWith('Digit') && combo.code.length === 6) {
+      return (e.key || '') === combo.code.slice(5);
+    }
+    return false;
+  }
+
+  function openShortcutsModalFromSidebar(targetType = null) {
+    if (window.CanvasModule && typeof window.CanvasModule.openShortcuts === 'function') {
+      window.CanvasModule.openShortcuts({ anchorToSettings: true, scrollToTarget: targetType });
+      return;
+    }
+    if (typeof openCanvasShortcutsModal === 'function') {
+      openCanvasShortcutsModal({ anchorToSettings: true, scrollToTarget: targetType });
+      return;
+    }
+    const btn = document.getElementById('canvasShortcutSettingsBtn');
+    if (btn) btn.click();
+  }
+
+  function updateSidebarAnchorShortcutDisplays() {
+    const sc = getCustomAnchorShortcuts();
+    const panel = document.getElementById('canvasHistoryPanel');
+    if (!panel) return;
+
+    const mPrev = panel.querySelector('.sidebar-manual-anchor-prev');
+    if (mPrev) mPrev.textContent = formatCustomAnchorKeyDisplay(sc.manualAnchorPrev);
+    const mAdd = panel.querySelector('.sidebar-manual-anchor-add');
+    if (mAdd) mAdd.textContent = formatCustomAnchorKeyDisplay(sc.manualAnchorAdd);
+    const mNext = panel.querySelector('.sidebar-manual-anchor-next');
+    if (mNext) mNext.textContent = formatCustomAnchorKeyDisplay(sc.manualAnchorNext);
+
+    const tPrev = panel.querySelector('.sidebar-temp-anchor-prev');
+    if (tPrev) tPrev.textContent = formatCustomAnchorKeyDisplay(sc.tempAnchorPrev);
+    const tAdd = panel.querySelector('.sidebar-temp-anchor-add');
+    if (tAdd) tAdd.textContent = formatCustomAnchorKeyDisplay(sc.tempAnchorAdd);
+    const tNext = panel.querySelector('.sidebar-temp-anchor-next');
+    if (tNext) tNext.textContent = formatCustomAnchorKeyDisplay(sc.tempAnchorNext);
+  }
+
   function handleAnchorShortcutKeydown(e) {
     if (e.isComposing) return;
 
-    // Check modifier: Command on Mac (metaKey), Ctrl on Windows/Linux (ctrlKey).
-    const hasModifier = (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey;
-    if (!hasModifier) return;
-
-    const keyLower = (e.key || '').toLowerCase();
-    const code = e.code || '';
-
-    // Manual Anchors: J (prev), K (add), L (next)
-    const isKeyJ = (keyLower === 'j' || code === 'KeyJ');
-    const isKeyK = (keyLower === 'k' || code === 'KeyK');
-    const isKeyL = (keyLower === 'l' || code === 'KeyL');
-
-    // Temp Anchors: A (prev), S (add), D (next)
-    const isKeyA = (keyLower === 'a' || code === 'KeyA');
-    const isKeyS = (keyLower === 's' || code === 'KeyS');
-    const isKeyD = (keyLower === 'd' || code === 'KeyD');
-
-    if (!isKeyJ && !isKeyK && !isKeyL && !isKeyA && !isKeyS && !isKeyD) return;
-
-    // Ignore if typing in text inputs
+    // 在文本输入框/可编辑元素中输入时不拦截
     const activeEl = document.activeElement;
     if (activeEl) {
       const tag = (activeEl.tagName || '').toUpperCase();
@@ -5063,20 +5194,32 @@
       }
     }
 
+    const sc = getCustomAnchorShortcuts();
+
+    const isPrevManual = matchesAnchorShortcut(sc.manualAnchorPrev, e);
+    const isAddManual = matchesAnchorShortcut(sc.manualAnchorAdd, e);
+    const isNextManual = matchesAnchorShortcut(sc.manualAnchorNext, e);
+
+    const isPrevTemp = matchesAnchorShortcut(sc.tempAnchorPrev, e);
+    const isAddTemp = matchesAnchorShortcut(sc.tempAnchorAdd, e);
+    const isNextTemp = matchesAnchorShortcut(sc.tempAnchorNext, e);
+
+    if (!isPrevManual && !isAddManual && !isNextManual && !isPrevTemp && !isAddTemp && !isNextTemp) return;
+
     e.preventDefault();
     e.stopPropagation();
 
-    if (isKeyJ) {
+    if (isPrevManual) {
       navigateManualAnchorSlot('prev');
-    } else if (isKeyK) {
+    } else if (isAddManual) {
       addManualAnchorFromCurrentViewport();
-    } else if (isKeyL) {
+    } else if (isNextManual) {
       navigateManualAnchorSlot('next');
-    } else if (isKeyA) {
+    } else if (isPrevTemp) {
       navigateTempAnchorSlot('prev');
-    } else if (isKeyS) {
+    } else if (isAddTemp) {
       addTempAnchorFromCurrentViewport();
-    } else if (isKeyD) {
+    } else if (isNextTemp) {
       navigateTempAnchorSlot('next');
     }
   }
@@ -5410,18 +5553,23 @@
             <input type="number" id="inlineManualAnchorLimitInput" min="1" max="50" value="${manualAnchorLimit}" />
           </div>
           <div class="manual-anchor-shortcuts-help" style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
-            <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary);">${isEn ? 'Manual Anchor Shortcuts' : '手动锚点快捷键'}</div>
+            <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
+              <span>${isEn ? 'Manual Anchor Shortcuts' : '手动锚点快捷键'}</span>
+              <button class="sidebar-action-btn edit-anchor-shortcuts-btn" id="openManualAnchorShortcutsBtn" type="button" title="${isEn ? 'Modify Shortcuts' : '点击修改快捷键'}" style="width: 20px; height: 20px; font-size: 11px;">
+                <i class="fas fa-edit"></i>
+              </button>
+            </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
               <span>${isEn ? 'Prev:' : '上一个：'}</span>
-              <kbd class="canvas-shortcut-key" style="font-size: 10px; padding: 1px 5px;">${isMacPlatform() ? 'Cmd + Shift + J' : 'Ctrl + Shift + J'}</kbd>
+              <kbd class="canvas-shortcut-key sidebar-manual-anchor-prev" data-shortcut-display="manualAnchorPrev" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().manualAnchorPrev)}</kbd>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
               <span>${isEn ? 'Add:' : '添加：'}</span>
-              <kbd class="canvas-shortcut-key" style="font-size: 10px; padding: 1px 5px;">${isMacPlatform() ? 'Cmd + Shift + K' : 'Ctrl + Shift + K'}</kbd>
+              <kbd class="canvas-shortcut-key sidebar-manual-anchor-add" data-shortcut-display="manualAnchorAdd" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().manualAnchorAdd)}</kbd>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
               <span>${isEn ? 'Next:' : '下一个：'}</span>
-              <kbd class="canvas-shortcut-key" style="font-size: 10px; padding: 1px 5px;">${isMacPlatform() ? 'Cmd + Shift + L' : 'Ctrl + Shift + L'}</kbd>
+              <kbd class="canvas-shortcut-key sidebar-manual-anchor-next" data-shortcut-display="manualAnchorNext" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().manualAnchorNext)}</kbd>
             </div>
           </div>
         </div>
@@ -5532,18 +5680,23 @@
             <input type="number" id="inlineTempAnchorLimitInput" min="1" max="50" value="${tempAnchorLimit}" />
           </div>
           <div class="temp-anchor-shortcuts-help" style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
-            <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary);">${isEn ? 'Temp Anchor Shortcuts' : '临时锚点快捷键'}</div>
+            <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
+              <span>${isEn ? 'Temp Anchor Shortcuts' : '临时锚点快捷键'}</span>
+              <button class="sidebar-action-btn edit-anchor-shortcuts-btn" id="openTempAnchorShortcutsBtn" type="button" title="${isEn ? 'Modify Shortcuts' : '点击修改快捷键'}" style="width: 20px; height: 20px; font-size: 11px;">
+                <i class="fas fa-edit"></i>
+              </button>
+            </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
               <span>${isEn ? 'Prev:' : '上一个：'}</span>
-              <kbd class="canvas-shortcut-key" style="font-size: 10px; padding: 1px 5px;">${isMacPlatform() ? 'Cmd + Shift + A' : 'Ctrl + Shift + A'}</kbd>
+              <kbd class="canvas-shortcut-key sidebar-temp-anchor-prev" data-shortcut-display="tempAnchorPrev" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().tempAnchorPrev)}</kbd>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
               <span>${isEn ? 'Add:' : '添加：'}</span>
-              <kbd class="canvas-shortcut-key" style="font-size: 10px; padding: 1px 5px;">${isMacPlatform() ? 'Cmd + Shift + S' : 'Ctrl + Shift + S'}</kbd>
+              <kbd class="canvas-shortcut-key sidebar-temp-anchor-add" data-shortcut-display="tempAnchorAdd" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().tempAnchorAdd)}</kbd>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
               <span>${isEn ? 'Next:' : '下一个：'}</span>
-              <kbd class="canvas-shortcut-key" style="font-size: 10px; padding: 1px 5px;">${isMacPlatform() ? 'Cmd + Shift + D' : 'Ctrl + Shift + D'}</kbd>
+              <kbd class="canvas-shortcut-key sidebar-temp-anchor-next" data-shortcut-display="tempAnchorNext" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().tempAnchorNext)}</kbd>
             </div>
             <div style="font-size: 10px; color: var(--text-muted, #888); margin-top: 3px;">
               ${isEn ? 'Independent per page. Cleared on close or refresh.' : '各页面独立，关闭或刷新后清空'}
@@ -5773,6 +5926,15 @@
       });
     }
 
+    const openManualShortcutsBtn = panel.querySelector('#openManualAnchorShortcutsBtn');
+    if (openManualShortcutsBtn) {
+      openManualShortcutsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openShortcutsModalFromSidebar('manual');
+      });
+    }
+
     // --- 临时锚点交互绑定 ---
     const inlineTempCheck = panel.querySelector('#inlineTempAnchorCheck');
     if (inlineTempCheck) {
@@ -5845,6 +6007,15 @@
         tempLimitInput.value = val;
         updateTempAnchorLimit(val);
         renderHistoryPanel();
+      });
+    }
+
+    const openTempShortcutsBtn = panel.querySelector('#openTempAnchorShortcutsBtn');
+    if (openTempShortcutsBtn) {
+      openTempShortcutsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openShortcutsModalFromSidebar('temp');
       });
     }
 
@@ -6056,6 +6227,9 @@
           }
         } catch (_) {}
       }
+      if (event && event.key === 'canvas-custom-shortcuts') {
+        try { updateSidebarAnchorShortcutDisplays(); } catch (_) {}
+      }
       try { renderHistoryPanel(); } catch (_) {}
     });
 
@@ -6077,7 +6251,12 @@
       try { renderHistoryPanel(); } catch (_) {}
     });
 
+    global.addEventListener('canvas-shortcuts-updated', () => {
+      try { updateSidebarAnchorShortcutDisplays(); } catch (_) {}
+    });
+
     global.addEventListener('shared-state-updated', () => {
+      try { updateSidebarAnchorShortcutDisplays(); } catch (_) {}
       queueRefresh();
     });
 
