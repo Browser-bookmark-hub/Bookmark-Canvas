@@ -87,6 +87,9 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
 .search-panel-resize-handle.handle-bottom {
     display: flex;
     bottom: 0;
+    box-sizing: border-box;
+    align-items: flex-end;
+    padding-bottom: 2px;
     border-bottom-left-radius: 11px;
     border-bottom-right-radius: 11px;
 }
@@ -629,6 +632,9 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     z-index: 60 !important;
     pointer-events: auto !important;
     touch-action: none !important;
+    box-sizing: border-box !important;
+    align-items: flex-end !important;
+    padding-bottom: 2px !important;
 }
 
 /* 上下调整把手：在底部停靠模式下贴附于面板顶端边缘，实现纯透明悬浮层，小白条刚好居于上边缘与视图切换按钮正中间 */
@@ -1128,6 +1134,260 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     align-items: center !important;
     text-align: center !important;
     padding: 0 2px !important;
+}
+
+/* 表格操作、计数、子域名、主域名、日期列强制严格居中 */
+.tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="actions"],
+.tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="count"],
+.tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="subdomainCount"],
+.tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="dateAdded"],
+.tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="rootDomain"] {
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+}
+
+/* 子域名胶囊按钮与弹窗 */
+.canvas-table-subdomain-pill-btn {
+    transition: all 0.15s ease;
+    user-select: none;
+}
+.canvas-table-subdomain-pill-btn:hover {
+    filter: brightness(0.95);
+    transform: translateY(-0.5px);
+}
+[data-theme="dark"] .canvas-table-subdomain-pill-btn:hover {
+    filter: brightness(1.2);
+}
+/* 子域名气泡与内联手风琴折叠展开 (In-Place Accordion) */
+.canvas-subdomain-list-popover {
+    min-width: 280px;
+    max-width: 440px;
+}
+.search-result-subdomain-bubble-item {
+    display: flex;
+    flex-direction: column;
+    border-radius: 6px;
+    margin-bottom: 3.5px;
+    border: 1px solid transparent;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.search-result-subdomain-bubble-item.is-expanded {
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.05));
+    border-color: var(--border-color, rgba(128, 128, 128, 0.15));
+}
+.search-result-subdomain-bubble-row {
+    transition: background-color 0.15s ease;
+    border-radius: 6px;
+}
+.search-result-subdomain-bubble-row:hover {
+    background: var(--bg-hover, rgba(128, 128, 128, 0.08));
+}
+.search-result-subdomain-bubble-item.is-expanded .search-result-subdomain-bubble-row {
+    border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.1));
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.subdomain-accordion-arrow {
+    transition: transform 0.2s ease;
+}
+.search-result-subdomain-bubble-item.is-expanded .subdomain-accordion-arrow {
+    transform: rotate(180deg);
+}
+.subdomain-accordion-drawer {
+    display: flex;
+    flex-direction: column;
+    padding: 5px 6px 6px 6px;
+    gap: 3.5px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+.subdomain-bookmark-item-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    min-height: 27px;
+    box-sizing: border-box;
+    border-radius: 5px;
+    background: var(--bg-primary, #ffffff);
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.12));
+    cursor: pointer;
+    font-size: 11.5px;
+    line-height: 1.35;
+    transition: all 0.15s ease;
+    overflow: hidden;
+}
+[data-theme="dark"] .subdomain-bookmark-item-row {
+    background: var(--bg-secondary, rgba(30, 41, 59, 0.6));
+    border-color: var(--border-color, rgba(128, 128, 128, 0.18));
+}
+.subdomain-bookmark-item-row:hover {
+    border-color: var(--accent-primary, #0284c7);
+    background: var(--bg-hover, rgba(14, 165, 233, 0.08));
+}
+.subdomain-bookmark-index {
+    font-size: 10px;
+    color: var(--text-tertiary, #94a3b8);
+    min-width: 15px;
+    text-align: right;
+    font-weight: 500;
+    flex-shrink: 0;
+}
+.subdomain-bookmark-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.subdomain-bookmark-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-weight: 500;
+    line-height: 1.35;
+}
+.subdomain-bookmark-jump-badge {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%) translateX(6px);
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--accent-primary, #0284c7);
+    background: var(--bg-primary, #ffffff);
+    padding: 2px 6.5px;
+    border-radius: 10px;
+    border: 1px solid rgba(2, 132, 199, 0.25);
+    box-shadow: -8px 0 10px 1px var(--bg-primary, #ffffff), 0 1px 3px rgba(0, 0, 0, 0.08);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+    z-index: 2;
+    white-space: nowrap;
+}
+[data-theme="dark"] .subdomain-bookmark-jump-badge {
+    background: #1e293b;
+    border-color: rgba(14, 165, 233, 0.35);
+    box-shadow: -8px 0 10px 1px #1e293b, 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.subdomain-bookmark-item-row:hover .subdomain-bookmark-jump-badge {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+    pointer-events: auto;
+}
+.subdomain-bookmark-jump-badge:hover {
+    background: var(--accent-primary, #0284c7);
+    color: #ffffff;
+    border-color: var(--accent-primary, #0284c7);
+    box-shadow: -6px 0 10px 1px var(--bg-primary, #ffffff), 0 2px 6px rgba(2, 132, 199, 0.35);
+}
+[data-theme="dark"] .subdomain-bookmark-jump-badge:hover {
+    background: var(--accent-primary, #0284c7);
+    color: #ffffff;
+    border-color: var(--accent-primary, #0284c7);
+    box-shadow: -6px 0 10px 1px #1e293b, 0 2px 6px rgba(14, 165, 233, 0.4);
+}
+
+/* 集中收纳文件夹详情气泡内书签列表 (Primary Folder Bookmarks List) */
+.search-result-folder-bookmarks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3.5px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+    max-height: 230px;
+    overflow-y: auto;
+    padding-left: 12px;
+    border-left: 2px solid var(--border-color, rgba(128, 128, 128, 0.18));
+    margin-left: 6px;
+}
+.search-result-folder-bookmark-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 7px;
+    min-height: 25px;
+    box-sizing: border-box;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 11.5px;
+    line-height: 1.35;
+    color: var(--text-primary);
+    transition: background-color 0.15s ease, color 0.15s ease;
+    overflow: hidden;
+}
+.search-result-folder-bookmark-row:hover {
+    background: var(--bg-hover, rgba(14, 165, 233, 0.08));
+    color: var(--accent-primary, #0284c7);
+}
+.search-result-folder-bookmark-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.search-result-folder-bookmark-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 450;
+    line-height: 1.35;
+}
+.search-result-folder-bookmark-jump-badge {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%) translateX(6px);
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--accent-primary, #0284c7);
+    background: var(--bg-elevated, #ffffff);
+    padding: 2px 6.5px;
+    border-radius: 10px;
+    border: 1px solid rgba(2, 132, 199, 0.25);
+    box-shadow: -8px 0 10px 1px var(--bg-elevated, #ffffff), 0 1px 3px rgba(0, 0, 0, 0.08);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+    z-index: 2;
+    white-space: nowrap;
+}
+[data-theme="dark"] .search-result-folder-bookmark-jump-badge {
+    background: #1e293b;
+    border-color: rgba(14, 165, 233, 0.35);
+    box-shadow: -8px 0 10px 1px #1e293b, 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.search-result-folder-bookmark-row:hover .search-result-folder-bookmark-jump-badge {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+    pointer-events: auto;
+}
+.search-result-folder-bookmark-jump-badge:hover {
+    background: var(--accent-primary, #0284c7);
+    color: #ffffff;
+    border-color: var(--accent-primary, #0284c7);
+    box-shadow: -6px 0 10px 1px var(--bg-elevated, #ffffff), 0 2px 6px rgba(2, 132, 199, 0.35);
+}
+[data-theme="dark"] .search-result-folder-bookmark-jump-badge:hover {
+    background: var(--accent-primary, #0284c7);
+    color: #ffffff;
+    border-color: var(--accent-primary, #0284c7);
+    box-shadow: -6px 0 10px 1px #1e293b, 0 2px 6px rgba(14, 165, 233, 0.4);
 }
 
 .tabulator.canvas-search-tabulator .tabulator-placeholder {
@@ -2122,8 +2382,25 @@ html.side-panel-mode .canvas-bookmark-selection-confirm-btn .canvas-selection-co
 }
 
 /* ==================== 候选条目网格视图 (Grid View - 严格对齐关联记录) ==================== */
-.search-results-items-container {
+.search-results-panel.view-grid {
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.search-results-panel.view-grid .search-results-items-container {
     width: 100%;
+    flex-shrink: 0 !important;
+}
+
+.search-results-panel.view-grid .search-results-load-more-row {
+    flex-shrink: 0 !important;
+}
+
+.search-results-panel.view-grid .search-panel-resize-handle.handle-bottom {
+    margin-top: auto !important;
+    box-sizing: border-box !important;
+    align-items: flex-end !important;
+    padding-bottom: 2px !important;
 }
 
 .search-results-items-container.view-grid,
@@ -2451,7 +2728,7 @@ html.side-panel-mode .canvas-bookmark-selection-confirm-btn .canvas-selection-co
     margin: 2px 0;
 }
 
-html:not(.side-panel-mode) .search-results-panel.view-grid:not(.is-single-column) .canvas-grid-card-locations-row {
+.search-results-panel.view-grid:not(.is-single-column) .canvas-grid-card-locations-row {
     display: flex !important;
 }
 
@@ -2953,7 +3230,7 @@ html:not(.side-panel-mode) .search-results-panel.view-grid:not(.is-single-column
 /* 严禁多列网格内就地展开详情与子条目、位置标签，全部由说明气泡承载，杜绝撑开网格单元 */
 .search-results-panel.view-grid .canvas-bookmark-details-collapsible,
 .search-results-panel.view-grid .canvas-bookmark-group-children,
-html:not(.side-panel-mode) .search-results-panel.view-grid:not(.is-single-column) .canvas-bookmark-location-row {
+.search-results-panel.view-grid:not(.is-single-column) .canvas-bookmark-location-row {
     display: none !important;
 }
 
@@ -2966,9 +3243,8 @@ html:not(.side-panel-mode) .search-results-panel.view-grid:not(.is-single-column
 }
 
 /* ==================== 单纵行（单列）网格视图：全面展示永久与临时栏目 ==================== */
-/* 当网格处于单纵行时（宽度 < 554px 或挂载 .is-single-column 或处于侧边栏模式），自动解除 96px 锁死，允许栏目多行换行，杜绝横向撑出 */
-.search-results-panel.view-grid.is-single-column .search-results-items-container,
-html.side-panel-mode .search-results-panel.view-grid .search-results-items-container {
+/* 当网格处于单纵行时（宽度 < 554px 挂载 .is-single-column），自动解除 96px 锁死，允许栏目多行换行，杜绝横向撑出 */
+.search-results-panel.view-grid.is-single-column .search-results-items-container {
     grid-template-columns: minmax(0, 1fr) !important;
     grid-auto-rows: auto !important;
     gap: 8px !important;
@@ -2979,8 +3255,7 @@ html.side-panel-mode .search-results-panel.view-grid .search-results-items-conta
     overflow-x: hidden !important;
 }
 
-.search-results-panel.view-grid.is-single-column .search-result-item,
-html.side-panel-mode .search-results-panel.view-grid .search-result-item {
+.search-results-panel.view-grid.is-single-column .search-result-item {
     height: auto !important;
     min-height: 72px !important;
     max-height: none !important;
@@ -3000,21 +3275,17 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-item {
 .search-results-panel.view-grid.is-single-column.mode-structure .search-result-item,
 .search-results-panel.view-grid.is-single-column.mode-description .search-result-item,
 .search-results-panel.view-grid.is-single-column[data-search-mode="structure"] .search-result-item,
-.search-results-panel.view-grid.is-single-column[data-search-mode="description"] .search-result-item,
-html.side-panel-mode .search-results-panel.view-grid.mode-structure .search-result-item,
-html.side-panel-mode .search-results-panel.view-grid.mode-description .search-result-item,
-html.side-panel-mode .search-results-panel.view-grid[data-search-mode="structure"] .search-result-item,
-html.side-panel-mode .search-results-panel.view-grid[data-search-mode="description"] .search-result-item {
+.search-results-panel.view-grid.is-single-column[data-search-mode="description"] .search-result-item {
     min-height: 52px !important;
+    padding: 8px 12px !important;
+    gap: 3px !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-grid-card-locations-row,
-html.side-panel-mode .search-results-panel.view-grid .canvas-grid-card-locations-row {
+.search-results-panel.view-grid.is-single-column .canvas-grid-card-locations-row {
     display: none !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-row,
-html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-row {
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-row {
     display: flex !important;
     flex-wrap: wrap !important;
     align-items: center !important;
@@ -3027,8 +3298,7 @@ html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-r
     overflow: hidden !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-row,
-html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-chip-row {
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-row {
     display: flex !important;
     flex-wrap: wrap !important;
     align-items: center !important;
@@ -3038,8 +3308,7 @@ html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-c
     min-width: 0 !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip,
-html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-chip {
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip {
     max-width: 100% !important;
     min-width: 0 !important;
     flex-shrink: 1 !important;
@@ -3047,8 +3316,7 @@ html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-c
     min-height: 18px !important;
 }
 
-.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-text,
-html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-chip-text {
+.search-results-panel.view-grid.is-single-column .canvas-bookmark-location-chip-text {
     max-width: 100% !important;
     min-width: 0 !important;
     overflow: hidden !important;
@@ -3057,16 +3325,13 @@ html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-location-c
 }
 
 .search-results-panel.view-grid.is-single-column .canvas-bookmark-details-row,
-.search-results-panel.view-grid.is-single-column .canvas-grid-card-info-row,
-html.side-panel-mode .search-results-panel.view-grid .canvas-bookmark-details-row,
-html.side-panel-mode .search-results-panel.view-grid .canvas-grid-card-info-row {
+.search-results-panel.view-grid.is-single-column .canvas-grid-card-info-row {
     height: auto !important;
     min-height: 20px !important;
     margin-top: 3px !important;
 }
 
-.search-results-panel.view-grid.is-single-column .search-result-details-preview-context,
-html.side-panel-mode .search-results-panel.view-grid .search-result-details-preview-context {
+.search-results-panel.view-grid.is-single-column .search-result-details-preview-context {
     height: auto !important;
     min-height: 18px !important;
 }
@@ -3880,22 +4145,27 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
 }
 
 .search-result-item.bookmark-group .search-result-title,
+.search-result-item.domain-group .search-result-title,
 .search-result-item[data-type="bookmark-item"] .search-result-title {
     align-items: center;
     white-space: nowrap;
     gap: 6px;
 }
 
-.search-result-item.bookmark-group {
+.search-result-item.bookmark-group,
+.search-result-item.domain-group {
     position: relative;
 }
 
-.search-result-item.bookmark-group .search-result-title {
+.search-result-item.bookmark-group .search-result-title,
+.search-result-item.domain-group .search-result-title {
     padding-right: 0;
 }
 
 .search-result-item.bookmark-group.has-group-actions .search-result-title,
-.search-result-item.bookmark-group:has(.canvas-bookmark-group-actions) .search-result-title {
+.search-result-item.bookmark-group:has(.canvas-bookmark-group-actions) .search-result-title,
+.search-result-item.domain-group.has-group-actions .search-result-title,
+.search-result-item.domain-group:has(.canvas-bookmark-group-actions) .search-result-title {
     padding-right: 64px;
 }
 
@@ -3910,21 +4180,19 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
     z-index: 2;
 }
 
-.search-result-item.bookmark-group[data-expanded="true"] .search-result-title {
+.search-result-item.bookmark-group[data-expanded="true"] .search-result-title,
+.search-result-item.domain-group[data-expanded="true"] .search-result-title {
     padding-right: 0;
 }
 
-.search-result-item.bookmark-group .search-result-right-stack {
+.search-result-item.bookmark-group .search-result-right-stack,
+.search-result-item.domain-group .search-result-right-stack {
     margin-right: 0;
 }
 
-.search-result-item.bookmark-group[data-expanded="true"] .search-result-right-stack {
+.search-result-item.bookmark-group[data-expanded="true"] .search-result-right-stack,
+.search-result-item.domain-group[data-expanded="true"] .search-result-right-stack {
     display: none;
-}
-
-.search-result-item.domain-group .search-result-title {
-    align-items: center;
-    gap: 6px;
 }
 
 .search-result-item.domain-child .search-result-title {
@@ -4286,7 +4554,8 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
     color: var(--text-primary);
 }
 
-.search-result-item.bookmark-group[data-expanded="true"] .canvas-bookmark-group-toggle {
+.search-result-item.bookmark-group[data-expanded="true"] .canvas-bookmark-group-toggle,
+.search-result-item.domain-group[data-expanded="true"] .canvas-bookmark-group-toggle {
     color: var(--accent-primary);
     border-color: rgba(var(--accent-rgb), 0.45);
     background: rgba(var(--accent-rgb), 0.12);
@@ -4967,35 +5236,12 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
     color: #059669;
 }
 
+/* 兼容旧域名操作类，统一复用书签组标准布局与对齐规范 */
 .search-domain-actions {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     flex-shrink: 0;
-}
-
-.search-domain-toggle-btn {
-    width: 24px;
-    height: 24px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid rgba(14, 165, 233, 0.22);
-    border-radius: 7px;
-    background: rgba(14, 165, 233, 0.08);
-    color: #0284c7;
-    cursor: pointer;
-    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-}
-
-.search-domain-toggle-btn:hover {
-    background: rgba(14, 165, 233, 0.14);
-    border-color: rgba(14, 165, 233, 0.38);
-    color: #0369a1;
-}
-
-.search-domain-toggle-btn i {
-    font-size: 11px;
 }
 
 .search-domain-host-line {
@@ -5012,6 +5258,86 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
     flex-direction: column;
     gap: 1px;
     min-width: 0;
+}
+
+.search-results-panel.view-grid .search-domain-children-meta {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 6px !important;
+    height: 20px !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+}
+
+.search-results-panel.view-grid .search-domain-children-meta .search-domain-host-line {
+    margin: 0 !important;
+    max-width: 140px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    flex-shrink: 1 !important;
+}
+
+.search-results-panel.view-grid .search-domain-children-meta .search-result-link-row {
+    margin: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    flex-shrink: 1 !important;
+}
+
+.search-domain-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 0;
+}
+
+.search-domain-summary .search-domain-count-line {
+    font-size: 11px;
+    line-height: 18px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.search-results-panel.view-grid .search-result-item[data-type="domain-group"] .search-result-content {
+    gap: 0 !important;
+}
+
+.search-results-panel.view-grid .search-result-item[data-type="domain-group"] .canvas-bookmark-group-summary {
+    flex: 1 1 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+}
+
+.search-results-panel.view-grid .search-domain-summary {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    gap: 2px !important;
+    height: auto !important;
+    max-height: 42px !important;
+    min-height: 18px !important;
+    margin: 0 !important;
+    padding-right: 26px !important;
+    overflow: hidden !important;
+}
+
+.search-results-panel.view-grid .search-domain-summary .search-domain-count-line {
+    height: 18px !important;
+    line-height: 18px !important;
+    font-size: 11px !important;
+    color: var(--text-muted) !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
 }
 
 /* 暗色主题 badge 适配 */
@@ -5040,17 +5366,7 @@ html.side-panel-mode .search-results-panel.view-grid .search-result-details-prev
     color: #34d399;
 }
 
-[data-theme="dark"] .search-domain-toggle-btn {
-    border-color: rgba(96, 165, 250, 0.28);
-    background: rgba(96, 165, 250, 0.12);
-    color: #7dd3fc;
-}
 
-[data-theme="dark"] .search-domain-toggle-btn:hover {
-    background: rgba(96, 165, 250, 0.18);
-    border-color: rgba(96, 165, 250, 0.4);
-    color: #bae6fd;
-}
 
 /* ==================== 画布元素高亮样式 ==================== */
 .canvas-search-highlight {
@@ -7180,5 +7496,120 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     opacity: 0.55;
 }
 
+/* =============================================================================
+   Phase 4: 域名与子域名纯粹化（方案 A 极简模型：无弹窗、无下钻，顶部分段切换）
+   ============================================================================= */
 
+/* 1. 顶部工具栏域名聚合粒度分段切换组 (主域名 | 子域名) */
+.canvas-bookmark-domain-control-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
 
+.canvas-bookmark-domain-granularity-toggle {
+    display: inline-flex;
+    align-items: center;
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.1));
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.25));
+    border-radius: 6px;
+    padding: 2px;
+    gap: 2px;
+}
+
+.canvas-bookmark-domain-granularity-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    line-height: 1.3;
+}
+
+.canvas-bookmark-domain-granularity-btn:hover {
+    color: var(--text-primary);
+}
+
+.canvas-bookmark-domain-granularity-btn.active {
+    background: var(--bg-elevated, #ffffff);
+    color: var(--accent-primary, #0ea5e9);
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="dark"] .canvas-bookmark-domain-granularity-btn.active {
+    background: #1e293b;
+    color: #38bdf8;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+/* 2. 网格视图卡片标题正常布局 */
+.search-results-panel.view-grid .search-result-item[data-type="domain-group"] .search-result-title,
+.view-grid .search-result-item[data-type="domain-group"] .search-result-title {
+    padding-right: 0 !important;
+}
+
+/* 5. 表格视图域名专属样式 */
+.canvas-table-domain-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 100%;
+}
+
+.canvas-table-domain-count-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    height: 20px !important;
+    min-height: 20px !important;
+    max-height: 20px !important;
+    line-height: 18px !important;
+    font-size: 10.5px !important;
+    font-weight: 700 !important;
+    padding: 0 6px !important;
+    border-radius: 999px !important;
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.3)) !important;
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08)) !important;
+    color: var(--text-primary) !important;
+    cursor: pointer;
+    box-sizing: border-box !important;
+    transition: all 0.15s ease;
+}
+
+.canvas-table-domain-count-btn:hover {
+    border-color: var(--accent-primary, #0ea5e9) !important;
+    background: rgba(14, 165, 233, 0.12) !important;
+    color: var(--accent-primary, #0ea5e9) !important;
+}
+
+.canvas-table-root-domain-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.15));
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 4. 暗色主题根域名徽章适配 */
+[data-theme="dark"] .canvas-table-root-domain-badge {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.14);
+}

@@ -203,6 +203,7 @@ const searchUiState = {
     // Canvas bookmark mode: group-by-section UI state
     bookmarkGroupCollapse: new Map(), // groupId -> boolean (true = collapsed)
     bookmarkGroupVisibleCount: new Map(), // groupId -> number (visible count)
+    domainGroupVisibleCount: new Map(), // domainKey -> number (visible count)
     bookmarkGroupModel: null, // [{ header, children:[{item,s}] }]
     bookmarkDetailsExpanded: new Set(), // Set of expanded item IDs / childKeys
 
@@ -223,6 +224,8 @@ const searchUiState = {
     domainGroupCollapse: new Map(),
     // Domain grouping level: 'root' (registrable) or 'host' (subdomain)
     domainGrouping: 'host',
+    focusedHost: null,
+    domainRootContext: null,
 
     // Search help menu state (click the left icon)
     isHelpOpen: false,
@@ -646,6 +649,8 @@ function setSearchPanelViewMode(mode, options = {}) {
     }
     if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
+    if (typeof hideDomainTempBubble === 'function') hideDomainTempBubble();
+    if (typeof hideSubdomainListPopover === 'function') hideSubdomainListPopover();
     if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
         const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
         exitCanvasSearchSelectionMode({
@@ -2028,6 +2033,12 @@ function showSearchResultsPanel() {
                 if (typeof hideGridGroupPopover === 'function') {
                     hideGridGroupPopover();
                 }
+                if (typeof hideDomainTempBubble === 'function') {
+                    hideDomainTempBubble();
+                }
+                if (typeof hideSubdomainListPopover === 'function') {
+                    hideSubdomainListPopover();
+                }
             }, { passive: true });
         }
     });
@@ -2040,6 +2051,8 @@ function hideSearchResultsPanel() {
     if (typeof exitCanvasSearchSelectionMode === 'function') exitCanvasSearchSelectionMode({ silent: true });
     if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
     if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble(true);
+    if (typeof hideDomainTempBubble === 'function') hideDomainTempBubble();
+    if (typeof hideSubdomainListPopover === 'function') hideSubdomainListPopover();
     if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
     if (typeof clearSearchPanelAutoInfiniteScroll === 'function') clearSearchPanelAutoInfiniteScroll();
@@ -2154,6 +2167,12 @@ function exitMainSearchMode(options = {}) {
         if (typeof hideGridDetailsBubble === 'function') {
             hideGridDetailsBubble();
         }
+        if (typeof hideDomainTempBubble === 'function') {
+            hideDomainTempBubble();
+        }
+        if (typeof hideSubdomainListPopover === 'function') {
+            hideSubdomainListPopover();
+        }
     } catch (_) { }
 
     try {
@@ -2255,6 +2274,12 @@ function clearMainSearchInput(options = {}) {
         }
         if (typeof hideGridDetailsBubble === 'function') {
             hideGridDetailsBubble();
+        }
+        if (typeof hideDomainTempBubble === 'function') {
+            hideDomainTempBubble();
+        }
+        if (typeof hideSubdomainListPopover === 'function') {
+            hideSubdomainListPopover();
         }
     } catch (_) { }
 
@@ -2827,6 +2852,26 @@ function handleSearchKeydown(e) {
         }
 
         if (e.key === 'Escape') {
+            if (typeof isDomainTempBubbleVisible === 'function' && isDomainTempBubbleVisible()) {
+                e.preventDefault();
+                hideDomainTempBubble();
+                return;
+            }
+            if (typeof isSubdomainListPopoverVisible === 'function' && isSubdomainListPopoverVisible()) {
+                e.preventDefault();
+                hideSubdomainListPopover();
+                return;
+            }
+            if (typeof isGridGroupPopoverVisible === 'function' && isGridGroupPopoverVisible()) {
+                e.preventDefault();
+                hideGridGroupPopover();
+                return;
+            }
+            if (typeof isGridDetailsBubbleVisible === 'function' && isGridDetailsBubbleVisible()) {
+                e.preventDefault();
+                hideGridDetailsBubble();
+                return;
+            }
             if (typeof hideTempSectionBubble === 'function' && tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
                 e.preventDefault();
                 hideTempSectionBubble(true);
@@ -2935,11 +2980,25 @@ function handleSearchResultsPanelClick(e) {
             hideTempSectionBubble(true);
         }
     }
+    if (typeof isDomainTempBubbleVisible === 'function' && isDomainTempBubbleVisible()) {
+        const inDomainBubbleOrBtn = e.target && e.target.closest && e.target.closest('#canvasDomainTempBubble, .canvas-domain-temp-btn');
+        if (!inDomainBubbleOrBtn) {
+            hideDomainTempBubble();
+        }
+    }
+    if (typeof isSubdomainListPopoverVisible === 'function' && isSubdomainListPopoverVisible()) {
+        const inSubdomainPopoverOrBtn = e.target && e.target.closest && e.target.closest('#canvasSubdomainPopover, .canvas-table-subdomain-pill-btn, .search-domain-subdomains-count');
+        if (!inSubdomainPopoverOrBtn) {
+            hideSubdomainListPopover();
+        }
+    }
 
     // ==================== 勾选模式强拦截（防误触与防止意外跳转退出） ====================
     if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
         const isControlAction = e.target.closest(
             '.canvas-bookmark-to-temp-btn, .canvas-bookmark-selection-confirm-btn, #searchTempSectionBubble, .canvas-temp-bubble-btn, .canvas-temp-bubble-chip, ' +
+            '.canvas-domain-temp-btn, #canvasDomainTempBubble, .canvas-table-subdomain-pill-btn, #canvasSubdomainPopover, .search-domain-subdomains-count, ' +
+            '.canvas-domain-nav-banner, .canvas-domain-nav-back-btn, .canvas-domain-nav-clear-focus-btn, ' +
             '.canvas-bookmark-view-toggle-btn, .canvas-bookmark-toolbar-actions, ' +
             '.canvas-bookmark-type-btn, .canvas-structure-type-btn, .canvas-description-type-btn, .canvas-bookmark-domain-granularity-btn, ' +
             '.canvas-bookmark-type-toggle, .canvas-structure-type-toggle, .canvas-description-type-toggle, ' +
@@ -3112,6 +3171,27 @@ function handleSearchResultsPanelClick(e) {
             }
         }
         toggleGridItemDetailsBubble(gridLocationMoreBtn, itemId, itemIndex);
+        return;
+    }
+
+    // Handle Subdomain List Popover (table pill button or grid card link)
+    const subdomainPillBtn = e.target.closest('.canvas-table-subdomain-pill-btn, .canvas-grid-subdomain-more-btn');
+    if (subdomainPillBtn) {
+        if (e._canvasHandled) return;
+        e._canvasHandled = true;
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        const domainKey = subdomainPillBtn.getAttribute('data-domain') || '';
+        const tabulatorRow = subdomainPillBtn.closest('.tabulator-row');
+        if (tabulatorRow && canvasSearchTabulatorInstance) {
+            try {
+                const rowData = canvasSearchTabulatorInstance.getRow(tabulatorRow)?.getData();
+                if (rowData) subdomainPillBtn._rowData = rowData;
+            } catch (_) { }
+        }
+        toggleSubdomainListPopover(subdomainPillBtn, domainKey);
         return;
     }
 
@@ -3387,6 +3467,8 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
+
+
     const bookmarkGroupToggle = e.target.closest('.canvas-bookmark-group-toggle, .canvas-bookmark-group-count');
     if (bookmarkGroupToggle) {
         try {
@@ -3403,6 +3485,20 @@ function handleSearchResultsPanelClick(e) {
         if (isSearchPanelGridView()) {
             toggleGridGroupPopover(bookmarkGroupToggle, groupId);
             return;
+        }
+
+        if (groupRow && groupRow.getAttribute('data-type') === 'domain-group') {
+            const domainKey = String(bookmarkGroupToggle.getAttribute('data-domain') || '').trim().toLowerCase();
+            const item = (selectedIndex >= 0 && Array.isArray(searchUiState.results)) ? searchUiState.results[selectedIndex] : null;
+            if (domainKey) {
+                const wasExpanded = item ? (item.isExpanded === true) : false;
+                setDomainGroupCollapsed(domainKey, wasExpanded);
+                if (wasExpanded && searchUiState.domainGroupVisibleCount instanceof Map) {
+                    searchUiState.domainGroupVisibleCount.set(domainKey, 50);
+                }
+                rerenderCanvasBookmarkResults(Number.isNaN(selectedIndex) ? searchUiState.selectedIndex : selectedIndex);
+                return;
+            }
         }
 
         if (!(searchUiState.bookmarkGroupCollapse instanceof Map)) {
@@ -3439,6 +3535,27 @@ function handleSearchResultsPanelClick(e) {
             searchUiState.bookmarkGroupVisibleCount = new Map();
         }
         searchUiState.bookmarkGroupVisibleCount.set(groupId, Infinity);
+        rerenderCanvasBookmarkResults(Number.isNaN(selectedIndex) ? searchUiState.selectedIndex : selectedIndex);
+        return;
+    }
+
+    const domainGroupLoadMore = e.target.closest('.canvas-domain-group-load-more-btn');
+    if (domainGroupLoadMore) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const domainKey = String(domainGroupLoadMore.getAttribute('data-domain') || '').trim().toLowerCase();
+        const groupRow = domainGroupLoadMore.closest('.search-result-item');
+        const selectedIndex = parseInt(groupRow && groupRow.getAttribute('data-index') || '-1', 10);
+        if (!domainKey) return;
+
+        if (!(searchUiState.domainGroupVisibleCount instanceof Map)) {
+            searchUiState.domainGroupVisibleCount = new Map();
+        }
+        const currentLimit = searchUiState.domainGroupVisibleCount.get(domainKey) || 50;
+        searchUiState.domainGroupVisibleCount.set(domainKey, currentLimit + 50);
         rerenderCanvasBookmarkResults(Number.isNaN(selectedIndex) ? searchUiState.selectedIndex : selectedIndex);
         return;
     }
@@ -3557,7 +3674,12 @@ function handleSearchResultsPanelClick(e) {
         searchUiState.bookmarkTypeFilter = (type === 'all' ? null : type);
         if (type === 'domain') {
             searchUiState.domainGrouping = 'root';
+            searchUiState.focusedHost = null;
+            searchUiState.domainRootContext = null;
             try { localStorage.setItem(DOMAIN_GROUP_PREF_KEY, 'root'); } catch (_) { }
+        } else {
+            searchUiState.focusedHost = null;
+            searchUiState.domainRootContext = null;
         }
         const groups = searchUiState.bookmarkGroupModel;
         if (Array.isArray(groups)) {
@@ -3644,10 +3766,13 @@ function handleSearchResultsPanelClick(e) {
 
         if (typeof hideTempSectionBubble === 'function') hideTempSectionBubble();
 
+        const requested = domainGranularityBtn.getAttribute('data-domain-group');
         const currentGroup = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
-        const next = currentGroup === 'host' ? 'root' : 'host';
+        const next = (requested === 'root' || requested === 'host') ? requested : (currentGroup === 'host' ? 'root' : 'host');
         searchUiState.bookmarkTypeFilter = 'domain';
         searchUiState.domainGrouping = next;
+        searchUiState.focusedHost = null;
+        searchUiState.domainRootContext = null;
         try { localStorage.setItem(DOMAIN_GROUP_PREF_KEY, next); } catch (_) { }
 
         const groups = searchUiState.bookmarkGroupModel;
@@ -3660,7 +3785,7 @@ function handleSearchResultsPanelClick(e) {
         return;
     }
 
-    const domainToggleBtn = e.target.closest('.search-domain-toggle-btn');
+    const domainToggleBtn = e.target.closest('.search-domain-toggle-btn, .canvas-domain-match-count');
     if (domainToggleBtn) {
         try {
             e.preventDefault();
@@ -3676,8 +3801,39 @@ function handleSearchResultsPanelClick(e) {
         const domainKey = String(item.domain || item.title || '').trim().toLowerCase();
         if (!domainKey) return;
 
-        setDomainGroupCollapsed(domainKey, item.isExpanded === true);
+        // 如果处于网格视图：弹出专门的多处匹配浮层 UI，就朝后边列出，完全学习 bookmark-group
+        if (isSearchPanelGridView()) {
+            toggleGridGroupPopover(domainToggleBtn, item.id || `domain:${domainKey}`);
+            return;
+        }
+
+        const wasExpanded = item.isExpanded === true;
+        setDomainGroupCollapsed(domainKey, wasExpanded);
+        if (wasExpanded && searchUiState.domainGroupVisibleCount instanceof Map) {
+            searchUiState.domainGroupVisibleCount.set(domainKey, 50);
+        }
         rerenderCanvasBookmarkResults(index);
+        return;
+    }
+
+    const domainChildItem = e.target.closest('.search-result-item.domain-child');
+    if (domainChildItem && !e.target.closest('.search-result-link-row a, .search-result-badge-interactive, .search-loc-chip')) {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+
+        const index = parseInt(domainChildItem.getAttribute('data-index') || '-1', 10);
+        const childItem = searchUiState.results[index];
+        if (childItem) {
+            recordCurrentSearchJumpHistory();
+            try {
+                hideSearchResultsPanel();
+                const inputEl = document.getElementById('searchInput');
+                if (inputEl) inputEl.value = '';
+            } catch (_) { }
+            navigateToCanvasBookmarkSearchTarget(childItem);
+        }
         return;
     }
 
@@ -3843,6 +3999,20 @@ function handleSearchResultsPanelClick(e) {
     if (!itemEl) return;
 
     const itemType = String(itemEl.getAttribute('data-type') || '').trim();
+    if (isSearchPanelGridView() && itemType === 'domain-group') {
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+        } catch (_) { }
+        const toggleBtn = itemEl.querySelector('.canvas-bookmark-group-toggle') || itemEl;
+        const idx = parseInt(itemEl.getAttribute('data-index') || '-1', 10);
+        const itemObj = (idx >= 0 && Array.isArray(searchUiState.results)) ? searchUiState.results[idx] : null;
+        const domainKey = String((itemObj && (itemObj.domain || itemObj.title)) || itemEl.getAttribute('data-domain') || '').trim().toLowerCase();
+        const groupId = String(itemEl.getAttribute('data-id') || `domain:${domainKey}`).trim();
+        toggleGridGroupPopover(toggleBtn, groupId);
+        return;
+    }
+
     if (itemType === 'tag-browser-color' || itemType === 'tag-browser-tag') {
         try {
             e.preventDefault();
@@ -3925,6 +4095,7 @@ function hideSearchTitleTooltip() {
     currentTooltipTarget = null;
     if (searchResultTooltipEl) {
         searchResultTooltipEl.classList.remove('visible');
+        searchResultTooltipEl.style.display = 'none';
     }
 }
 
@@ -4049,7 +4220,7 @@ function showSearchTitleTooltip(targetEl, text, options = {}) {
 }
 
 /**
- * 计划延迟展示完整标题浮层（工具栏气泡响应更迅速，默认 150ms；若已在显示气泡并在相邻按钮滑动则 60ms 平滑过渡）
+ * 计划延迟展示完整标题浮层（每个条目均严格独立等待 0.7s/700ms，绝不连续瞬间触发）
  */
 function scheduleSearchTitleTooltip(targetEl, fullTitle, delayMs = 700, options = {}) {
     if (!targetEl || !fullTitle) {
@@ -4059,11 +4230,11 @@ function scheduleSearchTitleTooltip(targetEl, fullTitle, delayMs = 700, options 
     if (currentTooltipTarget === targetEl) {
         return;
     }
-    const wasVisible = !!(currentTooltipTarget && (searchResultTooltipEl || document.getElementById('searchResultTitleTooltip'))?.classList.contains('visible'));
     hideSearchTitleTooltip();
     currentTooltipTarget = targetEl;
 
-    const timeout = wasVisible ? 60 : (typeof delayMs === 'number' ? delayMs : 700);
+    // 严格独立计时，绝不因相邻条目已显示而连带迅速触发；每个条目均需独立等待完整的 0.7s
+    const timeout = (typeof delayMs === 'number' && delayMs >= 0) ? delayMs : 700;
     searchResultTooltipTimer = setTimeout(() => {
         if (currentTooltipTarget === targetEl && document.body.contains(targetEl)) {
             showSearchTitleTooltip(targetEl, fullTitle, options);
@@ -4311,14 +4482,33 @@ function unwrapSearchItemsForTempPayload(items, options = {}) {
 
     for (const item of items) {
         if (!item) continue;
-        if (item.type === 'bookmark-group' || (item.header && Array.isArray(item.children))) {
+        if (item.type === 'bookmark-group' || item.type === 'domain-group' || (item.header && Array.isArray(item.children))) {
             let subList = [];
             if (Array.isArray(item.targetItems) && item.targetItems.length > 0) {
                 subList = item.targetItems.filter(Boolean);
+            } else if (Array.isArray(item.childItems) && item.childItems.length > 0) {
+                subList = item.childItems.filter(Boolean);
+            } else if (Array.isArray(item.items) && item.items.length > 0) {
+                subList = item.items.filter(Boolean);
             } else if (Array.isArray(item.children) && item.children.length > 0) {
                 subList = item.children.map(c => c && (c.item || c)).filter(Boolean);
             } else if (item.groupModel && Array.isArray(item.groupModel.children) && item.groupModel.children.length > 0) {
                 subList = item.groupModel.children.map(c => c && (c.item || c)).filter(Boolean);
+            }
+
+            if (item.type === 'domain-group' && subList.length === 0) {
+                const domainKey = String(item.domain || item.title || '').trim().toLowerCase();
+                if (domainKey) {
+                    try {
+                        const cache = ensureDomainCacheForQuery(searchUiState.query || '');
+                        if (cache && cache.map instanceof Map) {
+                            const entry = cache.map.get(domainKey);
+                            if (entry && Array.isArray(entry.items)) {
+                                subList = entry.items.filter(Boolean);
+                            }
+                        }
+                    } catch (_) {}
+                }
             }
 
             if (subList.length > 0) {
@@ -4501,7 +4691,9 @@ async function handleCanvasSearchTopNAction(nVal) {
     }
     if (!Number.isFinite(count) || count <= 0) return;
 
-    const topItems = collectBookmarkItemsForTempSection(count);
+    const topItems = (typeof collectBookmarkItemsForTempSection === 'function')
+        ? await collectBookmarkItemsForTempSection(count)
+        : [];
     if (!topItems.length) {
         showCanvasToastSafe(isZh ? '没有可用的书签结果' : 'No available bookmarks', 'warning', 1800);
         return;
@@ -4511,10 +4703,16 @@ async function handleCanvasSearchTopNAction(nVal) {
     hideTempSectionBubble(true);
     hideSearchResultsPanel();
     const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) ? searchUiState.query.trim() : '';
-    const hasExpandedMulti = topItems.length > count;
+    const totalBookmarks = (typeof countTotalBookmarksInPayload === 'function')
+        ? countTotalBookmarksInPayload(topItems)
+        : topItems.length;
+    const hasExpandedMulti = totalBookmarks > count;
+    const filter = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.bookmarkTypeFilter) || '';
+    const filterNameZh = filter === 'domain' ? '域名' : (filter === 'folder' ? '文件夹' : '书签');
+    const filterNameEn = filter === 'domain' ? 'Domains' : (filter === 'folder' ? 'Folders' : 'Bookmarks');
     const title = query
-        ? (isZh ? `搜索: "${query}" (前${count}项${hasExpandedMulti ? `·共${topItems.length}条` : ''})` : `Search: "${query}" (Top ${count}${hasExpandedMulti ? `, ${topItems.length} items` : ''})`)
-        : (isZh ? `书签 (前${count}项${hasExpandedMulti ? `·共${topItems.length}条` : ''})` : `Bookmarks (Top ${count}${hasExpandedMulti ? `, ${topItems.length} items` : ''})`);
+        ? (isZh ? `搜索: "${query}" (前${count}项${hasExpandedMulti ? `·共${totalBookmarks}条` : ''})` : `Search: "${query}" (Top ${count}${hasExpandedMulti ? `, ${totalBookmarks} items` : ''})`)
+        : (isZh ? `${filterNameZh} (前${count}项${hasExpandedMulti ? `·共${totalBookmarks}条` : ''})` : `${filterNameEn} (Top ${count}${hasExpandedMulti ? `, ${totalBookmarks} items` : ''})`);
 
     if (isCanvasSearchSelectionModeActive()) {
         exitCanvasSearchSelectionMode({ silent: true });
@@ -4529,9 +4727,94 @@ async function createTempSectionFromSelectedItems() {
         showCanvasToastSafe(isZh ? '请先点击条目进行勾选' : 'Please select items first', 'warning', 2000);
         return;
     }
-    const rawSelected = Array.from(canvasSearchSelectedItemsMap.values());
-    const visualCount = rawSelected.length;
-    const items = unwrapSearchItemsForTempPayload(rawSelected, { preserveExplicitSelection: true });
+
+    let selectedOrdered = [];
+    const isTableView = typeof isSearchPanelTableView === 'function' && isSearchPanelTableView() && typeof isCanvasSearchTabulatorReady === 'function' && isCanvasSearchTabulatorReady();
+
+    if (isTableView) {
+        const currentActiveRows = (canvasSearchTabulatorInstance && typeof canvasSearchTabulatorInstance.getData === 'function')
+            ? (canvasSearchTabulatorInstance.getData("active") || [])
+            : [];
+        let hasAllSelectedInCurrent = false;
+        if (currentActiveRows.length > 0 && canvasSearchSelectedItemsMap.size > 0) {
+            const loadedIdSet = new Set(currentActiveRows.map(r => String((r && (r.id || (r.rawItem && r.rawItem.id))) || '').trim()).filter(Boolean));
+            hasAllSelectedInCurrent = Array.from(canvasSearchSelectedItemsMap.keys()).every(k => loadedIdSet.has(String(k).trim()));
+        }
+        if (!hasAllSelectedInCurrent && typeof ensureAllCanvasSearchTabulatorDataLoaded === 'function') {
+            ensureAllCanvasSearchTabulatorDataLoaded();
+        }
+        const activeRows = canvasSearchTabulatorInstance.getData("active") || [];
+        const seenKeys = new Set();
+        for (const r of activeRows) {
+            const rId = String((r && (r.id || (r.rawItem && r.rawItem.id))) || '').trim();
+            if (rId && canvasSearchSelectedItemsMap.has(rId)) {
+                selectedOrdered.push(r.rawItem || canvasSearchSelectedItemsMap.get(rId) || r);
+                seenKeys.add(rId);
+            }
+        }
+        for (const [key, val] of canvasSearchSelectedItemsMap.entries()) {
+            if (!seenKeys.has(key)) {
+                selectedOrdered.push(val);
+            }
+        }
+    } else {
+        const gridResults = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.results))
+            ? searchUiState.results
+            : [];
+        const seenKeys = new Set();
+        for (const r of gridResults) {
+            const rId = String((r && (r.id || (r.rawItem && r.rawItem.id))) || '').trim();
+            if (rId && canvasSearchSelectedItemsMap.has(rId)) {
+                selectedOrdered.push(r.rawItem || canvasSearchSelectedItemsMap.get(rId) || r);
+                seenKeys.add(rId);
+            }
+        }
+        for (const [key, val] of canvasSearchSelectedItemsMap.entries()) {
+            if (!seenKeys.has(key)) {
+                selectedOrdered.push(val);
+            }
+        }
+    }
+
+    const visualCount = selectedOrdered.length;
+    const items = [];
+    const coveredBookmarkKeys = new Set();
+
+    for (const item of selectedOrdered) {
+        if (!item) continue;
+        const norm = item.rawItem || item;
+        const isDomainGroup = norm.type === 'domain-group' || item.type === 'domain-group';
+        if (isDomainGroup && typeof buildDomainGroupFolderPayload === 'function') {
+            const domainPayload = await buildDomainGroupFolderPayload(item, isZh);
+            if (domainPayload) {
+                items.push(domainPayload);
+                const markCovered = (children) => {
+                    if (!Array.isArray(children)) return;
+                    for (const c of children) {
+                        if (!c) continue;
+                        if (c.type === 'folder') {
+                            markCovered(c.children);
+                        } else {
+                            const cKey = (typeof getBookmarkItemContentKey === 'function') ? getBookmarkItemContentKey(c) : (c.url || c.id);
+                            const vKey = (typeof getBookmarkItemTagNoteVariantKey === 'function') ? getBookmarkItemTagNoteVariantKey(c) : '';
+                            coveredBookmarkKeys.add(`${cKey}::${vKey}`);
+                        }
+                    }
+                };
+                markCovered(domainPayload.children);
+            }
+        } else {
+            const unwrapped = unwrapSearchItemsForTempPayload([item], { preserveExplicitSelection: true });
+            for (const u of unwrapped) {
+                if (!u) continue;
+                const cKey = (typeof getBookmarkItemContentKey === 'function') ? getBookmarkItemContentKey(u) : (u.url || u.id);
+                const vKey = (typeof getBookmarkItemTagNoteVariantKey === 'function') ? getBookmarkItemTagNoteVariantKey(u) : '';
+                const fullKey = `${cKey}::${vKey}`;
+                if (coveredBookmarkKeys.has(fullKey)) continue;
+                items.push(u);
+            }
+        }
+    }
 
     if (!items.length) {
         showCanvasToastSafe(isZh ? '所选条目无效或为空' : 'Selected items are invalid or empty', 'warning', 1800);
@@ -4540,10 +4823,16 @@ async function createTempSectionFromSelectedItems() {
     hideTempSectionBubble(true);
     hideSearchResultsPanel();
     const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) ? searchUiState.query.trim() : '';
-    const hasExpandedMulti = items.length > visualCount;
+    const totalBookmarks = (typeof countTotalBookmarksInPayload === 'function')
+        ? countTotalBookmarksInPayload(items)
+        : items.length;
+    const hasExpandedMulti = totalBookmarks > visualCount;
+    const filter = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.bookmarkTypeFilter) || '';
+    const filterNameZh = filter === 'domain' ? '域名' : (filter === 'folder' ? '文件夹' : '书签');
+    const filterNameEn = filter === 'domain' ? 'Domains' : (filter === 'folder' ? 'Folders' : 'Bookmarks');
     const title = query
-        ? (isZh ? `搜索: "${query}" (已选${visualCount}项${hasExpandedMulti ? `·共${items.length}条` : ''})` : `Search: "${query}" (Selected ${visualCount}${hasExpandedMulti ? `, ${items.length} items` : ''})`)
-        : (isZh ? `已选书签 (${visualCount}项${hasExpandedMulti ? `·共${items.length}条` : ''})` : `Selected Bookmarks (${visualCount}${hasExpandedMulti ? `, ${items.length} items` : ''})`);
+        ? (isZh ? `搜索: "${query}" (已选${visualCount}项${hasExpandedMulti ? `·共${totalBookmarks}条` : ''})` : `Search: "${query}" (Selected ${visualCount}${hasExpandedMulti ? `, ${totalBookmarks} items` : ''})`)
+        : (isZh ? `已选${filterNameZh} (${visualCount}项${hasExpandedMulti ? `·共${totalBookmarks}条` : ''})` : `Selected ${filterNameEn} (${visualCount}${hasExpandedMulti ? `, ${totalBookmarks} items` : ''})`);
 
     await createTempSectionFromSearchResults(items, title);
     exitCanvasSearchSelectionMode({ silent: true });
@@ -4567,7 +4856,9 @@ async function exportAllSearchResultsToTempSection() {
     if (isCanvasSearchSelectionModeActive()) {
         exitCanvasSearchSelectionMode({ silent: true });
     }
-    const allItems = collectBookmarkItemsForTempSection();
+    const allItems = (typeof collectBookmarkItemsForTempSection === 'function')
+        ? await collectBookmarkItemsForTempSection()
+        : [];
     if (!allItems.length) {
         const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
         showCanvasToastSafe(isZh ? '没有可用的书签结果' : 'No available bookmarks', 'warning', 1800);
@@ -4576,9 +4867,15 @@ async function exportAllSearchResultsToTempSection() {
     const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) ? searchUiState.query.trim() : '';
     hideSearchResultsPanel();
     const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const totalBookmarks = (typeof countTotalBookmarksInPayload === 'function')
+        ? countTotalBookmarksInPayload(allItems)
+        : allItems.length;
+    const filter = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.bookmarkTypeFilter) || '';
+    const filterNameZh = filter === 'domain' ? '域名' : (filter === 'folder' ? '文件夹' : '书签');
+    const filterNameEn = filter === 'domain' ? 'Domains' : (filter === 'folder' ? 'Folders' : 'Bookmarks');
     const title = query
-        ? (isZh ? `搜索: "${query}" (全部·共${allItems.length}条)` : `Search: "${query}" (All, ${allItems.length} items)`)
-        : (isZh ? `全部书签 (共${allItems.length}条)` : `All Bookmarks (${allItems.length} items)`);
+        ? (isZh ? `搜索: "${query}" (全部·共${totalBookmarks}条)` : `Search: "${query}" (All, ${totalBookmarks} items)`)
+        : (isZh ? `全部${filterNameZh} (共${totalBookmarks}条)` : `All ${filterNameEn} (${totalBookmarks} items)`);
     await createTempSectionFromSearchResults(allItems, title);
 }
 
@@ -5140,6 +5437,7 @@ function hideGridDetailsBubble() {
     currentGridDetailsItemId = null;
     currentGridDetailsItem = null;
     currentGridDetailsItemIndex = -1;
+    if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
 }
 
 function isGridDetailsBubbleVisible() {
@@ -5201,7 +5499,7 @@ function hideGridGroupPopover() {
         currentGridGroupBtnTarget.classList.remove('popover-active');
         const icon = currentGridGroupBtnTarget.querySelector('i');
         if (icon) {
-            icon.className = 'fas fa-chevron-down';
+            icon.className = 'fas fa-chevron-right';
         }
         const parentActions = currentGridGroupBtnTarget.closest('.canvas-bookmark-group-actions');
         if (parentActions) {
@@ -5211,7 +5509,7 @@ function hideGridGroupPopover() {
             if (toggleBtn) {
                 toggleBtn.setAttribute('aria-expanded', 'false');
                 const i = toggleBtn.querySelector('i');
-                if (i) i.className = 'fas fa-chevron-down';
+                if (i) i.className = 'fas fa-chevron-right';
             }
         }
         currentGridGroupBtnTarget = null;
@@ -5267,6 +5565,36 @@ function getOrCreateGridGroupPopover() {
                     const hint = pathEllipsisToggle.closest('.search-result-path-hint, .canvas-grid-group-child-path');
                     if (hint) {
                         hint.classList.add('is-expanded');
+                    }
+                    return;
+                }
+
+                // 1c. 弹窗内懒加载：加载更多子项（超过50项时分批渲染）
+                const popoverLoadMoreBtn = e.target.closest('.canvas-grid-group-popover-load-more-btn');
+                if (popoverLoadMoreBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const listEl = el.querySelector('.canvas-grid-group-popover-list');
+                    if (listEl && Array.isArray(el._targetItems) && typeof el._renderPopoverChildRow === 'function') {
+                        const currentCount = listEl.querySelectorAll('.canvas-grid-group-child-row').length;
+                        const nextBatch = el._targetItems.slice(currentCount, currentCount + 50);
+                        if (nextBatch.length > 0) {
+                            const nextHtml = nextBatch.map((child, idx) => el._renderPopoverChildRow(child, currentCount + idx)).join('');
+                            const loadMoreWrap = popoverLoadMoreBtn.closest('.canvas-grid-group-popover-load-more');
+                            if (loadMoreWrap) {
+                                loadMoreWrap.insertAdjacentHTML('beforebegin', nextHtml);
+                                const newRemain = el._targetItems.length - (currentCount + nextBatch.length);
+                                if (newRemain > 0) {
+                                    const btnSpan = popoverLoadMoreBtn.querySelector('span');
+                                    if (btnSpan) {
+                                        const isZh = el._isZh !== false;
+                                        btnSpan.textContent = isZh ? `加载更多（剩余 ${newRemain} 项）` : `Load more (${newRemain} remaining)`;
+                                    }
+                                } else {
+                                    loadMoreWrap.remove();
+                                }
+                            }
+                        }
                     }
                     return;
                 }
@@ -5364,10 +5692,41 @@ function showGridGroupPopover(targetBtn, groupId) {
     hideGridGroupPopover();
     hideGridDetailsBubble();
 
-    const item = findSearchResultItemById(groupId);
+    let item = findSearchResultItemById(groupId);
+    if (!item && String(groupId).startsWith('domain:')) {
+        const dKey = String(groupId).replace(/^domain:/, '').trim().toLowerCase();
+        const cache = searchUiState && searchUiState.domainIndexCache;
+        if (cache && cache.map instanceof Map) {
+            let entry = cache.map.get(dKey);
+            if (!entry) {
+                for (const candidate of cache.map.values()) {
+                    const matchedItems = (candidate.items || []).filter(it => {
+                        const h = String(it.host || (it.url ? (function() { try { return new URL(it.url).hostname; } catch(_) { return ''; } })() : '')).toLowerCase();
+                        return h === dKey;
+                    });
+                    if (matchedItems.length > 0) {
+                        entry = {
+                            domain: dKey,
+                            items: matchedItems
+                        };
+                        break;
+                    }
+                }
+            }
+            if (entry) {
+                item = {
+                    id: groupId,
+                    type: 'domain-group',
+                    domain: entry.domain,
+                    title: entry.domain,
+                    targetItems: entry.items || []
+                };
+            }
+        }
+    }
     if (!item) return;
     const targetItems = Array.isArray(item.targetItems) ? item.targetItems : (Array.isArray(item.locations) ? item.locations : []);
-    if (targetItems.length <= 1) return;
+    if (targetItems.length === 0 || (targetItems.length <= 1 && item.type !== 'domain-group')) return;
 
     const popover = getOrCreateGridGroupPopover();
     const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
@@ -5393,8 +5752,18 @@ function showGridGroupPopover(targetBtn, groupId) {
     const headerBadgeEl = popover.querySelector('.canvas-grid-group-popover-badge');
 
     let iconHtml = '';
+    const isDomain = item.type === 'domain-group';
     const isFolder = item.nodeType === 'folder';
-    if (isFolder) {
+    if (isDomain) {
+        const domainUrl = 'https://' + (item.domain || item.title || '');
+        const faviconSrc = (typeof getFaviconUrl === 'function') ? getFaviconUrl(domainUrl) : '';
+        const hasRealFavicon = faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
+        if (hasRealFavicon) {
+            iconHtml = `<img src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(domainUrl)}" alt="">`;
+        } else {
+            iconHtml = `<i class="fas fa-globe" style="color:#0ea5e9;"></i>`;
+        }
+    } else if (isFolder) {
         iconHtml = `<i class="fas fa-folder" style="color:#2563eb;"></i>`;
     } else if (item.url) {
         const faviconSrc = (typeof getFaviconUrl === 'function') ? getFaviconUrl(item.url) : '';
@@ -5418,7 +5787,9 @@ function showGridGroupPopover(targetBtn, groupId) {
         headerTitleEl.title = rawTitle;
     }
     if (headerBadgeEl) {
-        headerBadgeEl.textContent = isZh ? `共 ${targetItems.length} 处分布` : `${targetItems.length} locations`;
+        headerBadgeEl.textContent = isDomain
+            ? (isZh ? `共 ${targetItems.length} 个书签` : `${targetItems.length} bookmarks`)
+            : (isZh ? `共 ${targetItems.length} 处分布` : `${targetItems.length} locations`);
     }
 
     // Body: List out child matches referencing list mode
@@ -5427,8 +5798,8 @@ function showGridGroupPopover(targetBtn, groupId) {
         const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
         let listHtml = '';
 
-        targetItems.forEach((child, childIndex) => {
-            if (!child) return;
+        const renderPopoverChildRow = (child, childIndex) => {
+            if (!child) return '';
             const childId = String(child.id || '').trim();
             const childTitle = child.title || item.title || (isZh ? '（无标题）' : '(Untitled)');
             const highlightedTitle = (typeof highlightSearchKeywords === 'function' && query)
@@ -5551,7 +5922,7 @@ function showGridGroupPopover(targetBtn, groupId) {
                 ? `<div class="canvas-grid-group-child-time" style="display:flex; align-items:center; gap:4px; font-size:10px; color:var(--text-secondary); line-height:1.3; opacity:0.85;"><i class="far fa-clock" style="font-size:9.5px; opacity:0.75;"></i><span>${isZh ? '创建时间: ' : 'Created: '}${highlightedChildTime}</span></div>`
                 : '';
 
-            listHtml += `
+            return `
                 <div class="canvas-grid-group-child-row ${child.nodeType === 'folder' ? 'is-folder' : 'is-bookmark'}"
                      role="button" tabindex="0"
                      data-bookmark-child-id="${escapeHtml(childId)}"
@@ -5575,7 +5946,27 @@ function showGridGroupPopover(targetBtn, groupId) {
                     </div>
                 </div>
             `;
-        });
+        };
+
+        const popoverVisibleLimit = 50;
+        const visibleItems = targetItems.slice(0, popoverVisibleLimit);
+        listHtml = visibleItems.map((child, idx) => renderPopoverChildRow(child, idx)).join('');
+
+        if (targetItems.length > popoverVisibleLimit) {
+            const remain = targetItems.length - popoverVisibleLimit;
+            listHtml += `
+                <div class="canvas-grid-group-popover-load-more" style="padding:10px 12px; text-align:center; border-top:1px dashed var(--border-color); margin-top:6px;">
+                    <button class="canvas-grid-group-popover-load-more-btn" type="button" style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; padding:5px 14px; font-size:11px; color:var(--text-secondary); cursor:pointer; font-weight:500; display:inline-flex; align-items:center; gap:6px;">
+                        <i class="fas fa-chevron-down" style="font-size:10px;"></i>
+                        <span>${isZh ? `加载更多（剩余 ${remain} 项）` : `Load more (${remain} remaining)`}</span>
+                    </button>
+                </div>
+            `;
+        }
+
+        popover._targetItems = targetItems;
+        popover._renderPopoverChildRow = renderPopoverChildRow;
+        popover._isZh = isZh;
 
         listEl.innerHTML = listHtml;
     }
@@ -5586,9 +5977,20 @@ function showGridGroupPopover(targetBtn, groupId) {
     popover.style.left = '-9999px';
     popover.style.top = '-9999px';
 
-    const cardRow = targetBtn.closest('.search-result-item') || targetBtn;
-    const cardRect = cardRow.getBoundingClientRect();
-    const btnRect = targetBtn.getBoundingClientRect();
+    let cardRow = targetBtn.closest('.search-result-item') || targetBtn;
+    let cardRect = cardRow.getBoundingClientRect();
+    let btnRect = targetBtn.getBoundingClientRect();
+    if ((cardRect.width === 0 && cardRect.height === 0) || !document.body.contains(cardRow)) {
+        if (currentSubdomainPopoverTarget && document.body.contains(currentSubdomainPopoverTarget)) {
+            cardRow = currentSubdomainPopoverTarget.closest('.search-result-item') || currentSubdomainPopoverTarget;
+            cardRect = cardRow.getBoundingClientRect();
+            btnRect = currentSubdomainPopoverTarget.getBoundingClientRect();
+        } else if (currentGridDetailsBtnTarget && document.body.contains(currentGridDetailsBtnTarget)) {
+            cardRow = currentGridDetailsBtnTarget.closest('.search-result-item') || currentGridDetailsBtnTarget;
+            cardRect = cardRow.getBoundingClientRect();
+            btnRect = currentGridDetailsBtnTarget.getBoundingClientRect();
+        }
+    }
     const popoverWidth = Math.min(360, window.innerWidth - 24);
     popover.style.width = popoverWidth + 'px';
 
@@ -5677,6 +6079,23 @@ function getOrCreateGridDetailsBubble() {
                 e.stopPropagation();
             });
 
+            el.addEventListener('mouseover', (e) => {
+                const bmRow = e.target.closest('.search-result-folder-bookmark-row');
+                if (!bmRow) {
+                    hideSearchTitleTooltip();
+                    return;
+                }
+                const fullTitle = bmRow.getAttribute('data-full-title');
+                if (fullTitle) {
+                    scheduleSearchTitleTooltip(bmRow, fullTitle, 700);
+                } else {
+                    hideSearchTitleTooltip();
+                }
+            });
+            el.addEventListener('mouseleave', () => {
+                hideSearchTitleTooltip();
+            });
+
             el.addEventListener('click', (e) => {
                 e.stopPropagation();
 
@@ -5722,6 +6141,38 @@ function getOrCreateGridDetailsBubble() {
                             return;
                         }
                     }
+                    return;
+                }
+
+                // 2c. 文件夹下属书签行点击：直接定位直达书签
+                const folderBmRow = e.target.closest('.search-result-folder-bookmark-row');
+                if (folderBmRow) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    recordCurrentSearchJumpHistory();
+                    const locId = folderBmRow.getAttribute('data-bookmark-id') || folderBmRow.getAttribute('data-loc-id');
+                    const locSource = folderBmRow.getAttribute('data-loc-source') || 'permanent';
+                    const locSection = folderBmRow.getAttribute('data-loc-section') || '';
+                    const rawCopyId = folderBmRow.getAttribute('data-copy-id');
+                    const copyId = (rawCopyId && rawCopyId !== 'null') ? rawCopyId : null;
+                    const chipColor = folderBmRow.style.getPropertyValue('--loc-color') || '#2563eb';
+
+                    hideGridDetailsBubble();
+                    hideSearchResultsPanel();
+                    try {
+                        const inputEl = document.getElementById('searchInput');
+                        if (inputEl) inputEl.value = '';
+                    } catch (_) { }
+
+                    const target = {
+                        type: 'bookmark-item',
+                        id: locId,
+                        source: locSource,
+                        sectionId: locSource === 'temporary' ? locSection : '',
+                        copyId: locSource === 'permanent' ? copyId : null,
+                        color: chipColor
+                    };
+                    navigateToCanvasBookmarkSearchTarget(target);
                     return;
                 }
 
@@ -5931,6 +6382,18 @@ function renderCanvasGridDetailsBubbleIconHtml(item, rowData, itemRow, tabRow) {
     const itemType = (rowData && rowData.rawItem && rowData.rawItem.type) || (item && (item.type || (item.rawItem && item.rawItem.type)));
     if (itemType === 'temp-section' || itemType === 'permanent-section') {
         return `<i class="fas fa-layer-group" style="color:#059669; font-size:14px;"></i>`;
+    }
+
+    // 2b. 判断是否域名组
+    if (itemType === 'domain-group' || (rowData && rowData.type === 'domain-group')) {
+        const domainKey = (rowData && rowData.domain) || (item && (item.domain || item.title)) || '';
+        const domainUrl = 'https://' + domainKey;
+        const faviconSrc = (rowData && rowData.favicon) || ((typeof getFaviconUrl === 'function') ? getFaviconUrl(domainUrl) : '');
+        const hasReal = faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
+        if (hasReal) {
+            return `<img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(domainUrl)}" alt="" style="width:16px; height:16px; object-fit:contain; border-radius:3px;">`;
+        }
+        return `<i class="fas fa-globe" style="color:#0ea5e9; font-size:14px;"></i>`;
     }
 
     // 3. 提取目标 URL
@@ -6154,7 +6617,8 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
         const isTagEllipsisBtn = !!(targetBtn && targetBtn.closest('.canvas-table-tag-ellipsis-btn, .search-result-tag-ellipsis-toggle'));
         const isTagMoreBtn = isTagEllipsisBtn || !!(targetBtn && targetBtn.closest('.canvas-table-tag-more-btn, .canvas-grid-tag-more-btn'));
         const isLocationBtn = !isDateMoreBtn && !isPathMoreBtn && !isNoteMoreBtn && !isTagMoreBtn && !!(targetBtn && targetBtn.closest('.canvas-grid-location-more-btn, .canvas-table-loc-more-btn'));
-        const isPathEllipsisBtn = isPathMoreBtn || !!(targetBtn && targetBtn.closest('.canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle'));
+        const isPathWrapperBtn = !!(targetBtn && targetBtn.closest('.canvas-table-path-wrapper, .canvas-table-path-text'));
+        const isPathEllipsisBtn = isPathMoreBtn || isPathWrapperBtn || !!(targetBtn && targetBtn.closest('.canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle'));
         const isNoteEllipsisBtn = !!(targetBtn && targetBtn.closest('.canvas-table-note-ellipsis-btn, .search-result-note-ellipsis-toggle'));
         const isNoteBtn = isNoteMoreBtn || isNoteEllipsisBtn || !!(targetBtn && targetBtn.closest('.canvas-table-note-btn, .canvas-table-note-wrapper'));
         const isUrlBtn = !!(targetBtn && targetBtn.closest('.canvas-table-url-btn, .canvas-table-url-text'));
@@ -6301,7 +6765,7 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
             // 如果用户点击的是「三个点 ...」（!isPathMoreBtn）：
             // .. 严格为单条路径内部层级过深服务，仅展示当前所点击的这条对应的展开路径，绝不出现“全部”标题，也不展示其他卡片路径！
             // 只有当用户点击「+N」（isPathMoreBtn）时，才展示全部卡片分布的路径列表与位置徽章！
-            const isSinglePathEllipsis = !isPathMoreBtn;
+            const isSinglePathEllipsis = !isPathMoreBtn && !isPathWrapperBtn;
             if (isSinglePathEllipsis && pathsList.length > 1) {
                 const targetPathText = String((rowData && rowData.path) || (item && (item.parentPath || item.path)) || (pathsList[0] && (pathsList[0].rawPath || pathsList[0].path)) || '').trim().toLowerCase();
                 const matched = pathsList.find(p => {
@@ -6328,23 +6792,78 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
                         return `${safePart}<span class="search-result-path-sep"> &gt; </span>`;
                     }).join('') : escapeHtml(entry.path || (isZh ? '根目录' : 'Root'));
 
+                    // 提取并渲染该文件夹下收纳的具体书签清单（书签标题、Favicon、点击跳转直达）
+                    const folderBookmarks = Array.isArray(entry.bookmarks) ? entry.bookmarks : [];
+                    let folderBookmarksListHtml = '';
+                    if (folderBookmarks.length > 0) {
+                        const bmRows = folderBookmarks.map((bm) => {
+                            const bmId = String(bm.id || '').trim();
+                            const bmTitle = bm.title || bm.rawTitle || (isZh ? '（无标题）' : '(Untitled)');
+                            const highlightedTitle = (typeof highlightSearchKeywords === 'function' && query)
+                                ? highlightSearchKeywords(bmTitle, query)
+                                : escapeHtml(bmTitle);
+
+                            const bmUrl = String(bm.url || '').trim();
+                            const faviconSrc = (typeof getFaviconUrl === 'function' && bmUrl) ? getFaviconUrl(bmUrl) : (bm.favicon || bm.favIconUrl || '');
+                            const hasReal = faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
+                            let bmIconHtml = '';
+                            if (hasReal) {
+                                bmIconHtml = `<img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(bmUrl)}" style="width:13px; height:13px; object-fit:contain; border-radius:2.5px; flex-shrink:0;" alt="">`;
+                            } else {
+                                bmIconHtml = `<i class="fas fa-bookmark" style="color:#f59e0b; font-size:10.5px; flex-shrink:0;"></i>`;
+                            }
+
+                            const bmSource = bm.source || entry.source || 'permanent';
+                            const bmSectionId = bm.sectionId || entry.sectionId || '';
+                            const bmCopyId = bm.copyId || entry.copyId || null;
+                            const bmColor = bm.color || entry.color || '#2563eb';
+
+                            return `<div class="search-result-folder-bookmark-row"
+                                         role="button"
+                                         tabindex="0"
+                                         data-bookmark-id="${escapeHtml(bmId)}"
+                                         data-loc-id="${escapeHtml(bmId)}"
+                                         data-loc-source="${escapeHtml(bmSource)}"
+                                         data-loc-section="${escapeHtml(bmSectionId)}"
+                                         data-copy-id="${escapeHtml(bmCopyId || '')}"
+                                         data-bookmark-url="${escapeHtml(bmUrl)}"
+                                         data-full-title="${escapeHtml(bmTitle)}"
+                                         style="--loc-color:${escapeHtml(bmColor)};"
+                                         aria-label="${escapeHtml(isZh ? `定位至「${bmTitle}」` : `Locate "${bmTitle}"`)}">
+                                <span class="search-result-folder-bookmark-icon">${bmIconHtml}</span>
+                                <span class="search-result-folder-bookmark-title">${highlightedTitle}</span>
+                                <span class="search-result-folder-bookmark-jump-badge">${isZh ? '定位' : 'Locate'}<i class="fas fa-arrow-right" style="font-size:8px; margin-left:3px;"></i></span>
+                            </div>`;
+                        }).join('');
+
+                        folderBookmarksListHtml = `<div class="search-result-folder-bookmarks-list">${bmRows}</div>`;
+                    }
+
                     if (!isSinglePathEllipsis && pathsList.length > 1) {
                         const isLast = idx === pathsList.length - 1;
-                        const borderBottom = isLast ? '' : 'border-bottom:1px solid var(--border-color, rgba(128,128,128,0.12)); padding-bottom:6px; margin-bottom:0;';
+                        const borderBottom = isLast ? '' : 'border-bottom:1px solid var(--border-color, rgba(128,128,128,0.12)); padding-bottom:8px; margin-bottom:4px;';
+                        const countBadgeHtml = (entry.count && entry.count > 0)
+                            ? `<span style="margin-left:auto; font-size:11px; font-weight:600; color:var(--text-secondary); flex-shrink:0;">${entry.count} ${isZh ? '项' : 'items'}</span>`
+                            : '';
                         return `<div class="search-result-path-row-entry" style="${borderBottom} display:flex; flex-direction:column; gap:4px;">
                             <div style="display:flex; align-items:center; line-height:1;">
                                 ${locChipHtml}
+                                ${countBadgeHtml}
                             </div>
                             <div class="search-result-path-hint is-expanded" data-item-id="${escapeHtml(String(entry.id || ''))}" data-loc-source="${escapeHtml(String(entry.source || ''))}" data-loc-section="${escapeHtml(String(entry.sectionId || ''))}" data-copy-id="${escapeHtml(String(entry.copyId || ''))}" style="margin:0; font-size:12px; line-height:1.5; display:flex; align-items:center; gap:6px; width:100%;">
                                 <i class="fas fa-folder" style="color:${escapeHtml(entry.color || '#2563eb')}; flex-shrink:0;"></i>
                                 <span class="search-result-path-text" style="flex:1; white-space:normal; overflow:visible; word-break:break-word; overflow-wrap:anywhere; line-height:1.5;">${pathPartsHtml}</span>
                             </div>
+                            ${folderBookmarksListHtml}
                         </div>`;
                     }
 
-                    return `<div class="search-result-path-hint is-expanded" data-item-id="${escapeHtml(String(entry.id || ''))}" data-loc-source="${escapeHtml(String(entry.source || ''))}" data-loc-section="${escapeHtml(String(entry.sectionId || ''))}" data-copy-id="${escapeHtml(String(entry.copyId || ''))}" style="margin-bottom:6px; font-size:12px; line-height:1.6; display:flex; align-items:center; gap:6px; width:100%; flex-wrap:wrap;">
-                        <i class="fas fa-folder" style="color:${escapeHtml(entry.color || '#2563eb')}; flex-shrink:0;"></i>
-                        <span class="search-result-path-text" style="flex:1; white-space:normal; overflow:visible; word-break:break-word; overflow-wrap:anywhere; line-height:1.6;">${pathPartsHtml}</span>
+                    return `<div class="search-result-path-row-entry" style="margin-bottom:6px; display:flex; flex-direction:column; gap:4px;">
+                        <div class="search-result-path-hint is-expanded" data-item-id="${escapeHtml(String(entry.id || ''))}" data-loc-source="${escapeHtml(String(entry.source || ''))}" data-loc-section="${escapeHtml(String(entry.sectionId || ''))}" data-copy-id="${escapeHtml(String(entry.copyId || ''))}" style="font-size:12px; line-height:1.6; display:flex; align-items:center; gap:6px; width:100%; flex-wrap:wrap;">
+                            <i class="fas fa-folder" style="color:${escapeHtml(entry.color || '#2563eb')}; flex-shrink:0;"></i>
+                            <span class="search-result-path-text" style="flex:1; white-space:normal; overflow:visible; word-break:break-word; overflow-wrap:anywhere; line-height:1.6;">${pathPartsHtml}</span>
+                        </div>
+                        ${folderBookmarksListHtml}
                     </div>`;
                 }).join('');
 
@@ -6354,8 +6873,8 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
             }
 
             let extraInfoHtml = '';
-            // 用户明确要求：路径的 +N 气泡里面不需要出现 tag、note，纯粹展示全部卡片分布的路径
-            if (isSinglePathEllipsis) {
+            // 用户明确要求：路径的 +N 气泡里面不需要出现 tag、note，纯粹展示全部卡片分布的路径与书签
+            if (isSinglePathEllipsis && !(item && (item.type === 'domain-group' || (item.rawItem && item.rawItem.type === 'domain-group')))) {
                 const allTags = getBookmarkItemAllTags(item, rowData, targetBtn);
                 if (allTags.length > 0) {
                     const tagsChips = allTags.map(t => {
@@ -6704,6 +7223,10 @@ function isSameGridBubbleTargetButton(btnA, btnB, currentKey, newKey) {
     const isPathEllipsisB = btnB.classList.contains('canvas-table-path-ellipsis-btn') || btnB.classList.contains('search-result-path-ellipsis-toggle');
     if (isPathEllipsisA && isPathEllipsisB) return true;
 
+    const isPathWrapperA = btnA.classList.contains('canvas-table-path-wrapper') || btnA.classList.contains('canvas-table-path-text');
+    const isPathWrapperB = btnB.classList.contains('canvas-table-path-wrapper') || btnB.classList.contains('canvas-table-path-text');
+    if (isPathWrapperA && isPathWrapperB) return true;
+
     // 便签：分别判定多卡片分布更多按钮 (+N) 与 单条便签全文展开/正文按钮 (...)
     const isNoteMoreA = btnA.classList.contains('canvas-table-note-more-btn') || btnA.classList.contains('canvas-grid-note-more-btn');
     const isNoteMoreB = btnB.classList.contains('canvas-table-note-more-btn') || btnB.classList.contains('canvas-grid-note-more-btn');
@@ -6723,8 +7246,8 @@ function isSameGridBubbleTargetButton(btnA, btnB, currentKey, newKey) {
     if (isTagEllipsisA && isTagEllipsisB) return true;
 
     // 位置更多按钮（排除上述所有专属维度的更多与省略号按钮）
-    const isAnyOtherA = isDateA || isPathMoreA || isPathEllipsisA || isNoteMoreA || isNoteContentA || isTagMoreA || isTagEllipsisA;
-    const isAnyOtherB = isDateB || isPathMoreB || isPathEllipsisB || isNoteMoreB || isNoteContentB || isTagMoreB || isTagEllipsisB;
+    const isAnyOtherA = isDateA || isPathMoreA || isPathEllipsisA || isPathWrapperA || isNoteMoreA || isNoteContentA || isTagMoreA || isTagEllipsisA;
+    const isAnyOtherB = isDateB || isPathMoreB || isPathEllipsisB || isPathWrapperB || isNoteMoreB || isNoteContentB || isTagMoreB || isTagEllipsisB;
     const isLocA = (btnA.classList.contains('canvas-grid-location-more-btn') || btnA.classList.contains('canvas-table-loc-more-btn')) && !isAnyOtherA;
     const isLocB = (btnB.classList.contains('canvas-grid-location-more-btn') || btnB.classList.contains('canvas-table-loc-more-btn')) && !isAnyOtherB;
     if (isLocA && isLocB) return true;
@@ -6757,6 +7280,434 @@ function toggleGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
     showGridItemDetailsBubble(targetBtn, safeItemId, safeIndex);
 }
 
+// ==================== 域名模块兼容性安全存根 (方案 A 模式：全平铺无弹窗) ====================
+let domainTempBubbleEl = null;
+let currentDomainTempBtnTarget = null;
+let currentDomainTempKey = null;
+
+function isDomainTempBubbleVisible() { return false; }
+function hideDomainTempBubble() { }
+function getOrCreateDomainTempBubble() { return null; }
+function showDomainTempBubble() { }
+function toggleDomainTempBubble() { }
+
+// ==================== 旗下子域名浮层详情 (Subdomains List Popover) ====================
+let subdomainListPopoverEl = null;
+let currentSubdomainPopoverTarget = null;
+let currentSubdomainPopoverKey = null;
+
+function isSubdomainListPopoverVisible() {
+    return !!(subdomainListPopoverEl && subdomainListPopoverEl.classList.contains('visible'));
+}
+
+function hideSubdomainListPopover() {
+    if (subdomainListPopoverEl) {
+        subdomainListPopoverEl.classList.remove('visible');
+        subdomainListPopoverEl.style.display = 'none';
+        subdomainListPopoverEl.setAttribute('aria-hidden', 'true');
+    }
+    if (currentSubdomainPopoverTarget) {
+        currentSubdomainPopoverTarget.classList.remove('subdomain-popover-active');
+        currentSubdomainPopoverTarget = null;
+    }
+    currentSubdomainPopoverKey = null;
+    if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
+}
+
+function getDomainSubdomainsList(item) {
+    if (!item) return [];
+    const raw = (item && item.rawItem) ? item.rawItem : item;
+    const targetItems = Array.isArray(raw.targetItems) ? raw.targetItems : (Array.isArray(item.targetItems) ? item.targetItems : []);
+
+    const hostMap = new Map();
+    targetItems.forEach(child => {
+        if (!child) return;
+        let host = String(child.host || '').trim();
+        if (!host && child.url) {
+            try { host = new URL(child.url).hostname; } catch (_) { }
+        }
+        if (!host) return;
+        if (!hostMap.has(host)) {
+            hostMap.set(host, {
+                host,
+                count: 0,
+                favicon: child.favicon || child.favIconUrl || '',
+                items: []
+            });
+        }
+        const entry = hostMap.get(host);
+        entry.count++;
+        entry.items.push(child);
+        if (!entry.favicon && (child.favicon || child.favIconUrl)) {
+            entry.favicon = child.favicon || child.favIconUrl;
+        }
+    });
+
+    const subdomains = Array.isArray(raw.subdomains) ? raw.subdomains : (Array.isArray(item.subdomains) ? item.subdomains : []);
+    subdomains.forEach(h => {
+        if (h && !hostMap.has(h)) {
+            hostMap.set(h, {
+                host: h,
+                count: 0,
+                favicon: '',
+                items: []
+            });
+        }
+    });
+
+    return Array.from(hostMap.values()).sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.host.localeCompare(b.host);
+    });
+}
+
+function getOrCreateSubdomainListPopover() {
+    if (!subdomainListPopoverEl || !document.body.contains(subdomainListPopoverEl)) {
+        let el = document.getElementById('searchSubdomainListPopover');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'searchSubdomainListPopover';
+            el.className = 'canvas-grid-details-bubble canvas-subdomain-list-popover';
+            el.setAttribute('role', 'dialog');
+            el.setAttribute('aria-hidden', 'true');
+            el.innerHTML = `
+                <div class="canvas-grid-bubble-arrow"></div>
+                <div class="canvas-grid-bubble-header" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px 8px 14px; border-bottom:1px solid var(--border-color, rgba(128,128,128,0.15));">
+                    <div class="canvas-subdomain-popover-title-group" style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
+                        <i class="fas fa-sitemap" style="color:#0ea5e9; font-size:14px; flex-shrink:0;"></i>
+                        <span class="canvas-subdomain-popover-title" style="font-size:12.5px; font-weight:600; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+                        <span class="canvas-subdomain-popover-count-badge" style="font-size:11px; font-weight:600; padding:1px 6px; border-radius:10px; background:rgba(14,165,233,0.12); color:#0284c7; flex-shrink:0;"></span>
+                    </div>
+                    <button type="button" class="canvas-grid-bubble-close-btn" aria-label="关闭" title="关闭 (Esc)" style="background:none; border:none; cursor:pointer; color:var(--text-tertiary); font-size:13px; padding:2px 4px;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="canvas-subdomain-popover-body" style="padding:6px; max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:2px;"></div>
+            `;
+            document.body.appendChild(el);
+
+            const closeBtn = el.querySelector('.canvas-grid-bubble-close-btn');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    hideSubdomainListPopover();
+                });
+            }
+
+            el.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+            el.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+
+            el.addEventListener('mouseover', (e) => {
+                const bmRow = e.target.closest('.subdomain-bookmark-item-row');
+                if (!bmRow) {
+                    hideSearchTitleTooltip();
+                    return;
+                }
+                const fullTitle = bmRow.getAttribute('data-full-title');
+                if (fullTitle) {
+                    scheduleSearchTitleTooltip(bmRow, fullTitle, 700);
+                } else {
+                    hideSearchTitleTooltip();
+                }
+            });
+            el.addEventListener('mouseleave', () => {
+                hideSearchTitleTooltip();
+            });
+
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // 1. 关闭按钮
+                if (e.target.closest('.canvas-grid-bubble-close-btn')) {
+                    hideSubdomainListPopover();
+                    return;
+                }
+
+                // 2. 点击某个子域名的书签条目：直接跳转定位至对应书签
+                const bmRow = e.target.closest('.subdomain-bookmark-item-row');
+                if (bmRow) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    recordCurrentSearchJumpHistory();
+                    const locId = bmRow.getAttribute('data-bookmark-id') || bmRow.getAttribute('data-loc-id');
+                    const locSource = bmRow.getAttribute('data-loc-source') || 'permanent';
+                    const locSection = bmRow.getAttribute('data-loc-section') || '';
+                    const rawCopyId = bmRow.getAttribute('data-copy-id');
+                    const copyId = (rawCopyId && rawCopyId !== 'null') ? rawCopyId : null;
+                    const chipColor = bmRow.style.getPropertyValue('--loc-color') || '#2563eb';
+
+                    hideSubdomainListPopover();
+                    hideSearchResultsPanel();
+                    try {
+                        const inputEl = document.getElementById('searchInput');
+                        if (inputEl) inputEl.value = '';
+                    } catch (_) { }
+
+                    const target = {
+                        type: 'bookmark-item',
+                        id: locId,
+                        source: locSource,
+                        sectionId: locSource === 'temporary' ? locSection : '',
+                        copyId: locSource === 'permanent' ? copyId : null,
+                        color: chipColor
+                    };
+                    navigateToCanvasBookmarkSearchTarget(target);
+                    return;
+                }
+
+                // 3. 点击某个子域名的整行或数量按钮：在当前浮层内就地展开/收起其书签抽屉（In-Place Accordion，彻底避免弹窗位置错位）
+                const countBtn = e.target.closest('.canvas-subdomain-bubble-count-btn, .canvas-bookmark-group-count');
+                const row = e.target.closest('.search-result-subdomain-bubble-row');
+                if (countBtn || row) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const itemContainer = (countBtn || row).closest('.search-result-subdomain-bubble-item');
+                    if (itemContainer) {
+                        const drawer = itemContainer.querySelector('.subdomain-accordion-drawer');
+                        const arrow = itemContainer.querySelector('.subdomain-accordion-arrow');
+                        const isCurrentlyExpanded = itemContainer.classList.contains('is-expanded');
+
+                        if (isCurrentlyExpanded) {
+                            itemContainer.classList.remove('is-expanded');
+                            if (drawer) drawer.style.display = 'none';
+                            if (arrow) {
+                                arrow.classList.remove('fa-chevron-up');
+                                arrow.classList.add('fa-chevron-down');
+                            }
+                        } else {
+                            itemContainer.classList.add('is-expanded');
+                            if (drawer) drawer.style.display = 'flex';
+                            if (arrow) {
+                                arrow.classList.remove('fa-chevron-down');
+                                arrow.classList.add('fa-chevron-up');
+                            }
+                        }
+                        repositionSubdomainListPopover();
+                    }
+                    return;
+                }
+            });
+
+            document.addEventListener('pointerdown', (e) => {
+                if (!isSubdomainListPopoverVisible()) return;
+                if (e.target.closest('#searchSubdomainListPopover') || e.target.closest('.canvas-table-subdomain-pill-btn, .canvas-grid-subdomain-more-btn')) {
+                    return;
+                }
+                hideSubdomainListPopover();
+            }, true);
+
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && isSubdomainListPopoverVisible()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    hideSubdomainListPopover();
+                }
+            }, true);
+        }
+        subdomainListPopoverEl = el;
+    }
+    return subdomainListPopoverEl;
+}
+
+function repositionSubdomainListPopover() {
+    if (!subdomainListPopoverEl || !currentSubdomainPopoverTarget || !document.body.contains(currentSubdomainPopoverTarget)) return;
+    const btnRect = currentSubdomainPopoverTarget.getBoundingClientRect();
+    if (btnRect.width === 0 && btnRect.height === 0) return;
+
+    const popoverWidth = Math.min(360, window.innerWidth - 24);
+    subdomainListPopoverEl.style.width = popoverWidth + 'px';
+
+    const popoverHeight = subdomainListPopoverEl.offsetHeight || 220;
+
+    let left = Math.round(btnRect.left + (btnRect.width / 2) - (popoverWidth / 2));
+    if (left < 12) left = 12;
+    if (left + popoverWidth > window.innerWidth - 12) {
+        left = window.innerWidth - popoverWidth - 12;
+    }
+
+    let top = Math.round(btnRect.bottom + 8);
+    let placement = 'bottom';
+    if (top + popoverHeight > window.innerHeight - 16) {
+        const topSpace = Math.round(btnRect.top - 8 - popoverHeight);
+        if (topSpace > 16) {
+            top = topSpace;
+            placement = 'top';
+        } else {
+            top = Math.max(12, window.innerHeight - popoverHeight - 16);
+        }
+    }
+
+    subdomainListPopoverEl.style.left = left + 'px';
+    subdomainListPopoverEl.style.top = top + 'px';
+    subdomainListPopoverEl.classList.remove('arrow-top', 'arrow-bottom');
+    subdomainListPopoverEl.classList.add(placement === 'bottom' ? 'arrow-top' : 'arrow-bottom');
+
+    const arrowEl = subdomainListPopoverEl.querySelector('.canvas-grid-bubble-arrow');
+    if (arrowEl) {
+        const btnCenter = btnRect.left + (btnRect.width / 2);
+        let arrowOffset = Math.round(btnCenter - left - 6);
+        if (arrowOffset < 16) arrowOffset = 16;
+        if (arrowOffset > popoverWidth - 28) arrowOffset = popoverWidth - 28;
+        arrowEl.style.right = 'auto';
+        arrowEl.style.left = arrowOffset + 'px';
+    }
+}
+
+function showSubdomainListPopover(targetBtn, domainKey) {
+    if (!targetBtn || !document.body.contains(targetBtn)) return;
+    hideSubdomainListPopover();
+    hideGridDetailsBubble();
+    hideGridGroupPopover();
+
+    const cleanDomain = String(domainKey || targetBtn.getAttribute('data-domain') || '').trim().toLowerCase();
+    if (!cleanDomain) return;
+
+    let rowData = targetBtn._rowData || null;
+    let item = null;
+    if (rowData) {
+        item = rowData.rawItem || rowData;
+    }
+    if (!item) {
+        item = findSearchResultItemById(`domain:${cleanDomain}`);
+    }
+    if (!item) {
+        const cache = searchUiState && searchUiState.domainIndexCache;
+        if (cache && cache.map instanceof Map) {
+            const entry = cache.map.get(cleanDomain);
+            if (entry) {
+                item = {
+                    domain: entry.domain,
+                    targetItems: entry.items || [],
+                    subdomains: Array.from(entry.hostSet || [])
+                };
+            }
+        }
+    }
+    if (!item) return;
+
+    const subdomainsList = getDomainSubdomainsList(item);
+    if (!subdomainsList.length) return;
+
+    const popover = getOrCreateSubdomainListPopover();
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+
+    currentSubdomainPopoverTarget = targetBtn;
+    currentSubdomainPopoverKey = cleanDomain;
+    targetBtn.classList.add('subdomain-popover-active');
+
+    const titleEl = popover.querySelector('.canvas-subdomain-popover-title');
+    const badgeEl = popover.querySelector('.canvas-subdomain-popover-count-badge');
+    const bodyEl = popover.querySelector('.canvas-subdomain-popover-body');
+
+    if (titleEl) titleEl.textContent = cleanDomain;
+    if (badgeEl) badgeEl.textContent = isZh ? `${subdomainsList.length} 个子域` : `${subdomainsList.length} subdomains`;
+
+    if (bodyEl) {
+        const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+        const rowsHtml = subdomainsList.map((sub) => {
+            const hostUrl = 'https://' + sub.host;
+            const faviconSrc = (typeof getFaviconUrl === 'function') ? getFaviconUrl(hostUrl) : '';
+            const hasReal = faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
+            let iconHtml = '';
+            if (hasReal) {
+                iconHtml = `<img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(hostUrl)}" style="width:15px; height:15px; object-fit:contain; border-radius:3px; flex-shrink:0;" alt="">`;
+            } else {
+                iconHtml = `<i class="fas fa-globe" style="color:#0ea5e9; font-size:13px; width:15px; text-align:center; flex-shrink:0;"></i>`;
+            }
+
+            const countText = isZh ? `${sub.count}项` : (sub.count === 1 ? '1 item' : `${sub.count} items`);
+            const rowTitle = isZh ? `点击展开/收起「${sub.host}」的书签明细` : `Toggle bookmarks for "${sub.host}"`;
+
+            // 渲染属于该子域名的所有书签项
+            const subItems = Array.isArray(sub.items) ? sub.items : [];
+            let bookmarksListHtml = '';
+            if (subItems.length > 0) {
+                const bmRows = subItems.map((bm, bIdx) => {
+                    const bmId = String(bm.id || '').trim();
+                    const bmTitle = bm.title || bm.rawTitle || (isZh ? '（无标题）' : '(Untitled)');
+                    const highlightedTitle = (typeof highlightSearchKeywords === 'function' && query)
+                        ? highlightSearchKeywords(bmTitle, query)
+                        : escapeHtml(bmTitle);
+
+                    const bmUrl = String(bm.url || '').trim();
+                    const bmFavicon = (typeof getFaviconUrl === 'function' && bmUrl) ? getFaviconUrl(bmUrl) : (bm.favicon || bm.favIconUrl || '');
+                    const hasBmReal = bmFavicon && !String(bmFavicon).startsWith('data:image/svg+xml') && bmFavicon !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
+                    let bmIconHtml = '';
+                    if (hasBmReal) {
+                        bmIconHtml = `<img class="search-result-favicon" src="${escapeHtml(bmFavicon)}" data-bookmark-url="${escapeHtml(bmUrl)}" style="width:13px; height:13px; object-fit:contain; border-radius:2px; flex-shrink:0;" alt="">`;
+                    } else {
+                        bmIconHtml = `<i class="fas fa-bookmark" style="color:#f59e0b; font-size:10.5px; flex-shrink:0;"></i>`;
+                    }
+
+                    const bmSource = bm.source || 'permanent';
+                    const bmSectionId = bm.sectionId || '';
+                    const bmCopyId = bm.copyId || null;
+                    const bmColor = bm.color || (bmSource === 'permanent' ? '#059669' : '#2563eb');
+
+                    return `<div class="subdomain-bookmark-item-row"
+                                 role="button"
+                                 tabindex="0"
+                                 data-bookmark-id="${escapeHtml(bmId)}"
+                                 data-loc-id="${escapeHtml(bmId)}"
+                                 data-loc-source="${escapeHtml(bmSource)}"
+                                 data-loc-section="${escapeHtml(bmSectionId)}"
+                                 data-copy-id="${escapeHtml(bmCopyId || '')}"
+                                 data-bookmark-url="${escapeHtml(bmUrl)}"
+                                 data-full-title="${escapeHtml(bmTitle)}"
+                                 style="--loc-color:${escapeHtml(bmColor)};"
+                                 aria-label="${escapeHtml(isZh ? `定位至「${bmTitle}」` : `Locate "${bmTitle}"`)}">
+                        <span class="subdomain-bookmark-index">${bIdx + 1}</span>
+                        <span class="subdomain-bookmark-icon">${bmIconHtml}</span>
+                        <span class="subdomain-bookmark-title">${highlightedTitle}</span>
+                        <span class="subdomain-bookmark-jump-badge">${isZh ? '定位' : 'Locate'}<i class="fas fa-arrow-right" style="font-size:8px; margin-left:3px;"></i></span>
+                    </div>`;
+                }).join('');
+
+                bookmarksListHtml = `<div class="subdomain-accordion-drawer" style="display:none;">${bmRows}</div>`;
+            }
+
+            return `<div class="search-result-subdomain-bubble-item" data-host="${escapeHtml(sub.host)}">
+                <div class="search-result-subdomain-bubble-row" data-host="${escapeHtml(sub.host)}" title="${escapeHtml(rowTitle)}" role="button" tabindex="0" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 9px; min-height:30px; box-sizing:border-box; border-radius:6px; cursor:pointer;">
+                    <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
+                        ${iconHtml}
+                        <span class="subdomain-host-text" style="font-size:12px; font-weight:500; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(sub.host)}</span>
+                    </div>
+                    <button type="button" class="canvas-bookmark-match-count canvas-bookmark-group-count canvas-subdomain-bubble-count-btn" data-domain="${escapeHtml(sub.host)}" title="${escapeHtml(isZh ? '展开/收起书签明细' : 'Toggle bookmark details')}" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; padding:2px 7px; border-radius:10px; flex-shrink:0;">
+                        ${escapeHtml(countText)} <i class="fas fa-chevron-down subdomain-accordion-arrow" style="font-size:8.5px; opacity:0.8;"></i>
+                    </button>
+                </div>
+                ${bookmarksListHtml}
+            </div>`;
+        }).join('');
+        bodyEl.innerHTML = rowsHtml;
+    }
+
+    // Positioning
+    popover.style.display = 'flex';
+    popover.classList.remove('visible', 'arrow-top', 'arrow-bottom');
+    popover.style.left = '-9999px';
+    popover.style.top = '-9999px';
+
+    repositionSubdomainListPopover();
+
+    requestAnimationFrame(() => {
+        popover.classList.add('visible');
+    });
+}
+
+function toggleSubdomainListPopover(targetBtn, domainKey) {
+    if (isSubdomainListPopoverVisible() && currentSubdomainPopoverTarget === targetBtn) {
+        hideSubdomainListPopover();
+        return;
+    }
+    showSubdomainListPopover(targetBtn, domainKey);
+}
+
+function executeSubdomainDrilldown() { }
+function exitSubdomainDrilldown() { }
+function clearSubdomainFocus() { }
+
+
 /**
  * 悬停搜索结果
  */
@@ -6785,7 +7736,7 @@ function handleSearchResultsPanelMouseOver(e) {
         }
     }
 
-    // 1. 悬停 0.7s 浮层逻辑：仅限包含「...」的候选条目
+    // 1. 悬停 0.7s (700ms) 独立浮层逻辑：每个包含「...」的候选条目均独立等待 700ms，绝不连续触发
     let targetWithEllipsis = e && e.target ? e.target.closest('[data-has-ellipsis="true"]') : null;
     if (!targetWithEllipsis && e && e.target) {
         // 若标题未被视窗算法截断，但因搜索面板宽度收窄触发了 CSS 文本省略截断，仅在悬停该项时按需检测一次
@@ -6806,7 +7757,7 @@ function handleSearchResultsPanelMouseOver(e) {
     if (targetWithEllipsis) {
         const fullTitle = targetWithEllipsis.getAttribute('data-full-title');
         if (fullTitle) {
-            scheduleSearchTitleTooltip(targetWithEllipsis, fullTitle);
+            scheduleSearchTitleTooltip(targetWithEllipsis, fullTitle, 700);
         } else {
             hideSearchTitleTooltip();
         }
@@ -7550,6 +8501,8 @@ function initSearchEvents() {
             if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
             if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
             if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
+            if (typeof hideDomainTempBubble === 'function') hideDomainTempBubble();
+            if (typeof hideSubdomainListPopover === 'function') hideSubdomainListPopover();
             clearGridSelectionOnScroll(searchResultsPanel);
         }, { passive: true });
         searchResultsPanel.setAttribute('data-search-bound', 'true');
@@ -13491,10 +14444,76 @@ function getBookmarkItemPathsList(item) {
                 label: raw.label || raw.sectionLabel || '#A',
                 title: raw.title || raw.sectionTitle || (isZh ? '永久栏目' : 'Permanent'),
                 source: raw.source || 'permanent',
-                color: raw.color || '#059669'
+                color: raw.color || '#059669',
+                count: 1,
+                bookmarks: [raw]
             }];
         }
         return [];
+    }
+
+    // 域名模式专属处理：一个域名的 targetItems 包含多个子书签，需按「所属栏目 + 文件夹路径」汇总去重聚合
+    // 学习普通书签多项集中收纳的设计，按各个文件夹收纳的书签数量降序排列，数量最多的作为首选主文件夹
+    if (raw && (raw.type === 'domain-group' || (item && item.type === 'domain-group') || (raw.domain && Array.isArray(raw.targetItems)))) {
+        const pathMap = new Map();
+
+        targetList.forEach((sub) => {
+            if (!sub) return;
+            let path = '';
+            if (typeof getBookmarkItemParentPathForSearchScope === 'function') {
+                path = getBookmarkItemParentPathForSearchScope(sub, fullscreenScope) || '';
+            }
+            if (!path) {
+                path = sub.parentPath || sub.namedPath || sub.path || '';
+            }
+
+            let label = sub.label || sub.sectionLabel || '';
+            let title = sub.title || sub.sectionTitle || '';
+            let source = sub.source || 'permanent';
+            let color = sub.color || (source === 'permanent' ? '#059669' : '#2563eb');
+            let sectionId = sub.sectionId || '';
+            let copyId = sub.copyId || null;
+            let id = String(sub.id || '');
+
+            if (source === 'permanent' && !label) {
+                label = '#A';
+            }
+            if (!title) {
+                title = source === 'permanent'
+                    ? (isZh ? `永久栏目 ${label}` : `Permanent ${label}`).trim()
+                    : (sub.sectionTitle || (isZh ? '临时栏目' : 'Temp Section'));
+            }
+
+            const cleanPath = (path || '').trim();
+            const folderKey = `${source}::${sectionId}::${copyId || ''}::${cleanPath.toLowerCase()}`;
+
+            if (!pathMap.has(folderKey)) {
+                pathMap.set(folderKey, {
+                    item: sub,
+                    id,
+                    path: cleanPath || (isZh ? '根目录' : 'Root'),
+                    rawPath: cleanPath,
+                    label,
+                    title,
+                    source,
+                    color,
+                    sectionId,
+                    copyId,
+                    count: 0,
+                    bookmarks: []
+                });
+            }
+            const folderEntry = pathMap.get(folderKey);
+            folderEntry.count++;
+            folderEntry.bookmarks.push(sub);
+        });
+
+        if (pathMap.size > 0) {
+            return Array.from(pathMap.values()).sort((a, b) => {
+                if (b.count !== a.count) return b.count - a.count;
+                return String(a.path || '').localeCompare(String(b.path || ''));
+            });
+        }
     }
 
     const locations = Array.isArray(raw.locations) ? raw.locations : (Array.isArray(item.locations) ? item.locations : []);
@@ -13542,7 +14561,9 @@ function getBookmarkItemPathsList(item) {
             source,
             color,
             sectionId,
-            copyId
+            copyId,
+            count: 1,
+            bookmarks: [sub]
         });
     });
 
@@ -13822,6 +14843,18 @@ function resolveBookmarkAncestorFolder(item, folderName, crumbIndex = -1) {
                 source: bestLoc.source || item.source || 'permanent',
                 color: bestLoc.color || item.color
             });
+        }
+    }
+
+    // 如果是域名组，提取包含目标文件夹的那个子书签项
+    if (item && (item.type === 'domain-group' || Array.isArray(item.targetItems))) {
+        const targetItems = item.targetItems || [];
+        const matchedChild = targetItems.find(t => {
+            const p = String(t.parentPath || t.namedPath || t.path || '').toLowerCase();
+            return p.includes(targetNameLower);
+        }) || targetItems[0];
+        if (matchedChild) {
+            item = matchedChild;
         }
     }
 
@@ -15669,6 +16702,8 @@ function searchCanvasAndRender(query, options = {}) {
         searchUiState.noteBrowseDetail = null;
         searchUiState.noteBrowseBucketsLimit = 5;
         searchUiState.noteBrowseBucketLimits = {};
+        searchUiState.focusedHost = null;
+        searchUiState.domainRootContext = null;
         hideSearchResultsPanel();
         return;
     }
@@ -15700,6 +16735,8 @@ function searchCanvasAndRender(query, options = {}) {
         if (triggerSource === 'input') {
             searchUiState.structureTypeFilter = null;
             searchUiState.descriptionTypeFilter = null;
+            searchUiState.focusedHost = null;
+            searchUiState.domainRootContext = null;
         }
     }
 
@@ -16537,14 +17574,15 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
                 match: false,
                 hostSet: new Set(),
                 matchedCount: 0,
-                matchedHostSet: new Set()
+                matchedHostSet: new Set(),
+                locationMap: new Map()
             };
             map.set(domain, entry);
         }
         const itemMatched = isDomainSearchItemMatched(domain, item, q, tagBrowseDetail, noteBrowseDetail);
 
         entry.count += 1;
-        entry.items.push({
+        const childSourceItem = Object.assign({}, item, {
             id: item.id,
             type: 'bookmark-item',
             title: item.title,
@@ -16552,6 +17590,13 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             nodeType: item.nodeType || 'bookmark',
             source: item.source || 'permanent',
             sectionId: item.sectionId || null,
+            sectionTitle: item.sectionTitle || '',
+            sectionLabel: item.sectionLabel || '',
+            sectionSource: item.sectionSource || '',
+            copyId: item.copyId || null,
+            parentPath: item.parentPath || item.namedPath || '',
+            namedPath: item.namedPath || item.parentPath || '',
+            dateAdded: (typeof item.dateAdded !== 'undefined' && item.dateAdded !== null) ? item.dateAdded : null,
             color: item.color || '#0ea5e9',
             host: host || '',
             tags: getCanvasBookmarkTagsForSearchCached(item),
@@ -16563,6 +17608,43 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             __note: item.__note || '',
             matched: !!itemMatched
         });
+        entry.items.push(childSourceItem);
+
+        // Record location for locations row chips
+        const isPerm = childSourceItem.source === 'permanent';
+        const locKey = isPerm
+            ? (childSourceItem.copyId ? `perm:${childSourceItem.copyId}` : 'perm:main')
+            : `temp:${childSourceItem.sectionId || 'unknown'}`;
+        if (!entry.locationMap.has(locKey)) {
+            if (isPerm) {
+                const copyLabel = (typeof getPermanentCopyLabelForBookmarkSearch === 'function')
+                    ? getPermanentCopyLabelForBookmarkSearch(childSourceItem, childSourceItem.label || childSourceItem.sectionLabel)
+                    : (childSourceItem.copyId ? `#${childSourceItem.copyId}` : '#A');
+                entry.locationMap.set(locKey, {
+                    id: childSourceItem.id,
+                    source: 'permanent',
+                    copyId: childSourceItem.copyId || null,
+                    label: copyLabel || '#A',
+                    title: (currentLang === 'zh_CN') ? '永久栏目' : 'Permanent',
+                    color: '#059669',
+                    locationKey: locKey
+                });
+            } else {
+                const secLabel = childSourceItem.sectionLabel || childSourceItem.label || ((currentLang === 'zh_CN') ? '临时' : 'Temp');
+                const secTitle = childSourceItem.sectionTitle || secLabel;
+                const secColor = childSourceItem.color || '#2563eb';
+                entry.locationMap.set(locKey, {
+                    id: childSourceItem.id,
+                    source: 'temporary',
+                    sectionId: childSourceItem.sectionId || null,
+                    label: secLabel,
+                    title: secTitle,
+                    color: secColor,
+                    locationKey: locKey
+                });
+            }
+        }
+
         if (host) {
             entry.hostSet.add(host);
         }
@@ -16584,6 +17666,12 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             const totalSubdomainCount = entry.hostSet ? entry.hostSet.size : 0;
             const matchedCount = Number(entry.matchedCount || 0);
             const matchedSubdomainCount = entry.matchedHostSet ? entry.matchedHostSet.size : 0;
+            const targetItems = entry.items || [];
+            const rawLocations = Array.from(entry.locationMap.values());
+            const canonicalLocations = (typeof sortBookmarkLocationsCanonical === 'function')
+                ? sortBookmarkLocationsCanonical(rawLocations)
+                : rawLocations;
+            const subdomains = Array.from(entry.hostSet);
             return {
                 id: `domain:${entry.domain}`,
                 type: 'domain-group',
@@ -16597,7 +17685,12 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
                 matchedSubdomainCount,
                 statsMode: useMatchedStats ? 'matched' : 'total',
                 groupLevel,
-                color: '#0ea5e9'
+                color: '#0ea5e9',
+                targetItems: targetItems,
+                childItems: targetItems,
+                locations: canonicalLocations,
+                subdomains: subdomains,
+                matchesCount: targetItems.length
             };
         });
 
@@ -16618,10 +17711,11 @@ function getDomainResultsForQuery(query, scopeInput = null) {
 
 function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
     const cache = ensureDomainCacheForQuery(query, scopeInput);
-    const parentResults = Array.isArray(cache.results) ? cache.results : [];
+    let parentResults = Array.isArray(cache.results) ? cache.results : [];
     const displayResults = [];
     const groupLevel = cache && cache.groupLevel === 'root' ? 'root' : 'host';
     const hasQuery = !!String(query || '').trim();
+
 
     for (const parent of parentResults) {
         if (!parent) continue;
@@ -16654,7 +17748,13 @@ function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
             return String(a && a.url || '').localeCompare(String(b && b.url || ''));
         });
 
-        childItems.forEach((child) => {
+        if (!(searchUiState.domainGroupVisibleCount instanceof Map)) {
+            searchUiState.domainGroupVisibleCount = new Map();
+        }
+        const visibleLimit = searchUiState.domainGroupVisibleCount.get(domainKey) || 50;
+        const visibleChildItems = childItems.slice(0, visibleLimit);
+
+        visibleChildItems.forEach((child) => {
             if (!child) return;
             displayResults.push({
                 id: child.id,
@@ -16664,6 +17764,13 @@ function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
                 url: child.url,
                 source: child.source || 'permanent',
                 sectionId: child.sectionId || null,
+                sectionTitle: child.sectionTitle || '',
+                sectionLabel: child.sectionLabel || '',
+                sectionSource: child.sectionSource || '',
+                copyId: child.copyId || null,
+                parentPath: child.parentPath || child.namedPath || '',
+                namedPath: child.namedPath || child.parentPath || '',
+                dateAdded: (typeof child.dateAdded !== 'undefined' && child.dateAdded !== null) ? child.dateAdded : null,
                 color: child.color || parent.color || '#0ea5e9',
                 isChild: true,
                 domainChild: true,
@@ -16673,9 +17780,26 @@ function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
                 note: normalizeNoteForSearch(child.note),
                 noteColor: normalizeNoteColorForSearch(child.noteColor),
                 __note: normalizeNoteForSearch(child.note).toLowerCase(),
-                groupLevel
+                groupLevel,
+                rawItem: child.rawItem || child
             });
         });
+
+        if (childItems.length > visibleLimit) {
+            const remainCount = childItems.length - visibleLimit;
+            const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+            displayResults.push({
+                id: `domain-more:${domainKey}`,
+                type: 'domain-group-more',
+                domain: domainKey,
+                domainGroupId: parent.id,
+                title: isZh ? `加载更多（剩余 ${remainCount} 项）` : `Load more (${remainCount} remaining)`,
+                remainCount,
+                groupLevel,
+                isChild: true,
+                domainChild: true
+            });
+        }
     }
 
     return displayResults;
@@ -16700,7 +17824,7 @@ function getSubdomainFolderTitle(host, domainKey, isZh) {
     return safeHost;
 }
 
-async function buildDomainPayloadBySubdomain(items, domainKey, isZh) {
+async function buildDomainPayloadBySubdomain(items, domainKey, isZh, topNPerSubdomain = 0) {
     const hostMap = new Map();
     let processed = 0;
 
@@ -16737,14 +17861,156 @@ async function buildDomainPayloadBySubdomain(items, domainKey, isZh) {
             if (b.children.length !== a.children.length) return b.children.length - a.children.length;
             return String(a.host || '').localeCompare(String(b.host || ''));
         })
-        .map(entry => ({
-            title: getSubdomainFolderTitle(entry.host, domainKey, isZh),
-            url: '',
-            type: 'folder',
-            children: entry.children
-        }));
+        .map(entry => {
+            const finalChildren = (topNPerSubdomain > 0) ? entry.children.slice(0, topNPerSubdomain) : entry.children;
+            return {
+                title: getSubdomainFolderTitle(entry.host, domainKey, isZh),
+                url: '',
+                type: 'folder',
+                children: finalChildren
+            };
+        })
+        .filter(entry => entry.children && entry.children.length > 0);
 
     return payloadItems;
+}
+
+function countTotalBookmarksInPayload(items) {
+    if (!Array.isArray(items)) return 0;
+    let count = 0;
+    for (const item of items) {
+        if (!item) continue;
+        if (item.type === 'folder' && Array.isArray(item.children)) {
+            count += countTotalBookmarksInPayload(item.children);
+        } else {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+async function buildDomainGroupFolderPayload(item, isZh) {
+    if (!item) return null;
+    const norm = item.rawItem || item;
+    const domainKey = String(norm.domain || norm.title || item.domain || item.title || '').trim().toLowerCase();
+    if (!domainKey) return null;
+
+    const groupLevel = norm.groupLevel || item.groupLevel || ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.domainGrouping === 'root') ? 'root' : 'host');
+
+    let subList = [];
+    if (Array.isArray(norm.targetItems) && norm.targetItems.length > 0) {
+        subList = norm.targetItems.filter(Boolean);
+    } else if (Array.isArray(item.targetItems) && item.targetItems.length > 0) {
+        subList = item.targetItems.filter(Boolean);
+    } else if (Array.isArray(norm.childItems) && norm.childItems.length > 0) {
+        subList = norm.childItems.filter(Boolean);
+    } else if (Array.isArray(item.childItems) && item.childItems.length > 0) {
+        subList = item.childItems.filter(Boolean);
+    } else if (Array.isArray(norm.items) && norm.items.length > 0) {
+        subList = norm.items.filter(Boolean);
+    } else if (Array.isArray(item.items) && item.items.length > 0) {
+        subList = item.items.filter(Boolean);
+    } else if (typeof getDomainItemsForTemp === 'function') {
+        subList = getDomainItemsForTemp(domainKey, (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '');
+    }
+
+    if ((!subList || !subList.length) && typeof ensureDomainCacheForQuery === 'function') {
+        const cache = ensureDomainCacheForQuery((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '');
+        if (cache && cache.map instanceof Map) {
+            const entry = cache.map.get(domainKey);
+            if (entry && Array.isArray(entry.items)) {
+                const hasQuery = !!String((searchUiState && searchUiState.query) || '').trim();
+                subList = entry.items.filter(b => !hasQuery || b.matched === true);
+            }
+        }
+    }
+
+    if (!subList || !subList.length) return null;
+
+    // Deduplicate bookmarks within this domain group based on bookmark content & tags/notes
+    const seenFullKeys = new Set();
+    const dedupedList = [];
+    for (const b of subList) {
+        const normBm = b && (b.rawItem || b);
+        if (!normBm) continue;
+        const cKey = (typeof getBookmarkItemContentKey === 'function') ? getBookmarkItemContentKey(normBm) : (normBm.url || normBm.id);
+        const vKey = (typeof getBookmarkItemTagNoteVariantKey === 'function') ? getBookmarkItemTagNoteVariantKey(normBm) : '';
+        const fullKey = `${cKey}::${vKey}`;
+        if (seenFullKeys.has(fullKey)) continue;
+        seenFullKeys.add(fullKey);
+        dedupedList.push(normBm);
+    }
+
+    if (!dedupedList.length) return null;
+
+    if (groupLevel === 'host') {
+        const children = [];
+        for (let i = 0; i < dedupedList.length; i += 1) {
+            const b = dedupedList[i];
+            const safeTitle = b.title || b.url || (isZh ? '书签' : 'Bookmark');
+            const safeUrl = b.url || 'https://';
+            children.push(buildSearchBookmarkPayload({
+                ...b,
+                title: safeTitle,
+                url: safeUrl
+            }, isZh));
+            if (i > 0 && i % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
+                await yieldToMainThread();
+            }
+        }
+        return {
+            title: domainKey,
+            url: '',
+            type: 'folder',
+            children: children
+        };
+    }
+
+    // groupLevel === 'root': Group by subdomains
+    const subdomainFolders = await buildDomainPayloadBySubdomain(dedupedList, domainKey, isZh);
+    if (!subdomainFolders || !subdomainFolders.length) {
+        const children = [];
+        for (let i = 0; i < dedupedList.length; i += 1) {
+            const b = dedupedList[i];
+            const safeTitle = b.title || b.url || (isZh ? '书签' : 'Bookmark');
+            const safeUrl = b.url || 'https://';
+            children.push(buildSearchBookmarkPayload({
+                ...b,
+                title: safeTitle,
+                url: safeUrl
+            }, isZh));
+            if (i > 0 && i % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
+                await yieldToMainThread();
+            }
+        }
+        return {
+            title: domainKey,
+            url: '',
+            type: 'folder',
+            children: children
+        };
+    }
+
+    // If there's only 1 subdomain folder and it represents the root domain directly
+    if (subdomainFolders.length === 1) {
+        const single = subdomainFolders[0];
+        const isRootFolder = single.title === domainKey || single.title === (isZh ? `主域名 (${domainKey})` : `Root (${domainKey})`);
+        if (isRootFolder) {
+            return {
+                title: domainKey,
+                url: '',
+                type: 'folder',
+                children: single.children || []
+            };
+        }
+    }
+
+    return {
+        title: domainKey,
+        url: '',
+        type: 'folder',
+        children: subdomainFolders
+    };
 }
 
 let searchInfiniteScrollObserver = null;
@@ -17201,6 +18467,25 @@ function isCanvasSearchTabulatorReady() {
 }
 
 /**
+ * 统一拦截表格单元格点击事件：若处于条目勾选模式，优先执行勾选/取消勾选，阻断原有的下钻跳转或弹窗
+ */
+function handleCanvasTabulatorCellClickSelectionGuard(e, cell) {
+    if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
+        if (e) {
+            e._canvasHandled = true;
+            try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
+        }
+        const d = cell ? cell.getData() : null;
+        const itemId = String((d && (d.id || (d.rawItem && d.rawItem.id))) || '').trim();
+        if (typeof toggleCanvasSearchItemSelection === 'function') {
+            toggleCanvasSearchItemSelection(itemId, d ? (d.rawItem || d) : null, cell && cell.getRow ? cell.getRow().getElement() : null);
+        }
+        return true;
+    }
+    return false;
+}
+
+/**
  * 安全触发 Tabulator 重绘，严禁在未就绪或 0 尺寸时调用，彻底杜绝强制同步重排与警告
  */
 function safeRedrawCanvasSearchTabulator(full = false) {
@@ -17222,6 +18507,33 @@ let canvasSearchTabulatorPendingState = {
 
 function cancelCanvasSearchTabulatorLazyLoad() {
     isAppendingTableChunk = false;
+}
+
+/**
+ * 确保 Tabulator 表格数据全量加载（用于表头排序、全量或 TopN 导出特殊临时栏目）
+ */
+function ensureAllCanvasSearchTabulatorDataLoaded() {
+    if (!canvasSearchTabulatorInstance || !canvasSearchTabulatorPendingState) return;
+    const { totalResults, loadedCount, renderQuery, isZh } = canvasSearchTabulatorPendingState;
+    if (!Array.isArray(totalResults) || loadedCount >= totalResults.length) return;
+
+    try {
+        const remainingSlice = totalResults.slice(loadedCount);
+        if (remainingSlice.length) {
+            const nextData = buildCanvasTabulatorData(remainingSlice, renderQuery, { isZh, startIndex: loadedCount });
+            canvasSearchTabulatorPendingState.loadedCount = totalResults.length;
+            if (searchUiState) {
+                searchUiState.resultVisibleCount = totalResults.length;
+                searchUiState.resultHasMore = false;
+            }
+            canvasSearchTabulatorInstance.addData(nextData);
+            updateCanvasTabulatorLoadMoreRow(0, isZh);
+            if (typeof syncCanvasTabulatorTopScrollbar === 'function') syncCanvasTabulatorTopScrollbar();
+            if (typeof syncCanvasTabulatorRightScrollbar === 'function') syncCanvasTabulatorRightScrollbar(true);
+        }
+    } catch (err) {
+        console.warn('[Search Tabulator] Failed to load remaining chunks:', err);
+    }
 }
 
 /**
@@ -17311,10 +18623,10 @@ function loadNextCanvasSearchTabulatorChunk() {
 }
 
 /**
- * 保持此函数以兼容旧调用点，避免阻塞主线程
+ * 保持此函数以兼容旧调用点，冲刷加载全部剩余表格数据
  */
 function flushRemainingCanvasSearchTableChunks() {
-    // 惰性架构下不全量阻塞冲刷
+    ensureAllCanvasSearchTabulatorDataLoaded();
 }
 
 function destroyCanvasSearchTabulator() {
@@ -17353,6 +18665,10 @@ function destroyCanvasSearchTabulator() {
     if (typeof hideCanvasTabulatorHeaderContextMenu === 'function') {
         hideCanvasTabulatorHeaderContextMenu();
     }
+    if (typeof hideDomainTempBubble === 'function') hideDomainTempBubble();
+    if (typeof hideSubdomainListPopover === 'function') hideSubdomainListPopover();
+    if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
+    if (typeof hideGridDetailsBubble === 'function') hideGridDetailsBubble();
     const tableWrapper = document.querySelector('.search-results-table-view-wrapper');
     if (tableWrapper) {
         tableWrapper.remove();
@@ -18322,10 +19638,24 @@ function setupCanvasTabulatorIndexHeaderProtection(tableInstance) {
 }
 
 /**
+ * 获取当前 Tabulator 的细分工作模式（支持 bookmark, structure, description, 以及 domain-root 与 domain-host）
+ */
+function getCanvasTabulatorActiveModeKey() {
+    const mode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    if (mode === 'bookmark') {
+        if (searchUiState && searchUiState.bookmarkTypeFilter === 'domain') {
+            const groupLevel = (searchUiState && searchUiState.domainGrouping === 'root') ? 'root' : 'host';
+            return `domain-${groupLevel}`;
+        }
+    }
+    return mode;
+}
+
+/**
  * 根据模式和自定义列宽决定 Tabulator 布局模式（fitColumns 或 fitDataFill）
  */
 function getCanvasTabulatorLayoutMode(mode) {
-    if (!mode) mode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    if (!mode) mode = getCanvasTabulatorActiveModeKey();
     if (mode === 'structure' || mode === 'description') {
         const savedWidths = getSavedTabulatorColumnWidths(mode);
         const hasFixedContentWidth = (mode === 'structure' && savedWidths['summary']) || (mode === 'description' && savedWidths['descriptionText']);
@@ -18371,7 +19701,7 @@ function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery,
     const initialData = buildCanvasTabulatorData(initialSlice, renderQuery, { isZh, startIndex: 0 });
 
     const hasTableholder = !!containerEl.querySelector('.tabulator-tableholder');
-    const activeMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    const activeMode = getCanvasTabulatorActiveModeKey();
     const expectedLayout = getCanvasTabulatorLayoutMode(activeMode);
 
     const isReady = isCanvasSearchTabulatorReady();
@@ -18514,6 +19844,97 @@ function buildCanvasTabulatorData(results, query, options = {}) {
     list.forEach((item) => {
         if (!item) return;
         if (item.type === 'bookmark-group-more') return;
+
+        // 域名模式专属数据行适配 (Root Domain & Subdomain)
+        if (item.type === 'domain-group') {
+            const domainKey = String(item.domain || item.title || '').trim();
+            const groupLevel = item.groupLevel || ((searchUiState && searchUiState.domainGrouping === 'root') ? 'root' : 'host');
+            const domainUrl = 'https://' + domainKey;
+            const faviconSrc = (typeof getFaviconUrl === 'function') ? getFaviconUrl(domainUrl) : '';
+            let iconUrl = '';
+            if (faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null)) {
+                iconUrl = faviconSrc;
+            }
+
+            // Bookmarks count and subdomain count
+            const count = Number(item.count || (item.targetItems ? item.targetItems.length : 0));
+            const subdomains = Array.isArray(item.subdomains) ? item.subdomains : [];
+            const subdomainCount = Number(item.subdomainCount || subdomains.length);
+
+            // Root domain calculation
+            let rootDomain = '';
+            if (groupLevel === 'host') {
+                rootDomain = (typeof getRegistrableDomain === 'function') ? getRegistrableDomain(domainKey) : domainKey;
+            } else {
+                rootDomain = domainKey;
+            }
+
+            // Find primary path among targetItems
+            let primaryPath = '';
+            if (Array.isArray(item.targetItems) && item.targetItems.length) {
+                const pathCounts = new Map();
+                item.targetItems.forEach(t => {
+                    const p = (t.parentPath || t.namedPath || t.path || '').trim();
+                    if (p) pathCounts.set(p, (pathCounts.get(p) || 0) + 1);
+                });
+                if (pathCounts.size > 0) {
+                    let maxCount = -1;
+                    for (const [p, cnt] of pathCounts.entries()) {
+                        if (cnt > maxCount) {
+                            maxCount = cnt;
+                            primaryPath = p;
+                        }
+                    }
+                }
+                if (!primaryPath) {
+                    primaryPath = item.targetItems[0].parentPath || item.targetItems[0].namedPath || item.targetItems[0].path || '';
+                }
+            }
+
+            // Latest creation time among targetItems
+            let latestTimestamp = 0;
+            if (Array.isArray(item.targetItems) && item.targetItems.length) {
+                item.targetItems.forEach(t => {
+                    const ts = Number(t.dateAdded) || 0;
+                    if (ts > latestTimestamp) latestTimestamp = ts;
+                });
+            }
+            let dateAddedText = '';
+            if (latestTimestamp > 0) {
+                try {
+                    const d = new Date(latestTimestamp);
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    dateAddedText = `${y}-${m}-${day}`;
+                } catch (_) {}
+            }
+
+            const typeLabel = groupLevel === 'root' ? (isZh ? '主域名' : 'Root Domain') : (isZh ? '子域名' : 'Subdomain');
+
+            data.push({
+                id: item.id || `domain:${domainKey}`,
+                index: rowIdx++,
+                domain: domainKey,
+                title: domainKey,
+                titleHtml: (typeof highlightSearchKeywords === 'function' && query) ? highlightSearchKeywords(domainKey, query) : escapeHtml(domainKey),
+                favicon: iconUrl,
+                count,
+                subdomainCount,
+                subdomains,
+                rootDomain,
+                groupLevel,
+                locations: item.locations || [],
+                path: primaryPath,
+                dateAdded: latestTimestamp,
+                dateAddedText,
+                type: 'domain-group',
+                typeLabel,
+                rawItem: item,
+                targetItems: item.targetItems || []
+            });
+            return;
+        }
 
         // 标题与图标
         let rawTitle = item.title || '';
@@ -19197,6 +20618,536 @@ function compareCanvasSearchNaturalPath(pathA, pathB, dir = 'asc') {
  * 获取 Tabulator 列配置
  */
 function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
+    const isDomainMode = mode === 'domain-root' || mode === 'domain-host' || (
+        (searchUiState && searchUiState.activeMode === 'bookmark' && searchUiState.bookmarkTypeFilter === 'domain') ||
+        (Array.isArray(tableData) && tableData.length > 0 && tableData[0] && (tableData[0].type === 'domain-group' || (tableData[0].rawItem && tableData[0].rawItem.type === 'domain-group')))
+    );
+
+    if (isDomainMode) {
+        const domainLevel = (mode === 'domain-host' || (!mode.startsWith('domain-') && searchUiState && searchUiState.domainGrouping === 'host') || (tableData[0] && (tableData[0].groupLevel === 'host' || (tableData[0].rawItem && tableData[0].rawItem.groupLevel === 'host')))) ? 'host' : 'root';
+        const effectiveMode = `domain-${domainLevel}`;
+        const savedWidths = getSavedTabulatorColumnWidths(effectiveMode);
+
+        const buildPrimaryFolderTabulatorColumn = () => ({
+            title: isZh ? "集中收纳文件夹" : "Primary Folder",
+            field: "path",
+            minWidth: 150,
+            width: savedWidths['path'] || 180,
+            resizable: true,
+            headerSort: true,
+            headerSortTristate: true,
+            sorter: (a, b, aRow, bRow, col, dir) => {
+                const getPrimaryPath = (row, val) => {
+                    const d = row && typeof row.getData === 'function' ? row.getData() : null;
+                    if (d) {
+                        const pathsList = (typeof getBookmarkItemPathsList === 'function') ? getBookmarkItemPathsList(d.rawItem || d) : [];
+                        return (pathsList[0] && (pathsList[0].rawPath || pathsList[0].path)) || d.path || String(val || '');
+                    }
+                    return String(val || '');
+                };
+                const pathA = getPrimaryPath(aRow, a);
+                const pathB = getPrimaryPath(bRow, b);
+                return compareCanvasSearchNaturalPath(pathA, pathB, dir, isZh);
+            },
+            formatter: (cell) => {
+                const d = cell.getData();
+                const pathsList = (typeof getBookmarkItemPathsList === 'function')
+                    ? getBookmarkItemPathsList(d.rawItem || d)
+                    : [];
+                const primaryPath = (pathsList[0] && pathsList[0].rawPath) || d.path || (pathsList[0] && pathsList[0].path) || '';
+                if (!primaryPath && !pathsList.length) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+
+                const displayPath = primaryPath || (isZh ? '根目录' : 'Root');
+                const parts = parseTablePathParts(displayPath);
+                if (!parts.length) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+
+                const isPathDeep = parts.length > 2;
+                let visibleParts = parts;
+                let hasPrefixEllipsis = false;
+
+                if (isPathDeep) {
+                    hasPrefixEllipsis = true;
+                    let matchIndex = -1;
+                    if (query) {
+                        const cleanTokens = query.toLowerCase().split(/\s+/).map(t => t.trim().replace(/^[*#]/, '')).filter(Boolean);
+                        if (cleanTokens.length) {
+                            matchIndex = parts.findIndex(p => {
+                                const low = String(p).toLowerCase();
+                                return cleanTokens.some(t => low.includes(t));
+                            });
+                        }
+                    }
+
+                    if (matchIndex >= 0 && matchIndex < parts.length - 2) {
+                        visibleParts = [parts[matchIndex], parts[parts.length - 1]];
+                    } else {
+                        visibleParts = parts.slice(parts.length - 2);
+                    }
+                }
+
+                // 1. 跨卡片/多文件夹分布（> 1 处）：首位展示 [+N] 徽章胶囊（如 +1, +2）
+                let moreBtnHtml = '';
+                if (pathsList.length > 1) {
+                    const remainCount = pathsList.length - 1;
+                    const itemId = String((d && d.id) || '');
+                    const itemIndex = String((d && d.index !== undefined) ? d.index : '');
+                    moreBtnHtml = `<button type="button" class="canvas-grid-location-more-btn canvas-table-loc-more-btn canvas-table-path-more-btn" data-item-id="${escapeHtml(itemId)}" data-item-index="${escapeHtml(itemIndex)}" title="${escapeHtml(isZh ? `查看全部 ${pathsList.length} 处文件夹收纳分布` : `View all ${pathsList.length} folders`)}" aria-label="${escapeHtml(isZh ? `还有 ${remainCount} 处文件夹` : `${remainCount} more folders`)}">+${remainCount}</button>`;
+                }
+
+                // 2. 单条路径内部层级过深，展示 ... 按钮折叠中间层级（位于左边开头）
+                let ellipsisHtml = '';
+                if (hasPrefixEllipsis) {
+                    ellipsisHtml = `<button type="button" class="canvas-table-path-ellipsis-btn search-result-path-ellipsis-toggle" data-item-id="${escapeHtml(String((d && d.id) || ''))}" data-item-index="${escapeHtml(String((d && d.index) || ''))}" title="${escapeHtml(isZh ? '展开完整路径与说明' : 'Show full path and info')}" aria-label="${escapeHtml(isZh ? '展开完整路径' : 'Show full path')}">...</button><span class="search-result-path-sep canvas-table-path-sep"> &gt; </span>`;
+                }
+
+                const partsHtml = visibleParts.map((part, index) => {
+                    const highlighted = (typeof highlightSearchKeywords === 'function' && query)
+                        ? highlightSearchKeywords(part, query)
+                        : escapeHtml(part);
+                    const safePart = `<span class="search-result-path-part canvas-table-path-part" data-folder-name="${escapeHtml(part)}" title="${escapeHtml(isZh ? `定位至「${part}」` : `Locate "${part}"`)}">${highlighted}</span>`;
+                    if (index >= visibleParts.length - 1) return safePart;
+                    return `${safePart}<span class="search-result-path-sep canvas-table-path-sep"> &gt; </span>`;
+                }).join('');
+
+                return `<div class="canvas-table-path-wrapper canvas-table-path-text" title="${escapeHtml(parts.join(' > '))}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width:100%; font-size:11px; color:var(--text-secondary); display:flex; align-items:center; gap:3px;">
+                    <i class="fas fa-folder" style="font-size:11px; color:#2563eb; flex-shrink:0;"></i>
+                    ${moreBtnHtml}${ellipsisHtml}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${partsHtml}</span>
+                </div>`;
+            },
+            cellClick: (e, cell) => {
+                if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
+                const pathMoreBtn = e.target.closest('.canvas-table-path-more-btn, .canvas-grid-path-more-btn');
+                const pathEllipsisBtn = e.target.closest('.canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle');
+                if (pathMoreBtn || pathEllipsisBtn) {
+                    if (e._canvasHandled) return;
+                    e._canvasHandled = true;
+                    try {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    } catch (_) { }
+                    const btn = pathMoreBtn || pathEllipsisBtn;
+                    const d = cell.getData();
+                    if (d) {
+                        btn._rowData = d;
+                        btn._tabRow = cell.getRow() ? (typeof cell.getRow().getElement === 'function' ? cell.getRow().getElement() : null) : null;
+                    }
+                    const itemId = String((d && d.id) || btn.getAttribute('data-item-id') || '').trim();
+                    const itemIndex = d ? d.index : -1;
+                    toggleGridItemDetailsBubble(btn, itemId, itemIndex);
+                    return;
+                }
+                const pathPartEl = e.target.closest('.search-result-path-part');
+                if (pathPartEl) {
+                    if (e._canvasHandled) return;
+                    e._canvasHandled = true;
+                    try {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    } catch (_) { }
+                    const d = cell.getData();
+                    const targetItem = (d && d.targetItems && d.targetItems[0]) || (typeof getResolvedBookmarkTargetItem === 'function' ? getResolvedBookmarkTargetItem(d) : d);
+                    const folderName = pathPartEl.dataset.folderName || pathPartEl.textContent.trim();
+                    if (targetItem && folderName) {
+                        const targetFolder = resolveBookmarkAncestorFolder(targetItem, folderName);
+                        if (targetFolder) {
+                            recordCurrentSearchJumpHistory();
+                            hideSearchResultsPanel();
+                            try {
+                                const inputEl = document.getElementById('searchInput');
+                                if (inputEl) inputEl.value = '';
+                            } catch (_) { }
+                            navigateToBookmarkAncestorFolder(targetFolder);
+                            return;
+                        }
+                    }
+                    return;
+                }
+
+                // 点击集中收纳文件夹单元格的其它区域（如文件夹图标、路径文本空白等）：展开收纳详情气泡
+                if (!e._canvasHandled) {
+                    e._canvasHandled = true;
+                    try {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    } catch (_) { }
+                    const d = cell.getData();
+                    const cellEl = cell.getElement();
+                    const wrapper = cellEl ? cellEl.querySelector('.canvas-table-path-wrapper') : null;
+                    const anchor = wrapper || cellEl;
+                    if (anchor && d) {
+                        anchor._rowData = d;
+                        anchor._tabRow = cell.getRow() ? (typeof cell.getRow().getElement === 'function' ? cell.getRow().getElement() : null) : null;
+                        const itemId = String((d && d.id) || '').trim();
+                        const itemIndex = d.index !== undefined ? d.index : -1;
+                        toggleGridItemDetailsBubble(anchor, itemId, itemIndex);
+                    }
+                }
+            }
+        });
+
+        if (domainLevel === 'root') {
+            const cols = [
+                {
+                    title: "#",
+                    field: "index",
+                    width: 36,
+                    minWidth: 32,
+                    maxWidth: 42,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: false,
+                    headerSort: false,
+                    formatter: formatCanvasTabulatorRowIndexCell
+                },
+                {
+                    title: isZh ? "主域名" : "Root Domain",
+                    field: "domain",
+                    minWidth: 160,
+                    width: savedWidths['domain'] || 200,
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    sorter: (a, b, aRow, bRow, col, dir) => compareCanvasSearchNaturalText(a, b, dir),
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                        const domainUrl = 'https://' + (d.domain || d.title || '');
+                        const iconSrc = d.favicon || ((typeof getFaviconUrl === 'function') ? getFaviconUrl(domainUrl) : '');
+                        const hasReal = iconSrc && !String(iconSrc).startsWith('data:image/svg+xml') && iconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
+                        let iconHtml = '';
+                        if (hasReal) {
+                            iconHtml = `<img class="search-result-favicon" src="${escapeHtml(iconSrc)}" style="width:16px; height:16px; object-fit:contain; border-radius:3px; flex-shrink:0;" alt="">`;
+                        } else {
+                            iconHtml = `<i class="fas fa-globe" style="color:#0ea5e9; font-size:14px; flex-shrink:0;"></i>`;
+                        }
+                        const highlighted = (typeof highlightSearchKeywords === 'function' && query)
+                            ? highlightSearchKeywords(d.domain, query)
+                            : escapeHtml(d.domain);
+                        return `<div class="canvas-table-cell-title" title="${escapeHtml(d.domain)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden;">
+                            ${iconHtml}
+                            <span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; font-weight:600; color:var(--text-primary);">${highlighted}</span>
+                        </div>`;
+                    }
+                },
+                {
+                    title: isZh ? "操作" : "Actions",
+                    field: "actions",
+                    width: savedWidths['actions'] || 90,
+                    minWidth: 80,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: false,
+                    headerSort: false,
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        const domainKey = d.domain || '';
+                        const count = d.count || 0;
+                        const countText = isZh ? `${count}项` : (count === 1 ? '1 item' : `${count} items`);
+                        const toggleTitle = isZh ? '展开书签明细' : 'Expand bookmark details';
+                        return `<div class="canvas-table-domain-actions" style="display:inline-flex; align-items:center; justify-content:center; width:100%; height:100%; text-align:center;">
+                            <button type="button" class="canvas-bookmark-match-count canvas-bookmark-group-count canvas-table-domain-count-btn" data-domain="${escapeHtml(domainKey)}" data-bookmark-group-id="domain:${escapeHtml(domainKey)}" title="${escapeHtml(toggleTitle)}" style="display:inline-flex; align-items:center; justify-content:center; gap:2px;">
+                                ${escapeHtml(countText)} <i class="fas fa-chevron-down" style="font-size:8px; opacity:0.7;"></i>
+                            </button>
+                        </div>`;
+                    },
+                    cellClick: (e, cell) => {
+                        if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
+                        const d = cell.getData();
+                        if (!d) return;
+                        const domainKey = d.domain || '';
+                        const countBtn = e.target.closest('.canvas-bookmark-group-count, .canvas-table-domain-count-btn') || cell.getElement().querySelector('.canvas-bookmark-group-count');
+                        if (countBtn) {
+                            e._canvasHandled = true;
+                            try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
+                            toggleGridGroupPopover(countBtn, `domain:${domainKey}`);
+                            return;
+                        }
+                    }
+                },
+                {
+                    title: isZh ? "书签总数" : "Bookmarks",
+                    field: "count",
+                    width: savedWidths['count'] || 90,
+                    minWidth: 75,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    headerSortStartingDir: "desc",
+                    sorter: "number",
+                    formatter: (cell) => {
+                        const val = Number(cell.getValue()) || 0;
+                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;"><span style="font-weight:700; color:var(--accent-primary, #0ea5e9); font-size:12px;">${val}</span></div>`;
+                    }
+                },
+                {
+                    title: isZh ? "旗下子域名" : "Subdomains",
+                    field: "subdomainCount",
+                    width: savedWidths['subdomainCount'] || 110,
+                    minWidth: 90,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    headerSortStartingDir: "desc",
+                    sorter: "number",
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        const val = Number(cell.getValue()) || 0;
+                        const domainKey = d.domain || '';
+                        if (val > 1) {
+                            return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;">
+                                <button type="button" class="canvas-table-subdomain-pill-btn" data-domain="${escapeHtml(domainKey)}" title="${escapeHtml(isZh ? `查看全部 ${val} 个旗下子域名` : `View all ${val} subdomains`)}" style="display:inline-flex; align-items:center; justify-content:center; gap:4px; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; cursor:pointer; background:rgba(14,165,233,0.1); color:#0284c7; border:1px solid rgba(14,165,233,0.25);">
+                                    <i class="fas fa-sitemap" style="font-size:9.5px; opacity:0.8;"></i>
+                                    <span>${val} ${isZh ? '个子域' : 'subdomains'}</span>
+                                </button>
+                            </div>`;
+                        }
+                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;">
+                            <button type="button" class="canvas-table-subdomain-pill-btn" data-domain="${escapeHtml(domainKey)}" title="${escapeHtml(isZh ? '查看对应域名' : 'View domain')}" style="display:inline-flex; align-items:center; justify-content:center; gap:4px; padding:2px 8px; border-radius:12px; font-size:11px; cursor:pointer; background:var(--bg-secondary, rgba(128,128,128,0.06)); color:var(--text-tertiary); border:1px solid var(--border-color, rgba(128,128,128,0.15));">
+                                <i class="fas fa-globe" style="font-size:9.5px; opacity:0.7;"></i>
+                                <span>${isZh ? '单域' : 'Single'}</span>
+                            </button>
+                        </div>`;
+                    },
+                    cellClick: (e, cell) => {
+                        if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
+                        const btn = e.target.closest('.canvas-table-subdomain-pill-btn') || cell.getElement().querySelector('.canvas-table-subdomain-pill-btn');
+                        if (btn) {
+                            e._canvasHandled = true;
+                            try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
+                            const d = cell.getData();
+                            const domainKey = d.domain || btn.getAttribute('data-domain') || '';
+                            btn._rowData = d;
+                            toggleSubdomainListPopover(btn, domainKey);
+                            return;
+                        }
+                    }
+                },
+                buildPrimaryFolderTabulatorColumn(),
+                {
+                    title: isZh ? "所在主要栏目" : "Locations",
+                    field: "locations",
+                    minWidth: 120,
+                    width: savedWidths['locations'] || 160,
+                    resizable: true,
+                    headerSort: false,
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        return renderCanvasTableBookmarkLocationsHtml(d.locations, isZh, d);
+                    },
+                    cellClick: (e, cell) => {
+                        if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
+                        const chip = e.target.closest('.search-loc-chip');
+                        if (chip) {
+                            if (e._canvasHandled) return;
+                            e._canvasHandled = true;
+                            if (chip.dataset && chip.dataset.searchNavDisabled === 'true') return;
+                            try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
+                            const d = cell.getData();
+                            const locId = chip.dataset.locId || (d && d.id);
+                            const locSource = chip.dataset.locSource;
+                            const locSection = chip.dataset.locSection;
+                            const rawCopyId = chip.dataset.copyId;
+                            const copyId = (!rawCopyId || rawCopyId === 'null') ? null : rawCopyId;
+                            const color = chip.style.getPropertyValue('--loc-color') || '#2563eb';
+                            recordCurrentSearchJumpHistory();
+                            hideSearchResultsPanel();
+                            try {
+                                const inputEl = document.getElementById('searchInput');
+                                if (inputEl) inputEl.value = '';
+                            } catch (_) { }
+                            const target = {
+                                type: 'bookmark-item',
+                                id: locId,
+                                source: locSource || 'permanent',
+                                sectionId: locSource === 'temporary' ? (locSection || '') : '',
+                                copyId: locSource === 'permanent' ? copyId : null,
+                                color: color
+                            };
+                            navigateToCanvasBookmarkSearchTarget(target);
+                            return;
+                        }
+                    }
+                },
+                {
+                    title: isZh ? "最近添加" : "Last Added",
+                    field: "dateAdded",
+                    minWidth: 100,
+                    width: savedWidths['dateAdded'] || 120,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    headerSortStartingDir: "desc",
+                    sorter: (a, b, aRow, bRow, col, dir) => {
+                        const numA = Number(a) || 0;
+                        const numB = Number(b) || 0;
+                        if (numA === numB) return 0;
+                        if (!numA) return dir === "desc" ? -1 : 1;
+                        if (!numB) return dir === "desc" ? 1 : -1;
+                        return numA - numB;
+                    },
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        const txt = d.dateAddedText || '-';
+                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
+                    }
+                }
+            ];
+            return applyTabulatorColumnOrder(cols, 'domain-root');
+        } else {
+            const cols = [
+                {
+                    title: "#",
+                    field: "index",
+                    width: 36,
+                    minWidth: 32,
+                    maxWidth: 42,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: false,
+                    headerSort: false,
+                    formatter: formatCanvasTabulatorRowIndexCell
+                },
+                {
+                    title: isZh ? "具体子域名" : "Subdomain",
+                    field: "domain",
+                    minWidth: 170,
+                    width: savedWidths['domain'] || 220,
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    sorter: (a, b, aRow, bRow, col, dir) => compareCanvasSearchNaturalText(a, b, dir),
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                        const domainUrl = 'https://' + (d.domain || d.title || '');
+                        const iconSrc = d.favicon || ((typeof getFaviconUrl === 'function') ? getFaviconUrl(domainUrl) : '');
+                        const hasReal = iconSrc && !String(iconSrc).startsWith('data:image/svg+xml') && iconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
+                        let iconHtml = '';
+                        if (hasReal) {
+                            iconHtml = `<img class="search-result-favicon" src="${escapeHtml(iconSrc)}" style="width:16px; height:16px; object-fit:contain; border-radius:3px; flex-shrink:0;" alt="">`;
+                        } else {
+                            iconHtml = `<i class="fas fa-globe" style="color:#0ea5e9; font-size:14px; flex-shrink:0;"></i>`;
+                        }
+                        const highlighted = (typeof highlightSearchKeywords === 'function' && query)
+                            ? highlightSearchKeywords(d.domain, query)
+                            : escapeHtml(d.domain);
+                        return `<div class="canvas-table-cell-title" title="${escapeHtml(d.domain)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden;">
+                            ${iconHtml}
+                            <span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; font-weight:600; color:var(--text-primary);">${highlighted}</span>
+                        </div>`;
+                    }
+                },
+                {
+                    title: isZh ? "操作" : "Actions",
+                    field: "actions",
+                    width: savedWidths['actions'] || 90,
+                    minWidth: 80,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: false,
+                    headerSort: false,
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        const domainKey = d.domain || '';
+                        const count = d.count || 0;
+                        const countText = isZh ? `${count}项` : (count === 1 ? '1 item' : `${count} items`);
+                        const toggleTitle = isZh ? '展开书签明细' : 'Expand bookmark details';
+                        return `<div class="canvas-table-domain-actions" style="display:inline-flex; align-items:center; justify-content:center; width:100%; height:100%; text-align:center;">
+                            <button type="button" class="canvas-bookmark-match-count canvas-bookmark-group-count canvas-table-domain-count-btn" data-domain="${escapeHtml(domainKey)}" data-bookmark-group-id="domain:${escapeHtml(domainKey)}" title="${escapeHtml(toggleTitle)}" style="display:inline-flex; align-items:center; justify-content:center; gap:2px;">
+                                ${escapeHtml(countText)} <i class="fas fa-chevron-down" style="font-size:8px; opacity:0.7;"></i>
+                            </button>
+                        </div>`;
+                    },
+                    cellClick: (e, cell) => {
+                        if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
+                        const d = cell.getData();
+                        if (!d) return;
+                        const domainKey = d.domain || '';
+                        const countBtn = e.target.closest('.canvas-bookmark-group-count, .canvas-table-domain-count-btn') || cell.getElement().querySelector('.canvas-bookmark-group-count');
+                        if (countBtn) {
+                            e._canvasHandled = true;
+                            try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
+                            toggleGridGroupPopover(countBtn, `domain:${domainKey}`);
+                            return;
+                        }
+                    }
+                },
+                {
+                    title: isZh ? "书签数量" : "Bookmarks",
+                    field: "count",
+                    width: savedWidths['count'] || 90,
+                    minWidth: 75,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    headerSortStartingDir: "desc",
+                    sorter: "number",
+                    formatter: (cell) => {
+                        const val = Number(cell.getValue()) || 0;
+                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;"><span style="font-weight:700; color:var(--accent-primary, #0ea5e9); font-size:12px;">${val}</span></div>`;
+                    }
+                },
+                {
+                    title: isZh ? "所属主域名" : "Root Domain",
+                    field: "rootDomain",
+                    width: savedWidths['rootDomain'] || 140,
+                    minWidth: 110,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    sorter: (a, b, aRow, bRow, col, dir) => compareCanvasSearchNaturalText(a, b, dir),
+                    formatter: (cell) => {
+                        const root = cell.getValue() || '-';
+                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;">
+                            <span class="canvas-table-root-domain-badge" title="${escapeHtml(root)}" style="display:inline-flex; align-items:center; justify-content:center; gap:4px; padding:2px 7px; border-radius:4px; font-size:11px; background:var(--bg-secondary, rgba(128,128,128,0.08)); color:var(--text-secondary); border:1px solid var(--border-color, rgba(128,128,128,0.15)); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                <i class="fas fa-globe" style="font-size:10px; opacity:0.65;"></i>
+                                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(root)}</span>
+                            </span>
+                        </div>`;
+                    }
+                },
+                buildPrimaryFolderTabulatorColumn(),
+                {
+                    title: isZh ? "最近添加" : "Last Added",
+                    field: "dateAdded",
+                    minWidth: 100,
+                    width: savedWidths['dateAdded'] || 120,
+                    hozAlign: "center",
+                    headerHozAlign: "center",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    headerSortStartingDir: "desc",
+                    sorter: (a, b, aRow, bRow, col, dir) => {
+                        const numA = Number(a) || 0;
+                        const numB = Number(b) || 0;
+                        if (numA === numB) return 0;
+                        if (!numA) return dir === "desc" ? -1 : 1;
+                        if (!numB) return dir === "desc" ? 1 : -1;
+                        return numA - numB;
+                    },
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        const txt = d.dateAddedText || '-';
+                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
+                    }
+                }
+            ];
+            return applyTabulatorColumnOrder(cols, 'domain-host');
+        }
+    }
+
     const savedWidths = getSavedTabulatorColumnWidths(mode);
 
     if (mode === 'structure') {
@@ -19269,6 +21220,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 headerSortTristate: true,
                 sorter: (a, b, aRow, bRow, col, dir) => compareCanvasSearchNaturalText(a, b, dir),
                 cellClick: async (e, cell) => {
+                    if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
                     if (e.target.closest('.search-loc-chip, .canvas-table-loc-more-btn, .canvas-grid-location-more-btn, a, button')) return;
                     const d = cell.getData();
                     if (!d || !d.rawItem) return;
@@ -19434,6 +21386,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 headerSortTristate: true,
                 sorter: (a, b, aRow, bRow, col, dir) => compareCanvasSearchNaturalText(a, b, dir),
                 cellClick: async (e, cell) => {
+                    if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
                     if (e.target.closest('.search-loc-chip, .canvas-table-loc-more-btn, .canvas-grid-location-more-btn, a, button')) return;
                     const d = cell.getData();
                     if (!d || !d.rawItem) return;
@@ -19701,6 +21654,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 return `<div class="canvas-table-path-wrapper canvas-table-path-text" title="${escapeHtml(parts.join(' > '))}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width:100%; font-size:11px; color:var(--text-secondary); display:flex; align-items:center; gap:3px;">${moreBtnHtml}${ellipsisHtml}<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${partsHtml}</span></div>`;
             },
             cellClick: (e, cell) => {
+                if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
                 const pathMoreBtn = e.target.closest('.canvas-table-path-more-btn, .canvas-grid-path-more-btn');
                 const pathEllipsisBtn = e.target.closest('.canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle');
                 if (pathMoreBtn || pathEllipsisBtn) {
@@ -19830,6 +21784,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 return `<div class="canvas-table-tags-wrapper" style="display:flex; align-items:center; gap:3px; overflow:hidden; width:100%;">${moreBtnHtml}${ellipsisHtml}${chips}</div>`;
             },
             cellClick: (e, cell) => {
+                if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
                 const tagMoreBtn = e.target.closest('.canvas-table-tag-more-btn, .canvas-grid-tag-more-btn');
                 const tagEllipsisBtn = e.target.closest('.canvas-table-tag-ellipsis-btn, .search-result-tag-ellipsis-toggle');
                 if (tagMoreBtn || tagEllipsisBtn) {
@@ -19933,6 +21888,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 return `<div class="canvas-table-note-wrapper canvas-table-note-btn note-color-${escapeHtml(colorKey)}" data-note-color="${escapeHtml(colorKey)}" data-item-id="${escapeHtml(String((d && d.id) || ''))}" data-item-index="${escapeHtml(String((d && d.index) || ''))}" title="${escapeHtml(isZh ? `点击展开完整笔记说明: ${noteText}` : `Click to view full note: ${noteText}`)}" style="display:flex; align-items:center; gap:3px; font-size:11px; max-width:100%; overflow:hidden;">${moreBtnHtml}${ellipsisHtml}<i class="fas fa-pencil-alt" style="color:${noteColorCss}; font-size:10px; flex-shrink:0;"></i><span class="canvas-table-note-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${highlightedNote}</span></div>`;
             },
             cellClick: (e, cell) => {
+                if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
                 const noteBtn = e.target.closest('.canvas-table-note-btn, .canvas-table-note-wrapper, .canvas-table-note-more-btn, .canvas-table-note-ellipsis-btn, .search-result-note-ellipsis-toggle');
                 if (noteBtn) {
                     if (e._canvasHandled) return;
@@ -19986,6 +21942,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 return `<div class="canvas-table-date-cell">${moreBtnHtml}<span class="canvas-table-date-text" title="${escapeHtml(timeText)}">${highlightedTime}</span></div>`;
             },
             cellClick: (e, cell) => {
+                if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
                 const dateMoreBtn = e.target.closest('.canvas-table-date-more-btn, .canvas-grid-date-more-btn');
                 if (dateMoreBtn) {
                     if (e._canvasHandled) return;
@@ -20033,6 +21990,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 </div>`;
             },
             cellClick: (e, cell) => {
+                if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
                 const extBtn = e.target.closest('.canvas-table-external-link, .search-result-external-link');
                 if (extBtn) {
                     if (e._canvasHandled) return;
@@ -20315,7 +22273,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
         canvasSearchTabulatorInstance = null;
     }
 
-    const activeMode = (searchUiState && searchUiState.activeMode) || 'bookmark';
+    const activeMode = getCanvasTabulatorActiveModeKey();
     canvasSearchTabulatorActiveMode = activeMode;
     const tabulatorLayout = getCanvasTabulatorLayoutMode(activeMode);
 
@@ -20376,6 +22334,28 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             ensureCanvasTabulatorIndexColumnFirst(inst, activeMode);
         });
 
+        if (!containerEl._hasHeaderSortCaptureBound) {
+            containerEl._hasHeaderSortCaptureBound = true;
+            containerEl.addEventListener('click', (e) => {
+                const headerCol = e.target.closest('.tabulator-col');
+                if (!headerCol) return;
+                const isSortable = headerCol.getAttribute('aria-sort') !== null || headerCol.classList.contains('tabulator-sortable');
+                if (isSortable && typeof ensureAllCanvasSearchTabulatorDataLoaded === 'function') {
+                    ensureAllCanvasSearchTabulatorDataLoaded();
+                }
+            }, true);
+        }
+
+        canvasSearchTabulatorInstance.on("headerClick", function(e, column) {
+            if (!column) return;
+            const def = column.getDefinition();
+            if (def && def.headerSort !== false) {
+                if (typeof ensureAllCanvasSearchTabulatorDataLoaded === 'function') {
+                    ensureAllCanvasSearchTabulatorDataLoaded();
+                }
+            }
+        });
+
         canvasSearchTabulatorInstance.on("tableBuilt", function() {
             const inst = this || canvasSearchTabulatorInstance;
             setupCanvasTabulatorIndexHeaderProtection(inst);
@@ -20411,11 +22391,17 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             if (typeof isGridDetailsBubbleVisible === 'function' && isGridDetailsBubbleVisible()) {
                 hideGridDetailsBubble();
             }
+            if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
+            if (typeof hideDomainTempBubble === 'function') hideDomainTempBubble();
+            if (typeof hideSubdomainListPopover === 'function') hideSubdomainListPopover();
         });
         canvasSearchTabulatorInstance.on("scrollHorizontal", () => {
             if (typeof isGridDetailsBubbleVisible === 'function' && isGridDetailsBubbleVisible()) {
                 hideGridDetailsBubble();
             }
+            if (typeof hideGridGroupPopover === 'function') hideGridGroupPopover();
+            if (typeof hideDomainTempBubble === 'function') hideDomainTempBubble();
+            if (typeof hideSubdomainListPopover === 'function') hideSubdomainListPopover();
         });
 
         return canvasSearchTabulatorInstance;
@@ -20437,7 +22423,7 @@ function updateSearchPanelColumnState(panel) {
     }
     const isSide = typeof isSidePanelModeInSearch === 'function' && isSidePanelModeInSearch();
     const w = panel.clientWidth;
-    const isSingle = isSide || (w > 0 && w < 554);
+    const isSingle = (w > 0) ? (w < 554) : isSide;
     panel.classList.toggle('is-single-column', isSingle);
     if (isSingle) {
         clampSingleColumnLocationRows(panel);
@@ -20475,7 +22461,7 @@ function observeSearchPanelColumns(panel) {
                 }
                 const isSide = typeof isSidePanelModeInSearch === 'function' && isSidePanelModeInSearch();
                 const w = entry.contentRect.width;
-                const isSingle = isSide || (w > 0 && w < 554);
+                const isSingle = (w > 0) ? (w < 554) : isSide;
                 target.classList.toggle('is-single-column', isSingle);
                 if (isSingle) {
                     clampSingleColumnLocationRows(target);
@@ -20501,7 +22487,7 @@ function clampSingleColumnLocationRows(panel) {
     if (panel.dataset && panel.dataset.panelType === 'root-browse') return;
     const isGrid = panel.classList.contains('view-grid') || (typeof isSearchPanelGridView === 'function' && isSearchPanelGridView());
     const isSide = typeof isSidePanelModeInSearch === 'function' && isSidePanelModeInSearch();
-    const isSingle = isSide || panel.classList.contains('is-single-column') || (panel.clientWidth > 0 && panel.clientWidth < 554);
+    const isSingle = panel.classList.contains('is-single-column') || (panel.clientWidth > 0 ? panel.clientWidth < 554 : isSide);
     if (!isGrid || !isSingle) return;
 
     if (_clampSingleColRaf) {
@@ -20665,7 +22651,7 @@ function renderOrUpdateSearchPanelHeader(panel, headerHtml) {
 
     // 1. 彻底清除所有已有的顶部详情头部与工具栏，杜绝任何历史残留或多行堆叠
     const staleHeaders = panel.querySelectorAll(
-        '.canvas-tag-browse-detail-header, .canvas-bookmark-type-toggle, .canvas-structure-type-toggle, .canvas-description-type-toggle, .search-suggestions-header, .search-empty-suggestions-hint, .canvas-suggestion-mode-item, .canvas-tag-browse-section, .canvas-note-browse-section'
+        '.canvas-tag-browse-detail-header, .canvas-bookmark-type-toggle, .canvas-structure-type-toggle, .canvas-description-type-toggle, .search-suggestions-header, .search-empty-suggestions-hint, .canvas-suggestion-mode-item, .canvas-tag-browse-section, .canvas-note-browse-section, .canvas-domain-nav-banner'
     );
     staleHeaders.forEach(el => el.remove());
 
@@ -21639,29 +23625,28 @@ function renderCanvasSearchResults(results, options = {}) {
                 ? makeBtn({ type: 'folder', icon: 'fa-folder', color: '#2563eb', count: folderCount, label: isZh ? '文件夹' : (folderCount > 1 ? 'Folders' : 'Folder') })
                 : '';
             const domainGrouping = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
-            const subdomainLabel = isZh ? '子域名' : 'Subdomain';
-            const domainGroupingTitle = isZh
-                ? '域名粒度：点击切换 主域名 / 子域名'
-                : 'Domain granularity: click to toggle root/subdomain';
             const subActive = active === 'domain' && domainGrouping === 'host';
             const rootActive = active === 'domain' && domainGrouping === 'root';
             const domainBtn = showDomainBtn
-                ? makeBtn({ type: 'domain', icon: 'fa-globe', color: '#0ea5e9', count: domainCount, label: isZh ? '域名' : (domainCount > 1 ? 'Domains' : 'Domain'), isActiveOverride: rootActive })
+                ? makeBtn({ type: 'domain', icon: 'fa-globe', color: '#0ea5e9', count: domainCount, label: isZh ? '域名' : (domainCount > 1 ? 'Domains' : 'Domain') })
                 : '';
             const shouldShowDomainGranularity = showDomainBtn && active === 'domain';
-            const domainGranularityBtn = shouldShowDomainGranularity
-                ? `<button class="canvas-bookmark-domain-granularity-btn ${subActive ? 'active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-domain-granularity-btn-compact' : ''}" type="button" data-domain-group="host" data-tooltip="${escapeHtml(domainGroupingTitle)}" aria-label="${escapeHtml(domainGroupingTitle)}"${compactBookmarkToolbar ? ' style="padding:4px 7px; font-size:10px;"' : ''}>${escapeHtml(subdomainLabel)}</button>`
+            const domainGranularityToggle = shouldShowDomainGranularity
+                ? `<div class="canvas-bookmark-domain-granularity-toggle${compactBookmarkToolbar ? ' canvas-bookmark-domain-granularity-toggle-compact' : ''}">
+                    <button class="canvas-bookmark-domain-granularity-btn ${rootActive ? 'active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-domain-granularity-btn-compact' : ''}" type="button" data-domain-group="root" data-tooltip="${escapeHtml(isZh ? '按主域名聚合' : 'Group by root domain')}" aria-label="${escapeHtml(isZh ? '主域名' : 'Root domain')}">${isZh ? '主域名' : 'Root'}</button>
+                    <button class="canvas-bookmark-domain-granularity-btn ${subActive ? 'active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-domain-granularity-btn-compact' : ''}" type="button" data-domain-group="host" data-tooltip="${escapeHtml(isZh ? '按子域名展示' : 'Show subdomains directly')}" aria-label="${escapeHtml(isZh ? '子域名' : 'Subdomain')}">${isZh ? '子域名' : 'Subdomain'}</button>
+                </div>`
                 : '';
             const domainControls = domainBtn
-                ? `<div class="canvas-bookmark-domain-control-group${compactBookmarkToolbar ? ' canvas-bookmark-domain-control-group-compact' : ''}">${domainBtn}${domainGranularityBtn}</div>`
+                ? `<div class="canvas-bookmark-domain-control-group${compactBookmarkToolbar ? ' canvas-bookmark-domain-control-group-compact' : ''}">${domainBtn}${domainGranularityToggle}</div>`
                 : '';
 
-            const visibleCount = displayResults.filter(r => r && (r.type === 'bookmark-group' || r.type === 'bookmark-item')).length;
+            const visibleCount = displayResults.filter(r => r && (r.type === 'bookmark-group' || r.type === 'bookmark-item' || r.type === 'domain-group')).length;
             const exportAriaLabel = isZh
                 ? `生成特殊临时栏目${visibleCount ? ` (${visibleCount}项)` : ''}`
                 : `Create special temporary section${visibleCount ? ` (${visibleCount} items)` : ''}`;
 
-            const showExportBtn = (active !== 'domain');
+            const showExportBtn = true;
             const isSel = (typeof isCanvasSearchSelectionModeActive === 'function') && isCanvasSearchSelectionModeActive();
             const selCount = (typeof getCanvasSearchSelectedItemsCount === 'function') ? getCanvasSearchSelectedItemsCount() : 0;
             const confirmBtnLabel = isZh
@@ -21961,8 +23946,8 @@ function renderCanvasSearchResults(results, options = {}) {
         let extraItemAttrs = '';
 
         const hideAggregateTags = (item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || '')))
-            || (item.type === 'domain-group' && item.isExpanded === true);
-        const tagMarkersHtml = isBookmarkMode && !hideAggregateTags ? renderBookmarkResultTagMarkers(item) : '';
+            || (item.type === 'domain-group');
+        const tagMarkersHtml = isBookmarkMode && !hideAggregateTags && item.type !== 'domain-group' ? renderBookmarkResultTagMarkers(item) : '';
         const tagsRowHtml = tagMarkersHtml ? `<div class="canvas-bookmark-tags-row" style="margin-top:4px;">${tagMarkersHtml}</div>` : '';
 
         const itemColor = item.color || '#999';
@@ -22232,6 +24217,7 @@ function renderCanvasSearchResults(results, options = {}) {
             }
 
             case 'domain-group': {
+                const bookmarkIconWrapStyle = 'display:flex; align-items:center; justify-content:flex-start; width:18px; height:20px; flex-shrink:0;';
                 const rawTitle = item.domain || item.title || '';
                 const formatted = formatSearchTitleWithWindow(rawTitle, searchUiState.query, {
                     isBookmarkMode: true,
@@ -22249,35 +24235,50 @@ function renderCanvasSearchResults(results, options = {}) {
                 const toggleTitle = isExpanded
                     ? (isZh ? '收起当前域名结果' : 'Collapse domain results')
                     : (isZh ? '展开当前域名结果' : 'Expand domain results');
-                const countLabel = isRootGroup
+                const bookmarksLabel = isZh
+                    ? (isMatchedStats ? `${count} 个匹配书签` : `${count} 个书签`)
+                    : (isMatchedStats ? (count === 1 ? '1 matched bookmark' : `${count} matched bookmarks`) : (count === 1 ? '1 bookmark' : `${count} bookmarks`));
+                const subdomainsLabel = (isRootGroup && subdomainCount > 0)
                     ? (isZh
-                        ? (isMatchedStats
-                            ? `${count} 个匹配书签 · ${subdomainCount} 个匹配子域名`
-                            : `${count} 个书签 · ${subdomainCount} 个子域名`)
-                        : (isMatchedStats
-                            ? `${count} matched bookmarks · ${subdomainCount} matched subdomains`
-                            : `${count} bookmarks · ${subdomainCount} subdomains`))
-                    : (isZh
-                        ? (isMatchedStats ? `${count} 个匹配书签` : `${count} 个书签`)
-                        : (isMatchedStats ? `${count} matched bookmarks` : `${count} bookmarks`));
+                        ? (isMatchedStats ? `${subdomainCount} 个匹配子域名` : `${subdomainCount} 个子域名`)
+                        : (isMatchedStats ? (subdomainCount === 1 ? '1 matched subdomain' : `${subdomainCount} matched subdomains`) : (subdomainCount === 1 ? '1 subdomain' : `${subdomainCount} subdomains`)))
+                    : '';
                 const domainUrl = 'https://' + (item.domain || item.title || '');
                 const faviconSrc = (typeof getFaviconUrl === 'function') ? getFaviconUrl(domainUrl) : null;
                 const hasRealFavicon = faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
 
-                indexLabel = `<div class="search-domain-group-icon" style="position:relative; display:inline-flex; align-items:center; justify-content:flex-start; width:18px; height:20px; flex-shrink:0;">
-                    <span class="search-result-icon-box-inline" style="display:${hasRealFavicon ? 'none' : 'inline-flex'}; align-items:center; justify-content:center; width:16px; height:16px;">
-                        <i class="fas fa-globe" style="color:#0ea5e9; font-size:16px;"></i>
-                    </span>
-                    <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(domainUrl)}" style="display:${hasRealFavicon ? '' : 'none'}; width:16px; height:16px; object-fit:contain; border-radius:3px;" alt="">
+                if (hasRealFavicon) {
+                    indexLabel = `<div style="${bookmarkIconWrapStyle}">
+                        <img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(domainUrl)}" style="width:16px; height:16px; object-fit:contain; border-radius:3px;" alt="">
+                    </div>`;
+                } else {
+                    indexLabel = `<div style="${bookmarkIconWrapStyle} position:relative;">
+                        <i class="fas fa-globe search-result-icon-box-inline" style="color:#0ea5e9; font-size:16px;"></i>
+                        <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(domainUrl)}" style="display:none; width:16px; height:16px; object-fit:contain; border-radius:3px; position:absolute;" alt="">
+                    </div>`;
+                }
+
+                const domainKey = String(item.domain || item.title || '').trim();
+                const domainGroupId = String(item.id || `domain:${domainKey}`).trim();
+                const domainCountText = isZh ? `${count}项` : (count === 1 ? '1 item' : `${count} items`);
+                const domainCountHtml = `<button class="canvas-bookmark-match-count canvas-bookmark-group-count" type="button" data-domain="${escapeHtml(domainKey)}" data-bookmark-group-id="${escapeHtml(domainGroupId)}" aria-expanded="${isExpanded ? 'true' : 'false'}" title="${escapeHtml(toggleTitle)}">${domainCountText}</button>`;
+                const domainToggleHtml = `<button class="canvas-bookmark-group-toggle" type="button" data-domain="${escapeHtml(domainKey)}" data-bookmark-group-id="${escapeHtml(domainGroupId)}" aria-label="${escapeHtml(toggleTitle)}" title="${escapeHtml(toggleTitle)}"><i class="fas ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>`;
+                const domainActionsHtml = `<div class="canvas-bookmark-group-actions">${domainCountHtml}${domainToggleHtml}</div>`;
+
+                title = `<div class="search-result-bookmark-title-text search-result-domain-title-text" data-raw-title="${escapeHtml(formatted.fullTitle)}">${domainText}</div>${domainActionsHtml}`;
+
+                // Summary Row (Clean static text: e.g. 23 个书签 · 4 个子域名，子域名支持点击浮层查看对应域名)
+                const subdomainsBtnHtml = (isRootGroup && subdomainCount > 0)
+                    ? `<button type="button" class="canvas-grid-subdomain-more-btn" data-domain="${escapeHtml(domainKey)}" title="${escapeHtml(isZh ? `查看全部 ${subdomainCount} 个旗下子域名` : `View all ${subdomainCount} subdomains`)}" style="background:none; border:none; padding:0; margin:0; font:inherit; color:var(--accent-primary, #0ea5e9); cursor:pointer; text-decoration:underline; text-underline-offset:2px; opacity:0.95;">${escapeHtml(subdomainsLabel)}</button>`
+                    : '';
+                const summaryHtml = subdomainsBtnHtml
+                    ? `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)} · ${subdomainsBtnHtml}</div></div>`
+                    : `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)}</div></div>`;
+
+                descHtml = `<div class="search-result-match canvas-bookmark-group-summary" style="display:flex; flex-direction:column; width:100%; min-width:0;">
+                    ${summaryHtml}
                 </div>`;
-                title = `<div class="search-result-domain-title-text" data-raw-title="${escapeHtml(formatted.fullTitle)}">${domainText}</div>${renderBookmarkResultNoteMarker(item)}`;
-                descHtml = `<div class="search-result-match" style="margin-top:2px; color:var(--text-muted); font-size:11px;">${escapeHtml(countLabel)}</div>${tagsRowHtml}${renderBookmarkResultNoteSnippet(item)}`;
-                badge = `<div class="search-domain-actions">
-                    ${makeColoredBadge(isZh ? '域名' : 'Domain', 'domain')}
-                    <button class="search-domain-toggle-btn" type="button" data-domain="${escapeHtml(item.domain || item.title || '')}" aria-label="${escapeHtml(toggleTitle)}" title="${escapeHtml(toggleTitle)}">
-                        <i class="fas ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i>
-                    </button>
-                </div>`;
+                badge = '';
                 break;
             }
 
@@ -22438,6 +24439,16 @@ function renderCanvasSearchResults(results, options = {}) {
                 indexLabel = `<span class="search-child-dot">…</span>`;
                 title = escapeHtml(item.title || (isZh ? '更多' : 'More'));
                 badge = '';
+                break;
+            }
+
+            case 'domain-group-more': {
+                indexLabel = `<span class="search-child-dot" style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px;"><i class="fas fa-chevron-down" style="font-size:10px; color:var(--text-muted);"></i></span>`;
+                title = `<button class="canvas-domain-group-load-more-btn" type="button" data-domain="${escapeHtml(item.domain)}" style="background:none; border:none; padding:0; color:var(--accent-color, #0ea5e9); cursor:pointer; font-size:12px; font-weight:500; display:inline-flex; align-items:center; gap:6px;">
+                    <span>${escapeHtml(item.title)}</span>
+                </button>`;
+                badge = '';
+                descHtml = '';
                 break;
             }
 
@@ -22742,11 +24753,44 @@ function renderCanvasSearchResults(results, options = {}) {
                     ${detailsHtml}
                 </div>
             `;
-        } else if (item.type === 'bookmark-item' && item.url && item.domainChild) {
-            // Keep original logic for domainChild but swap tag and note
-            const linkHtml = `<div class="search-result-match search-result-link-row">${renderExternalLinkHtml(item.url)}</div>`;
+        } else if (item.type === 'bookmark-item' && item.domainChild) {
+            const rootLabel = isZh ? '根目录' : 'Root';
+            const parentPath = getBookmarkItemParentPathForSearchScope(item, fullscreenScope);
+            const pathList = parentPath ? [parentPath] : [];
+            const pathHintTypeClass = item.nodeType === 'folder' ? 'is-folder' : 'is-bookmark';
+            const pathHtml = pathList.length
+                ? renderPathHintWithTailPreview(pathList, rootLabel, pathHintTypeClass, item)
+                : '';
+            const bookmarkLocationsHtml = renderCanvasBookmarkLocationsHtml(item, {
+                isZh,
+                compact: compactBookmarkToolbar,
+                disableLocationJumpBadges
+            });
+            if (bookmarkLocationsHtml) {
+                extraItemAttrs += ' data-has-locations="true"';
+            }
+            const hostText = String(item.domainHost || '').trim().toLowerCase();
+            const showHost = hostText && (String(item.groupLevel || '') === 'root' || hostText !== String(item.domain || '').trim().toLowerCase());
+            const hostLabel = showHost
+                ? `<span class="search-domain-host-line" style="margin:0; font-size:11px; color:var(--text-tertiary);">${escapeHtml(hostText)}</span>`
+                : '';
+            const linkHtml = item.url ? `<span class="search-result-link-row" style="margin:0;">${renderExternalLinkHtml(item.url)}</span>` : '';
             const itemNoteSnippetHtml = renderBookmarkResultNoteSnippet(item);
-            descHtml = `<div class="search-result-match search-domain-children-meta">${linkHtml}${tagsRowHtml}${itemNoteSnippetHtml}</div>`;
+
+            descHtml = `
+                <div class="search-result-match" style="display:flex; flex-direction:column; width:100%; min-width:0;">
+                    <div class="canvas-grid-card-locations-row" style="display:flex; align-items:center; gap:4px; height:18px; overflow:hidden;">
+                        ${bookmarkLocationsHtml}
+                        ${pathHtml}
+                    </div>
+                    <div class="search-result-match search-domain-children-meta" style="display:flex; flex-direction:row; align-items:center; gap:6px; height:20px; overflow:hidden; white-space:nowrap;">
+                        ${hostLabel}
+                        ${linkHtml}
+                        ${tagsRowHtml}
+                        ${itemNoteSnippetHtml}
+                    </div>
+                </div>
+            `;
         }
 
         const extraClasses = [];
@@ -22755,8 +24799,11 @@ function renderCanvasSearchResults(results, options = {}) {
             const canExpand = String(item.id || '').trim() && Array.isArray(item.targetItems) && item.targetItems.length > 1;
             if (canExpand) extraClasses.push('has-group-actions');
         }
-        if (item.type === 'bookmark-group-more') extraClasses.push('bookmark-more');
-        if (item.type === 'domain-group') extraClasses.push('domain-group');
+        if (item.type === 'bookmark-group-more' || item.type === 'domain-group-more') extraClasses.push('bookmark-more');
+        if (item.type === 'domain-group') {
+            extraClasses.push('domain-group');
+            extraClasses.push('has-group-actions');
+        }
         if (item.isChild) extraClasses.push('bookmark-child');
         if (item.domainChild) extraClasses.push('domain-child');
         if (!descHtml || !String(descHtml).trim()) {
@@ -22766,7 +24813,7 @@ function renderCanvasSearchResults(results, options = {}) {
             extraClasses.push('canvas-search-item-selected');
         }
         const rowClassName = ['search-result-item', isSelected].concat(extraClasses).filter(Boolean).join(' ');
-        const bookmarkGroupExpandedAttr = item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || ''))
+        const bookmarkGroupExpandedAttr = ((item.type === 'bookmark-group' && isBookmarkGroupExpanded(String(item.id || ''))) || (item.type === 'domain-group' && item.isExpanded === true))
             ? ' data-expanded="true"'
             : '';
 
@@ -22893,32 +24940,104 @@ function renderCanvasSearchResults(results, options = {}) {
     });
 }
 
-function collectBookmarkItemsForTempSection(targetCount = null) {
-    const filter = searchUiState.bookmarkTypeFilter;
-    if (filter === 'domain') return [];
-    const groups = searchUiState.bookmarkGroupModel;
+async function collectBookmarkItemsForTempSection(targetCount = null) {
+    const filter = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.bookmarkTypeFilter) || '';
     const isTargetCount = typeof targetCount === 'number' && targetCount > 0;
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+    const isTableView = typeof isSearchPanelTableView === 'function' && isSearchPanelTableView() && typeof isCanvasSearchTabulatorReady === 'function' && isCanvasSearchTabulatorReady();
 
-    let candidatePool = [];
-    if (Array.isArray(groups) && groups.length) {
-        candidatePool = groups;
-    } else {
-        const allCandidates = (Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
-            ? searchUiState.resultAll
-            : (searchUiState.results || []);
-        candidatePool = allCandidates.filter(r => r && (r.type === 'bookmark-item' || r.type === 'bookmark-group'));
-    }
+    if (isTableView) {
+        const currentActiveRows = (canvasSearchTabulatorInstance && typeof canvasSearchTabulatorInstance.getData === 'function')
+            ? (canvasSearchTabulatorInstance.getData("active") || [])
+            : [];
+        if (!isTargetCount || targetCount > currentActiveRows.length) {
+            if (typeof ensureAllCanvasSearchTabulatorDataLoaded === 'function') {
+                ensureAllCanvasSearchTabulatorDataLoaded();
+            }
+        }
+        const activeRows = canvasSearchTabulatorInstance.getData("active") || [];
+        const selectedRows = isTargetCount ? activeRows.slice(0, targetCount) : activeRows;
 
-    if (!isTargetCount) {
-        // 全部导出
+        if (filter === 'domain') {
+            const folderPayloads = [];
+            for (const row of selectedRows) {
+                const raw = row.rawItem || row;
+                const payload = (typeof buildDomainGroupFolderPayload === 'function')
+                    ? await buildDomainGroupFolderPayload(raw, isZh)
+                    : null;
+                if (payload) {
+                    folderPayloads.push(payload);
+                }
+            }
+            return folderPayloads;
+        }
+
+        const rawSelected = selectedRows.map(r => r.rawItem || r);
         return (typeof unwrapSearchItemsForTempPayload === 'function')
-            ? unwrapSearchItemsForTempPayload(candidatePool)
-            : candidatePool.map(r => r.rawItem || r);
+            ? unwrapSearchItemsForTempPayload(rawSelected, { preserveExplicitSelection: true })
+            : rawSelected;
     }
 
-    const selectedCandidates = candidatePool.slice(0, targetCount);
+    // 网格视图或非表格模式候选池收集
+    let candidatePool = [];
+    if (filter === 'domain') {
+        const cache = (typeof ensureDomainCacheForQuery === 'function')
+            ? ensureDomainCacheForQuery((searchUiState && searchUiState.query) || '')
+            : null;
+        if (cache && Array.isArray(cache.results)) {
+            candidatePool = cache.results;
+        } else {
+            const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
+                ? searchUiState.resultAll
+                : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
+            candidatePool = allCandidates.filter(r => r && (r.type === 'domain-group' || (r.rawItem && r.rawItem.type === 'domain-group')));
+        }
+    } else if (filter === 'folder') {
+        const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
+            ? searchUiState.resultAll
+            : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
+        candidatePool = allCandidates.filter(r => {
+            const norm = r && (r.rawItem || r);
+            return norm && (norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true);
+        });
+    } else if (filter === 'bookmark') {
+        const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
+            ? searchUiState.resultAll
+            : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
+        candidatePool = allCandidates.filter(r => {
+            const norm = r && (r.rawItem || r);
+            const isFold = norm && (norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true);
+            return norm && !isFold && (norm.type === 'bookmark-item' || norm.type === 'bookmark-group');
+        });
+    } else {
+        const groups = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.bookmarkGroupModel) || null;
+        if (Array.isArray(groups) && groups.length) {
+            candidatePool = groups;
+        } else {
+            const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
+                ? searchUiState.resultAll
+                : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
+            candidatePool = allCandidates.filter(r => r && (r.type === 'bookmark-item' || r.type === 'bookmark-group'));
+        }
+    }
+
+    const selectedCandidates = isTargetCount ? candidatePool.slice(0, targetCount) : candidatePool;
+
+    if (filter === 'domain') {
+        const folderPayloads = [];
+        for (const item of selectedCandidates) {
+            const payload = (typeof buildDomainGroupFolderPayload === 'function')
+                ? await buildDomainGroupFolderPayload(item, isZh)
+                : null;
+            if (payload) {
+                folderPayloads.push(payload);
+            }
+        }
+        return folderPayloads;
+    }
+
     return (typeof unwrapSearchItemsForTempPayload === 'function')
-        ? unwrapSearchItemsForTempPayload(selectedCandidates)
+        ? unwrapSearchItemsForTempPayload(selectedCandidates, { preserveExplicitSelection: (filter === 'folder') })
         : selectedCandidates.map(r => r.rawItem || r);
 }
 
@@ -23565,7 +25684,7 @@ async function createTempSectionFromSearchResults(customItems = null, customTitl
     try {
         const items = (Array.isArray(customItems) && customItems.length > 0)
             ? customItems
-            : collectBookmarkItemsForTempSection();
+            : ((typeof collectBookmarkItemsForTempSection === 'function') ? await collectBookmarkItemsForTempSection() : []);
         if (!items.length) {
             const isZh = currentLang === 'zh_CN';
             showCanvasToastSafe(isZh ? '没有可生成的书签条目' : 'No bookmark items to create temp section', 'warning', 1800);
@@ -23672,6 +25791,15 @@ async function createTempSectionFromSearchResults(customItems = null, customTitl
             const item = items[i];
             if (!item) continue;
 
+            if (item.type === 'folder' && Array.isArray(item.children)) {
+                await appendPayloadList([item], item.title || (isZh ? '文件夹' : 'Folder'));
+                processed += 1;
+                if (processed % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
+                    await yieldToMainThread();
+                }
+                continue;
+            }
+
             if (item.source === 'permanent' && permanentNodeMap) {
                 const node = permanentNodeMap.get(String(item.id));
                 const built = await buildPayloadFromPermanentNode(node, isZh, {
@@ -23683,12 +25811,9 @@ async function createTempSectionFromSearchResults(customItems = null, customTitl
                 if (built) {
                     await appendPayloadList([built], item.title || (isZh ? '文件夹' : 'Folder'));
                     processed += 1;
-                    if (processed % TEMP_SECTION_BUILD_YIELD_EVERY === 0) {
-                        await yieldToMainThread();
-                    }
                     continue;
                 }
-                throw new Error(isZh ? '永久搜索结果无法构建负载，无法创建临时栏目。' : 'Failed to build payload from permanent search result; cannot create a temporary section.');
+                console.warn('[Temp Section] Could not build full payload for permanent node, falling back to basic payload:', item);
             }
 
             if (item.nodeType === 'folder') {
@@ -23738,10 +25863,14 @@ async function createTempSectionFromSearchResults(customItems = null, customTitl
             }
         }
 
+        const totalBookmarksCount = (typeof countTotalBookmarksInPayload === 'function')
+            ? countTotalBookmarksInPayload(payloadItems) + insertedDirectCount
+            : (payloadItems.length + insertedDirectCount);
+
         showCanvasToastSafe(
             isZh
-                ? `正在写入临时栏目…（${payloadItems.length + insertedDirectCount}）`
-                : `Writing temp section… (${payloadItems.length + insertedDirectCount})`,
+                ? `正在写入临时栏目…（${totalBookmarksCount}）`
+                : `Writing temp section… (${totalBookmarksCount})`,
             'info',
             1600
         );
@@ -23767,8 +25896,8 @@ async function createTempSectionFromSearchResults(customItems = null, customTitl
 
         showCanvasToastSafe(
             isZh
-                ? `已生成并定位临时栏目（${payloadItems.length + insertedDirectCount}）`
-                : `Temp section created and located (${payloadItems.length + insertedDirectCount})`,
+                ? `已生成并定位临时栏目（${totalBookmarksCount}）`
+                : `Temp section created and located (${totalBookmarksCount})`,
             'success',
             2600
         );
@@ -23786,7 +25915,7 @@ async function createTempSectionFromSearchResults(customItems = null, customTitl
     }
 }
 
-async function createTempSectionFromDomainResult(domain) {
+async function createTempSectionFromDomainResult(domain, topNPerSubdomain = 0) {
     if (getCurrentViewSafe() !== 'canvas') return;
     if (!window.CanvasModule || !window.CanvasModule.createEmptyTempSection || !window.CanvasModule.temp) return;
 
@@ -23859,17 +25988,19 @@ async function createTempSectionFromDomainResult(domain) {
 
         let payloadItems = [];
         if (groupBySubdomainFolders) {
-            payloadItems = await buildDomainPayloadBySubdomain(items, domainKey, isZh);
+            payloadItems = await buildDomainPayloadBySubdomain(items, domainKey, isZh, topNPerSubdomain);
         }
 
         if (!payloadItems.length) {
+            const targetItems = (topNPerSubdomain > 0) ? items.slice(0, topNPerSubdomain) : items;
+            const bookmarkChildren = [];
             let processed = 0;
-            for (let i = 0; i < items.length; i += 1) {
-                const item = items[i];
+            for (let i = 0; i < targetItems.length; i += 1) {
+                const item = targetItems[i];
                 if (!item) continue;
                 const safeTitle = item.title || item.url || (isZh ? '书签' : 'Bookmark');
                 const safeUrl = item.url || 'https://';
-                payloadItems.push(buildSearchBookmarkPayload({
+                bookmarkChildren.push(buildSearchBookmarkPayload({
                     ...item,
                     title: safeTitle,
                     url: safeUrl
@@ -23880,19 +26011,31 @@ async function createTempSectionFromDomainResult(domain) {
                     await yieldToMainThread();
                 }
             }
+            if (bookmarkChildren.length) {
+                payloadItems = [{
+                    title: domainKey,
+                    url: '',
+                    type: 'folder',
+                    children: bookmarkChildren
+                }];
+            }
         }
 
         const folderCount = payloadItems.filter(item => item && item.type === 'folder').length;
-        const bookmarkCount = items.length;
+        const bookmarkCount = (typeof countTotalBookmarksInPayload === 'function')
+            ? countTotalBookmarksInPayload(payloadItems)
+            : (groupBySubdomainFolders
+                ? payloadItems.reduce((acc, f) => acc + (f && Array.isArray(f.children) ? f.children.length : 0), 0)
+                : payloadItems.length);
 
         showCanvasToastSafe(
-            groupBySubdomainFolders
+            folderCount > 0
                 ? (isZh
-                    ? `正在按子域名写入…（${folderCount} 个文件夹 / ${bookmarkCount}）`
-                    : `Writing by subdomain… (${folderCount} folders / ${bookmarkCount})`)
+                    ? `正在写入临时栏目…（${folderCount} 个文件夹 / ${bookmarkCount} 条书签）`
+                    : `Writing temp section… (${folderCount} folders / ${bookmarkCount} bookmarks)`)
                 : (isZh
-                    ? `正在写入域名结果…（${payloadItems.length}）`
-                    : `Writing domain results… (${payloadItems.length})`),
+                    ? `正在写入域名结果…（${bookmarkCount}）`
+                    : `Writing domain results… (${bookmarkCount})`),
             'info',
             1600
         );
@@ -23917,13 +26060,13 @@ async function createTempSectionFromDomainResult(domain) {
         } catch (_) { }
 
         showCanvasToastSafe(
-            groupBySubdomainFolders
+            folderCount > 0
                 ? (isZh
-                    ? `已按子域名生成并定位（${folderCount} 组 / ${bookmarkCount}）`
-                    : `Subdomain-grouped temp section created (${folderCount} groups / ${bookmarkCount})`)
+                    ? `已生成并定位域名栏目（${folderCount} 组 / ${bookmarkCount}）`
+                    : `Domain temp section created and located (${folderCount} groups / ${bookmarkCount})`)
                 : (isZh
-                    ? `已生成并定位域名栏目（${payloadItems.length}）`
-                    : `Domain temp section created and located (${payloadItems.length})`),
+                    ? `已生成并定位域名栏目（${bookmarkCount}）`
+                    : `Domain temp section created and located (${bookmarkCount})`),
             'success',
             2600
         );
@@ -25716,7 +27859,7 @@ async function activateCanvasSearchResultAtIndex(index) {
     }
 
     // "more" row is informational only
-    if (item.type === 'bookmark-group-more') {
+    if (item.type === 'bookmark-group-more' || item.type === 'domain-group-more') {
         return;
     }
 
@@ -25913,6 +28056,11 @@ async function activateCanvasSearchResultAtIndex(index) {
     if (item.type === 'anchor') {
         await navigateToCanvasAnchorTarget(item);
     } else if (item.type === 'bookmark-item') {
+        try {
+            hideSearchResultsPanel();
+            const inputEl = document.getElementById('searchInput');
+            if (inputEl) inputEl.value = '';
+        } catch (_) { }
         await locateCanvasBookmarkItem(item);
     } else if (item.type === 'group' || item.type === 'card-group' || item.subtype === 'card-group' || String(item.id || '').startsWith('card-group-')) {
         await locateCanvasGroupSearchResult(item);
