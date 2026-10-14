@@ -10441,10 +10441,6 @@ function resetCanvasFloatingToolsInteractionState() {
         clearCanvasFloatingDragVisualState();
     }
     suppressCanvasFloatingToolsToggleClick = false;
-    // 页面从休眠/冻结/切标签页恢复时，清理任何遗留的 Toast 幽灵节点
-    try {
-        document.querySelectorAll('.canvas-toast, .history-toast').forEach((t) => t.remove());
-    } catch (_) { }
 }
 
 function bindCanvasFloatingToolsLifecycleRecovery() {
@@ -10460,7 +10456,11 @@ function bindCanvasFloatingToolsLifecycleRecovery() {
     window.addEventListener('pageshow', recover, true);
     // Entering fullscreen hides the toolbar too; release its capture first.
     window.addEventListener('canvas-maximized-state-change', recover, true);
-    window.addEventListener('blur', resetCanvasFloatingToolsInteractionState, true);
+    window.addEventListener('blur', (e) => {
+        if (e.target === window || e.target === document) {
+            resetCanvasFloatingToolsInteractionState();
+        }
+    }, true);
     window.addEventListener('pagehide', resetCanvasFloatingToolsInteractionState, true);
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') recover();

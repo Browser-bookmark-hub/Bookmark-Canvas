@@ -4258,11 +4258,11 @@
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const m = monthNames[dateObj.getMonth()];
       const d = dateObj.getDate();
-      return `${timeShortStr} | ${m} ${d}`;
+      return `${timeShortStr} │ ${m} ${d}`;
     } else {
       const m = String(dateObj.getMonth() + 1).padStart(2, '0');
       const d = String(dateObj.getDate()).padStart(2, '0');
-      return `${timeShortStr} | ${m}月${d}日`;
+      return `${timeShortStr} │ ${m}月${d}日`;
     }
   }
 
@@ -4329,11 +4329,7 @@
 
   function showAnchorMutationBlockedToast(isEn) {
     const msg = getAnchorMutationBlockedMessage(isEn);
-    if (typeof global.showToast === 'function') {
-      global.showToast(msg);
-    } else {
-      alert(msg);
-    }
+    showSidebarToast(msg, 'warning');
   }
 
   async function exitCanvasNodeFullscreenForAnchorLocate() {
@@ -4383,13 +4379,11 @@
       slots = [];
     }
     const limit = getManualAnchorLimit();
-    while (slots.length < limit) {
-      slots.push(null);
+    const validSlots = slots.filter(s => s !== null && typeof s === 'object').slice(0, limit);
+    while (validSlots.length < limit) {
+      validSlots.push(null);
     }
-    if (slots.length > limit) {
-      slots = slots.slice(0, limit);
-    }
-    return slots;
+    return validSlots;
   }
 
   const MANUAL_REMEMBERED_SLOT_KEY = 'canvas-manual-anchor-remembered-slot';
@@ -4456,7 +4450,7 @@
       const worldY = Math.round(((wsH / 2 - state.panOffsetY) / z) * 100) / 100;
       
       const existingName = slots[index] ? slots[index].name : null;
-      const defaultName = existingName || (isEn ? `Slot ${index + 1}` : `槽位 ${index + 1}`);
+      const defaultName = existingName || generateAnchorTimeName(slots);
       
       slots[index] = {
         name: defaultName,
@@ -4555,20 +4549,42 @@
       });
     } 
     else if (action === 'delete') {
-      slots[index] = null;
-      if (rememberedSlotIndex === index) {
-        saveRememberedSlotIndex(findAdjacentValidSlotIndex(slots, index));
+      const validSlots = slots.filter(s => s && typeof s === 'object');
+      if (index >= 0 && index < validSlots.length) {
+        validSlots.splice(index, 1);
       }
-      if (highlightSlotIndex === index) {
-        highlightSlotIndex = null;
+      const limit = getManualAnchorLimit();
+      const newSlots = [...validSlots];
+      while (newSlots.length < limit) {
+        newSlots.push(null);
       }
-      const remainingCount = slots.filter(s => s !== null).length;
+      if (rememberedSlotIndex !== null) {
+        if (rememberedSlotIndex === index) {
+          if (validSlots.length === 0) {
+            saveRememberedSlotIndex(null);
+          } else if (index < validSlots.length) {
+            saveRememberedSlotIndex(index);
+          } else {
+            saveRememberedSlotIndex(validSlots.length - 1);
+          }
+        } else if (rememberedSlotIndex > index) {
+          saveRememberedSlotIndex(rememberedSlotIndex - 1);
+        }
+      }
+      if (highlightSlotIndex !== null) {
+        if (highlightSlotIndex === index) {
+          highlightSlotIndex = null;
+        } else if (highlightSlotIndex > index) {
+          highlightSlotIndex = highlightSlotIndex - 1;
+        }
+      }
+      const remainingCount = validSlots.length;
       const step = getDynamicStep();
       if (manualAnchorVisibleLimit > Math.max(step, remainingCount)) {
         manualAnchorVisibleLimit = Math.max(step, remainingCount);
         try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
       }
-      saveAnchorSlots(slots);
+      saveAnchorSlots(newSlots);
       renderHistoryPanel();
     }
   }
@@ -4626,12 +4642,11 @@
     if (!Array.isArray(tempAnchorSlots)) {
       tempAnchorSlots = [];
     }
-    while (tempAnchorSlots.length < limit) {
-      tempAnchorSlots.push(null);
+    const validSlots = tempAnchorSlots.filter(s => s !== null && typeof s === 'object').slice(0, limit);
+    while (validSlots.length < limit) {
+      validSlots.push(null);
     }
-    if (tempAnchorSlots.length > limit) {
-      tempAnchorSlots = tempAnchorSlots.slice(0, limit);
-    }
+    tempAnchorSlots = validSlots;
     return tempAnchorSlots;
   }
 
@@ -4774,10 +4789,10 @@
       type: type,
       icon: icon,
       duration: 2500,
-      forceFresh: forceFresh || isWarn
+      forceFresh: forceFresh || isWarn || isSuccess
     };
 
-    // 针对警告类（如重复锚点）或显式 forceFresh 提示，强制清理旧的残留 Toast 节点，确保每次点击都重新触发进场动效
+    // 针对警告类、成功类（如添加/保存锚点）或显式 forceFresh 提示，强制清理旧的残留 Toast 节点，确保每次点击都重新触发进场动效
     if (toastOptions.forceFresh) {
       try {
         const root = (typeof getOverlayContainer === 'function' ? getOverlayContainer() : null) || document.body;
@@ -4876,6 +4891,60 @@
     return null;
   }
 
+  function generateAnchorTimeName(slots, date = new Date()) {
+    const isEn = isEnglish();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const timeStr = `${hours}:${minutes}`;
+
+    let dateStr = '';
+    if (isEn) {
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const m = monthNames[date.getMonth()];
+      const d = date.getDate();
+      dateStr = `${m} ${d}`;
+    } else {
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      dateStr = `${m}月${d}日`;
+    }
+
+    const baseName = `${timeStr} │ ${dateStr}`;
+
+    if (!Array.isArray(slots) || slots.length === 0) {
+      return baseName;
+    }
+
+    const existingNames = new Set(slots.filter(Boolean).map(s => s.name));
+    if (!existingNames.has(baseName)) {
+      return baseName;
+    }
+
+    let count = 2;
+    while (existingNames.has(`${baseName} (${count})`)) {
+      count++;
+    }
+    return `${baseName} (${count})`;
+  }
+
+  function getNextAnchorSlotNumber(slots, isTemp = false) {
+    const prefixZh = isTemp ? '临时槽位 ' : '槽位 ';
+    const prefixEn = isTemp ? 'Temp Slot ' : 'Slot ';
+    let maxNum = 0;
+    (slots || []).forEach(s => {
+      if (!s || !s.name) return;
+      const mZh = s.name.match(new RegExp(`^${prefixZh}(\\d+)$`));
+      const mEn = s.name.match(new RegExp(`^${prefixEn}(\\d+)$`));
+      const match = mZh || mEn;
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxNum) maxNum = num;
+      }
+    });
+    const validCount = (slots || []).filter(s => s !== null && typeof s === 'object').length;
+    return Math.max(maxNum + 1, validCount + 1);
+  }
+
   function addManualAnchorFromCurrentViewport() {
     const isEn = isEnglish();
     if (isCanvasNodeFullscreenActive()) {
@@ -4897,15 +4966,16 @@
     const worldY = Math.round(((wsH / 2 - state.panOffsetY) / z) * 100) / 100;
 
     const slots = loadAnchorSlots();
+    const validSlots = slots.filter(s => s !== null && typeof s === 'object');
+    const manualAnchorLimit = getManualAnchorLimit();
 
     // 检查当前视口是否已存在于手动锚点中（同一位置防连续重复添加）
-    const existing = findExistingAnchorInSlots(slots, worldX, worldY, z, workspace);
+    const existing = findExistingAnchorInSlots(validSlots, worldX, worldY, z, workspace);
     if (existing) {
       const existingName = existing.slot.name || (isEn ? `Slot ${existing.index + 1}` : `槽位 ${existing.index + 1}`);
       const msg = isEn 
         ? `Manual anchor already exists: "${existingName}"` 
         : `当前手动锚点已存在：“${existingName}”`;
-      showSidebarToast(msg, 'warning');
       if (manualAnchorVisibleLimit < existing.index + 1) {
         manualAnchorVisibleLimit = existing.index + 1;
         try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
@@ -4913,28 +4983,22 @@
       highlightSlotIndex = existing.index;
       saveRememberedSlotIndex(existing.index);
       renderHistoryPanel();
+      showSidebarToast(msg, { type: 'warning', forceFresh: true });
       return false;
     }
 
-    const emptyIndex = slots.indexOf(null);
-    if (emptyIndex === -1) {
+    if (validSlots.length >= manualAnchorLimit) {
       const msg = isEn 
         ? 'Manual anchors are full. You can increase the maximum capacity in settings.' 
         : '手动锚点已满。您可以在右侧设置中增加最大记录上限。';
-      showSidebarToast(msg, 'warning');
+      showSidebarToast(msg, { type: 'warning', forceFresh: true });
       return false;
     }
 
-    const nonNullCount = slots.slice(0, emptyIndex).filter(s => s !== null).length + 1;
-    if (manualAnchorVisibleLimit < nonNullCount) {
-      manualAnchorVisibleLimit = nonNullCount;
-      try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
-    }
+    const nextIndex = validSlots.length;
+    const defaultName = generateAnchorTimeName(validSlots);
 
-    const slotNum = emptyIndex + 1;
-    const defaultName = isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`;
-
-    slots[emptyIndex] = {
+    const newSlot = {
       name: defaultName,
       x: worldX,
       y: worldY,
@@ -4943,12 +5007,24 @@
       timestamp: Date.now()
     };
 
-    highlightSlotIndex = emptyIndex;
-    saveRememberedSlotIndex(emptyIndex);
-    saveAnchorSlots(slots);
+    validSlots.push(newSlot);
+
+    const newSlots = [...validSlots];
+    while (newSlots.length < manualAnchorLimit) {
+      newSlots.push(null);
+    }
+
+    if (manualAnchorVisibleLimit < validSlots.length) {
+      manualAnchorVisibleLimit = validSlots.length;
+      try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
+    }
+
+    highlightSlotIndex = nextIndex;
+    saveRememberedSlotIndex(nextIndex);
+    saveAnchorSlots(newSlots);
     renderHistoryPanel();
 
-    showSidebarToast(isEn ? `Added manual anchor: ${defaultName}` : `已添加手动锚点：${defaultName}`, 'success');
+    showSidebarToast(isEn ? `Added manual anchor: ${defaultName}` : `已添加手动锚点：${defaultName}`, { type: 'success', forceFresh: true });
     return true;
   }
 
@@ -4979,42 +5055,38 @@
     const worldY = Math.round(((wsH / 2 - state.panOffsetY) / z) * 100) / 100;
 
     const slots = loadTempAnchorSlots();
+    const validSlots = slots.filter(s => s !== null && typeof s === 'object');
+    const tempAnchorLimit = getTempAnchorLimit();
 
     // 检查当前视口是否已存在于临时锚点中（同一位置防连续重复添加）
-    const existing = findExistingAnchorInSlots(slots, worldX, worldY, z, workspace);
+    const existing = findExistingAnchorInSlots(validSlots, worldX, worldY, z, workspace);
     if (existing) {
       const existingName = existing.slot.name || (isEn ? `Temp Slot ${existing.index + 1}` : `临时槽位 ${existing.index + 1}`);
       const msg = isEn 
         ? `Temporary anchor already exists: "${existingName}"` 
         : `当前临时锚点已存在：“${existingName}”`;
-      showSidebarToast(msg, 'warning');
       if (tempAnchorVisibleLimit < existing.index + 1) {
         tempAnchorVisibleLimit = existing.index + 1;
       }
       highlightTempSlotIndex = existing.index;
       rememberedTempSlotIndex = existing.index;
       renderHistoryPanel();
+      showSidebarToast(msg, { type: 'warning', forceFresh: true });
       return false;
     }
 
-    const emptyIndex = slots.indexOf(null);
-    if (emptyIndex === -1) {
+    if (validSlots.length >= tempAnchorLimit) {
       const msg = isEn 
         ? 'Temporary anchors are full. You can increase the maximum capacity in settings.' 
         : '临时锚点已满。您可以在右侧设置中增加最大记录上限。';
-      showSidebarToast(msg, 'warning');
+      showSidebarToast(msg, { type: 'warning', forceFresh: true });
       return false;
     }
 
-    const nonNullCount = slots.slice(0, emptyIndex).filter(s => s !== null).length + 1;
-    if (tempAnchorVisibleLimit < nonNullCount) {
-      tempAnchorVisibleLimit = nonNullCount;
-    }
+    const nextIndex = validSlots.length;
+    const defaultName = generateAnchorTimeName(validSlots);
 
-    const slotNum = emptyIndex + 1;
-    const defaultName = isEn ? `Temp Slot ${slotNum}` : `临时槽位 ${slotNum}`;
-
-    slots[emptyIndex] = {
+    const newSlot = {
       name: defaultName,
       x: worldX,
       y: worldY,
@@ -5023,12 +5095,23 @@
       timestamp: Date.now()
     };
 
-    highlightTempSlotIndex = emptyIndex;
-    rememberedTempSlotIndex = emptyIndex;
-    saveTempAnchorSlots(slots);
+    validSlots.push(newSlot);
+
+    const newSlots = [...validSlots];
+    while (newSlots.length < tempAnchorLimit) {
+      newSlots.push(null);
+    }
+
+    if (tempAnchorVisibleLimit < validSlots.length) {
+      tempAnchorVisibleLimit = validSlots.length;
+    }
+
+    highlightTempSlotIndex = nextIndex;
+    rememberedTempSlotIndex = nextIndex;
+    saveTempAnchorSlots(newSlots);
     renderHistoryPanel();
 
-    showSidebarToast(isEn ? `Added temp anchor: ${defaultName}` : `已添加临时锚点：${defaultName}`, 'success');
+    showSidebarToast(isEn ? `Added temp anchor: ${defaultName}` : `已添加临时锚点：${defaultName}`, { type: 'success', forceFresh: true });
     return true;
   }
 
@@ -5320,7 +5403,7 @@
       const worldY = Math.round(((wsH / 2 - state.panOffsetY) / z) * 100) / 100;
       
       const existingName = slots[index] ? slots[index].name : null;
-      const defaultName = existingName || (isEn ? `Temp Slot ${index + 1}` : `临时槽位 ${index + 1}`);
+      const defaultName = existingName || generateAnchorTimeName(slots);
       
       slots[index] = {
         name: defaultName,
@@ -5414,19 +5497,41 @@
       });
     } 
     else if (action === 'delete') {
-      slots[index] = null;
-      if (rememberedTempSlotIndex === index) {
-        rememberedTempSlotIndex = findAdjacentValidSlotIndex(slots, index);
+      const validSlots = slots.filter(s => s && typeof s === 'object');
+      if (index >= 0 && index < validSlots.length) {
+        validSlots.splice(index, 1);
       }
-      if (highlightTempSlotIndex === index) {
-        highlightTempSlotIndex = null;
+      const limit = getTempAnchorLimit();
+      const newSlots = [...validSlots];
+      while (newSlots.length < limit) {
+        newSlots.push(null);
       }
-      const remainingCount = slots.filter(s => s !== null).length;
+      if (rememberedTempSlotIndex !== null) {
+        if (rememberedTempSlotIndex === index) {
+          if (validSlots.length === 0) {
+            rememberedTempSlotIndex = null;
+          } else if (index < validSlots.length) {
+            rememberedTempSlotIndex = index;
+          } else {
+            rememberedTempSlotIndex = validSlots.length - 1;
+          }
+        } else if (rememberedTempSlotIndex > index) {
+          rememberedTempSlotIndex = rememberedTempSlotIndex - 1;
+        }
+      }
+      if (highlightTempSlotIndex !== null) {
+        if (highlightTempSlotIndex === index) {
+          highlightTempSlotIndex = null;
+        } else if (highlightTempSlotIndex > index) {
+          highlightTempSlotIndex = highlightTempSlotIndex - 1;
+        }
+      }
+      const remainingCount = validSlots.length;
       const step = getDynamicStep();
       if (tempAnchorVisibleLimit > Math.max(step, remainingCount)) {
         tempAnchorVisibleLimit = Math.max(step, remainingCount);
       }
-      saveTempAnchorSlots(slots);
+      saveTempAnchorSlots(newSlots);
       renderHistoryPanel();
     }
   }
@@ -5537,7 +5642,7 @@
         <div class="sidebar-section-header manual-anchor-header">
           <span class="sidebar-section-title">${isEn ? 'Manual Anchors' : '手动锚点'}</span>
           <div class="sidebar-header-actions">
-            <button class="sidebar-action-btn${isFull ? ' is-full' : ''}${isCardFullscreen ? ' is-disabled' : ''}" id="addManualAnchorBtn" type="button" title="${isEn ? 'Add Anchor' : '添加锚点'}"${isCardFullscreen ? ' disabled' : ''}>
+            <button class="sidebar-action-btn${isFull ? ' is-full' : ''}${isCardFullscreen ? ' is-disabled' : ''}" id="addManualAnchorBtn" type="button" title="${isEn ? 'Add Anchor' : '添加锚点'}">
               <i class="fas fa-plus"></i>
             </button>
             <button class="sidebar-action-btn" id="manualAnchorSettingsBtn" title="${isEn ? 'Anchor Settings' : '锚点设置'}">
@@ -5605,7 +5710,7 @@
                 <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isEn ? 'Clear slot' : '清除槽位'}">
                   <i class="fas fa-trash-alt"></i>
                 </button>
-                <button class="anchor-slot-btn save-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Overwrite with current viewport' : '用当前视口覆盖'}"${isCardFullscreen ? ' disabled' : ''}>
+                <button class="anchor-slot-btn save-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Overwrite with current viewport' : '用当前视口覆盖'}">
                   <i class="fas fa-anchor"></i>
                 </button>
                 <button class="anchor-slot-btn locate-btn" data-index="${index}" title="${isEn ? 'Locate viewport' : '定位到此视口'}">
@@ -5614,7 +5719,7 @@
               </div>
             </div>
             <div class="anchor-slot-info">
-              <span class="anchor-slot-coords">X: ${Math.round(slot.x)} | Y: ${Math.round(slot.y)} | ${zoomPercent}</span>
+              <span class="anchor-slot-coords">X: ${Math.round(slot.x)} │ Y: ${Math.round(slot.y)} │ ${zoomPercent}</span>
               ${absoluteTimeStr ? `<span class="anchor-slot-time">${absoluteTimeStr}</span>` : ''}
             </div>
           </div>
@@ -5661,7 +5766,7 @@
             </label>
           </div>
           <div class="sidebar-header-actions" style="flex-shrink: 0;">
-            <button class="sidebar-action-btn${isTempFull ? ' is-full' : ''}${isCardFullscreen || !isTempAnchorEnabled ? ' is-disabled' : ''}" id="addTempAnchorBtn" type="button" title="${isEn ? 'Add Temp Anchor' : '添加临时锚点'}"${(isCardFullscreen || !isTempAnchorEnabled) ? ' disabled' : ''} style="${isTempAnchorEnabled ? '' : 'display: none;'}">
+            <button class="sidebar-action-btn${isTempFull ? ' is-full' : ''}${isCardFullscreen || !isTempAnchorEnabled ? ' is-disabled' : ''}" id="addTempAnchorBtn" type="button" title="${isEn ? 'Add Temp Anchor' : '添加临时锚点'}" style="${isTempAnchorEnabled ? '' : 'display: none;'}">
               <i class="fas fa-plus"></i>
             </button>
             <button class="sidebar-action-btn" id="tempClearBtn" style="${isTempAnchorEnabled ? '' : 'display: none;'}" title="${isEn ? 'Clear All' : '清空临时锚点'}">
@@ -5741,7 +5846,7 @@
                 <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isEn ? 'Clear temp slot' : '清除临时槽位'}">
                   <i class="fas fa-trash-alt"></i>
                 </button>
-                <button class="anchor-slot-btn save-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Overwrite with current viewport' : '用当前视口覆盖'}"${isCardFullscreen ? ' disabled' : ''}>
+                <button class="anchor-slot-btn save-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Overwrite with current viewport' : '用当前视口覆盖'}">
                   <i class="fas fa-anchor"></i>
                 </button>
                 <button class="anchor-slot-btn locate-btn" data-index="${index}" title="${isEn ? 'Locate viewport' : '定位到此视口'}">
@@ -5750,7 +5855,7 @@
               </div>
             </div>
             <div class="anchor-slot-info">
-              <span class="anchor-slot-coords">X: ${Math.round(slot.x)} | Y: ${Math.round(slot.y)} | ${zoomPercent}</span>
+              <span class="anchor-slot-coords">X: ${Math.round(slot.x)} │ Y: ${Math.round(slot.y)} │ ${zoomPercent}</span>
               ${absoluteTimeStr ? `<span class="anchor-slot-time">${absoluteTimeStr}</span>` : ''}
             </div>
           </div>

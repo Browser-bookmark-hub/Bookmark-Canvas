@@ -10571,11 +10571,11 @@ function formatSearchAnchorTime(timestamp, isEn) {
         const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         const m = monthNames[dateObj.getMonth()];
         const d = dateObj.getDate();
-        return `${timeShort} | ${m} ${d}`;
+        return `${timeShort} │ ${m} ${d}`;
     } else {
         const m = String(dateObj.getMonth() + 1).padStart(2, '0');
         const d = String(dateObj.getDate()).padStart(2, '0');
-        return `${timeShort} | ${m}月${d}日`;
+        return `${timeShort} │ ${m}月${d}日`;
     }
 }
 
@@ -10613,7 +10613,7 @@ function getCanvasAnchorSearchItems() {
         // 搜索索引全面归一化为世界中心坐标：若为旧版本屏幕偏移，按公式转换为世界坐标
         const worldX = isWorld ? rawX : Math.round(((wsW / 2 - rawX) / zoom) * 100) / 100;
         const worldY = isWorld ? rawY : Math.round(((wsH / 2 - rawY) / zoom) * 100) / 100;
-        const coordText = `X: ${Math.round(worldX)} | Y: ${Math.round(worldY)} | ${zoomPercent}`;
+        const coordText = `X: ${Math.round(worldX)} │ Y: ${Math.round(worldY)} │ ${zoomPercent}`;
         const timeText = slot.timestamp ? formatSearchAnchorTime(slot.timestamp, isEn) : '';
         const id = `manual-anchor-${idx}`;
 
@@ -10669,7 +10669,7 @@ function getCanvasAnchorSearchItems() {
         const rawY = Number(slot.y) || 0;
         const worldX = isWorld ? rawX : Math.round(((wsW / 2 - rawX) / zoom) * 100) / 100;
         const worldY = isWorld ? rawY : Math.round(((wsH / 2 - rawY) / zoom) * 100) / 100;
-        const coordText = `X: ${Math.round(worldX)} | Y: ${Math.round(worldY)} | ${zoomPercent}`;
+        const coordText = `X: ${Math.round(worldX)} │ Y: ${Math.round(worldY)} │ ${zoomPercent}`;
         const timeText = slot.timestamp ? formatSearchAnchorTime(slot.timestamp, isEn) : '';
         const id = `temp-anchor-${idx}`;
 
