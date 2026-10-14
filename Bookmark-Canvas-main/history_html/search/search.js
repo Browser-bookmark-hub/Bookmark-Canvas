@@ -17795,12 +17795,12 @@ function ensureCanvasTabulatorIndexColumnFirst(tableInstance, activeMode) {
     if (!tableInstance || isReorderingIndexGuard) return;
     isReorderingIndexGuard = true;
     try {
-        const allCols = tableInstance.getColumns();
+        const allCols = (typeof tableInstance.getColumns === 'function') ? (tableInstance.getColumns() || []) : [];
         if (allCols && allCols.length > 0) {
             const firstCol = allCols[0];
-            if (firstCol && firstCol.getField() !== 'index') {
-                const indexCol = tableInstance.getColumn('index');
-                if (indexCol) {
+            if (firstCol && typeof firstCol.getField === 'function' && firstCol.getField() !== 'index') {
+                const indexCol = allCols.find(c => c && typeof c.getField === 'function' && c.getField() === 'index');
+                if (indexCol && typeof indexCol.move === 'function') {
                     indexCol.move(firstCol, false);
                 }
             }
@@ -18161,9 +18161,10 @@ function bindCanvasTabulatorColumnMoveEnhancements(tableInstance, containerEl, a
                     cleanupFastDrag();
                     if (moveMod.checkTimeout) {
                         clearTimeout(moveMod.checkTimeout);
-                        moveMod.checkTimeout = null;
                         const field = colEl.getAttribute('tabulator-field');
-                        const colComp = field ? tableInstance.getColumn(field) : null;
+                        const colComp = (field && typeof tableInstance.getColumns === 'function')
+                            ? (tableInstance.getColumns() || []).find(c => c && typeof c.getField === 'function' && c.getField() === field)
+                            : null;
                         const colObj = colComp ? colComp._column : null;
                         if (colObj && !moveMod.moving) {
                             moveMod.startMove(moveEvt, colObj);
@@ -18304,15 +18305,18 @@ function refreshTabulatorColumnsAfterReset(curMode, isZh) {
 function setupCanvasTabulatorIndexHeaderProtection(tableInstance) {
     if (!tableInstance) return;
     try {
-        const indexCol = tableInstance.getColumn('index');
-        if (indexCol) {
-            const el = indexCol.getElement();
-            if (el && !el._preventDragBound) {
-                el._preventDragBound = true;
-                el.addEventListener('mousedown', (e) => {
-                    e.stopPropagation();
-                }, true);
-            }
+        if (tableInstance.initialized === false || tableInstance.destroyed === true) return;
+        const allCols = (typeof tableInstance.getColumns === 'function') ? (tableInstance.getColumns() || []) : [];
+        const indexCol = allCols.find(c => c && typeof c.getField === 'function' && c.getField() === 'index');
+        let el = indexCol && typeof indexCol.getElement === 'function' ? indexCol.getElement() : null;
+        if (!el && tableInstance.element && typeof tableInstance.element.querySelector === 'function') {
+            el = tableInstance.element.querySelector('.tabulator-col[tabulator-field="index"]');
+        }
+        if (el && !el._preventDragBound) {
+            el._preventDragBound = true;
+            el.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+            }, true);
         }
     } catch (_) { }
 }
@@ -20367,12 +20371,14 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             }
         });
 
-        canvasSearchTabulatorInstance.on("columnMoved", (column, columns) => {
-            ensureCanvasTabulatorIndexColumnFirst(canvasSearchTabulatorInstance, activeMode);
+        canvasSearchTabulatorInstance.on("columnMoved", function(column, columns) {
+            const inst = this || canvasSearchTabulatorInstance;
+            ensureCanvasTabulatorIndexColumnFirst(inst, activeMode);
         });
 
-        canvasSearchTabulatorInstance.on("tableBuilt", () => {
-            setupCanvasTabulatorIndexHeaderProtection(canvasSearchTabulatorInstance);
+        canvasSearchTabulatorInstance.on("tableBuilt", function() {
+            const inst = this || canvasSearchTabulatorInstance;
+            setupCanvasTabulatorIndexHeaderProtection(inst);
             bindCanvasTabulatorHeaderContextMenu(containerEl, activeMode, isZh);
             bindCanvasTabulatorTopScrollbarEvents();
             syncCanvasTabulatorTopScrollbar();
@@ -20387,8 +20393,9 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             }
         });
 
-        canvasSearchTabulatorInstance.on("renderComplete", () => {
-            setupCanvasTabulatorIndexHeaderProtection(canvasSearchTabulatorInstance);
+        canvasSearchTabulatorInstance.on("renderComplete", function() {
+            const inst = this || canvasSearchTabulatorInstance;
+            setupCanvasTabulatorIndexHeaderProtection(inst);
             syncCanvasTabulatorTopScrollbar();
             if (canvasSearchTabulatorPendingState) {
                 const remain = Math.max(0, canvasSearchTabulatorPendingState.totalResults.length - canvasSearchTabulatorPendingState.loadedCount);
