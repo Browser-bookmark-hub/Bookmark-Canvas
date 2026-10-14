@@ -77,6 +77,9 @@ body.header-dock-bottom:not(.header-compact) .search-results-panel {
 .search-panel-resize-handle.handle-top {
     display: none;
     top: 0;
+    box-sizing: border-box;
+    align-items: flex-start;
+    padding-top: 2px;
     border-top-left-radius: 11px;
     border-top-right-radius: 11px;
 }
@@ -628,7 +631,7 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     touch-action: none !important;
 }
 
-/* 上下调整把手：在底部停靠模式下贴附于面板顶端边缘，实现纯透明悬浮层，消除占用文档流高度导致的工具栏下移与小白条上下间距不一致 */
+/* 上下调整把手：在底部停靠模式下贴附于面板顶端边缘，实现纯透明悬浮层，小白条刚好居于上边缘与视图切换按钮正中间 */
 body.header-dock-bottom .search-results-panel .search-panel-resize-handle.handle-top {
     position: sticky !important;
     top: 0 !important;
@@ -641,6 +644,9 @@ body.header-dock-bottom .search-results-panel .search-panel-resize-handle.handle
     z-index: 60 !important;
     pointer-events: auto !important;
     touch-action: none !important;
+    box-sizing: border-box !important;
+    align-items: flex-start !important;
+    padding-top: 2px !important;
 }
 
 body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-handle.handle-top {
@@ -655,6 +661,9 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     z-index: 60 !important;
     pointer-events: auto !important;
     touch-action: none !important;
+    box-sizing: border-box !important;
+    align-items: flex-start !important;
+    padding-top: 2px !important;
 }
 
 .search-results-panel.view-table .canvas-search-tabulator .tabulator-tableholder {
