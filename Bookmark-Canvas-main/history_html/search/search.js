@@ -443,6 +443,29 @@ const DOMAIN_GROUP_PREF_KEY = 'canvas-search-domain-grouping';
 const TAG_BROWSER_COLOR_ORDER = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
 const TAG_BROWSER_ROOT_QUERIES = new Set(['#', '{#}']);
 const NOTE_BROWSER_ROOT_QUERIES = new Set(['*', '{*}']);
+const TIME_BROWSER_ROOT_QUERIES = new Set(['@', '@时间', '@time', '{@}', '{@时间}', '{@time}']);
+
+function getCanvasTimeSearchNeedle(query) {
+    const raw = String(query || '').trim();
+    const lower = raw.toLowerCase();
+    if (TIME_BROWSER_ROOT_QUERIES.has(lower)) return '';
+    if (lower.startsWith('@时间')) return raw.slice(3).trim().toLowerCase();
+    if (lower.startsWith('{@时间}')) return raw.slice(5).trim().toLowerCase();
+    if (lower.startsWith('@time')) return raw.slice(5).trim().toLowerCase();
+    if (lower.startsWith('{@time}')) return raw.slice(7).trim().toLowerCase();
+    if (lower.startsWith('@')) return raw.slice(1).trim().toLowerCase();
+    if (lower.startsWith('{@}')) return raw.slice(3).trim().toLowerCase();
+    return null;
+}
+
+function isCanvasTimeSearchQuery(query) {
+    return getCanvasTimeSearchNeedle(query) !== null;
+}
+
+function isTimeBrowseRootQuery(query) {
+    const raw = String(query || '').trim().toLowerCase();
+    return TIME_BROWSER_ROOT_QUERIES.has(raw);
+}
 const TAG_BROWSER_ALPHA_KEYS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 const TAG_BROWSER_PINYIN_INITIAL_BOUNDARIES = [
     { letter: 'A', marker: '阿' },
@@ -3683,7 +3706,8 @@ function handleSearchResultsPanelClick(e) {
         }
         const groups = searchUiState.bookmarkGroupModel;
         if (Array.isArray(groups)) {
-            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
+            const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
+            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch });
             renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
         } else {
             // Fallback: rerun search
@@ -3777,7 +3801,8 @@ function handleSearchResultsPanelClick(e) {
 
         const groups = searchUiState.bookmarkGroupModel;
         if (Array.isArray(groups)) {
-            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
+            const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
+            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch });
             renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
         } else {
             searchCanvasAndRender(searchUiState.query);
@@ -4133,10 +4158,15 @@ function highlightSearchKeywords(text, query) {
     const rawTokens = q.toLowerCase().split(/\s+/).map(t => t.trim()).filter(Boolean);
     if (!rawTokens.length) return safeText;
 
-    // 过滤去重，剔除独立特殊模式符号（如 #、*、.、..、...），允许 #tag 或 *note 高亮其实际词，避免纯点号错误高亮省略号
+    // 过滤去重，剔除独立特殊模式符号（如 #、*、@、@时间、@time、.、..、...），允许 #tag、*note、@time 高亮其实际词，避免纯点号错误高亮省略号
     let uniqueTokens = Array.from(new Set(rawTokens))
-        .filter(t => !['#', '*'].includes(t) && !/^\.+$/.test(t))
-        .map(t => (t.startsWith('#') || t.startsWith('*')) ? t.slice(1) : t)
+        .filter(t => !['#', '*', '@', '@时间', '@time'].includes(t) && !/^\.+$/.test(t))
+        .map(t => {
+            if (t.startsWith('@时间')) return t.slice(3);
+            if (t.startsWith('@time')) return t.slice(5);
+            if (t.startsWith('#') || t.startsWith('*') || t.startsWith('@')) return t.slice(1);
+            return t;
+        })
         .filter(t => t && !/^\.+$/.test(t));
 
     if (!uniqueTokens.length) return safeText;
@@ -8518,10 +8548,10 @@ function initSearchEvents() {
         searchResultsPanel.setAttribute('data-search-wheel-bound', 'true');
     }
 
-    // Global delegation listener for bookmark-mode helper links (# tag / * note).
+    // Global delegation listener for bookmark-mode helper links (# tag / * note / @ time).
     if (!document.documentElement.hasAttribute('data-search-helper-link-bound')) {
         document.addEventListener('mousedown', (e) => {
-            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link');
+            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link');
             if (link) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -8532,7 +8562,12 @@ function initSearchEvents() {
                 }
 
                 // Clear input and insert the helper query.
-                const helperQuery = String(link.getAttribute('data-helper-query') || (link.classList.contains('search-helper-note-link') ? '*' : '#')).trim() || '#';
+                let helperQuery = String(link.getAttribute('data-helper-query') || '').trim();
+                if (!helperQuery) {
+                    if (link.classList.contains('search-helper-note-link')) helperQuery = '*';
+                    else if (link.classList.contains('search-helper-time-link')) helperQuery = (getCurrentLangSafe() === 'zh_CN' ? '@时间' : '@time');
+                    else helperQuery = '#';
+                }
                 const input = document.getElementById('searchInput');
                 if (input) {
                     input.value = helperQuery;
@@ -8548,7 +8583,7 @@ function initSearchEvents() {
         }, true); // Capture phase
 
         document.addEventListener('click', (e) => {
-            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link');
+            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link');
             if (link) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -8630,8 +8665,8 @@ const SEARCH_MODES = [
         labelEn: 'Bookmark',
         icon: 'fa-bookmark',
         color: 'mode-color-blue',
-        desc: '标题、URL、文件夹、<a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</a>、<a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*笔记</a>',
-        descEn: 'Title, URL, Folders, <a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</a>, <a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*Notes</a>'
+        desc: '标题、URL、文件夹、<a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</a>、<a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*笔记</a>、<a href="#" class="search-helper-time-link" data-helper-query="@时间" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@时间</a>',
+        descEn: 'Title, URL, Folders, <a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</a>、<a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*Notes</a>、<a href="#" class="search-helper-time-link" data-helper-query="@time" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@time</a>'
     },
     {
         key: 'structure',
@@ -10382,8 +10417,8 @@ function initSearchModeUI() {
             // Only handle mode selection in Canvas/mode menu
             if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
 
-            // Ignore clicks/mousedowns on search history section or help button
-            if (e.target.closest('.search-history-section') || e.target.closest('.search-hint-help-btn')) {
+            // Ignore clicks/mousedowns on search history section, help button, or helper links
+            if (e.target.closest('.search-history-section') || e.target.closest('.search-hint-help-btn') || e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link')) {
                 return;
             }
 
@@ -14270,7 +14305,66 @@ function getBookmarkItemCreationTime(item) {
         };
     }
 
+    if (!rawDate && !tempParsed) {
+        const targets = Array.isArray(item.targetItems) ? item.targetItems : (Array.isArray(item.childItems) ? item.childItems : []);
+        for (const t of targets) {
+            const tTime = getBookmarkItemCreationTime(t);
+            if (tTime && tTime.timestamp > 0) {
+                return tTime;
+            }
+        }
+    }
+
     return { timestamp: 0, text: '', dateOnly: '' };
+}
+
+function getItemOrFolderTimestamp(item) {
+    if (!item) return 0;
+    if (typeof item._calcTimestamp === 'number') return item._calcTimestamp;
+
+    let result = 0;
+    if (item.type === 'domain-group' || item.groupLevel) {
+        if (item.dateAdded) {
+            result = Number(item.dateAdded) || 0;
+        } else {
+            let maxTs = 0;
+            const targets = Array.isArray(item.targetItems) ? item.targetItems : (Array.isArray(item.childItems) ? item.childItems : []);
+            for (const t of targets) {
+                const ts = Number(t && t.dateAdded) || (getBookmarkItemCreationTime(t) ? getBookmarkItemCreationTime(t).timestamp : 0);
+                if (ts > maxTs) maxTs = ts;
+            }
+            result = maxTs;
+        }
+    } else if (item.dateAdded !== undefined && item.dateAdded !== null && item.dateAdded !== 0 && item.dateAdded !== '') {
+        const n = Number(item.dateAdded);
+        if (Number.isFinite(n) && n > 0) result = n;
+    }
+    if (!result) {
+        const cTime = getBookmarkItemCreationTime(item);
+        if (cTime && cTime.timestamp > 0) result = Number(cTime.timestamp);
+    }
+    if (!result && Array.isArray(item.targetItems) && item.targetItems.length > 0) {
+        let maxTs = 0;
+        for (const t of item.targetItems) {
+            const ts = getItemOrFolderTimestamp(t);
+            if (ts > maxTs) maxTs = ts;
+        }
+        if (maxTs > 0) result = maxTs;
+    }
+    if (!result && Array.isArray(item.children) && item.children.length > 0) {
+        let maxTs = 0;
+        for (const c of item.children) {
+            const cItem = c && c.item ? c.item : c;
+            const ts = getItemOrFolderTimestamp(cItem);
+            if (ts > maxTs) maxTs = ts;
+        }
+        if (maxTs > 0) result = maxTs;
+    }
+    if (!result && item.rawItem && item.rawItem !== item) {
+        result = getItemOrFolderTimestamp(item.rawItem);
+    }
+    item._calcTimestamp = result;
+    return result;
 }
 
 function getBookmarkItemCreationTimesList(item) {
@@ -14358,7 +14452,28 @@ function getBookmarkItemCreationTimesList(item) {
 }
 
 function renderBookmarkCreationTimeHtml(item, isZh = true, customQuery = null) {
-    const timeInfo = (item && typeof item === 'object' && item.text) ? item : getBookmarkItemCreationTime(item);
+    let timeInfo = (item && typeof item === 'object' && item.text) ? item : getBookmarkItemCreationTime(item);
+    if ((!timeInfo || !timeInfo.text) && item) {
+        const fallbackTs = getItemOrFolderTimestamp(item);
+        if (fallbackTs > 0) {
+            try {
+                const date = new Date(fallbackTs);
+                if (!isNaN(date.getTime())) {
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const hours = String(date.getHours()).padStart(2, '0');
+                    const minutes = String(date.getMinutes()).padStart(2, '0');
+                    const seconds = String(date.getSeconds()).padStart(2, '0');
+                    timeInfo = {
+                        timestamp: fallbackTs,
+                        text: `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`,
+                        dateOnly: `${year}/${month}/${day}`
+                    };
+                }
+            } catch (_) { }
+        }
+    }
     if (!timeInfo || !timeInfo.text) return '';
     const label = isZh ? '创建时间:' : 'Created:';
     const query = (customQuery !== null && customQuery !== undefined)
@@ -15093,8 +15208,18 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
 
     const groups = Array.from(groupsMap.values());
 
+    const isTimeSearch = !!(options && options.isTimeSearch);
     for (const g of groups) {
-        g.children.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, scope));
+        if (isTimeSearch) {
+            g.children.sort((a, b) => {
+                const timeA = getItemOrFolderTimestamp(a && a.item);
+                const timeB = getItemOrFolderTimestamp(b && b.item);
+                if (timeB !== timeA) return timeB - timeA;
+                return compareCanvasBookmarkScoredPairs(a, b, scope);
+            });
+        } else {
+            g.children.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, scope));
+        }
         g.header.matchesCount = g.children.length;
         g.firstChild = g.children[0] || null;
         g.firstOrder = g.firstChild ? getCanvasBookmarkSearchOrderValue(g.firstChild.item) : Number.POSITIVE_INFINITY;
@@ -15119,6 +15244,12 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
     }
 
     groups.sort((a, b) => {
+        if (isTimeSearch) {
+            const timeA = getItemOrFolderTimestamp(a.header || (a.firstChild && a.firstChild.item));
+            const timeB = getItemOrFolderTimestamp(b.header || (b.firstChild && b.firstChild.item));
+            if (timeB !== timeA) return timeB - timeA;
+            return String(a.header.title || '').localeCompare(String(b.header.title || ''));
+        }
         const childDelta = compareCanvasBookmarkScoredPairs(a.firstChild, b.firstChild, scope);
         if (childDelta !== 0) return childDelta;
         return String(a.header.title || '').localeCompare(String(b.header.title || ''));
@@ -15127,10 +15258,11 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
     return groups;
 }
 
-function buildCanvasBookmarkGroupedResultsFromModel(groups) {
+function buildCanvasBookmarkGroupedResultsFromModel(groups, options = {}) {
     const results = [];
     const isZh = currentLang === 'zh_CN';
     const fullscreenScope = getActiveFullscreenSearchScopeForFiltering();
+    const isTimeSearch = !!(options && options.isTimeSearch);
 
     const sourceGroups = Array.isArray(groups) ? groups : [];
 
@@ -15146,7 +15278,14 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups) {
         // The render function will use this 'locations' array to draw chips.
 
         const sortedChildren = Array.isArray(g.children)
-            ? g.children.slice().sort((left, right) => compareCanvasBookmarkScoredPairs(left, right, fullscreenScope))
+            ? g.children.slice().sort((left, right) => {
+                if (isTimeSearch) {
+                    const timeA = getItemOrFolderTimestamp(left && left.item);
+                    const timeB = getItemOrFolderTimestamp(right && right.item);
+                    if (timeB !== timeA) return timeB - timeA;
+                }
+                return compareCanvasBookmarkScoredPairs(left, right, fullscreenScope);
+            })
             : [];
         const activePermanentCopyId = fullscreenScope && String(fullscreenScope.kind || '') === 'permanent'
             ? String(fullscreenScope.copyId || '').trim()
@@ -16740,16 +16879,32 @@ function searchCanvasAndRender(query, options = {}) {
         }
     }
 
-    // Auto-align mode for Tag / Note browse or queries
+    if (trimmedQuery) {
+        if (searchUiState) {
+            searchUiState.canvasSuggestionsVisible = false;
+        }
+        const panel = getSearchResultsPanel();
+        if (panel) {
+            if (panel.dataset && panel.dataset.panelType === 'canvas-suggestions') {
+                panel.dataset.panelType = 'results';
+            }
+            const oldHistory = panel.querySelectorAll('.search-history-section');
+            oldHistory.forEach(el => el.remove());
+        }
+    }
+
+    // Auto-align mode for Tag / Note / Time browse or queries
     const hasBrowseDetail = (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.active === true)
         || (searchUiState.noteBrowseDetail && searchUiState.noteBrowseDetail.active === true);
     const isTagBrowseRoot = typeof isTagBrowseRootQuery === 'function' && isTagBrowseRootQuery(trimmedQuery);
     const isNoteBrowseRoot = typeof isNoteBrowseRootQuery === 'function' && isNoteBrowseRootQuery(trimmedQuery);
+    const isTimeBrowseRoot = typeof isTimeBrowseRootQuery === 'function' && isTimeBrowseRootQuery(trimmedQuery);
     const isTagSearch = typeof isCanvasTagSearchQuery === 'function' && isCanvasTagSearchQuery(trimmedQuery)
         && (typeof parsePermanentSectionQuery !== 'function' || parsePermanentSectionQuery(trimmedQuery) === null);
     const isNoteSearch = typeof isCanvasNoteSearchQuery === 'function' && isCanvasNoteSearchQuery(trimmedQuery);
+    const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(trimmedQuery);
 
-    if (hasBrowseDetail || isTagBrowseRoot || isNoteBrowseRoot || isTagSearch || isNoteSearch) {
+    if (hasBrowseDetail || isTagBrowseRoot || isNoteBrowseRoot || isTimeBrowseRoot || isTagSearch || isNoteSearch || isTimeSearch) {
         if (searchUiState.activeMode !== 'bookmark') {
             searchUiState.activeMode = 'bookmark';
             if (typeof renderSearchModeUI === 'function') {
@@ -16845,6 +17000,11 @@ function searchCanvasAndRender(query, options = {}) {
             const rootModel = buildCanvasNoteBrowseRootModel(scopedSource.sourceIndex, scopedSource.cacheKey);
             renderCanvasNoteBrowseRootPanel(rootModel, { query: trimmedQuery });
             return;
+        }
+    }
+    if (mode === 'bookmark' && isTimeBrowseRootQuery(trimmedQuery)) {
+        if (typeof recordSearchHistory === 'function') {
+            recordSearchHistory(trimmedQuery, 'bookmark', { trigger: 'jump' });
         }
     }
     const activeTagBrowseDetail = mode === 'bookmark' && isTagBrowseRootQuery(trimmedQuery)
@@ -17011,6 +17171,19 @@ function searchCanvasAndRender(query, options = {}) {
             continue;
         }
 
+        // Time search: all bookmark items qualify if root, or score by needle if provided
+        if (mode === 'bookmark' && isTimeSearch) {
+            const timeNeedle = getCanvasTimeSearchNeedle(trimmedQuery);
+            let rawScore = 100;
+            if (timeNeedle) {
+                rawScore = scoreCanvasSearchItem(item, timeNeedle, { isGroupSearch: false, mode });
+                if (rawScore === -Infinity) continue;
+            }
+            const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
+            scored.push({ item, s: rawScore + scopeBonus, rawScore });
+            continue;
+        }
+
         const rawScore = scoreCanvasSearchItem(item, bookmarkScoringQuery, { isGroupSearch, queryContext: scoringQueryContext, mode });
         if (rawScore > -Infinity) {
             const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
@@ -17033,10 +17206,20 @@ function searchCanvasAndRender(query, options = {}) {
 
     // Bookmark Mode: Group results by "section card" (永久栏目 / 临时栏目)
     if (mode === 'bookmark') {
-        scored.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, fullscreenScope));
-        const groups = buildCanvasBookmarkGroupModel(scored, { scope: fullscreenScope });
+        const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(trimmedQuery);
+        if (isTimeQuery) {
+            scored.sort((a, b) => {
+                const timeA = getItemOrFolderTimestamp(a.item);
+                const timeB = getItemOrFolderTimestamp(b.item);
+                if (timeB !== timeA) return timeB - timeA;
+                return compareCanvasBookmarkScoredPairs(a, b, fullscreenScope);
+            });
+        } else {
+            scored.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, fullscreenScope));
+        }
+        const groups = buildCanvasBookmarkGroupModel(scored, { scope: fullscreenScope, isTimeSearch: isTimeQuery });
         searchUiState.bookmarkGroupModel = groups;
-        const groupedResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
+        const groupedResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch: isTimeQuery });
         const preferredIndex = getPreferredSearchResultIndexByScope(groupedResults, fullscreenScope);
         renderCanvasSearchResults(groupedResults, {
             view: 'canvas',
@@ -17260,6 +17443,10 @@ function shouldShowEmptyQuerySuggestions() {
     try {
         if (typeof window.currentView === 'string' && window.currentView !== 'canvas') return false;
     } catch (_) { }
+    const input = document.getElementById('searchInput');
+    if (input && String(input.value || '').trim()) {
+        return false;
+    }
     const currentMode = normalizeSearchHistoryMode(searchUiState && searchUiState.activeMode);
     const showHistory = isSearchHistoryEnabled(currentMode) && getSearchHistoryList(currentMode).length > 0;
     return showHistory;
@@ -17273,6 +17460,11 @@ function renderCanvasSearchSuggestions() {
     try {
         if (typeof window.currentView === 'string' && window.currentView !== 'canvas') return;
     } catch (_) { }
+
+    const input = document.getElementById('searchInput');
+    if (input && String(input.value || '').trim()) {
+        return;
+    }
 
     const activeMode = normalizeSearchHistoryMode(searchUiState && searchUiState.activeMode);
     const historyList = getSearchHistoryList(activeMode);
@@ -17442,6 +17634,12 @@ function isDomainSearchItemMatched(domain, item, query, detailInput = null, note
     const detail = detailInput && detailInput.active === true ? detailInput : null;
     const noteDetail = noteDetailInput && noteDetailInput.active === true ? noteDetailInput : null;
     if (!q) return true;
+
+    if (typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(q)) {
+        const needle = getCanvasTimeSearchNeedle(q);
+        if (!needle) return true;
+        return isDomainSearchItemMatched(domain, item, needle, detail, noteDetail);
+    }
 
     if (detail) {
         const tags = getCanvasBookmarkTagsForSearchCached(item);
@@ -17672,11 +17870,19 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
                 ? sortBookmarkLocationsCanonical(rawLocations)
                 : rawLocations;
             const subdomains = Array.from(entry.hostSet);
+            let latestTimestamp = 0;
+            if (Array.isArray(targetItems) && targetItems.length) {
+                targetItems.forEach(t => {
+                    const ts = Number(t.dateAdded) || 0;
+                    if (ts > latestTimestamp) latestTimestamp = ts;
+                });
+            }
             return {
                 id: `domain:${entry.domain}`,
                 type: 'domain-group',
                 domain: entry.domain,
                 title: entry.domain,
+                dateAdded: latestTimestamp,
                 count: useMatchedStats ? matchedCount : totalCount,
                 subdomainCount: useMatchedStats ? matchedSubdomainCount : totalSubdomainCount,
                 totalCount,
@@ -17694,7 +17900,14 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             };
         });
 
+    const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(q);
     results.sort((a, b) => {
+        if (isTimeSearch) {
+            const timeA = Number(a.dateAdded) || 0;
+            const timeB = Number(b.dateAdded) || 0;
+            if (timeB !== timeA) return timeB - timeA;
+            return String(a.domain || '').localeCompare(String(b.domain || ''));
+        }
         if (b.count !== a.count) return b.count - a.count;
         return String(a.domain || '').localeCompare(String(b.domain || ''));
     });
@@ -17738,7 +17951,13 @@ function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
         const childItems = entry && Array.isArray(entry.items)
             ? entry.items.filter((child) => !hasQuery || child.matched === true).slice()
             : [];
+        const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(query);
         childItems.sort((a, b) => {
+            if (isTimeSearch) {
+                const timeA = Number(a && a.dateAdded) || 0;
+                const timeB = Number(b && b.dateAdded) || 0;
+                if (timeB !== timeA) return timeB - timeA;
+            }
             if (groupLevel === 'root') {
                 const hostDelta = String(a && a.host || '').localeCompare(String(b && b.host || ''));
                 if (hostDelta !== 0) return hostDelta;
@@ -18505,6 +18724,10 @@ let canvasSearchTabulatorPendingState = {
     isZh: true
 };
 
+// 记录进入 @时间 临时搜索模式前的原始表头排序状态，以便退出时精准复原
+let canvasSearchTabulatorPreTimeSearchSorts = null;
+let canvasSearchTabulatorWasTimeSearch = false;
+
 function cancelCanvasSearchTabulatorLazyLoad() {
     isAppendingTableChunk = false;
 }
@@ -18683,6 +18906,7 @@ function syncCanvasTabulatorTopScrollbar() {
     const thumb = document.getElementById('canvasTabulatorTopScrollbarThumb');
     const tableContainer = document.getElementById('canvasSearchTabulatorTable');
     if (!topScroll || !tableContainer) return;
+    if (topScroll._isDraggingThumb) return;
 
     const holder = tableContainer.querySelector('.tabulator-tableholder');
     if (!holder) return;
@@ -18695,7 +18919,7 @@ function syncCanvasTabulatorTopScrollbar() {
             topScroll.style.display = 'block';
         }
         if (thumb) {
-            const trackW = clientW;
+            const trackW = topScroll.clientWidth || clientW;
             const thumbW = Math.max(32, Math.round((clientW / scrollW) * trackW));
             const maxThumbLeft = Math.max(1, trackW - thumbW);
             const maxScrollLeft = Math.max(1, scrollW - clientW);
@@ -18720,33 +18944,39 @@ function bindCanvasTabulatorTopScrollbarEvents() {
     const tableContainer = document.getElementById('canvasSearchTabulatorTable');
     if (!topScroll || !tableContainer) return;
 
+    // 绑定 tableholder 的滚动监听（如果当前活跃的 holder 已经绑定过，则不重复绑定；若重建了 holder，则自动对新 holder 进行绑定）
     const holder = tableContainer.querySelector('.tabulator-tableholder');
-    if (!holder) return;
+    if (holder && !holder._hasCanvasTopScrollBound) {
+        holder._hasCanvasTopScrollBound = true;
+        holder.addEventListener('scroll', () => {
+            if (topScroll._isDraggingThumb) return;
+            syncCanvasTabulatorTopScrollbar();
+        }, { passive: true });
+    }
 
     if (topScroll._hasCustomScrollBinding) return;
     topScroll._hasCustomScrollBinding = true;
 
-    // 1. 表格内部滚动（例如 Shift+滚轮、触控板横向滑动手势）实时驱动顶部滑块位置，单向数据流，极速无冲突
-    holder.addEventListener('scroll', () => {
-        if (topScroll._isDraggingThumb) return;
-        syncCanvasTabulatorTopScrollbar();
-    }, { passive: true });
-
-    // 2. 在顶部滑块条上直接滚轮滚动：直接模拟水平滚动
+    // 2. 在顶部滑块条上直接滚轮滚动：直接模拟水平滚动（动态获取当前活跃的 holder）
     topScroll.addEventListener('wheel', (e) => {
+        const curHolder = tableContainer.querySelector('.tabulator-tableholder');
+        if (!curHolder) return;
         e.preventDefault();
         const delta = e.deltaX || e.deltaY;
         if (delta) {
-            holder.scrollLeft += delta;
+            curHolder.scrollLeft += delta;
             syncCanvasTabulatorTopScrollbar();
         }
     }, { passive: false });
 
-    // 3. 点击顶部滑块条空白区域直接跳转到对应位置
+    // 3. 点击顶部滑块条空白区域直接跳转到对应位置（动态获取当前活跃的 holder）
     topScroll.addEventListener('pointerdown', (e) => {
         if (thumb && (e.target === thumb || thumb.contains(e.target))) return;
         if (e.button !== 0) return;
         e.preventDefault();
+
+        const curHolder = tableContainer.querySelector('.tabulator-tableholder');
+        if (!curHolder) return;
 
         const rect = topScroll.getBoundingClientRect();
         const clickX = e.clientX - rect.left;
@@ -18755,18 +18985,21 @@ function bindCanvasTabulatorTopScrollbarEvents() {
         const maxThumbLeft = Math.max(1, trackW - thumbW);
         const targetThumbLeft = Math.max(0, Math.min(maxThumbLeft, clickX - thumbW / 2));
 
-        const scrollW = holder.scrollWidth;
-        const clientW = holder.clientWidth;
+        const scrollW = curHolder.scrollWidth;
+        const clientW = curHolder.clientWidth;
         const maxScrollLeft = Math.max(1, scrollW - clientW);
 
-        holder.scrollLeft = Math.round((targetThumbLeft / maxThumbLeft) * maxScrollLeft);
+        curHolder.scrollLeft = Math.round((targetThumbLeft / maxThumbLeft) * maxScrollLeft);
         syncCanvasTabulatorTopScrollbar();
     });
 
-    // 4. 手动抓取并拖拽 thumb 滑块：解耦驱动，rAF 更新，无原生双向事件死循环，零掉帧
+    // 4. 手动抓取并拖拽 thumb 滑块：解耦驱动，rAF 更新，无原生双向事件死循环，零掉帧（动态获取当前活跃的 holder）
     if (thumb) {
         thumb.addEventListener('pointerdown', (e) => {
             if (e.button !== 0) return;
+            const curHolder = tableContainer.querySelector('.tabulator-tableholder');
+            if (!curHolder) return;
+
             e.preventDefault();
             e.stopPropagation();
 
@@ -18774,9 +19007,9 @@ function bindCanvasTabulatorTopScrollbarEvents() {
             topScroll.classList.add('is-dragging');
 
             const startClientX = e.clientX;
-            const startScrollLeft = holder.scrollLeft;
-            const scrollW = holder.scrollWidth;
-            const clientW = holder.clientWidth;
+            const startScrollLeft = curHolder.scrollLeft;
+            const scrollW = curHolder.scrollWidth;
+            const clientW = curHolder.clientWidth;
             const trackW = topScroll.clientWidth;
             const thumbW = thumb.offsetWidth;
             const maxThumbLeft = Math.max(1, trackW - thumbW);
@@ -18796,7 +19029,10 @@ function bindCanvasTabulatorTopScrollbarEvents() {
                 if (!dragRaf) {
                     dragRaf = requestAnimationFrame(() => {
                         dragRaf = null;
-                        holder.scrollLeft = nextScrollLeft;
+                        const activeHolder = tableContainer.querySelector('.tabulator-tableholder');
+                        if (activeHolder) {
+                            activeHolder.scrollLeft = nextScrollLeft;
+                        }
                         // 同步更新滑块自身的位置
                         const curThumbLeft = Math.round((nextScrollLeft / maxScrollLeft) * maxThumbLeft);
                         thumb.style.left = `${curThumbLeft}px`;
@@ -18848,8 +19084,11 @@ function syncCanvasTabulatorRightScrollbarLayout() {
         const wrapperRect = wrapper.getBoundingClientRect();
         const holderRect = holder.getBoundingClientRect();
         const topOffset = Math.max(0, holderRect.top - wrapperRect.top);
+        const height = holderRect.height || holder.clientHeight;
         rightScroll.style.top = `${topOffset}px`;
-        rightScroll.style.height = `${holderRect.height || holder.clientHeight}px`;
+        if (height > 0) {
+            rightScroll.style.height = `${height}px`;
+        }
     }
 }
 
@@ -18863,6 +19102,7 @@ function syncCanvasTabulatorRightScrollbar(immediate = false) {
     const thumb = document.getElementById('canvasTabulatorRightScrollbarThumb');
     const tableContainer = document.getElementById('canvasSearchTabulatorTable');
     if (!rightScroll || !tableContainer) return;
+    if (rightScroll._isDraggingThumb) return;
 
     const holder = tableContainer.querySelector('.tabulator-tableholder');
     if (!holder) return;
@@ -18878,7 +19118,10 @@ function syncCanvasTabulatorRightScrollbar(immediate = false) {
         const updateThumb = () => {
             canvasTabulatorRightScrollRaf = null;
             if (!thumb) return;
-            const trackH = clientH;
+            if (!rightScroll.style.height || rightScroll.clientHeight <= 0) {
+                syncCanvasTabulatorRightScrollbarLayout();
+            }
+            const trackH = rightScroll.clientHeight || clientH;
             const thumbH = Math.max(28, Math.round((clientH / scrollH) * trackH));
             const maxThumbTop = Math.max(1, trackH - thumbH);
             const maxScrollTop = Math.max(1, scrollH - clientH);
@@ -18918,25 +19161,29 @@ function bindCanvasTabulatorRightScrollbarEvents() {
     const tableContainer = document.getElementById('canvasSearchTabulatorTable');
     if (!rightScroll || !tableContainer) return;
 
+    // 绑定 tableholder 的滚动监听（如果当前活跃的 holder 已经绑定过，则不重复绑定；若重建了 holder，则自动对新 holder 进行绑定）
     const holder = tableContainer.querySelector('.tabulator-tableholder');
-    if (!holder) return;
+    if (holder && !holder._hasCanvasRightScrollBound) {
+        holder._hasCanvasRightScrollBound = true;
+        holder.addEventListener('scroll', () => {
+            if (rightScroll._isDraggingThumb) return;
+            syncCanvasTabulatorRightScrollbar();
+        }, { passive: true });
+    }
 
     if (rightScroll._hasCustomScrollBinding) return;
     rightScroll._hasCustomScrollBinding = true;
 
-    // 1. 表格内部滚动（滚轮、触控板垂直手势、键盘方向键）实时驱动右侧滑块位置（rAF节流，单向数据流）
-    holder.addEventListener('scroll', () => {
-        if (rightScroll._isDraggingThumb) return;
-        syncCanvasTabulatorRightScrollbar();
-    }, { passive: true });
-
     // 2. 注意：滑块轨道已在 CSS 中配置 pointer-events: none，滚轮与触控板手势自然直通底层 holder，
     // 原生 momentum/inertia 滚动全程畅通无阻，无需且不可调用 e.preventDefault() 强制刹停。
 
-    // 3. 手动抓取并拖拽 thumb 滑块：解耦驱动，rAF 节流更新，零掉帧且绝不失控
+    // 3. 手动抓取并拖拽 thumb 滑块：解耦驱动，rAF 节流更新，零掉帧且绝不失控（动态获取当前活跃的 holder）
     if (thumb) {
         thumb.addEventListener('pointerdown', (e) => {
             if (e.button !== 0) return;
+            const curHolder = tableContainer.querySelector('.tabulator-tableholder');
+            if (!curHolder) return;
+
             e.preventDefault();
             e.stopPropagation();
 
@@ -18944,10 +19191,10 @@ function bindCanvasTabulatorRightScrollbarEvents() {
             rightScroll.classList.add('is-dragging');
 
             const startClientY = e.clientY;
-            const startScrollTop = holder.scrollTop;
-            const scrollH = holder.scrollHeight;
-            const clientH = holder.clientHeight;
-            const trackH = rightScroll.clientHeight;
+            const startScrollTop = curHolder.scrollTop;
+            const scrollH = curHolder.scrollHeight;
+            const clientH = curHolder.clientHeight;
+            const trackH = rightScroll.clientHeight || clientH;
             const thumbH = thumb.offsetHeight;
             const maxThumbTop = Math.max(1, trackH - thumbH);
             const maxScrollTop = Math.max(1, scrollH - clientH);
@@ -18966,7 +19213,10 @@ function bindCanvasTabulatorRightScrollbarEvents() {
                 if (!dragRaf) {
                     dragRaf = requestAnimationFrame(() => {
                         dragRaf = null;
-                        holder.scrollTop = nextScrollTop;
+                        const activeHolder = tableContainer.querySelector('.tabulator-tableholder');
+                        if (activeHolder) {
+                            activeHolder.scrollTop = nextScrollTop;
+                        }
                         // 同步更新滑块自身的位置
                         const curThumbTop = Math.round((nextScrollTop / maxScrollTop) * maxThumbTop);
                         thumb.style.top = `${curThumbTop}px`;
@@ -19076,30 +19326,50 @@ function resetSavedTabulatorColumnOrder(mode) {
 function applyTabulatorColumnOrder(cols, mode) {
     if (!Array.isArray(cols) || cols.length <= 1) return cols;
     const saved = getSavedTabulatorColumnOrder(mode);
-    if (!saved || !Array.isArray(saved) || saved.length === 0) return cols;
+    let orderedCols = cols;
 
-    const indexCol = cols.find(c => c && c.field === 'index');
-    const otherCols = cols.filter(c => c && c.field !== 'index');
+    if (saved && Array.isArray(saved) && saved.length > 0) {
+        const indexCol = cols.find(c => c && c.field === 'index');
+        const otherCols = cols.filter(c => c && c.field !== 'index');
 
-    const colMap = new Map();
-    otherCols.forEach(c => {
-        if (c && c.field) colMap.set(c.field, c);
-    });
+        const colMap = new Map();
+        otherCols.forEach(c => {
+            if (c && c.field) colMap.set(c.field, c);
+        });
 
-    const ordered = [];
-    saved.forEach(f => {
-        if (colMap.has(f)) {
-            ordered.push(colMap.get(f));
-            colMap.delete(f);
+        const ordered = [];
+        saved.forEach(f => {
+            if (colMap.has(f)) {
+                ordered.push(colMap.get(f));
+                colMap.delete(f);
+            }
+        });
+
+        // 将未在已保存顺序中的新字段或动态列，按原相对次序追加在末尾
+        colMap.forEach(c => {
+            ordered.push(c);
+        });
+
+        orderedCols = indexCol ? [indexCol, ...ordered] : ordered;
+    }
+
+    // 检查是否处于 @时间 / @time 临时搜索模式
+    const currentQ = (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
+    const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
+    if (isTimeSearch) {
+        // 在 @时间 查询下，无论用户是否有手动调整过列顺序，都临时将“创建时间/最近添加”（dateAdded）列挪到“标题/域名”（title 或 domain）的紧邻右侧
+        const dateAddedCol = orderedCols.find(c => c && c.field === 'dateAdded');
+        if (dateAddedCol) {
+            const colsWithoutDate = orderedCols.filter(c => c !== dateAddedCol);
+            const titleIdx = colsWithoutDate.findIndex(c => c && (c.field === 'title' || c.field === 'domain'));
+            if (titleIdx >= 0) {
+                colsWithoutDate.splice(titleIdx + 1, 0, dateAddedCol);
+                orderedCols = colsWithoutDate;
+            }
         }
-    });
+    }
 
-    // 将未在已保存顺序中的新字段或动态列，按原相对次序追加在末尾
-    colMap.forEach(c => {
-        ordered.push(c);
-    });
-
-    return indexCol ? [indexCol, ...ordered] : ordered;
+    return orderedCols;
 }
 
 let isReorderingIndexGuard = false;
@@ -19124,7 +19394,13 @@ function ensureCanvasTabulatorIndexColumnFirst(tableInstance, activeMode) {
         const currentFields = (tableInstance.getColumns() || [])
             .map(c => c.getField())
             .filter(f => f && f !== 'index');
-        saveTabulatorColumnOrder(activeMode, currentFields);
+
+        // 如果当前处于 @时间 临时模式，绝不能将临时的列顺序持久化保存，避免覆盖用户日常的正常列顺序
+        const currentQ = (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
+        const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
+        if (!isTimeSearch) {
+            saveTabulatorColumnOrder(activeMode, currentFields);
+        }
 
         if (typeof syncCanvasTabulatorTopScrollbar === 'function') {
             syncCanvasTabulatorTopScrollbar();
@@ -19705,12 +19981,53 @@ function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery,
     const expectedLayout = getCanvasTabulatorLayoutMode(activeMode);
 
     const isReady = isCanvasSearchTabulatorReady();
+    const currentQ = renderQuery || (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
+    const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
+
+    // 状态机：跟踪 @时间 / @time 临时搜索模式与常规搜索模式的互相转换
+    if (isTimeSearch && !canvasSearchTabulatorWasTimeSearch) {
+        // 进入 @时间 模式：记录用户原先的表头排序状态
+        try {
+            if (canvasSearchTabulatorInstance && typeof canvasSearchTabulatorInstance.getSorters === 'function') {
+                const currentSorters = canvasSearchTabulatorInstance.getSorters() || [];
+                canvasSearchTabulatorPreTimeSearchSorts = currentSorters.map(s => ({
+                    column: s.field,
+                    dir: s.dir
+                }));
+            } else {
+                canvasSearchTabulatorPreTimeSearchSorts = [];
+            }
+        } catch (_) {
+            canvasSearchTabulatorPreTimeSearchSorts = [];
+        }
+        canvasSearchTabulatorWasTimeSearch = true;
+    } else if (!isTimeSearch && canvasSearchTabulatorWasTimeSearch) {
+        // 退出 @时间 模式
+        canvasSearchTabulatorWasTimeSearch = false;
+    }
+
     if (!canvasSearchTabulatorInstance || !isReady || !hasTableholder || canvasSearchTabulatorActiveMode !== activeMode || (canvasSearchTabulatorInstance.options && canvasSearchTabulatorInstance.options.layout !== expectedLayout)) {
         initCanvasSearchTabulator(containerEl, initialData, isZh);
     } else {
         try {
             canvasSearchTabulatorInstance.setColumns(getCanvasTabulatorColumns(isZh, activeMode, initialData));
             canvasSearchTabulatorInstance.replaceData(initialData);
+            if (isTimeSearch) {
+                // 在 @时间 临时搜索模式下，表头临时与当前结果集内容保持一致（显示降序箭头），直观匹配内容
+                try {
+                    canvasSearchTabulatorInstance.setSort([{ column: "dateAdded", dir: "desc" }]);
+                } catch (_) { }
+            } else if (canvasSearchTabulatorPreTimeSearchSorts !== null) {
+                // 退出 @时间 临时搜索模式时，将表头排序状态严格恢复为进入前的值（如原本是 '-' 未排序，则彻底清除箭头恢复 '-'）
+                try {
+                    if (Array.isArray(canvasSearchTabulatorPreTimeSearchSorts) && canvasSearchTabulatorPreTimeSearchSorts.length > 0) {
+                        canvasSearchTabulatorInstance.setSort(canvasSearchTabulatorPreTimeSearchSorts);
+                    } else {
+                        canvasSearchTabulatorInstance.clearSort();
+                    }
+                } catch (_) { }
+                canvasSearchTabulatorPreTimeSearchSorts = null;
+            }
             safeRedrawCanvasSearchTabulator(false);
         } catch (err) {
             initCanvasSearchTabulator(containerEl, initialData, isZh);
@@ -20085,7 +20402,26 @@ function buildCanvasTabulatorData(results, query, options = {}) {
         }
 
         // 创建时间提取
-        const creationInfo = getBookmarkItemCreationTime(item);
+        let creationInfo = getBookmarkItemCreationTime(item);
+        if (creationInfo.timestamp === 0) {
+            const fallbackTs = getItemOrFolderTimestamp(item);
+            if (fallbackTs > 0) {
+                try {
+                    const d = new Date(fallbackTs);
+                    const year = d.getFullYear();
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    const hours = String(d.getHours()).padStart(2, '0');
+                    const minutes = String(d.getMinutes()).padStart(2, '0');
+                    const seconds = String(d.getSeconds()).padStart(2, '0');
+                    creationInfo = {
+                        timestamp: fallbackTs,
+                        text: `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`,
+                        dateOnly: `${year}/${month}/${day}`
+                    };
+                } catch (_) {}
+            }
+        }
 
         let typeLabel = '';
         let locationLabel = '';
@@ -20978,8 +21314,8 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     field: "dateAdded",
                     minWidth: 100,
                     width: savedWidths['dateAdded'] || 120,
-                    hozAlign: "center",
-                    headerHozAlign: "center",
+                    hozAlign: "left",
+                    headerHozAlign: "left",
                     resizable: true,
                     headerSort: true,
                     headerSortTristate: true,
@@ -20995,7 +21331,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     formatter: (cell) => {
                         const d = cell.getData();
                         const txt = d.dateAddedText || '-';
-                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
+                        return `<div style="display:inline-flex; align-items:center; justify-content:flex-start; width:100%; text-align:left;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
                     }
                 }
             ];
@@ -21123,8 +21459,8 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     field: "dateAdded",
                     minWidth: 100,
                     width: savedWidths['dateAdded'] || 120,
-                    hozAlign: "center",
-                    headerHozAlign: "center",
+                    hozAlign: "left",
+                    headerHozAlign: "left",
                     resizable: true,
                     headerSort: true,
                     headerSortTristate: true,
@@ -21140,7 +21476,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     formatter: (cell) => {
                         const d = cell.getData();
                         const txt = d.dateAddedText || '-';
-                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
+                        return `<div style="display:inline-flex; align-items:center; justify-content:flex-start; width:100%; text-align:left;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
                     }
                 }
             ];
@@ -21913,6 +22249,8 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
             field: "dateAdded",
             minWidth: 165,
             width: savedWidths['dateAdded'] || 185,
+            hozAlign: "left",
+            headerHozAlign: "left",
             resizable: true,
             headerSort: true,
             headerSortTristate: true,
@@ -21939,7 +22277,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     const remainCount = datesList.length - 1;
                     moreBtnHtml = `<button type="button" class="canvas-grid-location-more-btn canvas-table-loc-more-btn canvas-table-date-more-btn" data-item-id="${escapeHtml(String((d && d.id) || ''))}" data-item-index="${escapeHtml(String((d && d.index) || ''))}" title="${escapeHtml(isZh ? `查看全部 ${datesList.length} 项创建时间` : `View all ${datesList.length} creation times`)}" aria-label="${escapeHtml(isZh ? `还有 ${remainCount} 项创建时间` : `${remainCount} more creation times`)}">+${remainCount}</button>`;
                 }
-                return `<div class="canvas-table-date-cell">${moreBtnHtml}<span class="canvas-table-date-text" title="${escapeHtml(timeText)}">${highlightedTime}</span></div>`;
+                return `<div class="canvas-table-date-cell" style="display:inline-flex; align-items:center; justify-content:flex-start; width:100%; text-align:left;">${moreBtnHtml}<span class="canvas-table-date-text" title="${escapeHtml(timeText)}">${highlightedTime}</span></div>`;
             },
             cellClick: (e, cell) => {
                 if (handleCanvasTabulatorCellClickSelectionGuard(e, cell)) return;
@@ -22276,6 +22614,24 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
     const activeMode = getCanvasTabulatorActiveModeKey();
     canvasSearchTabulatorActiveMode = activeMode;
     const tabulatorLayout = getCanvasTabulatorLayoutMode(activeMode);
+    const currentQ = (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
+    const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
+
+    let initialSortConfig = undefined;
+    if (isTimeSearch) {
+        if (canvasSearchTabulatorPreTimeSearchSorts === null) {
+            canvasSearchTabulatorPreTimeSearchSorts = [];
+        }
+        canvasSearchTabulatorWasTimeSearch = true;
+        initialSortConfig = [{ column: "dateAdded", dir: "desc" }];
+    } else if (canvasSearchTabulatorPreTimeSearchSorts && canvasSearchTabulatorPreTimeSearchSorts.length > 0) {
+        initialSortConfig = canvasSearchTabulatorPreTimeSearchSorts;
+        canvasSearchTabulatorPreTimeSearchSorts = null;
+        canvasSearchTabulatorWasTimeSearch = false;
+    } else if (canvasSearchTabulatorWasTimeSearch) {
+        canvasSearchTabulatorPreTimeSearchSorts = null;
+        canvasSearchTabulatorWasTimeSearch = false;
+    }
 
     let placeholderText = isZh ? "无结果" : "No results";
 
@@ -22283,6 +22639,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
         canvasSearchTabulatorInstance = new Tabulator(containerEl, {
             data: tableData,
             layout: tabulatorLayout,
+            initialSort: initialSortConfig,
             renderVertical: "virtual",
             renderVerticalBuffer: 300,
             height: "100%",
@@ -22376,7 +22733,9 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
         canvasSearchTabulatorInstance.on("renderComplete", function() {
             const inst = this || canvasSearchTabulatorInstance;
             setupCanvasTabulatorIndexHeaderProtection(inst);
+            bindCanvasTabulatorTopScrollbarEvents();
             syncCanvasTabulatorTopScrollbar();
+            bindCanvasTabulatorRightScrollbarEvents();
             if (canvasSearchTabulatorPendingState) {
                 const remain = Math.max(0, canvasSearchTabulatorPendingState.totalResults.length - canvasSearchTabulatorPendingState.loadedCount);
                 updateCanvasTabulatorLoadMoreRow(remain, canvasSearchTabulatorPendingState.isZh);
@@ -22388,6 +22747,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
         });
 
         canvasSearchTabulatorInstance.on("scrollVertical", () => {
+            syncCanvasTabulatorRightScrollbar();
             if (typeof isGridDetailsBubbleVisible === 'function' && isGridDetailsBubbleVisible()) {
                 hideGridDetailsBubble();
             }
@@ -22396,6 +22756,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             if (typeof hideSubdomainListPopover === 'function') hideSubdomainListPopover();
         });
         canvasSearchTabulatorInstance.on("scrollHorizontal", () => {
+            syncCanvasTabulatorTopScrollbar();
             if (typeof isGridDetailsBubbleVisible === 'function' && isGridDetailsBubbleVisible()) {
                 hideGridDetailsBubble();
             }
@@ -22695,9 +23056,9 @@ function renderCanvasSearchResults(results, options = {}) {
     const panel = getSearchResultsPanel();
     if (!panel) return;
 
-    // 若当前面板处于模式建议/推荐界面（含“下次不再出现”），必须在尺寸计算前彻底清空建议 DOM，恢复纯净结果面板
+    // 若当前面板处于模式建议/推荐界面或包含历史记录，必须在尺寸计算前彻底清空建议 DOM，恢复纯净结果面板
     const isSuggestionsPanel = (panel.dataset && panel.dataset.panelType === 'canvas-suggestions') ||
-        !!panel.querySelector('.search-suggestions-header, .canvas-suggestions-hide-btn, .search-empty-suggestions-hide-btn, .canvas-suggestion-mode-item');
+        !!panel.querySelector('.search-history-section, .search-suggestions-header, .canvas-suggestions-hide-btn, .search-empty-suggestions-hide-btn, .canvas-suggestion-mode-item');
     if (isSuggestionsPanel) {
         if (typeof destroyCanvasSearchTabulator === 'function') {
             destroyCanvasSearchTabulator();
@@ -22778,6 +23139,16 @@ function renderCanvasSearchResults(results, options = {}) {
             displayResults = sourceResults.filter(r => !(r && r.nodeType === 'bookmark'));
         } else if (effectiveFilter === 'domain') {
             displayResults = domainResults;
+        }
+
+        const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(options.query || searchUiState.query);
+        if (isTimeQuery) {
+            displayResults = displayResults.slice().sort((a, b) => {
+                const timeA = getItemOrFolderTimestamp(a);
+                const timeB = getItemOrFolderTimestamp(b);
+                if (timeB !== timeA) return timeB - timeA;
+                return 0;
+            });
         }
     }
 
@@ -23442,7 +23813,7 @@ function renderCanvasSearchResults(results, options = {}) {
         url: 4,
         time: 5
     };
-    const buildMatchedDetailsPreviewHtml = (entries) => {
+    const buildMatchedDetailsPreviewHtml = (entries, customPriority = null) => {
         const matched = (Array.isArray(entries) ? entries : [])
             .filter((entry) => entry && entry.matched && entry.html);
         if (!matched.length) {
@@ -23451,10 +23822,11 @@ function renderCanvasSearchResults(results, options = {}) {
                 count: 0
             };
         }
+        const priorityOrder = customPriority || DETAILS_PREVIEW_PRIORITY_ORDER;
         // 网格模式信息预览只显示最高优先级的单项，优先顺序：tag > note > path > url > time
         const sorted = matched.slice().sort((a, b) => {
-            const pA = (a.type && DETAILS_PREVIEW_PRIORITY_ORDER[a.type]) || 99;
-            const pB = (b.type && DETAILS_PREVIEW_PRIORITY_ORDER[b.type]) || 99;
+            const pA = (a.type && priorityOrder[a.type]) || 99;
+            const pB = (b.type && priorityOrder[b.type]) || 99;
             return pA - pB;
         });
         const topEntry = sorted[0];
@@ -23489,19 +23861,21 @@ function renderCanvasSearchResults(results, options = {}) {
         const detailsExpanded = isBookmarkDetailsExpanded(childKey);
         const childCreationTimeHtml = renderBookmarkCreationTimeHtml(child, isZh, queryText);
 
+        const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(queryText);
         const hasPathMatch = isPlainBookmarkDetailsQuery && pathHtml && pathHtml.includes('<mark>');
-        const hasTimeMatch = isPlainBookmarkDetailsQuery && childCreationTimeHtml && childCreationTimeHtml.includes('<mark>');
+        const hasTimeMatch = (isPlainBookmarkDetailsQuery && childCreationTimeHtml && childCreationTimeHtml.includes('<mark>')) || isTimeQuery;
         const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
         const hasTagMatch = childTagMarkersHtml && childTagMarkersHtml.includes('<mark>');
         const hasNoteMatch = childNoteSnippetHtml && childNoteSnippetHtml.includes('<mark>');
 
+        const timePriorityOrder = isTimeQuery ? { time: 1, tag: 2, note: 3, path: 4, url: 5 } : null;
         const preview = buildMatchedDetailsPreviewHtml([
             { type: 'tag', matched: hasTagMatch, html: childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '' },
             { type: 'note', matched: hasNoteMatch, html: childNoteSnippetHtml },
             { type: 'path', matched: hasPathMatch, html: pathHtml },
             { type: 'url', matched: hasUrlMatch, html: urlHtml },
             { type: 'time', matched: hasTimeMatch, html: childCreationTimeHtml }
-        ]);
+        ], timePriorityOrder);
 
         const previewContextHtml = renderDetailsPreviewContextHtml(child, preview, detailsExpanded);
 
@@ -23879,6 +24253,9 @@ function renderCanvasSearchResults(results, options = {}) {
 
             const oldEmpty = panel.querySelectorAll('.search-result-empty, .search-results-empty');
             oldEmpty.forEach(el => el.remove());
+
+            const oldHistory = panel.querySelectorAll('.search-history-section');
+            oldHistory.forEach(el => el.remove());
 
             const oldSuggestions = panel.querySelectorAll('.search-suggestions-header, .canvas-suggestions-hide-btn, .search-empty-suggestions-hide-btn, .canvas-suggestion-mode-item');
             oldSuggestions.forEach(el => el.remove());
@@ -24271,9 +24648,22 @@ function renderCanvasSearchResults(results, options = {}) {
                 const subdomainsBtnHtml = (isRootGroup && subdomainCount > 0)
                     ? `<button type="button" class="canvas-grid-subdomain-more-btn" data-domain="${escapeHtml(domainKey)}" title="${escapeHtml(isZh ? `查看全部 ${subdomainCount} 个旗下子域名` : `View all ${subdomainCount} subdomains`)}" style="background:none; border:none; padding:0; margin:0; font:inherit; color:var(--accent-primary, #0ea5e9); cursor:pointer; text-decoration:underline; text-underline-offset:2px; opacity:0.95;">${escapeHtml(subdomainsLabel)}</button>`
                     : '';
+                const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
+                let domainDateHtml = '';
+                if (isTimeQuery && item.dateAdded) {
+                    try {
+                        const d = new Date(Number(item.dateAdded));
+                        if (!isNaN(d.getTime())) {
+                            const y = d.getFullYear();
+                            const m = String(d.getMonth() + 1).padStart(2, '0');
+                            const day = String(d.getDate()).padStart(2, '0');
+                            domainDateHtml = ` · <span class="search-domain-time" style="color:var(--text-secondary); font-size:11px; opacity:0.85;"><i class="far fa-clock" style="margin-right:3px;"></i>${y}-${m}-${day}</span>`;
+                        }
+                    } catch (_) {}
+                }
                 const summaryHtml = subdomainsBtnHtml
-                    ? `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)} · ${subdomainsBtnHtml}</div></div>`
-                    : `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)}</div></div>`;
+                    ? `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)} · ${subdomainsBtnHtml}${domainDateHtml}</div></div>`
+                    : `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)}${domainDateHtml}</div></div>`;
 
                 descHtml = `<div class="search-result-match canvas-bookmark-group-summary" style="display:flex; flex-direction:column; width:100%; min-width:0;">
                     ${summaryHtml}
@@ -24385,19 +24775,21 @@ function renderCanvasSearchResults(results, options = {}) {
                 const noteSnippetHtml = renderBookmarkResultNoteSnippet(item);
                 const creationTimeHtml = renderBookmarkCreationTimeHtml(item, isZh, searchUiState.query);
 
+                const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
                 const hasPathMatch = isPlainBookmarkDetailsQuery && parentPathHtml && parentPathHtml.includes('<mark>');
-                const hasTimeMatch = isPlainBookmarkDetailsQuery && creationTimeHtml && creationTimeHtml.includes('<mark>');
+                const hasTimeMatch = (isPlainBookmarkDetailsQuery && creationTimeHtml && creationTimeHtml.includes('<mark>')) || isTimeQuery;
                 const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
                 const hasTagMatch = tagsRowHtml && tagsRowHtml.includes('<mark>');
                 const hasNoteMatch = noteSnippetHtml && noteSnippetHtml.includes('<mark>');
 
+                const timePriorityOrder = isTimeQuery ? { time: 1, tag: 2, note: 3, path: 4, url: 5 } : null;
                 const preview = buildMatchedDetailsPreviewHtml([
                     { type: 'tag', matched: hasTagMatch, html: tagsRowHtml },
                     { type: 'note', matched: hasNoteMatch, html: noteSnippetHtml },
                     { type: 'path', matched: hasPathMatch, html: parentPathHtml },
                     { type: 'url', matched: hasUrlMatch, html: urlHtml },
                     { type: 'time', matched: hasTimeMatch, html: creationTimeHtml }
-                ]);
+                ], timePriorityOrder);
 
                 const detailsExpanded = isBookmarkDetailsExpanded(item.id);
                 const previewContextHtml = renderDetailsPreviewContextHtml(item, preview, detailsExpanded);
@@ -24895,6 +25287,8 @@ function renderCanvasSearchResults(results, options = {}) {
     const wrappedItemsHtml = `<div class="search-results-items-container${isGridView ? ' view-grid' : ''}" data-search-mode="${activeMode}">${itemsHtml}</div>`;
 
     const existingTableWrapper = panel.querySelector('.search-results-table-view-wrapper');
+    const oldHistory = panel.querySelectorAll('.search-history-section');
+    oldHistory.forEach(el => el.remove());
     if (existingTableWrapper) {
         existingTableWrapper.style.display = 'none';
         const oldGrid = panel.querySelector('.search-results-items-container');

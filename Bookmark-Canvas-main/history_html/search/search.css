@@ -1136,16 +1136,23 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     padding: 0 2px !important;
 }
 
-/* 表格操作、计数、子域名、主域名、日期列强制严格居中 */
+/* 表格操作、计数、子域名、主域名列强制严格居中 */
 .tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="actions"],
 .tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="count"],
 .tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="subdomainCount"],
-.tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="dateAdded"],
 .tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="rootDomain"] {
     display: inline-flex !important;
     justify-content: center !important;
     align-items: center !important;
     text-align: center !important;
+}
+
+/* 创建时间 / 最近添加纵行单元格内容统一左对齐 */
+.tabulator.canvas-search-tabulator .tabulator-cell[tabulator-field="dateAdded"] {
+    display: inline-flex !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    text-align: left !important;
 }
 
 /* 子域名胶囊按钮与弹窗 */
@@ -2825,6 +2832,8 @@ html.side-panel-mode .canvas-bookmark-selection-confirm-btn .canvas-selection-co
 .canvas-table-date-cell {
     display: inline-flex;
     align-items: center;
+    justify-content: flex-start;
+    text-align: left;
     gap: 4px;
     max-width: 100%;
 }
@@ -4964,10 +4973,20 @@ html.side-panel-mode .canvas-bookmark-selection-confirm-btn .canvas-selection-co
 }
 
 .search-helper-tag-link,
-.search-helper-note-link {
+.search-helper-note-link,
+.search-helper-time-link {
     display: inline-block;
     pointer-events: auto !important;
     cursor: pointer !important;
+    color: var(--accent-blue, #0a84ff) !important;
+    text-decoration: underline !important;
+}
+
+.search-helper-tag-link:hover,
+.search-helper-note-link:hover,
+.search-helper-time-link:hover {
+    color: #1d4ed8 !important;
+    text-decoration: underline !important;
 }
 
 .search-mode-menu-item {
@@ -4980,6 +4999,18 @@ html.side-panel-mode .canvas-bookmark-selection-confirm-btn .canvas-selection-co
 
 [data-theme="dark"] .search-result-external-link:hover {
     color: #93c5fd;
+}
+
+[data-theme="dark"] .search-helper-tag-link,
+[data-theme="dark"] .search-helper-note-link,
+[data-theme="dark"] .search-helper-time-link {
+    color: #60a5fa !important;
+}
+
+[data-theme="dark"] .search-helper-tag-link:hover,
+[data-theme="dark"] .search-helper-note-link:hover,
+[data-theme="dark"] .search-helper-time-link:hover {
+    color: #93c5fd !important;
 }
 
 /* =============================================================================
