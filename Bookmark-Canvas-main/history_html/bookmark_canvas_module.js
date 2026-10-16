@@ -2516,7 +2516,7 @@ const CANVAS_GRID_LAYER_INSET_PX = 200;
 
 const DEFAULT_CANVAS_OTHER_SETTINGS = {
     autoLinkSplit: false, // 临时栏目分裂后自动连接
-    gridSnapEnabled: false, // 移动卡片时吸附到画布网格点
+    gridSnapEnabled: true, // 移动卡片时吸附到画布网格点
     gridSnapContinuous: false, // 拖动过程中持续吸附到画布网格点
     gridPointSpacing: CANVAS_GRID_POINT_SPACING_DEFAULT, // 画布网格点间距
     menuColorSync: true, // 兼容旧配置：目录栏颜色同步
