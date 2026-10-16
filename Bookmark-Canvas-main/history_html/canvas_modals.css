@@ -5657,11 +5657,11 @@ html:fullscreen body.header-compact .canvas-main-container {
     height: 100%;
     padding: 0 0 20px 0;
     gap: 0;
-    overflow-y: hidden;
+    overflow: visible;
 }
 
 .nav-tabs.history-tab-active {
-    overflow-y: hidden !important;
+    overflow: visible !important;
 }
 
 .sidebar-section-header {
@@ -5673,6 +5673,159 @@ html:fullscreen body.header-compact .canvas-main-container {
     margin-bottom: 4px;
     margin-left: 8px;
     margin-right: 8px;
+}
+
+.anchor-unified-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 6px;
+    margin-bottom: 6px;
+    margin-left: 8px;
+    margin-right: 8px;
+    position: relative;
+    height: 28px;
+    box-sizing: border-box;
+}
+
+.sidebar-header-left {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex: 1;
+}
+
+.sidebar-header-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
+.sidebar-header-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex: 1;
+    gap: 4px;
+}
+
+.sidebar-temp-workspace-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+}
+
+.sidebar-temp-workspace-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    color: var(--accent-color);
+}
+
+.sidebar-temp-workspace-btn.active {
+    background: rgba(16, 185, 129, 0.18) !important;
+    color: #10b981 !important;
+    border: 1px solid rgba(16, 185, 129, 0.45) !important;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
+}
+
+.sidebar-temp-workspace-btn.active:hover {
+    background: rgba(16, 185, 129, 0.28) !important;
+    color: #10b981 !important;
+}
+
+.sidebar-temp-workspace-btn i {
+    font-size: 12px;
+}
+
+/* 序号：放置在卡片外部的正左边、垂直居中，无矩形底色/边框，极简数字 1, 2, 3...，高层级防遮挡 */
+.anchor-slot-shortcut-badge {
+    position: absolute;
+    right: calc(100% + 6px);
+    top: 50%;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    color: var(--text-tertiary, rgba(255, 255, 255, 0.45));
+    flex-shrink: 0;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 10;
+    transition: color 0.15s ease;
+    user-select: none;
+}
+
+.anchor-slot-row:hover .anchor-slot-shortcut-badge {
+    color: var(--text-primary, #ffffff);
+}
+
+.anchor-slot-row.active-slot .anchor-slot-shortcut-badge {
+    color: var(--accent-primary, #3b82f6);
+    font-weight: 700;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.sidebar-anchor-container.in-temp-mode .anchor-slot-row.active-slot .anchor-slot-shortcut-badge {
+    color: #10b981;
+    font-weight: 700;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.sidebar-anchor-container.in-temp-mode .anchor-slot-row.active-slot {
+    border-color: #10b981;
+}
+
+/* Toast 内的序号角标 */
+.toast-slot-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1;
+    border-radius: 3.5px;
+    background: var(--accent-primary, #3b82f6);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    flex-shrink: 0;
+    box-sizing: border-box;
+    margin: 0;
+}
+
+.toast-slot-badge.in-temp-mode {
+    background: #10b981;
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.3);
 }
 
 .sidebar-section-title {
@@ -5806,6 +5959,8 @@ html:fullscreen body.header-compact .canvas-main-container {
     scrollbar-gutter: stable;
     padding-top: 0;
     padding-bottom: 4px;
+    margin-left: -16px;
+    padding-left: 16px;
 }
 
 .sidebar-anchor-container.auto-inactive .anchor-slots-container,

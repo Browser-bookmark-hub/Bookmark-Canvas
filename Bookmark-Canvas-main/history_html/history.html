@@ -564,62 +564,32 @@
                                 <div class="canvas-help-pointer-info" id="canvasHelpPointerInfoShortcuts" hidden data-i18n-key="canvasHelpBatchOperationsPointer">文件夹内；书签同级位置下方；临时栏目根部；永久栏目书签栏根部；画布空白会新建“粘贴”临时栏目。文本保持浏览器原生粘贴。</div>
                             </div>
                             <div class="canvas-help-section">
-                                <div class="canvas-help-section-title" data-i18n-key="canvasHelpAnchorShortcutsTitle">手动锚点快捷键</div>
+                                <div class="canvas-help-section-title" data-i18n-key="canvasHelpAnchorShortcutsTitle">锚点快捷键</div>
                                 <div class="canvas-help-row">
                                     <span class="canvas-help-key">
-                                        <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="manualAnchorPrev">Ctrl + Shift + J</kbd>
+                                        <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="anchorLocate">Option</kbd><span class="canvas-shortcut-suffix" data-i18n-key="canvasHelpAnchorLocateSuffix"> + 1...+9、0</span>
                                     </span>
                                     <span class="canvas-help-desc">
-                                        <span data-i18n-key="canvasHelpAnchorShortcutsPrev">上一个</span>
-                                        <button class="canvas-shortcut-edit-btn" id="editManualAnchorPrevBtn" data-shortcut-target="manualAnchorPrev" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
+                                        <span data-i18n-key="canvasHelpAnchorShortcutsLocate">定位锚点 1~10</span>
+                                        <button class="canvas-shortcut-edit-btn" id="editAnchorLocateBtn" data-shortcut-target="anchorLocate" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
                                     </span>
                                 </div>
                                 <div class="canvas-help-row">
                                     <span class="canvas-help-key">
-                                        <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="manualAnchorAdd">Ctrl + Shift + K</kbd>
+                                        <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="anchorRecord">Option + S</kbd>
                                     </span>
                                     <span class="canvas-help-desc">
-                                        <span data-i18n-key="canvasHelpAnchorShortcutsAdd">添加</span>
-                                        <button class="canvas-shortcut-edit-btn" id="editManualAnchorAddBtn" data-shortcut-target="manualAnchorAdd" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
+                                        <span data-i18n-key="canvasHelpAnchorShortcutsRecord">记录当前视口（永久/临时共同）</span>
+                                        <button class="canvas-shortcut-edit-btn" id="editAnchorRecordBtn" data-shortcut-target="anchorRecord" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
                                     </span>
                                 </div>
                                 <div class="canvas-help-row">
                                     <span class="canvas-help-key">
-                                        <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="manualAnchorNext">Ctrl + Shift + L</kbd>
+                                        <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="anchorTempWorkspace">Option + C</kbd>
                                     </span>
                                     <span class="canvas-help-desc">
-                                        <span data-i18n-key="canvasHelpAnchorShortcutsNext">下一个</span>
-                                        <button class="canvas-shortcut-edit-btn" id="editManualAnchorNextBtn" data-shortcut-target="manualAnchorNext" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="canvas-help-section">
-                                <div class="canvas-help-section-title" data-i18n-key="canvasHelpTempAnchorShortcutsTitle">临时锚点快捷键</div>
-                                <div class="canvas-help-row">
-                                    <span class="canvas-help-key">
-                                        <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="tempAnchorPrev">Ctrl + Shift + A</kbd>
-                                    </span>
-                                    <span class="canvas-help-desc">
-                                        <span data-i18n-key="canvasHelpTempAnchorShortcutsPrev">上一个</span>
-                                        <button class="canvas-shortcut-edit-btn" id="editTempAnchorPrevBtn" data-shortcut-target="tempAnchorPrev" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
-                                    </span>
-                                </div>
-                                <div class="canvas-help-row">
-                                    <span class="canvas-help-key">
-                                        <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="tempAnchorAdd">Ctrl + Shift + S</kbd>
-                                    </span>
-                                    <span class="canvas-help-desc">
-                                        <span data-i18n-key="canvasHelpTempAnchorShortcutsAdd">添加</span>
-                                        <button class="canvas-shortcut-edit-btn" id="editTempAnchorAddBtn" data-shortcut-target="tempAnchorAdd" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
-                                    </span>
-                                </div>
-                                <div class="canvas-help-row">
-                                    <span class="canvas-help-key">
-                                        <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="tempAnchorNext">Ctrl + Shift + D</kbd>
-                                    </span>
-                                    <span class="canvas-help-desc">
-                                        <span data-i18n-key="canvasHelpTempAnchorShortcutsNext">下一个</span>
-                                        <button class="canvas-shortcut-edit-btn" id="editTempAnchorNextBtn" data-shortcut-target="tempAnchorNext" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
+                                        <span data-i18n-key="canvasHelpAnchorShortcutsTempWorkspace">进入/退出临时工作区</span>
+                                        <button class="canvas-shortcut-edit-btn" id="editAnchorTempWorkspaceBtn" data-shortcut-target="anchorTempWorkspace" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
                                     </span>
                                 </div>
                             </div>
@@ -915,62 +885,32 @@
                                                         <div class="canvas-help-pointer-info" id="canvasHelpPointerInfoHelp" hidden data-i18n-key="canvasHelpBatchOperationsPointer">文件夹内；书签同级位置下方；临时栏目根部；永久栏目书签栏根部；画布空白会新建“粘贴”临时栏目。文本保持浏览器原生粘贴。</div>
                                                     </div>
                                                     <div class="canvas-help-section">
-                                                        <div class="canvas-help-section-title" data-i18n-key="canvasHelpAnchorShortcutsTitle">手动锚点快捷键</div>
+                                                        <div class="canvas-help-section-title" data-i18n-key="canvasHelpAnchorShortcutsTitle">锚点快捷键</div>
                                                         <div class="canvas-help-row">
                                                             <span class="canvas-help-key">
-                                                                <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="manualAnchorPrev">Ctrl + Shift + J</kbd>
+                                                                <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="anchorLocate">Option</kbd><span class="canvas-shortcut-suffix" data-i18n-key="canvasHelpAnchorLocateSuffix"> + 1...+9、0</span>
                                                             </span>
                                                             <span class="canvas-help-desc">
-                                                                <span data-i18n-key="canvasHelpAnchorShortcutsPrev">上一个</span>
-                                                                <button class="canvas-shortcut-edit-btn" data-shortcut-target="manualAnchorPrev" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
+                                                                <span data-i18n-key="canvasHelpAnchorShortcutsLocate">定位锚点 1~10</span>
+                                                                <button class="canvas-shortcut-edit-btn" data-shortcut-target="anchorLocate" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
                                                             </span>
                                                         </div>
                                                         <div class="canvas-help-row">
                                                             <span class="canvas-help-key">
-                                                                <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="manualAnchorAdd">Ctrl + Shift + K</kbd>
+                                                                <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="anchorRecord">Option + S</kbd>
                                                             </span>
                                                             <span class="canvas-help-desc">
-                                                                <span data-i18n-key="canvasHelpAnchorShortcutsAdd">添加</span>
-                                                                <button class="canvas-shortcut-edit-btn" data-shortcut-target="manualAnchorAdd" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
+                                                                <span data-i18n-key="canvasHelpAnchorShortcutsRecord">记录当前视口（永久/临时共同）</span>
+                                                                <button class="canvas-shortcut-edit-btn" data-shortcut-target="anchorRecord" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
                                                             </span>
                                                         </div>
                                                         <div class="canvas-help-row">
                                                             <span class="canvas-help-key">
-                                                                <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="manualAnchorNext">Ctrl + Shift + L</kbd>
+                                                                <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="anchorTempWorkspace">Option + C</kbd>
                                                             </span>
                                                             <span class="canvas-help-desc">
-                                                                <span data-i18n-key="canvasHelpAnchorShortcutsNext">下一个</span>
-                                                                <button class="canvas-shortcut-edit-btn" data-shortcut-target="manualAnchorNext" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="canvas-help-section">
-                                                        <div class="canvas-help-section-title" data-i18n-key="canvasHelpTempAnchorShortcutsTitle">临时锚点快捷键</div>
-                                                        <div class="canvas-help-row">
-                                                            <span class="canvas-help-key">
-                                                                <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="tempAnchorPrev">Ctrl + Shift + A</kbd>
-                                                            </span>
-                                                            <span class="canvas-help-desc">
-                                                                <span data-i18n-key="canvasHelpTempAnchorShortcutsPrev">上一个</span>
-                                                                <button class="canvas-shortcut-edit-btn" data-shortcut-target="tempAnchorPrev" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
-                                                            </span>
-                                                        </div>
-                                                        <div class="canvas-help-row">
-                                                            <span class="canvas-help-key">
-                                                                <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="tempAnchorAdd">Ctrl + Shift + S</kbd>
-                                                            </span>
-                                                            <span class="canvas-help-desc">
-                                                                <span data-i18n-key="canvasHelpTempAnchorShortcutsAdd">添加</span>
-                                                                <button class="canvas-shortcut-edit-btn" data-shortcut-target="tempAnchorAdd" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
-                                                            </span>
-                                                        </div>
-                                                        <div class="canvas-help-row">
-                                                            <span class="canvas-help-key">
-                                                                <kbd class="canvas-shortcut-key canvas-shortcut-combo" data-shortcut-display="tempAnchorNext">Ctrl + Shift + D</kbd>
-                                                            </span>
-                                                            <span class="canvas-help-desc">
-                                                                <span data-i18n-key="canvasHelpTempAnchorShortcutsNext">下一个</span>
-                                                                <button class="canvas-shortcut-edit-btn" data-shortcut-target="tempAnchorNext" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
+                                                                <span data-i18n-key="canvasHelpAnchorShortcutsTempWorkspace">进入/退出临时工作区</span>
+                                                                <button class="canvas-shortcut-edit-btn" data-shortcut-target="anchorTempWorkspace" title="点击修改快捷键"><i class="fas fa-edit"></i></button>
                                                             </span>
                                                         </div>
                                                     </div>

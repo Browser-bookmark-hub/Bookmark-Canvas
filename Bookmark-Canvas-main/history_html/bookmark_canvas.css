@@ -5707,12 +5707,12 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     transform: translateX(-50%);
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     padding: 6px 14px;
     border-radius: 8px;
     font-size: 12px;
     font-weight: 500;
-    line-height: 1.4;
+    line-height: 1;
     color: #ffffff;
     background: #1e1e20;
     border: 1.5px solid #3b82f6;
@@ -5723,6 +5723,32 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     box-sizing: border-box;
     will-change: transform, opacity;
     animation: toastSlideInTop 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.toast-slot-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1;
+    border-radius: 3.5px;
+    background: var(--accent-primary, #3b82f6);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    flex-shrink: 0;
+    box-sizing: border-box;
+    margin: 0;
+}
+
+.toast-slot-badge.in-temp-mode {
+    background: #10b981;
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.3);
 }
 
 /* 状态对应四边边框颜色：绿色、红色、橙色、蓝色 */
@@ -5846,7 +5872,7 @@ body.header-dock-bottom .app-toast.pos-top-right {
     animation-name: toastSlideOutRight;
 }
 
-/* 图标与文字水平对齐优化：解决矢量图标与汉字排版视觉轴线不一致的问题 */
+/* 图标与文字水平对齐优化：确保矢量图标、序号角标与文字严格居中同轴对齐 */
 .toast-icon {
     font-size: 13px;
     line-height: 1;
@@ -5858,7 +5884,7 @@ body.header-dock-bottom .app-toast.pos-top-right {
     justify-content: center;
     margin: 0;
     padding: 0;
-    transform: translateY(0.5px);
+    transform: none;
 }
 
 .toast-icon-success {
@@ -5887,13 +5913,14 @@ body.header-dock-bottom .app-toast.pos-top-right {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1.35;
+    line-height: 1;
     display: inline-flex;
     align-items: center;
 }
 
 .toast-message.multiline {
     white-space: normal;
+    line-height: 1.35;
     display: block;
 }
 

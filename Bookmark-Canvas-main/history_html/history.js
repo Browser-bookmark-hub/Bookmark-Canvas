@@ -3718,17 +3718,11 @@ const i18n = {
 <li><strong>Ctrl / Command + C</strong>：复制已选项目</li>
 <li><strong>Ctrl / Command + V</strong>：粘贴到光标所在位置。文件夹内；书签同级位置下方；临时栏目根部；永久栏目书签栏根部；画布空白会新建“粘贴”临时栏目。文本保持浏览器原生粘贴。</li>
 </ul>
-<h3>手动锚点快捷键</h3>
+<h3>锚点快捷键</h3>
 <ul>
-<li><strong>Ctrl / Command + Shift + J</strong>：上一个</li>
-<li><strong>Ctrl / Command + Shift + K</strong>：添加</li>
-<li><strong>Ctrl / Command + Shift + L</strong>：下一个</li>
-</ul>
-<h3>临时锚点快捷键</h3>
-<ul>
-<li><strong>Ctrl / Command + Shift + A</strong>：上一个</li>
-<li><strong>Ctrl / Command + Shift + S</strong>：添加</li>
-<li><strong>Ctrl / Command + Shift + D</strong>：下一个</li>
+<li><strong>Option / Alt + 1...+9、0</strong>：定位锚点 1~10（0 代表第 10 个锚点）</li>
+<li><strong>Option / Alt + S</strong>：记录当前视口为锚点（永久/临时通用）</li>
+<li><strong>Option / Alt + C</strong>：进入/退出临时工作区</li>
 </ul>
 <h3>触控板操作</h3>
 <ul>
@@ -3756,17 +3750,11 @@ const i18n = {
 <li><strong>Ctrl / Command + C</strong>: Copy selected items</li>
 <li><strong>Ctrl / Command + V</strong>: Paste at the cursor location. Inside a folder; below a bookmark at the same level; at a temp card root; at the Bookmarks Bar root for a blank permanent card; or in a new “Paste” temp card on blank canvas. Text keeps native browser paste behavior.</li>
 </ul>
-<h3>Manual Anchor Shortcuts</h3>
+<h3>Anchor Shortcuts</h3>
 <ul>
-<li><strong>Ctrl / Command + Shift + J</strong>: Prev</li>
-<li><strong>Ctrl / Command + Shift + K</strong>: Add</li>
-<li><strong>Ctrl / Command + Shift + L</strong>: Next</li>
-</ul>
-<h3>Temporary Anchor Shortcuts</h3>
-<ul>
-<li><strong>Ctrl / Command + Shift + A</strong>: Prev</li>
-<li><strong>Ctrl / Command + Shift + S</strong>: Add</li>
-<li><strong>Ctrl / Command + Shift + D</strong>: Next</li>
+<li><strong>Option / Alt + 1...+9, 0</strong>: Locate Anchors 1~10 (0 for slot 10)</li>
+<li><strong>Option / Alt + S</strong>: Record Current Viewport (Permanent & Temp)</li>
+<li><strong>Option / Alt + C</strong>: Enter / Exit Temp Workspace</li>
 </ul>
 <h3>Touchpad Operations</h3>
 <ul>
@@ -4126,8 +4114,24 @@ const i18n = {
         'en': 'Show cursor placement rules'
     },
     canvasHelpAnchorShortcutsTitle: {
-        'zh_CN': '手动锚点快捷键',
-        'en': 'Manual Anchor Shortcuts'
+        'zh_CN': '锚点快捷键',
+        'en': 'Anchor Shortcuts'
+    },
+    canvasHelpAnchorShortcutsLocate: {
+        'zh_CN': '定位锚点 1~10',
+        'en': 'Locate Anchors 1-10'
+    },
+    canvasHelpAnchorLocateSuffix: {
+        'zh_CN': ' + 1...+9、0',
+        'en': ' + 1...+9, 0'
+    },
+    canvasHelpAnchorShortcutsRecord: {
+        'zh_CN': '记录当前视口（永久/临时共同）',
+        'en': 'Record Viewport (Permanent/Temp)'
+    },
+    canvasHelpAnchorShortcutsTempWorkspace: {
+        'zh_CN': '进入/退出临时工作区',
+        'en': 'Toggle Temporary Workspace'
     },
     canvasHelpAnchorShortcutsPrev: {
         'zh_CN': '上一个',
@@ -4142,8 +4146,8 @@ const i18n = {
         'en': 'Next'
     },
     canvasHelpTempAnchorShortcutsTitle: {
-        'zh_CN': '临时锚点快捷键',
-        'en': 'Temporary Anchor Shortcuts'
+        'zh_CN': '临时工作区快捷键',
+        'en': 'Temporary Workspace Shortcuts'
     },
     canvasHelpTempAnchorShortcutsPrev: {
         'zh_CN': '上一个',

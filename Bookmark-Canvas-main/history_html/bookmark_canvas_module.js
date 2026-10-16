@@ -2560,8 +2560,9 @@ const DEFAULT_CANVAS_OTHER_SETTINGS = {
     },
     autoRecordAnchor: false, // 自动记录视口锚点
     autoRecordAnchorInterval: 15, // 停留多少秒记录一次锚点
-    autoRecordAnchorLimit: 5, // 自动记录的最大上限
-    manualAnchorLimit: 5 // 手动锚点最大数量
+    autoRecordAnchorLimit: 10, // 自动记录的最大上限
+    manualAnchorLimit: 10, // 手动锚点最大数量
+    tempAnchorLimit: 10 // 临时锚点最大数量
 };
 
 const DEFAULT_PERF_BASELINE = {
@@ -2959,7 +2960,8 @@ function normalizeCanvasOtherSettings(input) {
     if (typeof input.autoRecordAnchor === 'boolean') out.autoRecordAnchor = input.autoRecordAnchor;
     out.autoRecordAnchorInterval = __clampNumber(input.autoRecordAnchorInterval, 1, 60, out.autoRecordAnchorInterval);
     out.autoRecordAnchorLimit = __clampNumber(input.autoRecordAnchorLimit, 1, 50, out.autoRecordAnchorLimit);
-    out.manualAnchorLimit = __clampNumber(input.manualAnchorLimit, 1, 50, out.manualAnchorLimit);
+    out.manualAnchorLimit = 10;
+    out.tempAnchorLimit = 10;
     const legacyMenuSync = (typeof input.menuColorSync === 'boolean') ? input.menuColorSync : null;
     if (typeof input.menuDefaultColorSync === 'boolean') {
         out.menuDefaultColorSync = input.menuDefaultColorSync;
@@ -4049,19 +4051,11 @@ _Tip: This card can be freely edited or deleted_
 
 ---
 
-### 手动锚点快捷键
+### 锚点快捷键
 
-- **\`Ctrl / Command + Shift + J\`**：上一个
-- **\`Ctrl / Command + Shift + K\`**：添加
-- **\`Ctrl / Command + Shift + L\`**：下一个
-
----
-
-### 临时锚点快捷键
-
-- **\`Ctrl / Command + Shift + A\`**：上一个
-- **\`Ctrl / Command + Shift + S\`**：添加
-- **\`Ctrl / Command + Shift + D\`**：下一个
+- **\`Option / Alt + 1...+9、0\`**：定位锚点 1~10（0 代表第 10 个锚点）
+- **\`Option / Alt + S\`**：记录当前视口为锚点（永久/临时通用）
+- **\`Option / Alt + C\`**：进入/退出临时工作区
 
 ---
 
@@ -4119,19 +4113,11 @@ _快捷键可在左上角「管理」中自定义_
 
 ---
 
-### Manual Anchor Shortcuts
+### Anchor Shortcuts
 
-- **\`Ctrl / Command + Shift + J\`**: Prev
-- **\`Ctrl / Command + Shift + K\`**: Add
-- **\`Ctrl / Command + Shift + L\`**: Next
-
----
-
-### Temporary Anchor Shortcuts
-
-- **\`Ctrl / Command + Shift + A\`**: Prev
-- **\`Ctrl / Command + Shift + S\`**: Add
-- **\`Ctrl / Command + Shift + D\`**: Next
+- **\`Option / Alt + 1...+9, 0\`**: Locate Anchors 1~10 (0 for slot 10)
+- **\`Option / Alt + S\`**: Record Current Viewport (Permanent & Temp)
+- **\`Option / Alt + C\`**: Enter / Exit Temp Workspace
 
 ---
 
@@ -4291,19 +4277,11 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 </ul>
 
 <hr>
-<h3>手动锚点快捷键</h3>
+<h3>锚点快捷键</h3>
 <ul>
-<li><strong><code>Ctrl / Command + Shift + J</code></strong>：上一个</li>
-<li><strong><code>Ctrl / Command + Shift + K</code></strong>：添加</li>
-<li><strong><code>Ctrl / Command + Shift + L</code></strong>：下一个</li>
-</ul>
-
-<hr>
-<h3>临时锚点快捷键</h3>
-<ul>
-<li><strong><code>Ctrl / Command + Shift + A</code></strong>：上一个</li>
-<li><strong><code>Ctrl / Command + Shift + S</code></strong>：添加</li>
-<li><strong><code>Ctrl / Command + Shift + D</code></strong>：下一个</li>
+<li><strong><code>Option / Alt + 1...+9、0</code></strong>：定位锚点 1~10（0 代表第 10 个锚点）</li>
+<li><strong><code>Option / Alt + S</code></strong>：记录当前视口为锚点（永久/临时通用）</li>
+<li><strong><code>Option / Alt + C</code></strong>：进入/退出临时工作区</li>
 </ul>
 
 <hr>
@@ -4360,19 +4338,11 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 </ul>
 
 <hr>
-<h3>Manual Anchor Shortcuts</h3>
+<h3>Anchor Shortcuts</h3>
 <ul>
-<li><strong><code>Ctrl / Command + Shift + J</code></strong>: Prev</li>
-<li><strong><code>Ctrl / Command + Shift + K</code></strong>: Add</li>
-<li><strong><code>Ctrl / Command + Shift + L</code></strong>: Next</li>
-</ul>
-
-<hr>
-<h3>Temporary Anchor Shortcuts</h3>
-<ul>
-<li><strong><code>Ctrl / Command + Shift + A</code></strong>: Prev</li>
-<li><strong><code>Ctrl / Command + Shift + S</code></strong>: Add</li>
-<li><strong><code>Ctrl / Command + Shift + D</code></strong>: Next</li>
+<li><strong><code>Option / Alt + 1...+9, 0</code></strong>: Locate Anchors 1~10 (0 for slot 10)</li>
+<li><strong><code>Option / Alt + S</code></strong>: Record Current Viewport (Permanent & Temp)</li>
+<li><strong><code>Option / Alt + C</code></strong>: Enter / Exit Temp Workspace</li>
 </ul>
 
 <hr>
@@ -4982,6 +4952,8 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
     let customIcon = '';
     let spin = false;
     let forceFresh = false;
+    let badge = null;
+    let isTemp = false;
 
     if (typeof typeOrOptions === 'string') {
         type = typeOrOptions;
@@ -4995,9 +4967,24 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
         if (typeOrOptions.icon) customIcon = typeOrOptions.icon;
         if (typeOrOptions.spin) spin = true;
         if (typeOrOptions.forceFresh) forceFresh = true;
+        if (typeOrOptions.badge !== undefined && typeOrOptions.badge !== null) badge = String(typeOrOptions.badge);
+        if (typeOrOptions.isTemp) isTemp = true;
     }
 
     const safeMessage = String(message ?? '');
+    // 智能提取锚点序号（如果未显式传 badge，智能匹配消息文本中是否带有槽位序号）
+    if (!badge) {
+        const slotMatch = safeMessage.match(/(?:槽位|Slot|锚点)\s*([1-9]|10)\b/i);
+        if (slotMatch) {
+            const rawNum = parseInt(slotMatch[1], 10);
+            if (!isNaN(rawNum) && rawNum >= 1 && rawNum <= 10) {
+                badge = (rawNum === 10) ? '0' : String(rawNum);
+            }
+        }
+        if (safeMessage.includes('临时') || safeMessage.toLowerCase().includes('temp')) {
+            isTemp = true;
+        }
+    }
     const isMultiline = safeMessage.includes('\n') || safeMessage.length > 60;
 
     const targetParent = (typeof getOverlayContainer === 'function')
@@ -5012,7 +4999,7 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
     // 如果显式要求 forceFresh，则跳过复用，直接销毁旧节点重建，确保入场动画与视觉反馈完整触发
     const existing = targetParent.querySelector('.canvas-toast, .history-toast, .app-toast');
     if (!forceFresh && existing && existing._toastState && existing._toastState.position === position && !existing._toastState.isClosing) {
-        return existing._toastState.update(safeMessage, type, duration, customIcon, spin);
+        return existing._toastState.update(safeMessage, type, duration, customIcon, spin, badge, isTemp);
     }
 
     // 清理可能残留的失效节点
@@ -5023,10 +5010,21 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
     const toast = document.createElement('div');
     toast.className = `canvas-toast history-toast app-toast${position !== 'top-center' ? ' pos-' + position : ''}`;
 
+    // 1. 说明图标（最左边展示）
     const iconEl = document.createElement('i');
     iconEl.className = 'toast-icon';
     toast.appendChild(iconEl);
 
+    // 2. 锚点序号角标（位于说明图标右侧、提示文字左侧）
+    let badgeEl = null;
+    if (badge !== null && badge !== undefined && badge !== '') {
+        badgeEl = document.createElement('span');
+        badgeEl.className = `toast-slot-badge${isTemp ? ' in-temp-mode' : ''}`;
+        badgeEl.textContent = String(badge);
+        toast.appendChild(badgeEl);
+    }
+
+    // 3. 提示文字（在右边展示）
     const messageEl = document.createElement('span');
     messageEl.className = `toast-message${isMultiline ? ' multiline' : ''}`;
     messageEl.textContent = safeMessage;
@@ -5097,7 +5095,7 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
     const state = {
         position,
         get isClosing() { return isClosing; },
-        update: (newMsg, newType = type, newDuration = duration, newIcon = customIcon, newSpin = spin) => {
+        update: (newMsg, newType = type, newDuration = duration, newIcon = customIcon, newSpin = spin, newBadge = badge, newIsTemp = isTemp) => {
             if (isClosing) return handle;
             const isWarnOrError = newType === 'warning' || newType === 'error';
             messageEl.textContent = String(newMsg ?? '');
@@ -5105,6 +5103,33 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
             messageEl.classList.toggle('multiline', newMultiline);
             applyType(newType);
             applyIcon(newType, newIcon, newSpin);
+
+            // 更新或创建 badge
+            if (!newBadge) {
+                const slotMatch = messageEl.textContent.match(/(?:槽位|Slot|锚点)\s*([1-9]|10)\b/i);
+                if (slotMatch) {
+                    const rawNum = parseInt(slotMatch[1], 10);
+                    if (!isNaN(rawNum) && rawNum >= 1 && rawNum <= 10) {
+                        newBadge = (rawNum === 10) ? '0' : String(rawNum);
+                    }
+                }
+                if (messageEl.textContent.includes('临时') || messageEl.textContent.toLowerCase().includes('temp')) {
+                    newIsTemp = true;
+                }
+            }
+
+            if (newBadge !== null && newBadge !== undefined && newBadge !== '') {
+                if (!badgeEl) {
+                    badgeEl = document.createElement('span');
+                    toast.insertBefore(badgeEl, messageEl);
+                }
+                badgeEl.className = `toast-slot-badge${newIsTemp ? ' in-temp-mode' : ''}`;
+                badgeEl.textContent = String(newBadge);
+            } else if (badgeEl) {
+                badgeEl.remove();
+                badgeEl = null;
+            }
+
             // 微缩放/晃动反馈：警告与报错使用明显的 toast-shake 左右晃动，信息提示使用 toast-pulse
             toast.classList.remove('toast-pulse', 'toast-shake');
             void toast.offsetWidth;
@@ -33616,10 +33641,9 @@ function openCanvasShortcutsModal(options = {}) {
 
     if (scrollToTarget) {
         window.requestAnimationFrame(() => {
-            const isTemp = scrollToTarget === 'temp';
-            const targetEl = isTemp
-                ? modal.querySelector('[data-shortcut-display="tempAnchorPrev"]')
-                : modal.querySelector('[data-shortcut-display="manualAnchorPrev"]');
+            const targetEl = modal.querySelector(`[data-shortcut-display="${scrollToTarget}"]`)
+                || modal.querySelector('[data-shortcut-display="anchorRecord"]')
+                || modal.querySelector('[data-shortcut-display="anchorTempWorkspace"]');
             if (targetEl) {
                 const section = targetEl.closest('.canvas-help-section') || targetEl;
                 section.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -33685,24 +33709,62 @@ function isMacEnvironment() {
     return typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
 }
 
-function getDefaultAnchorCombo(code) {
-    const isMac = isMacEnvironment();
+function getDefaultAnchorLocateModifier() {
     return {
-        meta: isMac,
-        ctrl: !isMac,
-        alt: false,
-        shift: true,
+        meta: false,
+        ctrl: false,
+        alt: true,
+        shift: false
+    };
+}
+
+function normalizeAnchorLocateShortcut(val) {
+    const defaultModifier = getDefaultAnchorLocateModifier();
+    if (!val || typeof val !== 'object') return defaultModifier;
+    const hasAny = Boolean(val.meta || val.ctrl || val.alt || val.shift);
+    if (!hasAny) return defaultModifier;
+    return {
+        meta: Boolean(val.meta),
+        ctrl: Boolean(val.ctrl),
+        alt: Boolean(val.alt),
+        shift: Boolean(val.shift)
+    };
+}
+
+function formatAnchorLocateModifierDisplay(combo, lang) {
+    if (!combo || typeof combo !== 'object') return isMacEnvironment() ? 'Option' : 'Alt';
+    const isMac = isMacEnvironment();
+    const parts = [];
+    if (isMac) {
+        if (combo.meta) parts.push('Cmd');
+        if (combo.ctrl) parts.push('Control');
+        if (combo.alt) parts.push('Option');
+        if (combo.shift) parts.push('Shift');
+    } else {
+        if (combo.ctrl) parts.push('Ctrl');
+        if (combo.alt) parts.push('Alt');
+        if (combo.shift) parts.push('Shift');
+        if (combo.meta) parts.push('Win');
+    }
+    return parts.length ? parts.join(' + ') : (isMac ? 'Option' : 'Alt');
+}
+
+function getDefaultAnchorCombo(code) {
+    return {
+        meta: false,
+        ctrl: false,
+        alt: true,
+        shift: false,
         code: code
     };
 }
 
 function normalizeAnchorShortcut(val, defaultKey) {
-    const isMac = isMacEnvironment();
     const defaultCombo = {
-        meta: isMac,
-        ctrl: !isMac,
-        alt: false,
-        shift: true,
+        meta: false,
+        ctrl: false,
+        alt: true,
+        shift: false,
         code: defaultKey
     };
 
@@ -33711,10 +33773,10 @@ function normalizeAnchorShortcut(val, defaultKey) {
     // 兼容历史纯字符串（如 'KeyJ'）
     if (typeof val === 'string') {
         return {
-            meta: isMac,
-            ctrl: !isMac,
-            alt: false,
-            shift: true,
+            meta: false,
+            ctrl: false,
+            alt: true,
+            shift: false,
             code: val
         };
     }
@@ -33801,32 +33863,22 @@ const DEFAULT_SHORTCUTS = {
     spaceKey: 'Space',        // Space, or any other key
     ctrl: 'Control',
     space: 'Space',
-    manualAnchorPrev: getDefaultAnchorCombo('KeyJ'), // 手动锚点 - 上一个
-    manualAnchorAdd: getDefaultAnchorCombo('KeyK'),  // 手动锚点 - 添加
-    manualAnchorNext: getDefaultAnchorCombo('KeyL'), // 手动锚点 - 下一个
-    tempAnchorPrev: getDefaultAnchorCombo('KeyA'),   // 临时锚点 - 上一个
-    tempAnchorAdd: getDefaultAnchorCombo('KeyS'),    // 临时锚点 - 添加
-    tempAnchorNext: getDefaultAnchorCombo('KeyD')    // 临时锚点 - 下一个
+    anchorLocate: getDefaultAnchorLocateModifier(),
+    anchorRecord: getDefaultAnchorCombo('KeyS'),       // 记录锚点（永久/临时共同按键）
+    anchorTempWorkspace: getDefaultAnchorCombo('KeyC') // 临时工作区（进入/退出）
 };
 
 let canvasShortcuts = { ...DEFAULT_SHORTCUTS };
 let isRecordingShortcut = false;
 let recordingTarget = null; // 'ctrl', 'space', 或锚点目标 key
 let shortcutRecordingToastHandle = null;
+let lastRecordedModifiers = null;
 
 function loadCanvasShortcuts() {
     try {
         const saved = localStorage.getItem(CANVAS_SHORTCUTS_KEY);
         if (saved) {
             const parsed = JSON.parse(saved);
-            // 如果之前保存的是旧默认值 Alt，自动升级到新的默认值 Control，避免旧缓存导致冲突
-            if (parsed.ctrlKey === 'Alt' || parsed.ctrl === 'Alt') {
-                parsed.ctrlKey = 'Control';
-                parsed.ctrl = 'Control';
-                try {
-                    localStorage.setItem(CANVAS_SHORTCUTS_KEY, JSON.stringify(parsed));
-                } catch (_) {}
-            }
             const ctrlVal = parsed.ctrlKey || parsed.ctrl || DEFAULT_SHORTCUTS.ctrlKey;
             const spaceVal = parsed.spaceKey || parsed.space || DEFAULT_SHORTCUTS.spaceKey;
             canvasShortcuts = {
@@ -33834,12 +33886,9 @@ function loadCanvasShortcuts() {
                 ctrl: ctrlVal,
                 spaceKey: spaceVal,
                 space: spaceVal,
-                manualAnchorPrev: normalizeAnchorShortcut(parsed.manualAnchorPrev, 'KeyJ'),
-                manualAnchorAdd: normalizeAnchorShortcut(parsed.manualAnchorAdd, 'KeyK'),
-                manualAnchorNext: normalizeAnchorShortcut(parsed.manualAnchorNext, 'KeyL'),
-                tempAnchorPrev: normalizeAnchorShortcut(parsed.tempAnchorPrev, 'KeyA'),
-                tempAnchorAdd: normalizeAnchorShortcut(parsed.tempAnchorAdd, 'KeyS'),
-                tempAnchorNext: normalizeAnchorShortcut(parsed.tempAnchorNext, 'KeyD')
+                anchorLocate: normalizeAnchorLocateShortcut(parsed.anchorLocate),
+                anchorRecord: normalizeAnchorShortcut(parsed.anchorRecord, 'KeyS'),
+                anchorTempWorkspace: normalizeAnchorShortcut(parsed.anchorTempWorkspace, 'KeyC')
             };
         } else {
             canvasShortcuts = { ...DEFAULT_SHORTCUTS };
@@ -33894,14 +33943,10 @@ function getKeyDisplayName(keyCode, lang) {
 function getAnchorShortcutDisplayName(targetKey, lang) {
     const raw = canvasShortcuts[targetKey] || DEFAULT_SHORTCUTS[targetKey];
     const defaultKeys = {
-        manualAnchorPrev: 'KeyJ',
-        manualAnchorAdd: 'KeyK',
-        manualAnchorNext: 'KeyL',
-        tempAnchorPrev: 'KeyA',
-        tempAnchorAdd: 'KeyS',
-        tempAnchorNext: 'KeyD'
+        anchorRecord: 'KeyS',
+        anchorTempWorkspace: 'KeyC'
     };
-    const combo = normalizeAnchorShortcut(raw, defaultKeys[targetKey] || 'KeyJ');
+    const combo = normalizeAnchorShortcut(raw, defaultKeys[targetKey] || 'KeyS');
     return formatShortcutCombo(combo, lang);
 }
 
@@ -33910,12 +33955,9 @@ function getShortcutTargetLabel(target, lang) {
     const labels = {
         ctrl: isZh ? 'Ctrl 键' : 'Ctrl Key',
         space: isZh ? '拖动画布' : 'Pan Canvas',
-        manualAnchorPrev: isZh ? '手动锚点 - 上一个' : 'Manual Anchor - Prev',
-        manualAnchorAdd: isZh ? '手动锚点 - 添加' : 'Manual Anchor - Add',
-        manualAnchorNext: isZh ? '手动锚点 - 下一个' : 'Manual Anchor - Next',
-        tempAnchorPrev: isZh ? '临时锚点 - 上一个' : 'Temp Anchor - Prev',
-        tempAnchorAdd: isZh ? '临时锚点 - 添加' : 'Temp Anchor - Add',
-        tempAnchorNext: isZh ? '临时锚点 - 下一个' : 'Temp Anchor - Next'
+        anchorLocate: isZh ? '定位锚点' : 'Locate Anchors',
+        anchorRecord: isZh ? '记录锚点（永久/临时）' : 'Record Anchor (Permanent/Temp)',
+        anchorTempWorkspace: isZh ? '进入/退出临时工作区' : 'Toggle Temp Workspace'
     };
     return labels[target] || target;
 }
@@ -33945,10 +33987,21 @@ function updateShortcutDisplays() {
         el.textContent = `${spaceName}${spaceTitleSuffix}`;
     });
 
-    // 更新手动锚点与临时锚点快捷键显示（整体胶囊显示完整组合键，无断裂符号）
+    // 更新定位锚点修饰键显示
+    const anchorLocateModText = formatAnchorLocateModifierDisplay(canvasShortcuts.anchorLocate, lang);
+    document.querySelectorAll('[data-shortcut-display="anchorLocate"]').forEach(el => {
+        el.textContent = anchorLocateModText;
+    });
+
+    // 更新定位锚点快捷键后缀文本
+    const locateSuffixText = (lang === 'en') ? ' + 1...+9, 0' : ' + 1...+9、0';
+    document.querySelectorAll('[data-i18n-key="canvasHelpAnchorLocateSuffix"]').forEach(el => {
+        el.textContent = locateSuffixText;
+    });
+
+    // 更新锚点快捷键显示
     const anchorKeys = [
-        'manualAnchorPrev', 'manualAnchorAdd', 'manualAnchorNext',
-        'tempAnchorPrev', 'tempAnchorAdd', 'tempAnchorNext'
+        'anchorRecord', 'anchorTempWorkspace'
     ];
     anchorKeys.forEach(targetKey => {
         const comboText = getAnchorShortcutDisplayName(targetKey, lang);
@@ -33989,11 +34042,23 @@ function startShortcutRecording(target) {
 
     const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
     const targetName = getShortcutTargetLabel(target, lang);
-    const isAnchorTarget = target.startsWith('manualAnchor') || target.startsWith('tempAnchor');
+    const isAnchorTarget = target && target.startsWith('anchor');
+    const isMac = isMacEnvironment();
 
-    const promptMsg = lang === 'zh_CN'
-        ? `正在修改【${targetName}】快捷键，请按下新按键...（按 Esc 取消）`
-        : `Recording [${targetName}] shortcut, press a new key... (Esc to cancel)`;
+    let promptMsg = '';
+    if (target === 'anchorLocate') {
+        promptMsg = lang === 'zh_CN'
+            ? `正在修改【${targetName}】快捷键，请按下修饰键（如 ${isMac ? 'Option' : 'Alt'}、Ctrl、Cmd，可配合 + 1...+9、0，按 Esc 取消）`
+            : `Recording [${targetName}], press modifier key (e.g. ${isMac ? 'Option' : 'Alt'}, Ctrl, Cmd, can combine with + 1...+9, 0, Esc to cancel)`;
+    } else if (isAnchorTarget) {
+        promptMsg = lang === 'zh_CN'
+            ? `正在修改【${targetName}】快捷键，请同时按下修饰键与字母/标点（如 ${isMac ? 'Option+S' : 'Alt+S'}，按 Esc 取消）`
+            : `Recording [${targetName}], press modifier + key (e.g. ${isMac ? 'Option+S' : 'Alt+S'}, Esc to cancel)`;
+    } else {
+        promptMsg = lang === 'zh_CN'
+            ? `正在修改【${targetName}】快捷键，请按下新按键...（按 Esc 取消）`
+            : `Recording [${targetName}] shortcut, press a new key... (Esc to cancel)`;
+    }
 
     if (typeof showCanvasToast === 'function') {
         shortcutRecordingToastHandle = showCanvasToast(promptMsg, {
@@ -34032,6 +34097,7 @@ function stopShortcutRecording(newKey) {
         try { shortcutRecordingToastHandle.close(); } catch (_) {}
     }
     shortcutRecordingToastHandle = null;
+    lastRecordedModifiers = null;
 
     // 清空全部高亮与激活样式
     document.querySelectorAll('[data-shortcut-display]').forEach(el => {
@@ -34062,7 +34128,9 @@ function stopShortcutRecording(newKey) {
 
         const targetName = getShortcutTargetLabel(currentTarget, lang);
         let displayKeyStr = '';
-        if (currentTarget.startsWith('manualAnchor') || currentTarget.startsWith('tempAnchor')) {
+        if (currentTarget === 'anchorLocate') {
+            displayKeyStr = `${formatAnchorLocateModifierDisplay(newKey, lang)}${lang === 'en' ? ' + 1...+9, 0' : ' + 1...+9、0'}`;
+        } else if (currentTarget && currentTarget.startsWith('anchor')) {
             displayKeyStr = formatShortcutCombo(newKey, lang);
         } else {
             displayKeyStr = getKeyDisplayName(newKey, lang);
@@ -34293,21 +34361,64 @@ function setupCanvasHelpModal() {
         e.stopImmediatePropagation();
 
         const modifierKeys = ['Control', 'Alt', 'Shift', 'Meta'];
-        const isAnchorTarget = recordingTarget && (recordingTarget.startsWith('manualAnchor') || recordingTarget.startsWith('tempAnchor'));
+        const isAnchorTarget = recordingTarget && recordingTarget.startsWith('anchor');
+
+        if (recordingTarget === 'anchorLocate') {
+            const hasModifier = Boolean(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey);
+            const isModifierKey = modifierKeys.includes(e.key);
+
+            if (isModifierKey) {
+                lastRecordedModifiers = {
+                    meta: Boolean(e.metaKey || e.key === 'Meta'),
+                    ctrl: Boolean(e.ctrlKey || e.key === 'Control'),
+                    alt: Boolean(e.altKey || e.key === 'Alt'),
+                    shift: Boolean(e.shiftKey || e.key === 'Shift')
+                };
+                return;
+            }
+
+            if (hasModifier) {
+                const capturedMods = {
+                    meta: Boolean(e.metaKey),
+                    ctrl: Boolean(e.ctrlKey),
+                    alt: Boolean(e.altKey),
+                    shift: Boolean(e.shiftKey)
+                };
+                lastRecordedModifiers = null;
+                stopShortcutRecording(capturedMods);
+                return;
+            }
+
+            const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
+            const isMac = isMacEnvironment();
+            const warnMsg = lang === 'zh_CN'
+                ? `定位锚点快捷键需要修饰键（如 ${isMac ? 'Option' : 'Alt'}、Ctrl、Cmd 等，按 Esc 取消）`
+                : `Locate anchor shortcut requires a modifier key (e.g. ${isMac ? 'Option' : 'Alt'}, Ctrl, Cmd, Esc to cancel)`;
+            if (typeof showCanvasToast === 'function') {
+                showCanvasToast(warnMsg, {
+                    type: 'warning',
+                    icon: 'fas fa-exclamation-triangle',
+                    duration: 2500,
+                    forceFresh: true
+                });
+            }
+            return;
+        }
 
         if (isAnchorTarget) {
-            // 如果用户单按修饰键（如仅按下了 Cmd 或 Ctrl），不单独保存，等待用户配合按下具体字符/数字键
+            // 如果用户单按修饰键（如仅按下了 Cmd 或 Ctrl 或 Alt/Option），不单独保存，等待用户配合按下具体字符/数字键
             if (modifierKeys.includes(e.key)) {
                 return;
             }
 
-            // 锚点快捷键必须配合至少一个修饰键（支持两个键如 Cmd+1，或三个键如 Cmd+Shift+J 等）
+            // 锚点快捷键必须配合至少一个修饰键（支持两个键如 Option+S 或 Cmd+1，或三个键如 Cmd+Shift+J 等）
             const hasModifier = Boolean(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey);
             const lang = typeof window !== 'undefined' && window.currentLang ? window.currentLang : 'zh_CN';
+            const isMac = isMacEnvironment();
             if (!hasModifier) {
                 const warnMsg = lang === 'zh_CN'
-                    ? '锚点快捷键需要配合修饰键（如 Cmd/Ctrl/Alt/Shift + 按键），请同时按住修饰键'
-                    : 'Anchor shortcut requires a modifier key (e.g. Cmd/Ctrl/Alt/Shift + Key)';
+                    ? `锚点快捷键需要配合修饰键（如 ${isMac ? 'Option' : 'Alt'} / Cmd / Ctrl + 按键），请同时按住修饰键`
+                    : `Anchor shortcut requires a modifier key (e.g. ${isMac ? 'Option' : 'Alt'} / Cmd / Ctrl + Key)`;
                 if (typeof showCanvasToast === 'function') {
                     showCanvasToast(warnMsg, {
                         type: 'warning',
@@ -34344,18 +34455,28 @@ function setupCanvasHelpModal() {
                 key: e.key
             };
 
+            // 数字键 1~0 保留给快速定位锚点 1~10，不可占用
+            if (/^Digit[0-9]$/.test(e.code) || /^Numpad[0-9]$/.test(e.code)) {
+                const locateModStr = formatAnchorLocateModifierDisplay(canvasShortcuts.anchorLocate, lang);
+                const warnMsg = lang === 'zh_CN'
+                    ? `数字键 1~0 已保留给快速定位锚点 1~10（${locateModStr} + 1...+9、0），请选择其他字母或按键（按 Esc 取消）`
+                    : `Digits 1-0 are reserved for locating anchors 1-10 (${locateModStr} + 1...+9, 0) (Esc to cancel)`;
+                if (typeof showCanvasToast === 'function') {
+                    showCanvasToast(warnMsg, {
+                        type: 'warning',
+                        icon: 'fas fa-exclamation-triangle',
+                        duration: 2500,
+                        forceFresh: true
+                    });
+                }
+                return;
+            }
+
             // 锚点类快捷键之间的互斥冲突检查
-            const anchorKeys = [
-                'manualAnchorPrev', 'manualAnchorAdd', 'manualAnchorNext',
-                'tempAnchorPrev', 'tempAnchorAdd', 'tempAnchorNext'
-            ];
+            const anchorKeys = ['anchorRecord', 'anchorTempWorkspace'];
             const defaultKeys = {
-                manualAnchorPrev: 'KeyJ',
-                manualAnchorAdd: 'KeyK',
-                manualAnchorNext: 'KeyL',
-                tempAnchorPrev: 'KeyA',
-                tempAnchorAdd: 'KeyS',
-                tempAnchorNext: 'KeyD'
+                anchorRecord: 'KeyS',
+                anchorTempWorkspace: 'KeyC'
             };
             let conflictTarget = null;
             for (const ak of anchorKeys) {
@@ -34434,6 +34555,19 @@ function setupCanvasHelpModal() {
                     duration: 2500,
                     forceFresh: true
                 });
+            }
+        }
+    }, true);
+
+    // 监听键盘松开事件（处理仅按下并松开修饰键设置 anchorLocate 的情况）
+    document.addEventListener('keyup', (e) => {
+        if (!isRecordingShortcut || recordingTarget !== 'anchorLocate') return;
+        if (lastRecordedModifiers) {
+            const hasAny = Boolean(lastRecordedModifiers.meta || lastRecordedModifiers.ctrl || lastRecordedModifiers.alt || lastRecordedModifiers.shift);
+            if (hasAny) {
+                const mods = { ...lastRecordedModifiers };
+                lastRecordedModifiers = null;
+                stopShortcutRecording(mods);
             }
         }
     }, true);

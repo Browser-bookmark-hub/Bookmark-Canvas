@@ -4283,7 +4283,7 @@
         }
       }
     } catch (_) {}
-    return { manualAnchorLimit: 5, tempAnchorLimit: 5 };
+    return { manualAnchorLimit: 10, tempAnchorLimit: 10 };
   }
 
   function saveCanvasOtherSettingsInline(settings) {
@@ -4297,17 +4297,11 @@
   }
 
   function getManualAnchorLimit() {
-    const settings = getCanvasOtherSettingsSafe();
-    let val = parseInt(settings.manualAnchorLimit, 10);
-    if (isNaN(val) || val < 1) val = 5;
-    return val;
+    return 10;
   }
 
   function getTempAnchorLimit() {
-    const settings = getCanvasOtherSettingsSafe();
-    let val = parseInt(settings.tempAnchorLimit, 10);
-    if (isNaN(val) || val < 1) val = 5;
-    return val;
+    return 10;
   }
 
   function isCanvasNodeFullscreenActive() {
@@ -4464,7 +4458,8 @@
       saveRememberedSlotIndex(index);
       saveAnchorSlots(slots);
       renderHistoryPanel();
-      showSidebarToast(isEn ? 'Viewport saved to slot' : '视口已保存至槽位', 'success');
+      const badgeNum = (index < 10) ? String((index + 1) % 10) : String(index + 1);
+      showSidebarToast(isEn ? 'Viewport saved to slot' : '视口已保存至槽位', { type: 'success', badge: badgeNum, isTemp: false });
     } 
     else if (action === 'locate') {
       const slot = slots[index];
@@ -4474,8 +4469,9 @@
         setTimeout(renderHistoryPanel, 50);
       });
       const slotNum = index + 1;
+      const badgeNum = (index < 10) ? String((index + 1) % 10) : String(slotNum);
       const displayName = slot.name || (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
-      showSidebarToast(isEn ? `Anchor: ${displayName}` : `已切换至锚点：${displayName}`, 'info');
+      showSidebarToast(isEn ? `Anchor: ${displayName}` : `已切换至锚点：${displayName}`, { type: 'info', badge: badgeNum, isTemp: false });
     }
     else if (action === 'rename') {
       const slot = slots[index];
@@ -4590,22 +4586,19 @@
   }
 
   function getDynamicStep() {
-    const panel = document.getElementById('canvasHistoryPanel');
-    const height = panel ? panel.clientHeight : 0;
-    if (height <= 0) return 5;
-    return Math.max(5, Math.floor(height / 100));
+    return 10;
   }
 
-  let tempAnchorSettingsOpen = false;
-  let manualAnchorSettingsOpen = false;
-  let tempAnchorVisibleLimit = 5;
+  let anchorSettingsOpen = false;
+  let isTempWorkspaceMode = false; // 临时工作区模式开关
+  let tempAnchorVisibleLimit = 10;
 
-  let manualAnchorVisibleLimit = 5;
+  let manualAnchorVisibleLimit = 10;
   try {
     const saved = localStorage.getItem('canvas-manual-anchor-visible-limit');
     if (saved) {
       const parsed = parseInt(saved, 10);
-      if (!isNaN(parsed) && parsed >= 5) manualAnchorVisibleLimit = parsed;
+      if (!isNaN(parsed) && parsed >= 10) manualAnchorVisibleLimit = parsed;
     }
   } catch (_) {}
   
@@ -4709,19 +4702,15 @@
     });
 
     const slotNum = targetIndex + 1;
+    const badgeNum = (targetIndex < 10) ? String((targetIndex + 1) % 10) : String(slotNum);
     const displayName = targetSlot.name || (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
-    showSidebarToast(isEn ? `Anchor: ${displayName}` : `已切换至锚点：${displayName}`, 'info');
+    showSidebarToast(isEn ? `Anchor: ${displayName}` : `已切换至锚点：${displayName}`, { type: 'info', badge: badgeNum, isTemp: false });
 
     return true;
   }
 
   function navigateTempAnchorSlot(direction) {
     const isEn = isEnglish();
-
-    if (!isTempAnchorEnabled) {
-      showSidebarToast(isEn ? 'Temporary anchors disabled. Please enable in sidebar.' : '临时锚点未开启，请先在侧边栏开启', 'warning');
-      return false;
-    }
 
     const slots = loadTempAnchorSlots();
     const validIndices = [];
@@ -4767,8 +4756,9 @@
     });
 
     const slotNum = targetIndex + 1;
+    const badgeNum = (targetIndex < 10) ? String((targetIndex + 1) % 10) : String(slotNum);
     const displayName = targetSlot.name || (isEn ? `Temp Slot ${slotNum}` : `临时槽位 ${slotNum}`);
-    showSidebarToast(isEn ? `Temp Anchor: ${displayName}` : `已切换至临时锚点：${displayName}`, 'info');
+    showSidebarToast(isEn ? `Temp Anchor: ${displayName}` : `已切换至临时锚点：${displayName}`, { type: 'info', badge: badgeNum, isTemp: true });
 
     return true;
   }
@@ -4776,12 +4766,31 @@
   function showSidebarToast(msg, typeOrOptions = 'info') {
     let type = 'info';
     let forceFresh = false;
+    let badge = null;
+    let isTemp = false;
     if (typeof typeOrOptions === 'string') {
       type = typeOrOptions;
     } else if (typeOrOptions && typeof typeOrOptions === 'object') {
       if (typeOrOptions.type) type = typeOrOptions.type;
       if (typeOrOptions.forceFresh) forceFresh = true;
+      if (typeOrOptions.badge !== undefined && typeOrOptions.badge !== null) badge = String(typeOrOptions.badge);
+      if (typeOrOptions.isTemp) isTemp = true;
     }
+
+    const safeMsg = String(msg || '');
+    if (!badge) {
+      const slotMatch = safeMsg.match(/(?:槽位|Slot|锚点)\s*([1-9]|10)\b/i);
+      if (slotMatch) {
+        const rawNum = parseInt(slotMatch[1], 10);
+        if (!isNaN(rawNum) && rawNum >= 1 && rawNum <= 10) {
+          badge = (rawNum === 10) ? '0' : String(rawNum);
+        }
+      }
+      if (safeMsg.includes('临时') || safeMsg.toLowerCase().includes('temp')) {
+        isTemp = true;
+      }
+    }
+
     const isWarn = type === 'warning' || type === 'error';
     const isSuccess = type === 'success';
     const icon = isWarn ? 'fas fa-exclamation-triangle' : (isSuccess ? 'fas fa-check-circle' : 'fas fa-info-circle');
@@ -4789,7 +4798,9 @@
       type: type,
       icon: icon,
       duration: 2500,
-      forceFresh: forceFresh || isWarn || isSuccess
+      forceFresh: forceFresh || isWarn || isSuccess,
+      badge: badge,
+      isTemp: isTemp
     };
 
     // 针对警告类、成功类（如添加/保存锚点）或显式 forceFresh 提示，强制清理旧的残留 Toast 节点，确保每次点击都重新触发进场动效
@@ -4834,11 +4845,21 @@
       toast.className = `canvas-toast history-toast app-toast toast-type-${type}${isWarn ? ' toast-shake' : ''}`;
       const borderColor = isWarn ? '#f59e0b' : (isSuccess ? '#10b981' : '#3b82f6');
       toast.style.cssText = `position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:9999999;display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:500;color:#ffffff;background:#1e1e20;border:1.5px solid ${borderColor};box-shadow:0 4px 14px rgba(0,0,0,0.28);pointer-events:none;max-width:min(420px, calc(100vw - 24px));`;
+      
       const iconEl = document.createElement('i');
       iconEl.className = `toast-icon ${icon}`;
       toast.appendChild(iconEl);
+
+      if (badge !== null && badge !== undefined && badge !== '') {
+        const badgeEl = document.createElement('span');
+        badgeEl.className = `toast-slot-badge${isTemp ? ' in-temp-mode' : ''}`;
+        badgeEl.textContent = String(badge);
+        toast.appendChild(badgeEl);
+      }
+
       const textEl = document.createElement('span');
-      textEl.textContent = String(msg || '');
+      textEl.className = 'toast-message';
+      textEl.textContent = safeMsg;
       toast.appendChild(textEl);
       (document.body || document.documentElement).appendChild(toast);
       setTimeout(() => { if (toast.parentNode) toast.remove(); }, 2500);
@@ -4983,14 +5004,15 @@
       highlightSlotIndex = existing.index;
       saveRememberedSlotIndex(existing.index);
       renderHistoryPanel();
-      showSidebarToast(msg, { type: 'warning', forceFresh: true });
+      const existingBadge = (existing.index < 10) ? String((existing.index + 1) % 10) : String(existing.index + 1);
+      showSidebarToast(msg, { type: 'warning', forceFresh: true, badge: existingBadge, isTemp: false });
       return false;
     }
 
     if (validSlots.length >= manualAnchorLimit) {
       const msg = isEn 
-        ? 'Manual anchors are full. You can increase the maximum capacity in settings.' 
-        : '手动锚点已满。您可以在右侧设置中增加最大记录上限。';
+        ? 'Manual anchors are full (maximum 10).' 
+        : '手动锚点已满（上限 10 个）。';
       showSidebarToast(msg, { type: 'warning', forceFresh: true });
       return false;
     }
@@ -5024,17 +5046,13 @@
     saveAnchorSlots(newSlots);
     renderHistoryPanel();
 
-    showSidebarToast(isEn ? `Added manual anchor: ${defaultName}` : `已添加手动锚点：${defaultName}`, { type: 'success', forceFresh: true });
+    const badgeNum = (nextIndex < 10) ? String((nextIndex + 1) % 10) : String(nextIndex + 1);
+    showSidebarToast(isEn ? `Added manual anchor: ${defaultName}` : `已添加手动锚点：${defaultName}`, { type: 'success', forceFresh: true, badge: badgeNum, isTemp: false });
     return true;
   }
 
   function addTempAnchorFromCurrentViewport() {
     const isEn = isEnglish();
-
-    if (!isTempAnchorEnabled) {
-      showSidebarToast(isEn ? 'Temporary anchors disabled. Please enable in sidebar.' : '临时锚点未开启，请先在侧边栏开启', 'warning');
-      return false;
-    }
 
     if (isCanvasNodeFullscreenActive()) {
       showAnchorMutationBlockedToast(isEn);
@@ -5071,14 +5089,15 @@
       highlightTempSlotIndex = existing.index;
       rememberedTempSlotIndex = existing.index;
       renderHistoryPanel();
-      showSidebarToast(msg, { type: 'warning', forceFresh: true });
+      const existingBadge = (existing.index < 10) ? String((existing.index + 1) % 10) : String(existing.index + 1);
+      showSidebarToast(msg, { type: 'warning', forceFresh: true, badge: existingBadge, isTemp: true });
       return false;
     }
 
     if (validSlots.length >= tempAnchorLimit) {
       const msg = isEn 
-        ? 'Temporary anchors are full. You can increase the maximum capacity in settings.' 
-        : '临时锚点已满。您可以在右侧设置中增加最大记录上限。';
+        ? 'Temporary anchors are full (maximum 10).' 
+        : '临时锚点已满（上限 10 个）。';
       showSidebarToast(msg, { type: 'warning', forceFresh: true });
       return false;
     }
@@ -5111,26 +5130,26 @@
     saveTempAnchorSlots(newSlots);
     renderHistoryPanel();
 
-    showSidebarToast(isEn ? `Added temp anchor: ${defaultName}` : `已添加临时锚点：${defaultName}`, { type: 'success', forceFresh: true });
+    const badgeNum = (nextIndex < 10) ? String((nextIndex + 1) % 10) : String(nextIndex + 1);
+    showSidebarToast(isEn ? `Added temp anchor: ${defaultName}` : `已添加临时锚点：${defaultName}`, { type: 'success', forceFresh: true, badge: badgeNum, isTemp: true });
     return true;
   }
 
   function normalizeAnchorShortcut(val, defaultKey) {
-    const isMac = isMacPlatform();
     const defaultCombo = {
-      meta: isMac,
-      ctrl: !isMac,
-      alt: false,
-      shift: true,
+      meta: false,
+      ctrl: false,
+      alt: true,
+      shift: false,
       code: defaultKey
     };
     if (!val) return defaultCombo;
     if (typeof val === 'string') {
       return {
-        meta: isMac,
-        ctrl: !isMac,
-        alt: false,
-        shift: true,
+        meta: false,
+        ctrl: false,
+        alt: true,
+        shift: false,
         code: val
       };
     }
@@ -5147,35 +5166,90 @@
     return defaultCombo;
   }
 
+  function normalizeAnchorLocateShortcut(val) {
+    const defaultModifier = {
+      meta: false,
+      ctrl: false,
+      alt: true,
+      shift: false
+    };
+    if (!val || typeof val !== 'object') return defaultModifier;
+    const hasAny = Boolean(val.meta || val.ctrl || val.alt || val.shift);
+    if (!hasAny) return defaultModifier;
+    return {
+      meta: Boolean(val.meta),
+      ctrl: Boolean(val.ctrl),
+      alt: Boolean(val.alt),
+      shift: Boolean(val.shift)
+    };
+  }
+
+  function formatAnchorLocateModifierDisplay(combo) {
+    if (!combo || typeof combo !== 'object') return isMacPlatform() ? 'Option' : 'Alt';
+    const isMac = isMacPlatform();
+    const parts = [];
+    if (isMac) {
+      if (combo.meta) parts.push('Cmd');
+      if (combo.ctrl) parts.push('Control');
+      if (combo.alt) parts.push('Option');
+      if (combo.shift) parts.push('Shift');
+    } else {
+      if (combo.ctrl) parts.push('Ctrl');
+      if (combo.alt) parts.push('Alt');
+      if (combo.shift) parts.push('Shift');
+      if (combo.meta) parts.push('Win');
+    }
+    return parts.length ? parts.join(' + ') : (isMac ? 'Option' : 'Alt');
+  }
+
+  function matchesAnchorLocateModifier(combo, e) {
+    if (!combo || typeof combo !== 'object') {
+      return Boolean(e.altKey) && !e.metaKey && !e.ctrlKey && !e.shiftKey;
+    }
+    const reqMeta = Boolean(combo.meta);
+    const reqCtrl = Boolean(combo.ctrl);
+    const actualMeta = Boolean(e.metaKey);
+    const actualCtrl = Boolean(e.ctrlKey);
+
+    if (reqMeta && reqCtrl) {
+      if (!actualMeta || !actualCtrl) return false;
+    } else if (reqMeta) {
+      if (!actualMeta && !actualCtrl) return false;
+    } else if (reqCtrl) {
+      if (!actualCtrl && !actualMeta) return false;
+    } else {
+      if (actualMeta || actualCtrl) return false;
+    }
+
+    if (Boolean(combo.alt) !== Boolean(e.altKey)) return false;
+    if (Boolean(combo.shift) !== Boolean(e.shiftKey)) return false;
+
+    return true;
+  }
+
   function getCustomAnchorShortcuts() {
     try {
       const raw = localStorage.getItem('canvas-custom-shortcuts');
       if (raw) {
         const parsed = JSON.parse(raw);
         return {
-          manualAnchorPrev: normalizeAnchorShortcut(parsed.manualAnchorPrev, 'KeyJ'),
-          manualAnchorAdd: normalizeAnchorShortcut(parsed.manualAnchorAdd, 'KeyK'),
-          manualAnchorNext: normalizeAnchorShortcut(parsed.manualAnchorNext, 'KeyL'),
-          tempAnchorPrev: normalizeAnchorShortcut(parsed.tempAnchorPrev, 'KeyA'),
-          tempAnchorAdd: normalizeAnchorShortcut(parsed.tempAnchorAdd, 'KeyS'),
-          tempAnchorNext: normalizeAnchorShortcut(parsed.tempAnchorNext, 'KeyD')
+          anchorLocate: normalizeAnchorLocateShortcut(parsed.anchorLocate),
+          anchorRecord: normalizeAnchorShortcut(parsed.anchorRecord, 'KeyS'),
+          anchorTempWorkspace: normalizeAnchorShortcut(parsed.anchorTempWorkspace, 'KeyC')
         };
       }
     } catch (_) {}
     return {
-      manualAnchorPrev: normalizeAnchorShortcut(null, 'KeyJ'),
-      manualAnchorAdd: normalizeAnchorShortcut(null, 'KeyK'),
-      manualAnchorNext: normalizeAnchorShortcut(null, 'KeyL'),
-      tempAnchorPrev: normalizeAnchorShortcut(null, 'KeyA'),
-      tempAnchorAdd: normalizeAnchorShortcut(null, 'KeyS'),
-      tempAnchorNext: normalizeAnchorShortcut(null, 'KeyD')
+      anchorLocate: normalizeAnchorLocateShortcut(null),
+      anchorRecord: normalizeAnchorShortcut(null, 'KeyS'),
+      anchorTempWorkspace: normalizeAnchorShortcut(null, 'KeyC')
     };
   }
 
   function formatCustomAnchorKeyDisplay(combo) {
     if (!combo) return '?';
     if (typeof combo === 'string') {
-      combo = normalizeAnchorShortcut(combo, 'KeyJ');
+      combo = normalizeAnchorShortcut(combo, 'KeyS');
     }
     const isMac = isMacPlatform();
     const parts = [];
@@ -5211,23 +5285,50 @@
 
   function matchesAnchorShortcut(combo, e) {
     if (!combo || !combo.code) return false;
-    // 严格匹配修饰键标志（允许2键组合如 Cmd+1，或3键组合如 Cmd+Shift+J）
-    if (Boolean(combo.meta) !== Boolean(e.metaKey)) return false;
-    if (Boolean(combo.ctrl) !== Boolean(e.ctrlKey)) return false;
+    const reqMeta = Boolean(combo.meta);
+    const reqCtrl = Boolean(combo.ctrl);
+    const actualMeta = Boolean(e.metaKey);
+    const actualCtrl = Boolean(e.ctrlKey);
+
+    if (reqMeta && reqCtrl) {
+      if (!actualMeta || !actualCtrl) return false;
+    } else if (reqMeta) {
+      if (!actualMeta && !actualCtrl) return false;
+    } else if (reqCtrl) {
+      if (!actualCtrl && !actualMeta) return false;
+    } else {
+      if (actualMeta || actualCtrl) return false;
+    }
+
     if (Boolean(combo.alt) !== Boolean(e.altKey)) return false;
     if (Boolean(combo.shift) !== Boolean(e.shiftKey)) return false;
 
-    // 匹配按键 code
     const eCode = e.code || '';
     if (eCode === combo.code) return true;
 
-    // 回退匹配按键 key
+    // 兼容 macOS Option 特殊字符输入或无标准 e.code 的输入
     const keyLower = (e.key || '').toLowerCase();
     if (combo.code.startsWith('Key') && combo.code.length === 4) {
-      return keyLower === combo.code.slice(3).toLowerCase();
+      const letter = combo.code.slice(3).toLowerCase();
+      if (keyLower === letter) return true;
+      const macOptionKeyMap = {
+        KeyS: ['ß', 's'],
+        KeyC: ['ç', 'c']
+      };
+      if (macOptionKeyMap[combo.code] && macOptionKeyMap[combo.code].includes(keyLower)) {
+        return true;
+      }
     }
     if (combo.code.startsWith('Digit') && combo.code.length === 6) {
-      return (e.key || '') === combo.code.slice(5);
+      const digit = combo.code.slice(5);
+      if (e.key === digit) return true;
+      const macOptionDigitMap = {
+        'Digit1': ['¡', '1'], 'Digit2': ['™', '2'], 'Digit3': ['£', '3'], 'Digit4': ['¢', '4'], 'Digit5': ['∞', '5'],
+        'Digit6': ['§', '6'], 'Digit7': ['¶', '7'], 'Digit8': ['•', '8'], 'Digit9': ['ª', '9'], 'Digit0': ['º', '0']
+      };
+      if (macOptionDigitMap[combo.code] && macOptionDigitMap[combo.code].includes(e.key)) {
+        return true;
+      }
     }
     return false;
   }
@@ -5250,19 +5351,97 @@
     const panel = document.getElementById('canvasHistoryPanel');
     if (!panel) return;
 
-    const mPrev = panel.querySelector('.sidebar-manual-anchor-prev');
-    if (mPrev) mPrev.textContent = formatCustomAnchorKeyDisplay(sc.manualAnchorPrev);
-    const mAdd = panel.querySelector('.sidebar-manual-anchor-add');
-    if (mAdd) mAdd.textContent = formatCustomAnchorKeyDisplay(sc.manualAnchorAdd);
-    const mNext = panel.querySelector('.sidebar-manual-anchor-next');
-    if (mNext) mNext.textContent = formatCustomAnchorKeyDisplay(sc.manualAnchorNext);
+    const locateEl = panel.querySelector('.sidebar-anchor-locate');
+    if (locateEl) locateEl.textContent = formatAnchorLocateModifierDisplay(sc.anchorLocate);
+    const suffixEl = panel.querySelector('.sidebar-anchor-locate + .canvas-shortcut-suffix');
+    if (suffixEl) suffixEl.textContent = isEnglish() ? ' + 1...+9, 0' : ' + 1...+9、0';
+    const recordEl = panel.querySelector('.sidebar-anchor-record');
+    if (recordEl) recordEl.textContent = formatCustomAnchorKeyDisplay(sc.anchorRecord);
+    const tempEl = panel.querySelector('.sidebar-anchor-temp-toggle');
+    if (tempEl) tempEl.textContent = formatCustomAnchorKeyDisplay(sc.anchorTempWorkspace);
 
-    const tPrev = panel.querySelector('.sidebar-temp-anchor-prev');
-    if (tPrev) tPrev.textContent = formatCustomAnchorKeyDisplay(sc.tempAnchorPrev);
-    const tAdd = panel.querySelector('.sidebar-temp-anchor-add');
-    if (tAdd) tAdd.textContent = formatCustomAnchorKeyDisplay(sc.tempAnchorAdd);
-    const tNext = panel.querySelector('.sidebar-temp-anchor-next');
-    if (tNext) tNext.textContent = formatCustomAnchorKeyDisplay(sc.tempAnchorNext);
+    const locateModifier = formatAnchorLocateModifierDisplay(sc.anchorLocate);
+    const isEn = isEnglish();
+    panel.querySelectorAll('.anchor-slot-row').forEach(row => {
+      const idx = parseInt(row.dataset.index, 10);
+      if (Number.isFinite(idx) && idx < 10) {
+        const badge = row.querySelector('.anchor-slot-shortcut-badge');
+        if (badge) {
+          const badgeNum = String((idx + 1) % 10);
+          const shortcutHint = `${locateModifier}+${badgeNum}`;
+          badge.title = isEn ? `Locate shortcut: ${shortcutHint}` : `定位快捷键：${shortcutHint}`;
+        }
+      }
+    });
+  }
+
+  function locateAnchorByIndex(index) {
+    const isEn = isEnglish();
+    const slotNum = index + 1;
+    const isTemp = isTempWorkspaceMode;
+    const slots = isTemp ? loadTempAnchorSlots() : loadAnchorSlots();
+
+    const slot = slots[index];
+    const badgeNum = (index < 10) ? String((index + 1) % 10) : String(slotNum);
+    if (!slot || typeof slot !== 'object') {
+      const emptyMsg = isTemp
+        ? (isEn ? `Temp anchor slot ${slotNum} is empty` : `临时锚点槽位 ${slotNum} 尚未保存`)
+        : (isEn ? `Anchor slot ${slotNum} is empty` : `锚点槽位 ${slotNum} 尚未保存`);
+      showSidebarToast(emptyMsg, { type: 'warning', badge: badgeNum, isTemp: isTemp });
+      return false;
+    }
+
+    if (isTemp) {
+      rememberedTempSlotIndex = index;
+      highlightTempSlotIndex = index;
+      if (tempAnchorVisibleLimit < slotNum) {
+        tempAnchorVisibleLimit = Math.max(tempAnchorVisibleLimit, slotNum);
+      }
+    } else {
+      saveRememberedSlotIndex(index);
+      highlightSlotIndex = index;
+      if (manualAnchorVisibleLimit < slotNum) {
+        manualAnchorVisibleLimit = Math.max(manualAnchorVisibleLimit, slotNum);
+        try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
+      }
+    }
+
+    navigateToViewportFromAnchor(slot).then(() => {
+      renderHistoryPanel();
+    });
+
+    const displayName = slot.name || (isEn ? (isTemp ? `Temp Slot ${slotNum}` : `Slot ${slotNum}`) : (isTemp ? `临时槽位 ${slotNum}` : `槽位 ${slotNum}`));
+    const toastMsg = isTemp
+      ? (isEn ? `Temp Anchor: ${displayName}` : `已切换至临时锚点：${displayName}`)
+      : (isEn ? `Anchor: ${displayName}` : `已切换至锚点：${displayName}`);
+    showSidebarToast(toastMsg, { type: 'info', badge: badgeNum, isTemp: isTemp });
+    return true;
+  }
+
+  function toggleTempWorkspaceMode() {
+    isTempWorkspaceMode = !isTempWorkspaceMode;
+    const isEn = isEnglish();
+    const tempToggleKeyDisplay = formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().anchorTempWorkspace);
+
+    const panelHist = document.getElementById('canvasHistoryPanel');
+    const tabHist = document.getElementById('sidebarTabAnchor');
+    const tabDir = document.getElementById('sidebarTabDirectory');
+    const panelDir = document.getElementById('canvasDirectoryTree');
+    if (panelHist && panelHist.style.display === 'none' && tabHist && tabDir && panelDir) {
+      tabDir.classList.remove('active');
+      tabHist.classList.add('active');
+      panelDir.style.display = 'none';
+      panelHist.style.display = '';
+      const navTabs = panelHist.closest('.nav-tabs');
+      if (navTabs) navTabs.classList.add('history-tab-active');
+    }
+
+    renderHistoryPanel();
+
+    const toastMsg = isTempWorkspaceMode
+      ? (isEn ? `Entered Temporary Workspace (${tempToggleKeyDisplay})` : `已进入临时锚点工作区 (${tempToggleKeyDisplay})`)
+      : (isEn ? `Exited to Permanent Anchors (${tempToggleKeyDisplay})` : `已退出临时工作区，返回永久锚点 (${tempToggleKeyDisplay})`);
+    showSidebarToast(toastMsg, 'info');
   }
 
   function handleAnchorShortcutKeydown(e) {
@@ -5279,31 +5458,53 @@
 
     const sc = getCustomAnchorShortcuts();
 
-    const isPrevManual = matchesAnchorShortcut(sc.manualAnchorPrev, e);
-    const isAddManual = matchesAnchorShortcut(sc.manualAnchorAdd, e);
-    const isNextManual = matchesAnchorShortcut(sc.manualAnchorNext, e);
+    // 1. 检查数字键快速切换锚点: 默认 Option (Mac) / Alt (Win/Linux) + 1/2/.../9/0，可自定义修饰键
+    if (matchesAnchorLocateModifier(sc.anchorLocate, e)) {
+      let targetDigit = null;
+      const digitMatch = (e.code || '').match(/^Digit([0-9])$/);
+      if (digitMatch) {
+        targetDigit = parseInt(digitMatch[1], 10);
+      } else if (e.code && /^Numpad([0-9])$/.test(e.code)) {
+        targetDigit = parseInt(e.code.slice(6), 10);
+      } else {
+        const macOptionDigitMap = {
+          '¡': 1, '™': 2, '£': 3, '¢': 4, '∞': 5, '§': 6, '¶': 7, '•': 8, 'ª': 9, 'º': 0,
+          '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '0': 0
+        };
+        if (typeof e.key === 'string' && macOptionDigitMap.hasOwnProperty(e.key)) {
+          targetDigit = macOptionDigitMap[e.key];
+        }
+      }
 
-    const isPrevTemp = matchesAnchorShortcut(sc.tempAnchorPrev, e);
-    const isAddTemp = matchesAnchorShortcut(sc.tempAnchorAdd, e);
-    const isNextTemp = matchesAnchorShortcut(sc.tempAnchorNext, e);
+      if (targetDigit !== null) {
+        const targetIndex = (targetDigit === 0) ? 9 : targetDigit - 1; // 1->0, 2->1, ..., 9->8, 0->9
+        e.preventDefault();
+        e.stopPropagation();
+        locateAnchorByIndex(targetIndex);
+        return;
+      }
+    }
 
-    if (!isPrevManual && !isAddManual && !isNextManual && !isPrevTemp && !isAddTemp && !isNextTemp) return;
+    // 2. 检查记录锚点快捷键（永久/临时工作区共同按键，默认 Option/Alt + S）
+    const isRecord = matchesAnchorShortcut(sc.anchorRecord, e);
+    if (isRecord) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isTempWorkspaceMode) {
+        addTempAnchorFromCurrentViewport();
+      } else {
+        addManualAnchorFromCurrentViewport();
+      }
+      return;
+    }
 
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (isPrevManual) {
-      navigateManualAnchorSlot('prev');
-    } else if (isAddManual) {
-      addManualAnchorFromCurrentViewport();
-    } else if (isNextManual) {
-      navigateManualAnchorSlot('next');
-    } else if (isPrevTemp) {
-      navigateTempAnchorSlot('prev');
-    } else if (isAddTemp) {
-      addTempAnchorFromCurrentViewport();
-    } else if (isNextTemp) {
-      navigateTempAnchorSlot('next');
+    // 3. 检查进入/退出临时工作区快捷键（默认 Option/Alt + C）
+    const isToggleWorkspace = matchesAnchorShortcut(sc.anchorTempWorkspace, e);
+    if (isToggleWorkspace) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleTempWorkspaceMode();
+      return;
     }
   }
 
@@ -5352,34 +5553,16 @@
     saveTempAnchorSlots(slots);
   }
 
+  function saveSettingsOnCollapse() {
+    // 锚点容量固定为 10，无需在面板收起时保存容量设置
+  }
+
   function saveManualSettingsOnCollapse() {
-    const manualPanel = document.getElementById('manualAnchorInlineSettings');
-    if (!manualPanel) return;
-    const input = manualPanel.querySelector('#inlineManualAnchorLimitInput');
-    if (input) {
-      const rawVal = input.value.trim();
-      let val = 5;
-      if (/^[1-9]\d*$/.test(rawVal)) {
-        const parsed = parseInt(rawVal, 10);
-        val = Math.max(1, Math.min(50, parsed));
-      }
-      updateManualAnchorLimit(val);
-    }
+    saveSettingsOnCollapse();
   }
 
   function saveTempSettingsOnCollapse() {
-    const tempPanel = document.getElementById('tempAnchorInlineSettings');
-    if (!tempPanel) return;
-    const input = tempPanel.querySelector('#inlineTempAnchorLimitInput');
-    if (input) {
-      const rawVal = input.value.trim();
-      let val = 5;
-      if (/^[1-9]\d*$/.test(rawVal)) {
-        const parsed = parseInt(rawVal, 10);
-        val = Math.max(1, Math.min(50, parsed));
-      }
-      updateTempAnchorLimit(val);
-    }
+    saveSettingsOnCollapse();
   }
 
   function handleTempSlotAction(action, index, btnEl) {
@@ -5417,7 +5600,8 @@
       rememberedTempSlotIndex = index;
       saveTempAnchorSlots(slots);
       renderHistoryPanel();
-      showSidebarToast(isEn ? 'Viewport saved to temp slot' : '视口已覆盖至临时槽位', 'success');
+      const badgeNum = (index < 10) ? String((index + 1) % 10) : String(index + 1);
+      showSidebarToast(isEn ? 'Viewport saved to temp slot' : '视口已覆盖至临时槽位', { type: 'success', badge: badgeNum, isTemp: true });
     } 
     else if (action === 'locate') {
       const slot = slots[index];
@@ -5427,8 +5611,9 @@
         setTimeout(renderHistoryPanel, 50);
       });
       const slotNum = index + 1;
+      const badgeNum = (index < 10) ? String((index + 1) % 10) : String(slotNum);
       const displayName = slot.name || (isEn ? `Temp Slot ${slotNum}` : `临时槽位 ${slotNum}`);
-      showSidebarToast(isEn ? `Temp Anchor: ${displayName}` : `已切换至临时锚点：${displayName}`, 'info');
+      showSidebarToast(isEn ? `Temp Anchor: ${displayName}` : `已切换至临时锚点：${displayName}`, { type: 'info', badge: badgeNum, isTemp: true });
     }
     else if (action === 'rename') {
       const slot = slots[index];
@@ -5587,9 +5772,7 @@
     if (!panel || panel.style.display === 'none') return;
 
     const slotsList = panel.querySelector('.anchor-slots-container');
-    const tempSlotsList = panel.querySelector('.temp-anchor-slots-container');
     const slotsScrollTop = slotsList ? slotsList.scrollTop : 0;
-    const tempSlotsScrollTop = tempSlotsList ? tempSlotsList.scrollTop : 0;
 
     const activeEl = document.activeElement;
     const activeId = activeEl ? activeEl.id : null;
@@ -5603,17 +5786,10 @@
     }
 
     const isEn = isEnglish();
-    const slots = loadAnchorSlots();
-    const tempSlots = loadTempAnchorSlots();
-    if (rememberedSlotIndex !== null) {
-      if (!slots[rememberedSlotIndex] || typeof slots[rememberedSlotIndex] !== 'object') {
-        const firstValid = slots.findIndex(s => s && typeof s === 'object');
-        saveRememberedSlotIndex(firstValid >= 0 ? firstValid : null);
-      }
-    }
+    const isMac = isMacPlatform();
     const isCardFullscreen = isCanvasNodeFullscreenActive();
-    
     const step = getDynamicStep();
+
     if (manualAnchorVisibleLimit < step) {
       manualAnchorVisibleLimit = step;
     }
@@ -5623,8 +5799,24 @@
 
     const manualAnchorLimit = getManualAnchorLimit();
     const tempAnchorLimit = getTempAnchorLimit();
-    
-    const savedSlots = slots
+
+    const slots = loadAnchorSlots();
+    const tempSlots = loadTempAnchorSlots();
+
+    if (rememberedSlotIndex !== null) {
+      if (!slots[rememberedSlotIndex] || typeof slots[rememberedSlotIndex] !== 'object') {
+        const firstValid = slots.findIndex(s => s && typeof s === 'object');
+        saveRememberedSlotIndex(firstValid >= 0 ? firstValid : null);
+      }
+    }
+    if (rememberedTempSlotIndex !== null) {
+      if (!tempSlots[rememberedTempSlotIndex] || typeof tempSlots[rememberedTempSlotIndex] !== 'object') {
+        const firstValidTemp = tempSlots.findIndex(s => s && typeof s === 'object');
+        rememberedTempSlotIndex = (firstValidTemp >= 0 ? firstValidTemp : null);
+      }
+    }
+
+    const savedManualSlots = slots
       .map((slot, idx) => slot ? { ...slot, originalIndex: idx } : null)
       .filter(s => s !== null);
 
@@ -5632,82 +5824,108 @@
       .map((slot, idx) => slot ? { ...slot, originalIndex: idx } : null)
       .filter(s => s !== null);
 
-    const isFull = savedSlots.length >= manualAnchorLimit;
-    const isTempFull = savedTempSlots.length >= tempAnchorLimit;
-    const isTempInactiveOrEmpty = !isTempAnchorEnabled || savedTempSlots.length === 0;
-      
+    const activeSavedSlots = isTempWorkspaceMode ? savedTempSlots : savedManualSlots;
+    const currentLimit = isTempWorkspaceMode ? tempAnchorLimit : manualAnchorLimit;
+    const currentVisibleLimit = isTempWorkspaceMode ? tempAnchorVisibleLimit : manualAnchorVisibleLimit;
+    const currentRememberedIndex = isTempWorkspaceMode ? rememberedTempSlotIndex : rememberedSlotIndex;
+    const isFull = activeSavedSlots.length >= currentLimit;
+
+    const customShortcuts = getCustomAnchorShortcuts();
+    const locateModifierDisplay = formatAnchorLocateModifierDisplay(customShortcuts.anchorLocate);
+    const anchorRecordDisplay = formatCustomAnchorKeyDisplay(customShortcuts.anchorRecord);
+    const anchorTempWorkspaceDisplay = formatCustomAnchorKeyDisplay(customShortcuts.anchorTempWorkspace);
+
     let html = `
-      <div class="sidebar-anchor-container${isTempInactiveOrEmpty ? ' auto-inactive temp-inactive' : ''}">
-        <!-- Section 1: Manual Anchors -->
-        <div class="sidebar-section-header manual-anchor-header">
-          <span class="sidebar-section-title">${isEn ? 'Manual Anchors' : '手动锚点'}</span>
-          <div class="sidebar-header-actions">
-            <button class="sidebar-action-btn${isFull ? ' is-full' : ''}${isCardFullscreen ? ' is-disabled' : ''}" id="addManualAnchorBtn" type="button" title="${isEn ? 'Add Anchor' : '添加锚点'}">
-              <i class="fas fa-plus"></i>
-            </button>
-            <button class="sidebar-action-btn" id="manualAnchorSettingsBtn" title="${isEn ? 'Anchor Settings' : '锚点设置'}">
+      <div class="sidebar-anchor-container${isTempWorkspaceMode ? ' in-temp-mode' : ''}">
+        <!-- Unified Header: Left: Settings, Center: Temp Workspace, Right: Clear (in temp mode) + Add -->
+        <div class="sidebar-section-header anchor-unified-header">
+          <div class="sidebar-header-left">
+            <button class="sidebar-action-btn" id="anchorSettingsBtn" title="${isEn ? 'Anchor Settings' : '锚点设置'}">
               <i class="fas fa-cog"></i>
             </button>
           </div>
-        </div>
-        
-        <!-- Inline Settings Panel for Manual Anchors -->
-        <div class="manual-anchor-settings-panel" id="manualAnchorInlineSettings" style="${manualAnchorSettingsOpen ? '' : 'display: none;'}">
-          <div class="settings-inline-row" style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="settings-inline-span">${isEn ? 'Max capacity:' : '最大记录数量：'}</span>
-            <input type="number" id="inlineManualAnchorLimitInput" min="1" max="50" value="${manualAnchorLimit}" />
+          <div class="sidebar-header-center">
+            <button class="sidebar-action-btn sidebar-temp-workspace-btn${isTempWorkspaceMode ? ' active' : ''}" id="tempWorkspaceToggleBtn" type="button" title="${isEn ? `Toggle Temporary Workspace (${anchorTempWorkspaceDisplay})` : `进入/退出临时工作区 (${anchorTempWorkspaceDisplay})`}">
+              <i class="fas fa-layer-group"></i>
+            </button>
           </div>
-          <div class="manual-anchor-shortcuts-help" style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
+          <div class="sidebar-header-right">
+            ${isTempWorkspaceMode ? `
+              <button class="sidebar-action-btn" id="tempClearBtn" title="${isEn ? 'Clear Temporary Anchors' : '一键清空临时锚点'}" style="${savedTempSlots.length === 0 ? 'opacity: 0.5;' : ''}">
+                <i class="fas fa-trash-alt"></i>
+              </button>
+            ` : ''}
+            <button class="sidebar-action-btn${isFull ? ' is-full' : ''}${isCardFullscreen ? ' is-disabled' : ''}" id="addAnchorBtn" type="button" title="${isTempWorkspaceMode ? (isEn ? 'Add Temp Anchor' : '添加临时锚点') : (isEn ? 'Add Anchor' : '添加锚点')}">
+              <i class="fas fa-plus"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Inline Settings Panel -->
+        <div class="manual-anchor-settings-panel anchor-settings-panel" id="anchorInlineSettings" style="${anchorSettingsOpen ? '' : 'display: none;'}">
+          <div class="manual-anchor-shortcuts-help" style="font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
             <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
-              <span>${isEn ? 'Manual Anchor Shortcuts' : '手动锚点快捷键'}</span>
-              <button class="sidebar-action-btn edit-anchor-shortcuts-btn" id="openManualAnchorShortcutsBtn" type="button" title="${isEn ? 'Modify Shortcuts' : '点击修改快捷键'}" style="width: 20px; height: 20px; font-size: 11px;">
+              <span>${isEn ? 'Anchor Shortcuts' : '锚点快捷键'}</span>
+              <button class="sidebar-action-btn edit-anchor-shortcuts-btn" id="openAnchorShortcutsBtn" type="button" title="${isEn ? 'Modify Shortcuts' : '点击修改快捷键'}" style="width: 20px; height: 20px; font-size: 11px;">
                 <i class="fas fa-edit"></i>
               </button>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-              <span>${isEn ? 'Prev:' : '上一个：'}</span>
-              <kbd class="canvas-shortcut-key sidebar-manual-anchor-prev" data-shortcut-display="manualAnchorPrev" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().manualAnchorPrev)}</kbd>
+              <span>${isEn ? 'Locate 1~10:' : '定位 1~10：'}</span>
+              <span><kbd class="canvas-shortcut-key sidebar-anchor-locate" data-shortcut-display="anchorLocate" style="font-size: 10px; padding: 1px 5px;">${locateModifierDisplay}</kbd><span class="canvas-shortcut-suffix">${isEn ? ' + 1...+9, 0' : ' + 1...+9、0'}</span></span>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-              <span>${isEn ? 'Add:' : '添加：'}</span>
-              <kbd class="canvas-shortcut-key sidebar-manual-anchor-add" data-shortcut-display="manualAnchorAdd" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().manualAnchorAdd)}</kbd>
+              <span>${isEn ? 'Record Viewport:' : '记录视口：'}</span>
+              <kbd class="canvas-shortcut-key sidebar-anchor-record" data-shortcut-display="anchorRecord" style="font-size: 10px; padding: 1px 5px;">${anchorRecordDisplay}</kbd>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-              <span>${isEn ? 'Next:' : '下一个：'}</span>
-              <kbd class="canvas-shortcut-key sidebar-manual-anchor-next" data-shortcut-display="manualAnchorNext" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().manualAnchorNext)}</kbd>
+              <span>${isEn ? 'Temp Workspace:' : '进入/退出临时：'}</span>
+              <kbd class="canvas-shortcut-key sidebar-anchor-temp-toggle" data-shortcut-display="anchorTempWorkspace" style="font-size: 10px; padding: 1px 5px;">${anchorTempWorkspaceDisplay}</kbd>
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted, #888); margin-top: 4px; line-height: 1.4;">
+              ${isEn ? 'Anchor capacity is fixed at 10. Temp anchors are independent per page and cleared on reload.' : '锚点容量最大限度为 10 个。临时锚点各页面独立，刷新或重启后自动清空。'}
             </div>
           </div>
         </div>
-        
+
+        <!-- Single Unified Slots Container -->
         <div class="anchor-slots-container">
     `;
-    
-    const visibleSavedSlots = savedSlots.slice(0, manualAnchorVisibleLimit);
 
-    if (savedSlots.length === 0) {
+    const visibleSavedSlots = activeSavedSlots.slice(0, currentVisibleLimit);
+
+    if (activeSavedSlots.length === 0) {
       html += `
         <div class="history-empty-tip">
-          ${isEn ? 'No manual anchors yet.' : '暂无手动锚点'}
+          ${isTempWorkspaceMode ? (isEn ? 'No temporary anchors yet.' : '暂无临时锚点') : (isEn ? 'No manual anchors yet.' : '暂无手动锚点')}
         </div>
       `;
     } else {
       visibleSavedSlots.forEach((slot) => {
         const index = slot.originalIndex;
         const slotNum = index + 1;
-        const displayName = slot.name || (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
+        const defaultPrefix = isTempWorkspaceMode ? (isEn ? 'Temp Slot' : '临时槽位') : (isEn ? 'Slot' : '槽位');
+        const displayName = slot.name || `${defaultPrefix} ${slotNum}`;
         const zoomPercent = formatAnchorZoomPercent(slot.zoom);
         const absoluteTimeStr = slot.timestamp ? formatAbsoluteTime(slot.timestamp, isEn) : '';
-        const isRemembered = (rememberedSlotIndex === index);
-        
+        const isRemembered = (currentRememberedIndex === index);
+        const badgeNum = (index < 10) ? String((index + 1) % 10) : String(slotNum);
+        const locateModifier = locateModifierDisplay;
+        const shortcutHint = (index < 10) ? `${locateModifier}+${badgeNum}` : '';
+        const badgeTitle = shortcutHint
+          ? (isEn ? `Locate shortcut: ${shortcutHint}` : `定位快捷键：${shortcutHint}`)
+          : (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
+
         html += `
           <div class="anchor-slot-row${isRemembered ? ' active-slot' : ''}" data-index="${index}" title="${isRemembered ? (isEn ? 'Current remembered anchor' : '当前记忆中的锚点') : ''}">
+            <span class="anchor-slot-shortcut-badge" title="${badgeTitle}">${badgeNum}</span>
             <div class="anchor-slot-header">
               <span class="anchor-slot-name" title="${displayName}">${displayName}</span>
               <div class="anchor-slot-actions">
-                <button class="anchor-slot-btn rename-btn" data-index="${index}" title="${isEn ? 'Rename slot' : '重命名槽位'}">
+                <button class="anchor-slot-btn rename-btn" data-index="${index}" title="${isTempWorkspaceMode ? (isEn ? 'Rename temp slot' : '重命名临时槽位') : (isEn ? 'Rename slot' : '重命名槽位')}">
                   <i class="fas fa-edit"></i>
                 </button>
-                <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isEn ? 'Clear slot' : '清除槽位'}">
+                <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isTempWorkspaceMode ? (isEn ? 'Clear temp slot' : '清除临时槽位') : (isEn ? 'Clear slot' : '清除槽位')}">
                   <i class="fas fa-trash-alt"></i>
                 </button>
                 <button class="anchor-slot-btn save-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Overwrite with current viewport' : '用当前视口覆盖'}">
@@ -5726,203 +5944,56 @@
         `;
       });
     }
-    
-    const hasMoreManual = savedSlots.length > visibleSavedSlots.length;
-    const canCollapseManual = manualAnchorVisibleLimit > step;
-    if (hasMoreManual || canCollapseManual) {
-      const remaining = savedSlots.length - visibleSavedSlots.length;
+
+    const hasMore = activeSavedSlots.length > visibleSavedSlots.length;
+    const canCollapse = currentVisibleLimit > step;
+    if (hasMore || canCollapse) {
+      const remaining = activeSavedSlots.length - visibleSavedSlots.length;
       const willLoad = Math.min(step, remaining);
-      
+
       html += `
         <div class="lazy-load-container" style="display: flex; gap: 8px; margin: 4px 8px 8px 8px; justify-content: center;">
       `;
-      if (hasMoreManual) {
+      if (hasMore) {
         html += `
-          <button class="lazy-load-btn load-more-btn" id="manualAnchorLoadMoreBtn" style="flex: 1;">
+          <button class="lazy-load-btn load-more-btn" id="anchorLoadMoreBtn" style="flex: 1;">
             <i class="fas fa-chevron-down"></i> ${isEn ? `Show More (+${willLoad})` : `展开更多 (+${willLoad})`}
           </button>
         `;
       }
-      if (canCollapseManual) {
+      if (canCollapse) {
         html += `
-          <button class="lazy-load-btn collapse-btn" id="manualAnchorCollapseBtn" style="flex: 1;">
+          <button class="lazy-load-btn collapse-btn" id="anchorCollapseBtn" style="flex: 1;">
             <i class="fas fa-chevron-up"></i> ${isEn ? 'Collapse' : '收起'}
           </button>
         `;
       }
       html += `</div>`;
     }
-    
-    html += `</div>`;
-    
-    html += `
-        <!-- Section 2: Temporary Anchors -->
-        <div class="sidebar-section-header temp-anchor-header" style="margin-top: 12px; display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;">
-            <span class="sidebar-section-title" style="line-height: 1.2;" title="${isEn ? 'Temporary Anchors' : '临时锚点'}">${isEn ? 'Temp' : '临时'}</span>
-            <label class="other-toggle-switch" style="margin: 0; transform: scale(0.8); transform-origin: left center; flex-shrink: 0;" title="${isEn ? 'Enable Temp Anchors' : '开启临时锚点'}">
-              <input type="checkbox" id="inlineTempAnchorCheck" ${isTempAnchorEnabled ? 'checked' : ''}${isCardFullscreen && !isTempAnchorEnabled ? ' disabled' : ''} />
-              <span class="other-toggle-slider"></span>
-            </label>
-          </div>
-          <div class="sidebar-header-actions" style="flex-shrink: 0;">
-            <button class="sidebar-action-btn${isTempFull ? ' is-full' : ''}${isCardFullscreen || !isTempAnchorEnabled ? ' is-disabled' : ''}" id="addTempAnchorBtn" type="button" title="${isEn ? 'Add Temp Anchor' : '添加临时锚点'}" style="${isTempAnchorEnabled ? '' : 'display: none;'}">
-              <i class="fas fa-plus"></i>
-            </button>
-            <button class="sidebar-action-btn" id="tempClearBtn" style="${isTempAnchorEnabled ? '' : 'display: none;'}" title="${isEn ? 'Clear All' : '清空临时锚点'}">
-              <i class="fas fa-trash-alt"></i>
-            </button>
-            <button class="sidebar-action-btn" id="tempAnchorSettingsBtn" style="${isTempAnchorEnabled ? '' : 'display: none;'}" title="${isEn ? 'Temp Anchor Settings' : '临时锚点设置'}">
-              <i class="fas fa-cog"></i>
-            </button>
-          </div>
-        </div>
-        
-        <!-- Inline Settings Panel for Temporary Anchors -->
-        <div class="temp-anchor-settings-panel" id="tempAnchorInlineSettings" style="${tempAnchorSettingsOpen && isTempAnchorEnabled ? '' : 'display: none;'}">
-          <div class="settings-inline-row" style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="settings-inline-span">${isEn ? 'Max capacity:' : '最大记录数量：'}</span>
-            <input type="number" id="inlineTempAnchorLimitInput" min="1" max="50" value="${tempAnchorLimit}" />
-          </div>
-          <div class="temp-anchor-shortcuts-help" style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
-            <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
-              <span>${isEn ? 'Temp Anchor Shortcuts' : '临时锚点快捷键'}</span>
-              <button class="sidebar-action-btn edit-anchor-shortcuts-btn" id="openTempAnchorShortcutsBtn" type="button" title="${isEn ? 'Modify Shortcuts' : '点击修改快捷键'}" style="width: 20px; height: 20px; font-size: 11px;">
-                <i class="fas fa-edit"></i>
-              </button>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-              <span>${isEn ? 'Prev:' : '上一个：'}</span>
-              <kbd class="canvas-shortcut-key sidebar-temp-anchor-prev" data-shortcut-display="tempAnchorPrev" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().tempAnchorPrev)}</kbd>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-              <span>${isEn ? 'Add:' : '添加：'}</span>
-              <kbd class="canvas-shortcut-key sidebar-temp-anchor-add" data-shortcut-display="tempAnchorAdd" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().tempAnchorAdd)}</kbd>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-              <span>${isEn ? 'Next:' : '下一个：'}</span>
-              <kbd class="canvas-shortcut-key sidebar-temp-anchor-next" data-shortcut-display="tempAnchorNext" style="font-size: 10px; padding: 1px 5px;">${formatCustomAnchorKeyDisplay(getCustomAnchorShortcuts().tempAnchorNext)}</kbd>
-            </div>
-            <div style="font-size: 10px; color: var(--text-muted, #888); margin-top: 3px;">
-              ${isEn ? 'Independent per page. Cleared on close or refresh.' : '各页面独立，关闭或刷新后清空'}
-            </div>
-          </div>
-        </div>
-        
-        <div class="temp-anchor-slots-container">
-    `;
-    
-    const visibleSavedTempSlots = savedTempSlots.slice(0, tempAnchorVisibleLimit);
-    
-    if (!isTempAnchorEnabled) {
-      html += `
-        <div class="history-empty-tip">
-          ${isEn ? 'Temporary anchors disabled' : '临时锚点未开启'}
-        </div>
-      `;
-    } else if (savedTempSlots.length === 0) {
-      html += `
-        <div class="history-empty-tip">
-          ${isEn ? 'No temporary anchors yet' : '暂无临时锚点'}
-        </div>
-      `;
-    } else {
-      visibleSavedTempSlots.forEach((slot) => {
-        const index = slot.originalIndex;
-        const slotNum = index + 1;
-        const displayName = slot.name || (isEn ? `Temp Slot ${slotNum}` : `临时槽位 ${slotNum}`);
-        const zoomPercent = formatAnchorZoomPercent(slot.zoom);
-        const absoluteTimeStr = slot.timestamp ? formatAbsoluteTime(slot.timestamp, isEn) : '';
-        const isRemembered = (rememberedTempSlotIndex === index);
-        
-        html += `
-          <div class="anchor-slot-row${isRemembered ? ' active-slot' : ''}" data-index="${index}" title="${isRemembered ? (isEn ? 'Current remembered temp anchor' : '当前记忆中的临时锚点') : ''}">
-            <div class="anchor-slot-header">
-              <span class="anchor-slot-name" title="${displayName}">${displayName}</span>
-              <div class="anchor-slot-actions">
-                <button class="anchor-slot-btn rename-btn" data-index="${index}" title="${isEn ? 'Rename temp slot' : '重命名临时槽位'}">
-                  <i class="fas fa-edit"></i>
-                </button>
-                <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isEn ? 'Clear temp slot' : '清除临时槽位'}">
-                  <i class="fas fa-trash-alt"></i>
-                </button>
-                <button class="anchor-slot-btn save-btn${isCardFullscreen ? ' is-disabled' : ''}" data-index="${index}" title="${isEn ? 'Overwrite with current viewport' : '用当前视口覆盖'}">
-                  <i class="fas fa-anchor"></i>
-                </button>
-                <button class="anchor-slot-btn locate-btn" data-index="${index}" title="${isEn ? 'Locate viewport' : '定位到此视口'}">
-                  <i class="fas fa-crosshairs"></i>
-                </button>
-              </div>
-            </div>
-            <div class="anchor-slot-info">
-              <span class="anchor-slot-coords">X: ${Math.round(slot.x)} │ Y: ${Math.round(slot.y)} │ ${zoomPercent}</span>
-              ${absoluteTimeStr ? `<span class="anchor-slot-time">${absoluteTimeStr}</span>` : ''}
-            </div>
-          </div>
-        `;
-      });
-    }
-    
-    const hasMoreTemp = savedTempSlots.length > visibleSavedTempSlots.length;
-    const canCollapseTemp = tempAnchorVisibleLimit > step;
-    if (isTempAnchorEnabled && (hasMoreTemp || canCollapseTemp)) {
-      const remaining = savedTempSlots.length - visibleSavedTempSlots.length;
-      const willLoad = Math.min(step, remaining);
-      
-      html += `
-        <div class="lazy-load-container" style="display: flex; gap: 8px; margin: 8px 8px 4px 8px; justify-content: center;">
-      `;
-      if (hasMoreTemp) {
-        html += `
-          <button class="lazy-load-btn load-more-btn" id="tempAnchorLoadMoreBtn" style="flex: 1;">
-            <i class="fas fa-chevron-down"></i> ${isEn ? `Show More (+${willLoad})` : `展开更多 (+${willLoad})`}
-          </button>
-        `;
-      }
-      if (canCollapseTemp) {
-        html += `
-          <button class="lazy-load-btn collapse-btn" id="tempAnchorCollapseBtn" style="flex: 1;">
-            <i class="fas fa-chevron-up"></i> ${isEn ? 'Collapse' : '收起'}
-          </button>
-        `;
-      }
-      html += `</div>`;
-    }
-    
+
     html += `
         </div>
       </div>
     `;
-    
+
     panel.innerHTML = html;
 
     const newSlotsList = panel.querySelector('.anchor-slots-container');
-    const newTempSlotsList = panel.querySelector('.temp-anchor-slots-container');
-
-    // 使用原生容器级 API 进行精准、平滑的滚动定位（避免全局 scrollIntoView 导致侧边栏与画布跳动）
     if (newSlotsList) {
       newSlotsList.scrollTop = slotsScrollTop;
-      if (highlightSlotIndex !== null) {
-        const targetEl = panel.querySelector(`.anchor-slots-container .anchor-slot-row[data-index="${highlightSlotIndex}"]`);
+      const highlightIdx = isTempWorkspaceMode ? highlightTempSlotIndex : highlightSlotIndex;
+      if (highlightIdx !== null) {
+        const targetEl = panel.querySelector(`.anchor-slots-container .anchor-slot-row[data-index="${highlightIdx}"]`);
         if (targetEl) {
           requestAnimationFrame(() => {
             scrollSlotRowIntoContainerView(newSlotsList, targetEl, 'smooth');
           });
         }
-        highlightSlotIndex = null;
-      }
-    }
-
-    if (newTempSlotsList) {
-      newTempSlotsList.scrollTop = tempSlotsScrollTop;
-      if (highlightTempSlotIndex !== null) {
-        const targetTempEl = panel.querySelector(`.temp-anchor-slots-container .anchor-slot-row[data-index="${highlightTempSlotIndex}"]`);
-        if (targetTempEl) {
-          requestAnimationFrame(() => {
-            scrollSlotRowIntoContainerView(newTempSlotsList, targetTempEl, 'smooth');
-          });
+        if (isTempWorkspaceMode) {
+          highlightTempSlotIndex = null;
+        } else {
+          highlightSlotIndex = null;
         }
-        highlightTempSlotIndex = null;
       }
     }
 
@@ -5937,139 +6008,39 @@
         }
       }
     }
-    
-    // --- 手动锚点交互绑定 ---
-    const addBtn = panel.querySelector('#addManualAnchorBtn');
-    if (addBtn) {
-      addBtn.addEventListener('click', (e) => {
-        e.preventDefault();
+
+    // --- 事件绑定 ---
+    const settingsBtn = panel.querySelector('#anchorSettingsBtn');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        addManualAnchorFromCurrentViewport();
-      });
-    }
-
-    const manualLoadMoreBtn = panel.querySelector('#manualAnchorLoadMoreBtn');
-    if (manualLoadMoreBtn) {
-      manualLoadMoreBtn.addEventListener('click', () => {
-        const step = getDynamicStep();
-        manualAnchorVisibleLimit += step;
-        try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
-        renderHistoryPanel();
-      });
-    }
-
-    const manualCollapseBtn = panel.querySelector('#manualAnchorCollapseBtn');
-    if (manualCollapseBtn) {
-      manualCollapseBtn.addEventListener('click', () => {
-        const step = getDynamicStep();
-        manualAnchorVisibleLimit = step;
-        try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
-        renderHistoryPanel();
-      });
-    }
-
-    panel.querySelectorAll('.anchor-slots-container .anchor-slot-row').forEach(row => {
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('.anchor-slot-btn') || e.target.closest('.anchor-slot-rename-input')) return;
-        const index = parseInt(row.dataset.index, 10);
-        const currentSlots = loadAnchorSlots();
-        const slot = currentSlots[index];
-        if (!slot) return;
-        saveRememberedSlotIndex(index);
-        navigateToViewportFromAnchor(slot).then(() => {
-          setTimeout(renderHistoryPanel, 50);
-        });
-        const slotNum = index + 1;
-        const displayName = slot.name || (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
-        showSidebarToast(isEn ? `Anchor: ${displayName}` : `已切换至锚点：${displayName}`, 'info');
-      });
-    });
-
-    panel.querySelectorAll('.anchor-slots-container .anchor-slot-btn').forEach(btn => {
-      const index = parseInt(btn.dataset.index, 10);
-      const action = btn.classList.contains('locate-btn') ? 'locate' :
-                     btn.classList.contains('save-btn') ? 'save' :
-                     btn.classList.contains('rename-btn') ? 'rename' :
-                     btn.classList.contains('delete-btn') ? 'delete' : null;
-      
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        handleSlotAction(action, index, btn);
-      });
-    });
-
-    const manualSettingsBtn = panel.querySelector('#manualAnchorSettingsBtn');
-    if (manualSettingsBtn) {
-      manualSettingsBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (manualAnchorSettingsOpen) {
-          saveManualSettingsOnCollapse();
-          manualAnchorSettingsOpen = false;
+        if (anchorSettingsOpen) {
+          saveSettingsOnCollapse();
+          anchorSettingsOpen = false;
           renderHistoryPanel();
         } else {
-          manualAnchorSettingsOpen = true;
-          const inlinePanel = panel.querySelector('#manualAnchorInlineSettings');
+          anchorSettingsOpen = true;
+          const inlinePanel = panel.querySelector('#anchorInlineSettings');
           if (inlinePanel) {
             inlinePanel.style.display = '';
           }
         }
       });
     }
-    
-    const manualLimitInput = panel.querySelector('#inlineManualAnchorLimitInput');
-    if (manualLimitInput) {
-      manualLimitInput.addEventListener('change', () => {
-        const rawVal = manualLimitInput.value.trim();
-        let val = 5; // default
-        if (/^[1-9]\d*$/.test(rawVal)) {
-          const parsed = parseInt(rawVal, 10);
-          val = Math.max(1, Math.min(50, parsed));
-        }
-        manualLimitInput.value = val;
-        updateManualAnchorLimit(val);
-        renderHistoryPanel();
-      });
-    }
 
-    const openManualShortcutsBtn = panel.querySelector('#openManualAnchorShortcutsBtn');
-    if (openManualShortcutsBtn) {
-      openManualShortcutsBtn.addEventListener('click', (e) => {
+    const tempToggleBtn = panel.querySelector('#tempWorkspaceToggleBtn');
+    if (tempToggleBtn) {
+      tempToggleBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        openShortcutsModalFromSidebar('manual');
-      });
-    }
-
-    // --- 临时锚点交互绑定 ---
-    const inlineTempCheck = panel.querySelector('#inlineTempAnchorCheck');
-    if (inlineTempCheck) {
-      inlineTempCheck.addEventListener('change', () => {
-        if (inlineTempCheck.checked && isCanvasNodeFullscreenActive()) {
-          inlineTempCheck.checked = false;
-          showAnchorMutationBlockedToast(isEn);
-          return;
-        }
-        saveTempAnchorEnabledState(inlineTempCheck.checked);
-        if (!isTempAnchorEnabled && tempAnchorSettingsOpen) {
-          saveTempSettingsOnCollapse();
-          tempAnchorSettingsOpen = false;
-        }
-        renderHistoryPanel();
-      });
-    }
-
-    const addTempBtn = panel.querySelector('#addTempAnchorBtn');
-    if (addTempBtn) {
-      addTempBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        addTempAnchorFromCurrentViewport();
+        toggleTempWorkspaceMode();
       });
     }
 
     const tempClearBtn = panel.querySelector('#tempClearBtn');
     if (tempClearBtn) {
       tempClearBtn.addEventListener('click', (e) => {
+        e.preventDefault();
         e.stopPropagation();
         const limit = getTempAnchorLimit();
         tempAnchorSlots = new Array(limit).fill(null);
@@ -6082,93 +6053,77 @@
       });
     }
 
-    const tempSettingsBtn = panel.querySelector('#tempAnchorSettingsBtn');
-    if (tempSettingsBtn) {
-      tempSettingsBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (tempAnchorSettingsOpen) {
-          saveTempSettingsOnCollapse();
-          tempAnchorSettingsOpen = false;
-          renderHistoryPanel();
-        } else {
-          tempAnchorSettingsOpen = true;
-          const inlinePanel = panel.querySelector('#tempAnchorInlineSettings');
-          if (inlinePanel) {
-            inlinePanel.style.display = '';
-          }
-        }
-      });
-    }
-
-    const tempLimitInput = panel.querySelector('#inlineTempAnchorLimitInput');
-    if (tempLimitInput) {
-      tempLimitInput.addEventListener('change', () => {
-        const rawVal = tempLimitInput.value.trim();
-        let val = 5; // default
-        if (/^[1-9]\d*$/.test(rawVal)) {
-          const parsed = parseInt(rawVal, 10);
-          val = Math.max(1, Math.min(50, parsed));
-        }
-        tempLimitInput.value = val;
-        updateTempAnchorLimit(val);
-        renderHistoryPanel();
-      });
-    }
-
-    const openTempShortcutsBtn = panel.querySelector('#openTempAnchorShortcutsBtn');
-    if (openTempShortcutsBtn) {
-      openTempShortcutsBtn.addEventListener('click', (e) => {
+    const addBtn = panel.querySelector('#addAnchorBtn');
+    if (addBtn) {
+      addBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        openShortcutsModalFromSidebar('temp');
+        if (isTempWorkspaceMode) {
+          addTempAnchorFromCurrentViewport();
+        } else {
+          addManualAnchorFromCurrentViewport();
+        }
       });
     }
 
-    const tempLoadMoreBtn = panel.querySelector('#tempAnchorLoadMoreBtn');
-    if (tempLoadMoreBtn) {
-      tempLoadMoreBtn.addEventListener('click', () => {
+    const openShortcutsBtn = panel.querySelector('#openAnchorShortcutsBtn');
+    if (openShortcutsBtn) {
+      openShortcutsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openShortcutsModalFromSidebar(isTempWorkspaceMode ? 'anchorTempWorkspace' : 'anchorRecord');
+      });
+    }
+
+    const loadMoreBtn = panel.querySelector('#anchorLoadMoreBtn');
+    if (loadMoreBtn) {
+      loadMoreBtn.addEventListener('click', () => {
         const step = getDynamicStep();
-        tempAnchorVisibleLimit += step;
+        if (isTempWorkspaceMode) {
+          tempAnchorVisibleLimit += step;
+        } else {
+          manualAnchorVisibleLimit += step;
+          try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
+        }
         renderHistoryPanel();
       });
     }
 
-    const tempCollapseBtn = panel.querySelector('#tempAnchorCollapseBtn');
-    if (tempCollapseBtn) {
-      tempCollapseBtn.addEventListener('click', () => {
+    const collapseBtn = panel.querySelector('#anchorCollapseBtn');
+    if (collapseBtn) {
+      collapseBtn.addEventListener('click', () => {
         const step = getDynamicStep();
-        tempAnchorVisibleLimit = step;
+        if (isTempWorkspaceMode) {
+          tempAnchorVisibleLimit = step;
+        } else {
+          manualAnchorVisibleLimit = step;
+          try { localStorage.setItem('canvas-manual-anchor-visible-limit', manualAnchorVisibleLimit); } catch (_) {}
+        }
         renderHistoryPanel();
       });
     }
 
-    panel.querySelectorAll('.temp-anchor-slots-container .anchor-slot-row').forEach(row => {
+    panel.querySelectorAll('.anchor-slots-container .anchor-slot-row').forEach(row => {
       row.addEventListener('click', (e) => {
         if (e.target.closest('.anchor-slot-btn') || e.target.closest('.anchor-slot-rename-input')) return;
         const index = parseInt(row.dataset.index, 10);
-        const currentSlots = loadTempAnchorSlots();
-        const slot = currentSlots[index];
-        if (!slot) return;
-        rememberedTempSlotIndex = index;
-        navigateToViewportFromAnchor(slot).then(() => {
-          setTimeout(renderHistoryPanel, 50);
-        });
-        const slotNum = index + 1;
-        const displayName = slot.name || (isEn ? `Temp Slot ${slotNum}` : `临时槽位 ${slotNum}`);
-        showSidebarToast(isEn ? `Temp Anchor: ${displayName}` : `已切换至临时锚点：${displayName}`, 'info');
+        locateAnchorByIndex(index);
       });
     });
 
-    panel.querySelectorAll('.temp-anchor-slots-container .anchor-slot-btn').forEach(btn => {
+    panel.querySelectorAll('.anchor-slots-container .anchor-slot-btn').forEach(btn => {
       const index = parseInt(btn.dataset.index, 10);
       const action = btn.classList.contains('locate-btn') ? 'locate' :
                      btn.classList.contains('save-btn') ? 'save' :
                      btn.classList.contains('rename-btn') ? 'rename' :
                      btn.classList.contains('delete-btn') ? 'delete' : null;
-      
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        handleTempSlotAction(action, index, btn);
+        if (isTempWorkspaceMode) {
+          handleTempSlotAction(action, index, btn);
+        } else {
+          handleSlotAction(action, index, btn);
+        }
       });
     });
   }
@@ -6370,27 +6325,16 @@
     });
 
     document.addEventListener('click', (e) => {
-      const manualPanel = document.getElementById('manualAnchorInlineSettings');
-      const manualBtn = document.getElementById('manualAnchorSettingsBtn');
-      const tempPanel = document.getElementById('tempAnchorInlineSettings');
-      const tempBtn = document.getElementById('tempAnchorSettingsBtn');
+      const anchorPanel = document.getElementById('anchorInlineSettings');
+      const anchorBtn = document.getElementById('anchorSettingsBtn');
 
       let changed = false;
 
-      // Click outside manual settings panel & button collapses manual panel
-      if (manualAnchorSettingsOpen && manualPanel && manualBtn) {
-        if (!manualPanel.contains(e.target) && !manualBtn.contains(e.target)) {
-          saveManualSettingsOnCollapse();
-          manualAnchorSettingsOpen = false;
-          changed = true;
-        }
-      }
-
-      // Click outside temp settings panel & button collapses temp panel
-      if (tempAnchorSettingsOpen && tempPanel && tempBtn) {
-        if (!tempPanel.contains(e.target) && !tempBtn.contains(e.target)) {
-          saveTempSettingsOnCollapse();
-          tempAnchorSettingsOpen = false;
+      // Click outside anchor settings panel & button collapses settings panel
+      if (anchorSettingsOpen && anchorPanel && anchorBtn) {
+        if (!anchorPanel.contains(e.target) && !anchorBtn.contains(e.target)) {
+          saveSettingsOnCollapse();
+          anchorSettingsOpen = false;
           changed = true;
         }
       }
@@ -6410,6 +6354,9 @@
     refresh,
     navigateManualAnchorSlot,
     navigateTempAnchorSlot,
+    locateAnchorByIndex,
+    toggleTempWorkspaceMode,
+    isTempWorkspaceMode: () => isTempWorkspaceMode,
     addManualAnchorFromCurrentViewport,
     addTempAnchorFromCurrentViewport,
     getManualAnchorSlots: () => loadAnchorSlots(),
