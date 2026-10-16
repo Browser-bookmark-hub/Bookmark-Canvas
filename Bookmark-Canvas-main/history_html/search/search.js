@@ -22647,6 +22647,8 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             placeholder: placeholderText,
             columnHeaderSortMulti: true,
             movableColumns: true,
+            debugInvalidComponentFuncs: false,
+            debugInvalidOptions: false,
             columnDefaults: {
                 headerSortTristate: true
             },

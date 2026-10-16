@@ -8866,8 +8866,8 @@ function setupCanvasZoomAndPan() {
         }
 
         if (e.repeat || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-        // 在 contenteditable 元素内编辑时不拦截键盘事件（允许输入空格等）
-        if (e.target.isContentEditable || e.target.closest('[contenteditable="true"]')) return;
+        // 在 contenteditable 元素内编辑时不拦截键盘事件（允许输入空格等，使用可选链防御 e.target 为 document 的情况）
+        if (e.target.isContentEditable || e.target?.closest?.('[contenteditable="true"]')) return;
 
         if (isSpaceShortcut && !__isCanvasNodeMaximizedActive()) {
             e.preventDefault();
