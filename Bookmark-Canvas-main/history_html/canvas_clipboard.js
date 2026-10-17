@@ -2,6 +2,7 @@
     'use strict';
 
     const STORAGE_KEY = 'bcs:clipboard-history';
+    const LIMIT_STORAGE_KEY = 'bcs:clipboard-limit';
     const MIN_LIMIT = 1;
     const MAX_LIMIT = 50;
     const DEFAULT_LIMIT = 7;
@@ -22,6 +23,34 @@
         return null;
     }
 
+    function getPersistentArea() {
+        return getArea();
+    }
+
+    function readPersistentLimit() {
+        const area = getPersistentArea();
+        if (!area) {
+            try { return Number.parseInt(localStorage.getItem(LIMIT_STORAGE_KEY), 10) || null; } catch (_) { return null; }
+        }
+        return new Promise((resolve) => {
+            try {
+                area.get([LIMIT_STORAGE_KEY], (items) => {
+                    const val = items && items[LIMIT_STORAGE_KEY];
+                    resolve(Number.parseInt(val, 10) || null);
+                });
+            } catch (_) { resolve(null); }
+        });
+    }
+
+    function savePersistentLimit(val) {
+        const area = getPersistentArea();
+        if (!area) {
+            try { localStorage.setItem(LIMIT_STORAGE_KEY, String(val)); } catch (_) {}
+            return;
+        }
+        try { area.set({ [LIMIT_STORAGE_KEY]: val }); } catch (_) {}
+    }
+
     function normalize(raw) {
         const input = raw && typeof raw === 'object' ? raw : {};
         const limit = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Number.parseInt(input.limit, 10) || DEFAULT_LIMIT));
@@ -32,17 +61,6 @@
 
     function getActiveEntry() {
         return state.entries.find((entry) => entry && entry.id === state.activeEntryId) || null;
-    }
-
-    function promoteLatestEntry() {
-        if (state.activeEntryId || !Array.isArray(state.entries)) return null;
-        const entry = state.entries.find((item) => item && item.cutState !== 'claimed');
-        if (!entry) return null;
-        if (entry.originalOperation === 'cut' && entry.cutState === 'pending') entry.cutState = 'superseded';
-        entry.currentOperation = 'copy';
-        entry.updatedAt = Date.now();
-        state.activeEntryId = entry.id;
-        return entry;
     }
 
     function notify() {
@@ -66,7 +84,12 @@
     }
 
     function persist() {
-        const snapshot = clone(state);
+        const snapshot = {
+            version: 1,
+            limit: state.limit,
+            activeEntryId: null,
+            entries: clone(state.entries)
+        };
         writeChain = writeChain.then(() => new Promise((resolve) => {
             const area = getArea();
             if (!area) {
@@ -111,7 +134,19 @@
 
     async function init() {
         if (initialized) return state;
-        state = normalize(await readStorage());
+        const [raw, persistentLimit, remote] = await Promise.all([
+            readStorage(),
+            readPersistentLimit(),
+            sendRuntimeMessage({ action: 'canvasClipboardMutate', operation: 'get-state' })
+        ]);
+        const merged = raw && typeof raw === 'object' ? raw : {};
+        if (merged.limit == null && persistentLimit) merged.limit = persistentLimit;
+        state = normalize(merged);
+        if (remote && remote.success && remote.state && remote.state.activeEntryId) {
+            state.activeEntryId = remote.state.activeEntryId;
+        } else {
+            state.activeEntryId = null;
+        }
         initialized = true;
         notify();
         return state;
@@ -312,8 +347,19 @@
         }
         state.entries = state.entries.filter((entry) => entry.id !== id);
         if (state.activeEntryId === id) state.activeEntryId = null;
-        promoteLatestEntry();
         selectedIds.delete(id);
+        await persist();
+        notify();
+    }
+
+    async function deactivateActive() {
+        await init();
+        const remote = await mutateInBackground('deactivate-active');
+        if (remote) {
+            notify();
+            return;
+        }
+        state.activeEntryId = null;
         await persist();
         notify();
     }
@@ -335,15 +381,16 @@
 
     async function setLimit(value) {
         await init();
-        const remote = await mutateInBackground('set-limit', { limit: value });
+        const nextLimit = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Number.parseInt(value, 10) || DEFAULT_LIMIT));
+        savePersistentLimit(nextLimit);
+        const remote = await mutateInBackground('set-limit', { limit: nextLimit });
         if (remote) {
             notify();
             return;
         }
-        state.limit = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Number.parseInt(value, 10) || DEFAULT_LIMIT));
+        state.limit = nextLimit;
         state.entries = state.entries.slice(0, state.limit);
         if (!state.entries.some((entry) => entry.id === state.activeEntryId)) state.activeEntryId = null;
-        promoteLatestEntry();
         await persist();
         notify();
     }
@@ -453,6 +500,10 @@
         setText('canvasClipboardLimitUnit', text('条', 'items'));
         setText('canvasClipboardSaveSettingsBtn', text('保存', 'Save'));
         setText('canvasClipboardCancelBtn', text('取消', 'Cancel'));
+        setText('canvasClipboardSettingsTipText', text(
+            '剪贴板记录保存在本地；全部画布与侧边栏关闭后，右键待粘贴状态自动清空，可在剪贴板中重新选取应用。',
+            'Clipboard history is saved locally. Active paste states clear automatically after all canvas tabs and sidebars are closed, and can be reapplied from the clipboard panel.'
+        ));
         setLabel('canvasClipboardSettingsBtn', text('剪贴板设置', 'Clipboard settings'));
         setLabel('canvasClipboardClearBtn', text('清空剪贴板', 'Clear clipboard'));
         setLabel('canvasClipboardModalClose', text('关闭', 'Close'));
@@ -610,16 +661,55 @@
         document.addEventListener('copy', (event) => { if (!shouldCaptureTextCopy(event)) return; const selection = getCopiedCanvasText(event); if (selection.trim()) addText(selection); });
     }
 
-    global.addEventListener('storage', (event) => { if (event.key === STORAGE_KEY) { init().then(() => { try { state = normalize(JSON.parse(event.newValue || '{}')); notify(); } catch (_) {} }); } });
+    global.addEventListener('storage', (event) => {
+        if (!getArea() && event.key === STORAGE_KEY) {
+            init().then(() => {
+                try {
+                    const parsed = JSON.parse(event.newValue || '{}');
+                    state.entries = Array.isArray(parsed.entries) ? parsed.entries.slice(0, state.limit) : [];
+                    if (!state.entries.some((entry) => entry && entry.id === state.activeEntryId)) {
+                        state.activeEntryId = null;
+                    }
+                    notify();
+                } catch (_) {}
+            });
+        }
+    });
     try {
         if (chrome && chrome.storage && chrome.storage.onChanged) {
-            chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes[STORAGE_KEY]) { state = normalize(changes[STORAGE_KEY].newValue); initialized = true; notify(); } });
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area === 'local' && changes[STORAGE_KEY]) {
+                    const newRaw = changes[STORAGE_KEY].newValue;
+                    if (newRaw && Array.isArray(newRaw.entries)) {
+                        state.entries = newRaw.entries.slice(0, state.limit);
+                        if (!state.entries.some((entry) => entry && entry.id === state.activeEntryId)) {
+                            state.activeEntryId = null;
+                        }
+                    } else if (!newRaw) {
+                        state.entries = [];
+                        state.activeEntryId = null;
+                    }
+                    initialized = true;
+                    notify();
+                }
+            });
+        }
+    } catch (_) {}
+    try {
+        if (chrome && chrome.runtime && chrome.runtime.onMessage) {
+            chrome.runtime.onMessage.addListener((message) => {
+                if (message && message.action === 'canvasClipboardStateBroadcast' && message.state) {
+                    state = normalize(message.state);
+                    initialized = true;
+                    notify();
+                }
+            });
         }
     } catch (_) {}
 
     global.CanvasClipboard = {
         init, addStructured, addText, getActivePayload, consumeActiveCut, claimActiveStructuredForPaste, finishClaimedCut,
-        cancelActiveCut, activateSelected, removeEntry, clear, setLimit,
+        cancelActiveCut, activateSelected, deactivateActive, removeEntry, clear, setLimit,
         open() {
             const modal = document.getElementById('canvasClipboardModal');
             if (!modal) return;

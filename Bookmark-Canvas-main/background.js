@@ -47,10 +47,20 @@ const activeForegroundPorts = new Map();
 let foregroundActivePortListenerRegistered = false;
 
 const CANVAS_CLIPBOARD_STORAGE_KEY = 'bcs:clipboard-history';
+const CANVAS_CLIPBOARD_LIMIT_STORAGE_KEY = 'bcs:clipboard-limit';
 const CANVAS_CLIPBOARD_MIN_LIMIT = 1;
 const CANVAS_CLIPBOARD_MAX_LIMIT = 50;
 const CANVAS_CLIPBOARD_DEFAULT_LIMIT = 7;
 let canvasClipboardOperation = Promise.resolve();
+let canvasClipboardActiveEntryId = null;
+let canvasClipboardResetTimer = null;
+
+// Clean up any residual session storage clipboard keys from prior versions
+try {
+  if (browserAPI?.storage?.session) {
+    browserAPI.storage.session.remove([CANVAS_CLIPBOARD_STORAGE_KEY]).catch?.(() => {});
+  }
+} catch (_) {}
 
 function cloneCanvasClipboardValue(value) {
   try {
@@ -89,27 +99,51 @@ function supersedePriorCanvasClipboardCuts(state) {
   });
 }
 
-function promoteLatestCanvasClipboardEntry(state) {
-  if (state.activeEntryId || !Array.isArray(state.entries)) return null;
-  const entry = state.entries.find((item) => item && item.cutState !== 'claimed');
-  if (!entry) return null;
-  if (entry.originalOperation === 'cut' && entry.cutState === 'pending') {
-    entry.cutState = 'superseded';
-  }
-  entry.currentOperation = 'copy';
-  entry.updatedAt = Date.now();
-  state.activeEntryId = entry.id;
-  return entry;
+async function getCanvasClipboardLimit() {
+  const local = await storageLocalGet([CANVAS_CLIPBOARD_LIMIT_STORAGE_KEY]);
+  const limit = Number.parseInt(local[CANVAS_CLIPBOARD_LIMIT_STORAGE_KEY], 10);
+  return (Number.isFinite(limit) && limit >= CANVAS_CLIPBOARD_MIN_LIMIT && limit <= CANVAS_CLIPBOARD_MAX_LIMIT)
+    ? limit
+    : CANVAS_CLIPBOARD_DEFAULT_LIMIT;
+}
+
+function broadcastCanvasClipboardState(state, activePayload) {
+  try {
+    if (browserAPI?.runtime?.sendMessage) {
+      browserAPI.runtime.sendMessage({
+        action: 'canvasClipboardStateBroadcast',
+        state,
+        activePayload
+      }, () => {
+        try { const _ = browserAPI.runtime.lastError; } catch (_) {}
+      });
+    }
+  } catch (_) {}
 }
 
 async function updateCanvasClipboardState(mutator) {
   return runCanvasClipboardOperation(async () => {
-    const items = await storageLocalGet([CANVAS_CLIPBOARD_STORAGE_KEY]);
-    const state = normalizeCanvasClipboardState(items[CANVAS_CLIPBOARD_STORAGE_KEY]);
+    const [localItems, persistentLimit] = await Promise.all([
+      storageLocalGet([CANVAS_CLIPBOARD_STORAGE_KEY]),
+      getCanvasClipboardLimit()
+    ]);
+    const raw = localItems[CANVAS_CLIPBOARD_STORAGE_KEY] || {};
+    if (raw.limit == null) raw.limit = persistentLimit;
+    const state = normalizeCanvasClipboardState(raw);
+    state.activeEntryId = canvasClipboardActiveEntryId;
     const result = await mutator(state);
     const normalized = normalizeCanvasClipboardState(state);
-    const success = await storageLocalSet({ [CANVAS_CLIPBOARD_STORAGE_KEY]: normalized });
-    return { success, state: normalized, ...result };
+    canvasClipboardActiveEntryId = normalized.activeEntryId;
+    const diskSnapshot = {
+      version: 1,
+      limit: normalized.limit,
+      activeEntryId: null,
+      entries: normalized.entries
+    };
+    const success = await storageLocalSet({ [CANVAS_CLIPBOARD_STORAGE_KEY]: diskSnapshot });
+    const activePayload = buildCanvasClipboardActivePayload(normalized);
+    broadcastCanvasClipboardState(normalized, activePayload);
+    return { success, state: normalized, activePayload, ...result };
   });
 }
 
@@ -128,6 +162,10 @@ function buildCanvasClipboardActivePayload(state) {
 async function handleCanvasClipboardMutation(message) {
   const operation = String(message && message.operation || '');
   return updateCanvasClipboardState(async (state) => {
+    if (operation === 'get-state') {
+      return { activePayload: buildCanvasClipboardActivePayload(state) };
+    }
+
     if (operation === 'add-entry') {
       const entry = cloneCanvasClipboardValue(message.entry);
       if (!entry || !entry.id) return { error: 'invalid_entry' };
@@ -150,11 +188,26 @@ async function handleCanvasClipboardMutation(message) {
       return { activePayload: buildCanvasClipboardActivePayload(state) };
     }
 
+    if (operation === 'activate-entry') {
+      const id = String(message.entryId || '');
+      const entry = state.entries.find((item) => item && item.id === id);
+      if (!entry) return { error: 'entry_not_found' };
+      supersedePriorCanvasClipboardCuts(state);
+      entry.currentOperation = 'copy';
+      entry.updatedAt = Date.now();
+      state.activeEntryId = id;
+      return { activePayload: buildCanvasClipboardActivePayload(state) };
+    }
+
+    if (operation === 'deactivate-active') {
+      state.activeEntryId = null;
+      return { activePayload: null };
+    }
+
     if (operation === 'remove-entry') {
       const id = String(message.entryId || '');
       state.entries = state.entries.filter((entry) => entry && entry.id !== id);
       if (state.activeEntryId === id) state.activeEntryId = null;
-      promoteLatestCanvasClipboardEntry(state);
       return { activePayload: buildCanvasClipboardActivePayload(state) };
     }
 
@@ -165,13 +218,14 @@ async function handleCanvasClipboardMutation(message) {
     }
 
     if (operation === 'set-limit') {
-      state.limit = Math.min(
+      const nextLimit = Math.min(
         CANVAS_CLIPBOARD_MAX_LIMIT,
         Math.max(CANVAS_CLIPBOARD_MIN_LIMIT, Number.parseInt(message.limit, 10) || CANVAS_CLIPBOARD_DEFAULT_LIMIT)
       );
+      state.limit = nextLimit;
       state.entries = state.entries.slice(0, state.limit);
       if (!state.entries.some((entry) => entry && entry.id === state.activeEntryId)) state.activeEntryId = null;
-      promoteLatestCanvasClipboardEntry(state);
+      storageLocalSet({ [CANVAS_CLIPBOARD_LIMIT_STORAGE_KEY]: nextLimit }).catch?.(() => {});
       return { activePayload: buildCanvasClipboardActivePayload(state) };
     }
 
@@ -444,6 +498,11 @@ function registerCanvasForegroundActivePortListener() {
   browserAPI.runtime.onConnect.addListener((port) => {
     if (!port || port.name !== CANVAS_FOREGROUND_ACTIVE_PORT) return;
 
+    if (canvasClipboardResetTimer) {
+      clearTimeout(canvasClipboardResetTimer);
+      canvasClipboardResetTimer = null;
+    }
+
     // A connecting page is not considered runnable until it explicitly reports
     // its lifecycle state. This avoids treating a reconnected frozen document
     // as the owner of permanent-bookmark BCS updates.
@@ -465,6 +524,14 @@ function registerCanvasForegroundActivePortListener() {
         }
       } catch (_) { }
       activeForegroundPorts.delete(port);
+      if (activeForegroundPorts.size === 0) {
+        if (canvasClipboardResetTimer) clearTimeout(canvasClipboardResetTimer);
+        canvasClipboardResetTimer = setTimeout(() => {
+          if (activeForegroundPorts.size === 0) {
+            canvasClipboardActiveEntryId = null;
+          }
+        }, 2500);
+      }
       try {
         port.onMessage.removeListener(onMessage);
         port.onDisconnect.removeListener(onDisconnect);

@@ -1002,10 +1002,16 @@
                             </div>
                             <div class="canvas-manage-modal-body canvas-clipboard-modal-body">
                                 <div class="canvas-clipboard-settings" id="canvasClipboardSettings" hidden>
-                                    <label id="canvasClipboardLimitLabel" for="canvasClipboardLimitInput">最多保存</label>
-                                    <input id="canvasClipboardLimitInput" name="canvasClipboardLimitInput" type="number" min="1" max="50" inputmode="numeric" />
-                                    <span id="canvasClipboardLimitUnit">条</span>
-                                    <button id="canvasClipboardSaveSettingsBtn" type="button">保存</button>
+                                    <div class="canvas-clipboard-settings-row">
+                                        <label id="canvasClipboardLimitLabel" for="canvasClipboardLimitInput">最多保存</label>
+                                        <input id="canvasClipboardLimitInput" name="canvasClipboardLimitInput" type="number" min="1" max="50" inputmode="numeric" />
+                                        <span id="canvasClipboardLimitUnit">条</span>
+                                        <button id="canvasClipboardSaveSettingsBtn" type="button">保存</button>
+                                    </div>
+                                    <div class="canvas-clipboard-settings-tip" id="canvasClipboardSettingsTip">
+                                        <i class="fas fa-info-circle"></i>
+                                        <span id="canvasClipboardSettingsTipText">剪贴板记录保存在本地；全部画布与侧边栏关闭后，右键待粘贴状态自动清空，可在剪贴板中重新选取应用。</span>
+                                    </div>
                                 </div>
                                 <div class="canvas-clipboard-list" id="canvasClipboardList"></div>
                             </div>
