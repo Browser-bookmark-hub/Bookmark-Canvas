@@ -622,19 +622,19 @@
 }
 
 html[lang="en"] .canvas-manage-modal {
-    min-width: 400px;
+    min-width: 280px;
     width: min(420px, calc(100vw - 16px));
 }
 
 html[lang="en"] #canvasManageModal.canvas-manage-modal {
-    min-width: 360px;
+    min-width: 280px;
     width: min(372px, calc(100vw - 16px));
     transform: translate(-4px, -4px);
 }
 
 #canvasShortcutsModal.canvas-manage-modal,
 #canvasOpenSourceModal.canvas-manage-modal {
-    min-width: 440px;
+    min-width: 280px;
     width: min(480px, calc(100vw - 16px));
 }
 
@@ -644,7 +644,7 @@ html[lang="en"] #canvasManageModal.canvas-manage-modal {
 
 html[lang="en"] #canvasShortcutsModal.canvas-manage-modal,
 html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
-    min-width: 480px;
+    min-width: 280px;
     width: min(520px, calc(100vw - 16px));
 }
 
@@ -717,8 +717,8 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
 
 /* ==================== Canvas clipboard ==================== */
 .canvas-clipboard-modal {
-    width: min(560px, calc(100vw - 16px));
-    min-width: 420px;
+    width: min(420px, calc(100vw - 16px));
+    min-width: 280px;
 }
 
 .canvas-clipboard-header-actions {
@@ -823,6 +823,81 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     .canvas-clipboard-modal { min-width: 0; width: calc(100vw - 16px); }
     .canvas-clipboard-entry-meta time { display: none; }
     .canvas-clipboard-header-actions { gap: 3px; }
+}
+
+html.side-panel-mode .canvas-manage-modal {
+    left: 8px;
+    min-width: 280px;
+    max-width: calc(100vw - 16px);
+}
+
+html.side-panel-mode .canvas-clipboard-modal,
+html.side-panel-mode #canvasShortcutsModal.canvas-manage-modal,
+html.side-panel-mode #canvasOpenSourceModal.canvas-manage-modal {
+    min-width: 280px;
+    width: calc(100vw - 16px);
+}
+
+html.side-panel-mode .canvas-clipboard-entry-meta time {
+    display: none;
+}
+
+html.side-panel-mode .canvas-clipboard-header-actions {
+    gap: 3px;
+}
+
+html.side-panel-mode .canvas-help-row {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 6px;
+}
+
+html.side-panel-mode .canvas-help-desc {
+    text-align: left !important;
+    max-width: 100% !important;
+    padding-left: 8px;
+}
+
+html.side-panel-mode .canvas-help-pointer-action {
+    align-self: stretch;
+    max-width: 100%;
+    text-align: left;
+    padding-left: 8px;
+    justify-content: flex-start;
+}
+
+html.side-panel-mode .canvas-help-pointer-info {
+    max-width: 100%;
+    margin: 1px 0 5px;
+    text-align: left;
+    padding-left: 8px;
+}
+
+#canvasShortcutsModal.show {
+    display: block !important;
+}
+
+html.side-panel-mode .click-to-clear-toolbar {
+    bottom: 48px;
+    padding: 6px 10px;
+    max-width: calc(100vw - 16px);
+    width: max-content;
+}
+
+html.side-panel-mode .click-to-clear-toolbar-content {
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
+html.side-panel-mode .click-to-clear-count {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+html.side-panel-mode .click-to-clear-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+    gap: 4px;
 }
 
 html[lang="en"] #canvasManageModal .canvas-manage-modal-header {
@@ -2464,7 +2539,7 @@ body.canvas-popover-active .md-align-popover {
 /* 点击清除浮动工具栏 */
 .click-to-clear-toolbar {
     position: fixed;
-    bottom: 24px;
+    bottom: 72px;
     left: 50%;
     transform: translateX(-50%);
     background: var(--bg-elevated, #ffffff);
@@ -2529,11 +2604,15 @@ body.canvas-popover-active .md-align-popover {
 
 .click-to-clear-actions {
     display: flex;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center;
     gap: 8px;
 }
 
 .click-to-clear-btn {
     display: flex;
+    flex-direction: row !important;
     align-items: center;
     gap: 6px;
     padding: 8px 14px;
@@ -2543,6 +2622,8 @@ body.canvas-popover-active .md-align-popover {
     color: var(--text-primary);
     font-size: 13px;
     cursor: pointer;
+    white-space: nowrap !important;
+    flex-shrink: 0;
     transition: all 0.15s ease;
 }
 
@@ -2659,6 +2740,9 @@ body.canvas-popover-active .md-align-popover {
 
 .click-to-clear-confirm-actions {
     display: flex;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center;
     gap: 10px;
     margin-top: 6px;
     width: 100%;
@@ -2671,8 +2755,10 @@ body.canvas-popover-active .md-align-popover {
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
+    white-space: nowrap !important;
     transition: all 0.15s ease;
     display: flex;
+    flex-direction: row !important;
     align-items: center;
     justify-content: center;
     gap: 6px;

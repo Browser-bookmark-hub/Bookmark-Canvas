@@ -167,8 +167,13 @@ function updateShortcutsDisplay() {
                 } catch (_) { }
 
                 try {
+                    if (typeof window.openCanvasShortcutsModal === 'function') {
+                        window.openCanvasShortcutsModal({ anchorToSettings: true });
+                        return;
+                    }
                     const canvasShortcutsModal = document.getElementById('canvasShortcutsModal');
                     if (canvasShortcutsModal) {
+                        canvasShortcutsModal.style.display = 'block';
                         canvasShortcutsModal.classList.add('show');
                         if (window.CanvasModule && typeof window.CanvasModule.updateShortcutDisplays === 'function') {
                             window.CanvasModule.updateShortcutDisplays();

@@ -4751,10 +4751,11 @@ a.tree-label.tree-bookmark-link:hover {
     box-shadow: var(--shadow-lg);
 }
 
-/* 外观设置弹窗：横向稍微更宽 */
-.modal-content.appearance-settings-modal {
-    width: 70%;
-    max-width: 700px;
+/* 外观设置与滚动缩放弹窗：采用现代化卡片式紧凑宽度 */
+.modal-content.appearance-settings-modal,
+.modal-content.other-settings-modal {
+    width: 540px;
+    max-width: 92vw;
 }
 
 /* 专门给快捷键二级 UI 使用：覆盖默认宽度为“按内容自适应” */
