@@ -3840,6 +3840,7 @@ body.sidebar-resizing * {
     box-sizing: border-box;
     cursor: pointer;
     user-select: none;
+    -webkit-user-select: none;
     color: var(--text-secondary);
     font-size: 10px;
     font-weight: 500;
@@ -4046,13 +4047,20 @@ body.sidebar-resizing * {
     box-sizing: border-box;
     color: var(--text-secondary);
     cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
     border-radius: 6px;
     transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
     position: relative;
 }
 
 .canvas-dir-item-btn.canvas-dir-item-btn-has-delete {
-    padding-right: 22px;
+    padding-right: 6px;
+}
+
+.canvas-dir-item:hover>.canvas-dir-item-btn.canvas-dir-item-btn-has-delete,
+.canvas-dir-item:focus-within>.canvas-dir-item-btn.canvas-dir-item-btn-has-delete {
+    padding-right: 38px;
 }
 
 .canvas-dir-item-delete-wrap {
@@ -4115,16 +4123,10 @@ body.sidebar-resizing * {
     position: absolute;
     left: calc(-1 * var(--canvas-tree-indent));
     top: 50%;
-    width: calc(var(--canvas-tree-indent) + var(--canvas-tree-toggle-center));
+    width: var(--canvas-tree-indent);
     border-top: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
     transform: translateY(-0.5px);
     pointer-events: none;
-}
-
-/* 链式/特殊目录：水平引导线稍短，避免插入图标区域 */
-.canvas-dir-folder[data-node-key$="temp-split"]>summary::before,
-.canvas-dir-folder[data-node-key$="temp-special"]>summary::before {
-    width: calc(var(--canvas-tree-indent) + var(--canvas-tree-toggle-center) - 4px);
 }
 
 .canvas-dir-children>.canvas-dir-item>.canvas-dir-item-btn.canvas-dir-no-icon::before,
@@ -4202,15 +4204,21 @@ body.sidebar-resizing * {
 .canvas-dir-folder-delete-wrap:focus-within,
 .canvas-dir-folder-delete-wrap.is-open {
     margin-left: 4px;
-    gap: 4px;
+    gap: 3px;
     flex: 0 0 auto;
     width: auto;
     overflow: visible;
     opacity: 1;
     pointer-events: auto;
-    background: var(--bg-primary);
+    background: transparent;
     border-radius: 6px;
-    box-shadow: 0 0 0 2px var(--bg-primary);
+    box-shadow: none;
+}
+
+.canvas-dir-folder-delete-wrap.is-open {
+    background: color-mix(in srgb, var(--bg-secondary) 85%, transparent);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    padding: 0 2px;
 }
 
 .canvas-dir-folder-locate {
@@ -4236,6 +4244,100 @@ body.sidebar-resizing * {
 .canvas-dir-folder-locate:hover {
     background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
     color: var(--accent-primary);
+}
+
+.canvas-dir-pin-btn,
+.canvas-dir-unpin-btn {
+    margin-left: 0;
+    width: 14px;
+    height: 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    flex: 0 0 14px;
+    position: relative;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.canvas-dir-pin-btn i,
+.canvas-dir-unpin-btn i {
+    font-size: 9px;
+}
+
+.canvas-dir-pin-btn:hover,
+.canvas-dir-pin-btn:focus-visible {
+    background: color-mix(in srgb, var(--canvas-dir-color-pinned, #eab308) 18%, transparent);
+    color: var(--canvas-dir-color-pinned, #eab308);
+}
+
+.canvas-dir-pin-btn.is-pinned {
+    color: var(--canvas-dir-color-pinned, #eab308);
+}
+
+.canvas-dir-pin-btn.is-pinned:hover {
+    background: color-mix(in srgb, #ef4444 18%, transparent);
+    color: #ef4444;
+}
+
+.canvas-dir-unpin-btn:hover {
+    background: color-mix(in srgb, #ef4444 18%, transparent);
+    color: #ef4444;
+}
+
+.canvas-dir-pin-btn[data-tooltip]::before,
+.canvas-dir-pin-btn[data-tooltip]::after,
+.canvas-dir-unpin-btn[data-tooltip]::before,
+.canvas-dir-unpin-btn[data-tooltip]::after {
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+    right: 0;
+    z-index: 50;
+    transition: opacity 0.08s ease, transform 0.08s ease;
+}
+
+.canvas-dir-pin-btn[data-tooltip]::after,
+.canvas-dir-unpin-btn[data-tooltip]::after {
+    content: attr(data-tooltip);
+    bottom: calc(100% + 6px);
+    transform: translateY(3px);
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.15;
+    white-space: nowrap;
+    color: #fff;
+    background: rgba(20, 22, 28, 0.94);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.canvas-dir-pin-btn[data-tooltip]::before,
+.canvas-dir-unpin-btn[data-tooltip]::before {
+    content: '';
+    bottom: calc(100% + 1px);
+    right: 3px;
+    transform: translateY(3px);
+    border: 4px solid transparent;
+    border-top-color: rgba(20, 22, 28, 0.94);
+}
+
+.canvas-dir-pin-btn[data-tooltip]:hover::before,
+.canvas-dir-pin-btn[data-tooltip]:hover::after,
+.canvas-dir-pin-btn[data-tooltip]:focus-visible::before,
+.canvas-dir-pin-btn[data-tooltip]:focus-visible::after,
+.canvas-dir-unpin-btn[data-tooltip]:hover::before,
+.canvas-dir-unpin-btn[data-tooltip]:hover::after,
+.canvas-dir-unpin-btn[data-tooltip]:focus-visible::before,
+.canvas-dir-unpin-btn[data-tooltip]:focus-visible::after {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .canvas-dir-folder-delete {
@@ -4581,6 +4683,11 @@ body.sidebar-resizing * {
     border-radius: 4px;
 }
 
+.sidebar.mini .canvas-dir-icon-badge-special {
+    font-size: 16px !important;
+    line-height: 1;
+}
+
 .sidebar.mini .canvas-dir-folder > summary:hover,
 .sidebar.mini .canvas-dir-item-btn:hover {
     background: var(--bg-hover, rgba(255, 255, 255, 0.08));
@@ -4597,6 +4704,141 @@ body.sidebar-resizing * {
 .sidebar.mini .canvas-dir-item-btn::before,
 .sidebar.mini .canvas-dir-item-btn::after {
     display: none !important;
+}
+
+/* 置顶区域在展开模式下的样式 */
+.canvas-dir-pinned-folder {
+    margin-bottom: 4px;
+}
+
+.canvas-dir-pinned-folder > summary {
+    font-weight: 600;
+    color: var(--canvas-dir-color-pinned, #eab308);
+}
+
+.canvas-dir-pinned-folder > summary .canvas-dir-icon,
+.canvas-dir-pinned-folder > summary .canvas-dir-count {
+    color: var(--canvas-dir-color-pinned, #eab308);
+}
+
+.canvas-dir-pinned-children {
+    margin-top: 2px;
+}
+
+.canvas-dir-pinned-folder > .canvas-dir-children > .canvas-dir-item > .canvas-dir-item-btn {
+    padding-left: 3px;
+}
+
+.canvas-dir-pinned-item-btn.canvas-dir-node-colored .canvas-dir-icon,
+.canvas-dir-pinned-item-btn.canvas-dir-node-colored .canvas-dir-icon-badge {
+    color: var(--canvas-dir-node-color, var(--canvas-dir-node-default-color, var(--text-tertiary)));
+}
+
+.canvas-dir-pinned-item-btn.canvas-dir-node-colored:hover .canvas-dir-icon,
+.canvas-dir-pinned-item-btn.canvas-dir-node-colored:hover .canvas-dir-icon-badge {
+    color: color-mix(in srgb, var(--canvas-dir-node-color, var(--text-primary)) 88%, var(--text-primary));
+}
+
+.canvas-dir-pinned-item-btn.canvas-dir-node-colored .canvas-dir-icon-badge-md,
+.sidebar.mini .canvas-dir-pinned-item-btn.canvas-dir-node-colored .canvas-dir-icon-badge-md {
+    color: var(--canvas-dir-node-color, var(--quick-add-blank-color, var(--accent-primary)));
+    border-color: color-mix(in srgb, var(--canvas-dir-node-color, var(--quick-add-blank-color, var(--accent-primary))) 45%, var(--border-color));
+    background: color-mix(in srgb, var(--canvas-dir-node-color, var(--quick-add-blank-color, var(--accent-primary))) 10%, transparent);
+}
+
+/* 置顶区域在极窄模式（第二形态）下的表现 */
+.sidebar.mini .canvas-dir-pinned-folder {
+    width: 100% !important;
+    height: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    margin: 0 0 6px 0 !important;
+    padding: 0 0 6px 0 !important;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 65%, transparent) !important;
+}
+
+.sidebar.mini .canvas-dir-pinned-folder > summary {
+    width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 6px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    cursor: pointer !important;
+}
+
+.sidebar.mini .canvas-dir-pinned-folder > summary .canvas-dir-icon {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    color: var(--canvas-dir-color-pinned, #eab308);
+}
+
+.sidebar.mini .canvas-dir-pinned-folder[open] > .canvas-dir-pinned-children {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 6px !important;
+    margin: 6px 0 0 0 !important;
+    padding: 0 !important;
+    border-left: none !important;
+    width: 100% !important;
+}
+
+.sidebar.mini .canvas-dir-pinned-item {
+    width: 36px !important;
+    height: 36px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+}
+
+.sidebar.mini .canvas-dir-pinned-item-btn {
+    width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 6px !important;
+    box-sizing: border-box !important;
+    position: relative;
+}
+
+.sidebar.mini .canvas-dir-pinned-item-btn::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background-color: var(--canvas-dir-color-pinned, #eab308);
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
+}
+
+.sidebar.mini .canvas-dir-item-btn.canvas-dir-node-colored .canvas-dir-icon,
+.sidebar.mini .canvas-dir-item-btn.canvas-dir-node-colored .canvas-dir-icon-badge,
+.sidebar.mini .canvas-dir-pinned-item-btn.canvas-dir-node-colored .canvas-dir-icon,
+.sidebar.mini .canvas-dir-pinned-item-btn.canvas-dir-node-colored .canvas-dir-icon-badge {
+    color: var(--canvas-dir-node-color, var(--canvas-dir-node-default-color, var(--text-tertiary)));
+}
+
+.sidebar.mini .canvas-dir-item-btn.canvas-dir-node-colored:hover .canvas-dir-icon,
+.sidebar.mini .canvas-dir-item-btn.canvas-dir-node-colored:hover .canvas-dir-icon-badge,
+.sidebar.mini .canvas-dir-pinned-item-btn.canvas-dir-node-colored:hover .canvas-dir-icon,
+.sidebar.mini .canvas-dir-pinned-item-btn.canvas-dir-node-colored:hover .canvas-dir-icon-badge {
+    color: color-mix(in srgb, var(--canvas-dir-node-color, var(--text-primary)) 88%, var(--text-primary));
 }
 
 .sidebar.compact .canvas-directory-tree {

@@ -45592,9 +45592,9 @@ function createCanvasAppearanceSettingsModal() {
                             </label>
                         </div>
                     </div>
-                    <div class="appearance-row other-sub-row">
+                    <div class="appearance-row">
                         <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Directory title color' : '目录栏标题颜色'}</span>
+                            <span>${isEn ? 'Directory category color sync' : '目录栏分类标题颜色同步'}</span>
                             <button class="perf-help-btn" id="otherMenuDefaultColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
@@ -45872,15 +45872,15 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="otherMenuDefaultColorSyncHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Directory title entries</b>: Manages the color synchronization of category headers and folder titles in the directory (controls all remaining non-locatable parts outside the locatable-item switch).'
-            : '<b>目录栏标题条目</b>：管理目录中分类标题、文件夹等不可定位跳转的条目（即控制除「可定位跳转条目」之外的其余条目颜色同步）。'}
+            ? '<b>Directory category titles</b>: Synchronize default theme colors for category headers and icons (Permanent, Temporary, Blank, Groups, Pinned, etc.) in the directory. When disabled, category headers and icons display in neutral gray.'
+            : '<b>目录栏分类标题条目</b>：同步目录中各大分类标题与图标（永久栏目、临时栏目、空白栏目、组、置顶等）的外观默认主题色。开启时分类标题和顶层图标显示对应色彩，关闭时统一显示素雅的中性灰。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherMenuLocatableColorSyncHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Locatable entries</b>: Manages all directory entries that can be located/jumped.'
-            : '<b>可定位跳转条目</b>：管理目录里所有可以定位/跳转的条目。'}
+            ? '<b>Locatable items</b>: Synchronize colors for individual cards and entries that can be located on the canvas. When disabled, items display in neutral gray.'
+            : '<b>可定位跳转条目</b>：同步目录中各个具体可定位/跳转的卡片条目（在画布上的实时自定义颜色或大类默认色）。关闭时统一显示中性灰。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherSidebarCollapseModeHelpPopover">

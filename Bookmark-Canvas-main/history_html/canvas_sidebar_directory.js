@@ -13,6 +13,102 @@
   const PERMANENT_COPY_TIP_STORAGE_PREFIX = 'bcs:perm:tip-copy-';
   const FOLDER_OPEN_STATES_KEY = 'bcs:sidebar:folder_open_states';
   const POST_RELOAD_LOCATE_KEY = 'bcs:post-reload-locate';
+  const PINNED_KEYS_STORAGE_KEY = 'bcs:sidebar:directory_pinned_keys';
+  const PINNED_SECTION_OPEN_KEY = 'bcs:sidebar:pinned_section_open';
+
+  function loadPinnedKeys() {
+    try {
+      const raw = localStorage.getItem(PINNED_KEYS_STORAGE_KEY);
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function savePinnedKeys(keys) {
+    try {
+      const clean = Array.isArray(keys) ? keys.filter(Boolean) : [];
+      localStorage.setItem(PINNED_KEYS_STORAGE_KEY, JSON.stringify(clean));
+    } catch (_) {}
+  }
+
+  function isNodeKeyPinned(key) {
+    if (!key) return false;
+    return loadPinnedKeys().includes(key);
+  }
+
+  function togglePinnedNodeKey(key) {
+    if (!key) return;
+    const keys = loadPinnedKeys().slice();
+    const idx = keys.indexOf(key);
+    if (idx >= 0) {
+      keys.splice(idx, 1);
+    } else {
+      keys.push(key);
+    }
+    savePinnedKeys(keys);
+    refreshDirectory({ force: true });
+  }
+
+  function removePinnedNodeKey(key) {
+    if (!key) return;
+    const keys = loadPinnedKeys().slice();
+    const idx = keys.indexOf(key);
+    if (idx >= 0) {
+      keys.splice(idx, 1);
+      savePinnedKeys(keys);
+      refreshDirectory({ force: true });
+    }
+  }
+
+  function unpinByEntityId(entityId) {
+    const rawId = normalizeText(entityId);
+    if (!rawId) return;
+    const keys = loadPinnedKeys();
+    const clean = keys.filter((k) => {
+      if (!k) return false;
+      if (k === rawId) return false;
+      if (k.endsWith(`-${rawId}`)) return false;
+      if (k.includes(`-${rawId}-`)) return false;
+      return true;
+    });
+    if (clean.length !== keys.length) {
+      savePinnedKeys(clean);
+      refreshDirectory({ force: true });
+    }
+  }
+
+  function unpinAllNonPermanent() {
+    const keys = loadPinnedKeys();
+    const clean = keys.filter((k) => {
+      if (!k) return false;
+      return k === 'folder-permanent' || k.startsWith('permanent-col-') || k === 'permanent-main';
+    });
+    if (clean.length !== keys.length) {
+      savePinnedKeys(clean);
+      refreshDirectory({ force: true });
+    }
+  }
+
+  function getPinnedSectionOpenState() {
+    try {
+      const val = localStorage.getItem(PINNED_SECTION_OPEN_KEY);
+      return val === null ? true : val === 'true';
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function savePinnedSectionOpenState(isOpen) {
+    try {
+      localStorage.setItem(PINNED_SECTION_OPEN_KEY, isOpen ? 'true' : 'false');
+    } catch (_) {}
+  }
+
+  function canPinNode(node) {
+    return !!(node && node.key && node.target && !node.placeholder);
+  }
 
   function getFolderOpenStates() {
     try {
@@ -49,7 +145,8 @@
     specialTemp: '#e9973f',
     blank: '#888888',
     cardGroup: '#888888',
-    edge: '#999999'
+    edge: '#999999',
+    pinned: '#eab308'
   });
   const DIRECTORY_LOCATABLE_NEUTRAL_COLOR = '#888888';
   const IMPORT_DIRECTORY_NEUTRAL_COLOR = '#9aa0a6';
@@ -68,7 +165,25 @@
   let nodeActionMap = new Map();
   let nodeDeleteActionMap = new Map();
   let directoryNodeDataMap = new Map();
+  let pinnedTargetMap = new Map();
   let pendingDeleteUiKey = '';
+
+  function resolveNodeTarget(nodeKey) {
+    if (!nodeKey) return null;
+    if (pinnedTargetMap && pinnedTargetMap.has(nodeKey)) {
+      return pinnedTargetMap.get(nodeKey);
+    }
+    const root = document.getElementById(ROOT_ID);
+    const nodeMap = (root && root.__directoryNodeDataMap__) || directoryNodeDataMap;
+    const node = nodeMap ? nodeMap.get(nodeKey) : null;
+    if (node && node.target) {
+      return node.target;
+    }
+    if (nodeActionMap && nodeActionMap.has(nodeKey)) {
+      return nodeActionMap.get(nodeKey);
+    }
+    return null;
+  }
 
   function getLang() {
     return (typeof global.currentLang === 'string' && global.currentLang) ? global.currentLang : 'zh_CN';
@@ -383,7 +498,8 @@
       specialTemp: normalizeHexColor(colors && colors.specialTemp, defaults.specialTemp),
       blank: normalizeHexColor(colors && colors.mdNode, defaults.blank),
       cardGroup: normalizeHexColor(colors && colors.cardGroup, defaults.cardGroup),
-      edge: normalizeHexColor(colors && colors.edge, defaults.edge)
+      edge: normalizeHexColor(colors && colors.edge, defaults.edge),
+      pinned: normalizeHexColor(colors && colors.pinned, defaults.pinned)
     };
   }
 
@@ -396,7 +512,8 @@
         specialTemp: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
         blank: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
         cardGroup: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
-        edge: DIRECTORY_LOCATABLE_NEUTRAL_COLOR
+        edge: DIRECTORY_LOCATABLE_NEUTRAL_COLOR,
+        pinned: DIRECTORY_LOCATABLE_NEUTRAL_COLOR
       };
     }
     return getAppearanceThemeColorTokens();
@@ -421,6 +538,7 @@
     root.style.setProperty('--canvas-dir-color-blank', colors.blank);
     root.style.setProperty('--canvas-dir-color-card-group', colors.cardGroup);
     root.style.setProperty('--canvas-dir-color-edge', colors.edge);
+    root.style.setProperty('--canvas-dir-color-pinned', colors.pinned);
   }
 
   function readPermanentCopies() {
@@ -565,16 +683,17 @@
 
   function isSpecialTempSection(section) {
     if (!section) return false;
-    if (section.isSnapshot) return true;
+    if (section.isSnapshot || section.isSpecial) return true;
     const tempKindRaw = normalizeText(section.tempKind).toLowerCase();
     if (tempKindRaw === 'special') return true;
     if (tempKindRaw === 'regular') return false;
 
     const sourceRaw = normalizeText(section.source).toLowerCase();
-    if (sourceRaw && SPECIAL_TEMP_SOURCE_SET.has(sourceRaw)) return true;
+    if (sourceRaw && (SPECIAL_TEMP_SOURCE_SET.has(sourceRaw) || sourceRaw === 'special')) return true;
 
     const labelRaw = normalizeText(section.label);
     if (!labelRaw) return false;
+    if (labelRaw.includes('✦')) return true;
     if (labelRaw === '拖入' || labelRaw === '搜索' || labelRaw === '批量' || labelRaw === '添加' || labelRaw === '导入文件' || labelRaw === '导入') return true;
 
     const label = labelRaw.toLowerCase();
@@ -1003,8 +1122,10 @@
         title,
         color: resolveColor(section),
         defaultColor,
-        icon: 'fas fa-code-branch',
-        variant: 'chain-item',
+        icon: options.icon || (options.iconText ? 'fas fa-star' : 'fas fa-sitemap'),
+        iconText: options.iconText || '',
+        iconTone: options.iconTone || '',
+        variant: options.variant || 'chain-item',
         showIcon: false,
         showDeleteControl: true,
         deleteAction: {
@@ -1042,24 +1163,36 @@
         if (right === 'other') return -1;
         return compareText(left, right);
       })
-      .map(([bucket, bucketSections]) => makeFolderNode({
-        key: `${keyPrefix}bucket-${bucket}`,
-        code: '',
-        title: bucket === 'other' ? t('其他', 'Other') : bucket,
-        color: options.color || '',
-        defaultColor: options.defaultColor || options.color || '',
-        icon: 'fas fa-folder',
-        variant: 'temp-letter-bucket',
-        showFoldControl: true,
-        open: false,
-        count: bucketSections.length,
-        children: buildFlatTempSectionNodes(bucketSections, {
-          resolveColor: options.resolveColor,
-          fallbackColor: options.color || '',
+      .map(([bucket, bucketSections]) => {
+        const sectionIds = bucketSections.map((s) => normalizeText(s && s.id)).filter(Boolean);
+        const target = sectionIds.length > 0 ? {
+          kind: 'folder-cluster',
+          clusterType: 'temp-sections',
+          sectionIds,
+          title: bucket === 'other' ? t('其他', 'Other') : bucket
+        } : null;
+        return makeFolderNode({
+          key: `${keyPrefix}bucket-${bucket}`,
+          code: '',
+          title: bucket === 'other' ? t('其他', 'Other') : bucket,
+          color: options.color || '',
           defaultColor: options.defaultColor || options.color || '',
-          keyPrefix: `${keyPrefix}${bucket}-`
-        })
-      }));
+          icon: 'fas fa-folder',
+          variant: 'temp-letter-bucket',
+          showFoldControl: true,
+          open: false,
+          count: bucketSections.length,
+          target,
+          children: buildFlatTempSectionNodes(bucketSections, {
+            resolveColor: options.resolveColor,
+            fallbackColor: options.color || '',
+            defaultColor: options.defaultColor || options.color || '',
+            keyPrefix: `${keyPrefix}${bucket}-`,
+            icon: options.icon || 'fas fa-sitemap',
+            variant: 'chain-item'
+          })
+        });
+      });
   }
 
   function makePlaceholderItem(key, code, title, options = {}) {
@@ -1167,15 +1300,24 @@
 
       if (groupNodes.length >= threshold) {
         const folderItems = groupNodes.map((node, idx) => mapNodeToItem(node, idx));
+        const nodeIds = groupNodes.map((n) => normalizeText(n && n.id)).filter(Boolean);
+        const folderTitle = cat === 'other' ? t('其他', 'Other') : cat;
+        const target = nodeIds.length > 0 ? {
+          kind: 'folder-cluster',
+          clusterType: 'nodes',
+          nodeIds,
+          title: folderTitle
+        } : null;
         folderNodes.push(makeFolderNode({
           key: `${parentKey}-cat-${cat}`,
           code: '',
-          title: cat === 'other' ? t('其他', 'Other') : cat,
+          title: folderTitle,
           color: folderColor,
           defaultColor,
           icon: 'fas fa-folder',
           open: false,
           count: groupNodes.length,
+          target,
           children: folderItems
         }));
       } else {
@@ -1268,7 +1410,8 @@
     const applyDirectoryColorControl = (nodes) => {
       const walk = (node) => {
         if (!node || typeof node !== 'object') return;
-        const isLocatableNode = !!node.target && !node.placeholder;
+        const isClusterFolder = !!(node.target && node.target.kind === 'folder-cluster');
+        const isLocatableNode = !!node.target && !node.placeholder && !isClusterFolder;
 
         if (isLocatableNode) {
           const themeColor = getLocatableThemeColorByTarget(node.target);
@@ -1343,7 +1486,8 @@
         resolveColor: sectionColorResolver,
         color: splitColor,
         defaultColor: splitColor,
-        keyPrefix: `${keyPrefix}temp-split-`
+        keyPrefix: `${keyPrefix}temp-split-`,
+        icon: splitFolderIcon
       });
 
       if (!splitItems.length) {
@@ -1353,7 +1497,8 @@
           t('暂无分裂栏目', 'No split sections'),
           {
             color: splitColor,
-            defaultColor: splitColor
+            defaultColor: splitColor,
+            icon: splitFolderIcon
           }
         ));
       }
@@ -1362,7 +1507,11 @@
         resolveColor: sectionColorResolver,
         fallbackColor: specialColor,
         defaultColor: specialColor,
-        keyPrefix: `${keyPrefix}temp-special-`
+        keyPrefix: `${keyPrefix}temp-special-`,
+        icon: specialFolderIcon,
+        iconText: specialIconText,
+        iconTone: specialIconTone,
+        variant: 'special-temp'
       });
 
       if (!specialItems.length) {
@@ -1388,6 +1537,12 @@
         icon: folderIcon,
         open: config.open !== false,
         count: typeof config.count === 'number' ? config.count : sections.length,
+        target: sections.length > 0 ? {
+          kind: 'folder-cluster',
+          clusterType: 'temp-sections',
+          sectionIds: sections.map((s) => normalizeText(s && s.id)).filter(Boolean),
+          title: config.title || t('临时栏目', 'Temporary')
+        } : null,
         children: [
           makeFolderNode({
             key: splitFolderKey,
@@ -1398,6 +1553,12 @@
             icon: splitFolderIcon,
             open: false,
             count: splitTempSections.length,
+            target: splitTempSections.length > 0 ? {
+              kind: 'folder-cluster',
+              clusterType: 'temp-sections',
+              sectionIds: splitTempSections.map((s) => normalizeText(s && s.id)).filter(Boolean),
+              title: t('常规链式', 'General Chain')
+            } : null,
             children: splitItems
           }),
           makeFolderNode({
@@ -1411,6 +1572,12 @@
             iconTone: specialIconTone,
             open: false,
             count: specialTempSections.length,
+            target: specialTempSections.length > 0 ? {
+              kind: 'folder-cluster',
+              clusterType: 'temp-sections',
+              sectionIds: specialTempSections.map((s) => normalizeText(s && s.id)).filter(Boolean),
+              title: t('特殊临时栏目', 'Special temporary')
+            } : null,
             children: specialItems
           })
         ]
@@ -1501,6 +1668,12 @@
         variant,
         open: config.open !== false,
         count: typeof config.count === 'number' ? config.count : sortedMdNodes.length,
+        target: sortedMdNodes.length > 0 ? {
+          kind: 'folder-cluster',
+          clusterType: 'nodes',
+          nodeIds: sortedMdNodes.map((n) => normalizeText(n && n.id)).filter(Boolean),
+          title: config.title || t('空白栏目', 'Blank')
+        } : null,
         children: directItems
       });
     };
@@ -1576,6 +1749,7 @@
             color: edgeColorResolver(edge),
             defaultColor,
             icon: 'fas fa-link',
+            showIcon: true,
             showDeleteControl: true,
             deleteAction: {
               kind: 'edge',
@@ -1635,6 +1809,7 @@
           icon: 'fas fa-link',
           open: false,
           count: labeledEdges.length,
+          target: null,
           children: labeledItems
         });
 
@@ -1647,6 +1822,7 @@
           icon: 'fas fa-link',
           open: false,
           count: unlabeledEdges.length,
+          target: null,
           children: unlabeledItems
         });
 
@@ -1662,6 +1838,7 @@
         icon: folderIcon,
         open: config.open !== false,
         count: edgeList.length,
+        target: null,
         children: mainChildren
       });
     };
@@ -1720,6 +1897,12 @@
       iconText: '#',
       iconTone: 'hash',
       count: permanentChildren.length,
+      target: {
+        kind: 'folder-cluster',
+        clusterType: 'permanent',
+        nodeIds: ['permanentSection', ...copies.map((c) => `permanent-section-copy-${c.id}`)],
+        title: t('永久栏目', 'Permanent')
+      },
       children: permanentChildren
     });
 
@@ -2290,10 +2473,16 @@
       title: t('组', 'Group'),
       icon: 'fas fa-object-group',
       variant: 'card-groups-root',
-      color: '',
-      defaultColor: '',
+      color: colorTokens.cardGroup,
+      defaultColor: colorTokens.cardGroup,
       open: true,
       count: cardGroupItems.length,
+      target: {
+        kind: 'folder-cluster',
+        clusterType: 'nodes',
+        nodeIds: cardGroupNodes.map((n) => normalizeText(n && n.id)).filter(Boolean),
+        title: t('组', 'Group')
+      },
       children: groupItems
     }) : null;
 
@@ -2504,14 +2693,29 @@
 
     const isGroup = node.variant === 'card-group-item' || (node.deleteAction && node.deleteAction.directoryVariant === 'card-group');
     const hasDelete = !!(node.showDeleteControl && node.deleteAction);
+    const pinnable = canPinNode(node);
 
-    if (!hasDelete && !isGroup) return;
+    if (!hasDelete && !isGroup && !pinnable) return;
 
     const deleteWrap = document.createElement('span');
     deleteWrap.className = 'canvas-dir-folder-delete-wrap';
     const deleteUiOpen = hasDelete && !!pendingDeleteUiKey && pendingDeleteUiKey === node.key;
     if (deleteUiOpen) {
       deleteWrap.classList.add('is-open');
+    }
+
+    if (pinnable && !deleteUiOpen) {
+      const isPinned = isNodeKeyPinned(node.key);
+      const pinBtn = document.createElement('span');
+      pinBtn.setAttribute('role', 'button');
+      pinBtn.className = 'canvas-dir-pin-btn' + (isPinned ? ' is-pinned' : '');
+      pinBtn.dataset.nodePinKey = node.key;
+      const isEn = isEnglish();
+      const pinTitle = isPinned ? (isEn ? 'Unpin' : '取消置顶') : (isEn ? 'Pin to top' : '置顶');
+      pinBtn.setAttribute('aria-label', pinTitle);
+      pinBtn.dataset.tooltip = pinTitle;
+      pinBtn.innerHTML = '<i class="fas fa-thumbtack" aria-hidden="true"></i>';
+      deleteWrap.appendChild(pinBtn);
     }
 
     if (isGroup) {
@@ -2722,13 +2926,17 @@
       btn.classList.add('canvas-dir-no-icon');
     }
     btn.appendChild(buildLabelElement(node));
-    if (node.showDeleteControl && node.deleteAction) {
+    const hasControls = !!(
+      (node.showDeleteControl && node.deleteAction) ||
+      canPinNode(node)
+    );
+    if (hasControls) {
       btn.classList.add('canvas-dir-item-btn-has-delete');
     }
 
     item.appendChild(btn);
 
-    if (node.showDeleteControl && node.deleteAction) {
+    if (hasControls) {
       appendNodeDeleteControl(item, node);
       const maybeDeleteWrap = item.lastElementChild;
       if (maybeDeleteWrap && maybeDeleteWrap.classList && maybeDeleteWrap.classList.contains('canvas-dir-folder-delete-wrap')) {
@@ -2821,7 +3029,7 @@
           clearAllFolderUnloadTimers(childrenWrap);
           childrenWrap.querySelectorAll('[data-node-key]').forEach((el) => {
             const k = el.dataset.nodeKey;
-            if (k) {
+            if (k && !isNodeKeyPinned(k)) {
               nodeActionMap.delete(k);
               nodeDeleteActionMap.delete(k);
             }
@@ -2839,6 +3047,10 @@
     if (details.__lastProcessedOpen__ === isOpen) return;
     details.__lastProcessedOpen__ = isOpen;
     const key = details.dataset.nodeKey;
+    if (key === 'folder-pinned') {
+      savePinnedSectionOpenState(isOpen);
+      return;
+    }
     if (key) {
       saveFolderOpenState(key, isOpen);
     }
@@ -3100,6 +3312,25 @@
     return fromRect || toRect || null;
   }
 
+  function computeUnionRect(rects) {
+    const valid = (Array.isArray(rects) ? rects : []).filter((r) => r && Number.isFinite(r.x) && Number.isFinite(r.y) && Number.isFinite(r.w) && Number.isFinite(r.h));
+    if (!valid.length) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    valid.forEach((r) => {
+      minX = Math.min(minX, r.x);
+      minY = Math.min(minY, r.y);
+      maxX = Math.max(maxX, r.x + r.w);
+      maxY = Math.max(maxY, r.y + r.h);
+    });
+    if (minX === Infinity) return null;
+    return {
+      x: minX,
+      y: minY,
+      w: Math.max(1, maxX - minX),
+      h: Math.max(1, maxY - minY)
+    };
+  }
+
   function getCanvasRectForDirectoryTarget(target) {
     if (!target || typeof target !== 'object') return null;
     if (target.rect) return target.rect;
@@ -3114,6 +3345,38 @@
         return getCanvasNodeRectFromState(target.nodeId);
       case 'edge':
         return getEdgeRectFromState(target);
+      case 'folder-cluster': {
+        const rects = [];
+        if (target.hasPermanentMain) {
+          const r = getPermanentMainRectFromState();
+          if (r) rects.push(r);
+        }
+        if (Array.isArray(target.copyIds)) {
+          target.copyIds.forEach((copyId) => {
+            const r = getPermanentCopyRectFromState(copyId);
+            if (r) rects.push(r);
+          });
+        }
+        if (Array.isArray(target.sectionIds)) {
+          target.sectionIds.forEach((id) => {
+            const r = getCanvasNodeRectFromState(id);
+            if (r) rects.push(r);
+          });
+        }
+        if (Array.isArray(target.nodeIds)) {
+          target.nodeIds.forEach((id) => {
+            const r = getCanvasNodeRectFromState(id);
+            if (r) rects.push(r);
+          });
+        }
+        if (Array.isArray(target.edgeIds)) {
+          target.edgeIds.forEach((id) => {
+            const r = getEdgeRectFromState({ edgeId: id });
+            if (r) rects.push(r);
+          });
+        }
+        return computeUnionRect(rects);
+      }
       default:
         return null;
     }
@@ -3163,6 +3426,33 @@
     const kind = normalizeText(target.kind);
     const wake = () => {
       try {
+        if (kind === 'folder-cluster') {
+          if (target.hasPermanentMain) {
+            const el = document.getElementById('permanentSection');
+            if (el && typeof module.wakeCanvasNodeFromLazyState === 'function') {
+              module.wakeCanvasNodeFromLazyState(el);
+            }
+          }
+          if (Array.isArray(target.copyIds)) {
+            target.copyIds.forEach((id) => {
+              const el = document.querySelector(`.permanent-copy-canvas-node[data-copy-id="${escapeSelector(id)}"]`);
+              if (el && typeof module.wakeCanvasNodeFromLazyState === 'function') {
+                module.wakeCanvasNodeFromLazyState(el);
+              }
+            });
+          }
+          if (Array.isArray(target.sectionIds) && typeof module.forceWakeAndRender === 'function') {
+            target.sectionIds.forEach((id) => {
+              try { module.forceWakeAndRender(id); } catch (_) {}
+            });
+          }
+          if (Array.isArray(target.nodeIds) && typeof module.materializeMaximizedNodeFromDescriptor === 'function') {
+            target.nodeIds.forEach((id) => {
+              try { module.materializeMaximizedNodeFromDescriptor({ type: 'md-node', id }); } catch (_) {}
+            });
+          }
+          return;
+        }
         const el = resolveDirectoryTargetElement(target);
         if (el && typeof module.wakeCanvasNodeFromLazyState === 'function') {
           module.wakeCanvasNodeFromLazyState(el);
@@ -3181,7 +3471,41 @@
   }
 
   function scheduleDirectoryTargetHighlight(target) {
+    if (!target) return;
     const highlight = () => {
+      if (target.kind === 'folder-cluster') {
+        if (target.hasPermanentMain) {
+          const el = document.getElementById('permanentSection');
+          if (el) highlightLocatedElement(el);
+        }
+        if (Array.isArray(target.copyIds)) {
+          target.copyIds.forEach((id) => {
+            const escaped = escapeSelector(id);
+            const el = document.querySelector(`.permanent-copy-canvas-node[data-copy-id="${escaped}"]`);
+            if (el) highlightLocatedElement(el);
+          });
+        }
+        if (Array.isArray(target.sectionIds)) {
+          target.sectionIds.forEach((id) => {
+            const escaped = escapeSelector(id);
+            const el = document.getElementById(id)
+              || (escaped ? document.querySelector(`.temp-canvas-node[data-section-id="${escaped}"]`) : null);
+            if (el) highlightLocatedElement(el);
+          });
+        }
+        if (Array.isArray(target.nodeIds)) {
+          target.nodeIds.forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) highlightLocatedElement(el);
+          });
+        }
+        if (Array.isArray(target.edgeIds)) {
+          target.edgeIds.forEach((id) => {
+            highlightEdge(id);
+          });
+        }
+        return;
+      }
       const el = resolveDirectoryTargetElement(target);
       if (el) highlightLocatedElement(el);
     };
@@ -3356,6 +3680,7 @@
 
   function locateTarget(target, zoom = null) {
     if (!target || typeof target !== 'object') return;
+    scheduleDirectoryTargetWake(target);
 
     const module = getCanvasModule();
     switch (target.kind) {
@@ -3403,6 +3728,9 @@
           global.setTimeout(() => highlightEdge(target.edgeId), 120);
           global.setTimeout(() => highlightEdge(target.edgeId), 360);
         }
+        break;
+      case 'folder-cluster':
+        locateDirectoryTargetFromRect(module, target, zoom || 'fit');
         break;
       default:
         break;
@@ -3735,6 +4063,92 @@
   }
 
   function handleRootClick(event) {
+    const unpinBtn = event && event.target && event.target.closest ? event.target.closest('.canvas-dir-unpin-btn') : null;
+    if (unpinBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const nodeKey = unpinBtn.dataset.unpinKey;
+      if (nodeKey) {
+        removePinnedNodeKey(nodeKey);
+      }
+      return;
+    }
+
+    const pinBtn = event && event.target && event.target.closest ? event.target.closest('.canvas-dir-pin-btn') : null;
+    if (pinBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const nodeKey = pinBtn.dataset.nodePinKey;
+      if (nodeKey) {
+        togglePinnedNodeKey(nodeKey);
+      }
+      return;
+    }
+
+    const pinnedBtn = event && event.target && event.target.closest
+      ? event.target.closest('.canvas-dir-pinned-item-btn')
+      : null;
+    if (pinnedBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const nodeKey = pinnedBtn.dataset.nodeKey;
+      if (!nodeKey) return;
+
+      activeNodeKey = nodeKey;
+      const root = document.getElementById(ROOT_ID);
+      updateActiveState(root);
+
+      const clearActiveHighlight = () => {
+        global.setTimeout(() => {
+          if (activeNodeKey === nodeKey) {
+            activeNodeKey = '';
+            updateActiveState(root);
+          }
+        }, 300);
+      };
+
+      const target = resolveNodeTarget(nodeKey);
+      if (target) {
+        if (switchFullscreenNodeByDirectoryTarget(target)) {
+          clearActiveHighlight();
+          return;
+        }
+        locateTarget(target);
+        clearActiveHighlight();
+      }
+      return;
+    }
+
+    const pinnedSummary = event && event.target && event.target.closest
+      ? event.target.closest('.canvas-dir-pinned-summary')
+      : null;
+    if (pinnedSummary) {
+      const sidebar = document.getElementById('sidebar');
+      const isMini = !!(sidebar && sidebar.classList.contains('mini'));
+      if (isMini) {
+        event.preventDefault();
+        event.stopPropagation();
+        const folder = pinnedSummary.closest('.canvas-dir-folder');
+        if (folder) {
+          folder.open = true;
+          try { handleFolderToggle(folder); } catch (_) {}
+        }
+        if (typeof window.setSidebarState === 'function') {
+          window.setSidebarState('expanded', { manual: true });
+        }
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const folder = pinnedSummary.closest('.canvas-dir-folder');
+      if (folder) {
+        folder.open = !folder.open;
+        handleFolderToggle(folder);
+      }
+      return;
+    }
+
     const sidebar = document.getElementById('sidebar');
     if (sidebar && sidebar.classList.contains('mini')) {
       event.preventDefault();
@@ -3756,7 +4170,7 @@
       event.stopPropagation();
       const nodeKey = locateBtn.dataset.nodeLocateKey;
       if (nodeKey) {
-        const target = nodeActionMap.get(nodeKey);
+        const target = resolveNodeTarget(nodeKey);
         if (target) {
           activeNodeKey = nodeKey;
           const root = document.getElementById(ROOT_ID);
@@ -3900,50 +4314,22 @@
       : null;
     if (!targetEl || !targetEl.dataset) return;
 
+    if (targetEl.classList.contains('canvas-dir-folder-summary-btn')) {
+      event.preventDefault();
+      event.stopPropagation();
+      const folderEl = targetEl.closest('.canvas-dir-folder');
+      if (folderEl) {
+        folderEl.open = !folderEl.open;
+        handleFolderToggle(folderEl);
+      }
+      return;
+    }
+
     const nodeKey = targetEl.dataset.nodeKey;
     if (!nodeKey) return;
 
-    const target = nodeActionMap.get(nodeKey);
+    const target = resolveNodeTarget(nodeKey);
     if (!target) return;
-
-    if (targetEl.classList.contains('canvas-dir-folder-summary-btn')) {
-      const isTitleClick = !!event.target.closest('.canvas-dir-title');
-      if (isTitleClick) {
-        const folderEl = targetEl.closest('.canvas-dir-folder');
-        const isCardGroupFolder = !!(folderEl && folderEl.dataset && folderEl.dataset.nodeVariant === 'card-group-item');
-        if (isCardGroupFolder) {
-          return;
-        }
-
-        event.preventDefault();
-        event.stopPropagation();
-
-        activeNodeKey = nodeKey;
-        const root = document.getElementById(ROOT_ID);
-        updateActiveState(root);
-
-        const clearActiveHighlight = () => {
-          global.setTimeout(() => {
-            if (activeNodeKey === nodeKey) {
-              activeNodeKey = '';
-              updateActiveState(root);
-            }
-          }, 300);
-        };
-
-        if (switchFullscreenNodeByDirectoryTarget(target)) {
-          clearActiveHighlight();
-          return;
-        }
-        locateTarget(target);
-        clearActiveHighlight();
-        return;
-      } else {
-        // Clicked non-title, non-button area. Let details toggle natively.
-        // Do not locate, do not set activeNodeKey / highlight.
-        return;
-      }
-    }
 
     if (targetEl.classList.contains('canvas-dir-item-btn')) {
       event.preventDefault();
@@ -4017,6 +4403,185 @@
     root.appendChild(container);
   }
 
+  function isCanvasReadyForPruning() {
+    if (typeof window !== 'undefined' && window.__bookmarkCanvasSearchStateReady === true) {
+      return true;
+    }
+    const state = getCanvasState();
+    if (state && Array.isArray(state.tempSections) && Array.isArray(state.mdNodes)) {
+      if (document.readyState === 'complete') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function buildPinnedSection(directoryNodeDataMap, openFolderKeys) {
+    const rawKeys = loadPinnedKeys();
+    if (!rawKeys.length) return null;
+
+    pinnedTargetMap.clear();
+
+    const pinnedNodes = [];
+    const validKeys = [];
+    let hasStaleKeys = false;
+    rawKeys.forEach((key) => {
+      const node = directoryNodeDataMap.get(key);
+      if (node && node.target && !node.placeholder) {
+        pinnedNodes.push(node);
+        validKeys.push(key);
+        pinnedTargetMap.set(node.key, node.target);
+      } else {
+        hasStaleKeys = true;
+      }
+    });
+
+    if (hasStaleKeys && isCanvasReadyForPruning()) {
+      savePinnedKeys(validKeys);
+    }
+
+    if (!pinnedNodes.length) return null;
+
+    const isEn = isEnglish();
+    const isPinnedOpen = getPinnedSectionOpenState();
+
+    const pinnedSectionIds = [];
+    const pinnedNodeIds = [];
+    const pinnedEdgeIds = [];
+    const pinnedCopyIds = [];
+    let hasPermanentMain = false;
+
+    pinnedNodes.forEach((node) => {
+      const tgt = node && node.target;
+      if (!tgt) return;
+      const kind = normalizeText(tgt.kind);
+      if (kind === 'temp-section' && tgt.sectionId) pinnedSectionIds.push(tgt.sectionId);
+      else if (kind === 'md-node' && tgt.nodeId) pinnedNodeIds.push(tgt.nodeId);
+      else if (kind === 'edge' && tgt.edgeId) pinnedEdgeIds.push(tgt.edgeId);
+      else if (kind === 'permanent-copy' && tgt.copyId) pinnedCopyIds.push(tgt.copyId);
+      else if (kind === 'permanent-main') hasPermanentMain = true;
+      else if (kind === 'folder-cluster') {
+        if (Array.isArray(tgt.sectionIds)) pinnedSectionIds.push(...tgt.sectionIds);
+        if (Array.isArray(tgt.nodeIds)) pinnedNodeIds.push(...tgt.nodeIds);
+        if (Array.isArray(tgt.edgeIds)) pinnedEdgeIds.push(...tgt.edgeIds);
+      }
+    });
+
+    const pinnedClusterTarget = {
+      kind: 'folder-cluster',
+      clusterType: 'pinned',
+      sectionIds: pinnedSectionIds,
+      nodeIds: pinnedNodeIds,
+      edgeIds: pinnedEdgeIds,
+      copyIds: pinnedCopyIds,
+      hasPermanentMain,
+      title: isEn ? 'Pinned' : '置顶'
+    };
+
+    pinnedTargetMap.set('folder-pinned', pinnedClusterTarget);
+
+    const details = document.createElement('details');
+    details.className = 'canvas-dir-folder canvas-dir-pinned-folder';
+    details.dataset.nodeKey = 'folder-pinned';
+    details.open = isPinnedOpen;
+
+    const summary = document.createElement('summary');
+    summary.className = 'canvas-dir-pinned-summary canvas-dir-folder-summary-btn';
+    summary.dataset.nodeKey = 'folder-pinned';
+    summary.title = isEn ? `Pinned (${pinnedNodes.length})` : `置顶 (${pinnedNodes.length})`;
+
+    const iconWrap = document.createElement('span');
+    iconWrap.className = 'canvas-dir-icon';
+    iconWrap.innerHTML = '<i class="fas fa-thumbtack" aria-hidden="true"></i>';
+    summary.appendChild(iconWrap);
+
+    const label = document.createElement('span');
+    label.className = 'canvas-dir-label';
+    const titleEl = document.createElement('span');
+    titleEl.className = 'canvas-dir-title';
+    titleEl.textContent = isEn ? 'Pinned' : '置顶';
+    label.appendChild(titleEl);
+    summary.appendChild(label);
+
+    const count = document.createElement('span');
+    count.className = 'canvas-dir-count';
+    count.textContent = String(pinnedNodes.length);
+    summary.appendChild(count);
+
+    details.appendChild(summary);
+
+    const childrenWrap = document.createElement('div');
+    childrenWrap.className = 'canvas-dir-children canvas-dir-pinned-children';
+
+    pinnedNodes.forEach((node) => {
+      const item = document.createElement('div');
+      item.className = 'canvas-dir-item canvas-dir-pinned-item';
+      item.dataset.pinnedKey = node.key;
+      if (node.variant) item.dataset.nodeVariant = node.variant;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'canvas-dir-item-btn canvas-dir-pinned-item-btn canvas-dir-item-btn-has-delete';
+      btn.dataset.nodeKey = node.key;
+      if (node.variant) btn.dataset.nodeVariant = node.variant;
+      if (node.defaultColor) {
+        btn.style.setProperty('--canvas-dir-node-default-color', node.defaultColor);
+      }
+      if (node.color) {
+        item.dataset.nodeColored = 'true';
+        item.style.setProperty('--canvas-dir-node-color', node.color);
+        btn.style.setProperty('--canvas-dir-node-color', node.color);
+        btn.classList.add('canvas-dir-node-colored');
+      }
+      btn.title = node.title || '';
+
+      const iconToUse = node.icon || (node.iconText ? '' : 'fas fa-thumbtack');
+      if (iconToUse || node.iconText) {
+        btn.appendChild(buildIconElement(iconToUse, {
+          iconText: node.iconText,
+          iconTone: node.iconTone
+        }));
+      } else {
+        btn.appendChild(buildIconSpacer());
+      }
+
+      btn.appendChild(buildLabelElement(node));
+      if (typeof node.count === 'number') {
+        const count = document.createElement('span');
+        count.className = 'canvas-dir-count';
+        count.textContent = String(node.count);
+        if (node.color) {
+          count.style.color = node.color;
+        }
+        btn.appendChild(count);
+      }
+      item.appendChild(btn);
+
+      const unpinWrap = document.createElement('span');
+      unpinWrap.className = 'canvas-dir-folder-delete-wrap canvas-dir-item-delete-wrap canvas-dir-pinned-unpin-wrap';
+      const unpinBtn = document.createElement('span');
+      unpinBtn.setAttribute('role', 'button');
+      unpinBtn.className = 'canvas-dir-unpin-btn';
+      unpinBtn.dataset.unpinKey = node.key;
+      const unpinLabel = isEn ? 'Unpin' : '取消置顶';
+      unpinBtn.setAttribute('aria-label', unpinLabel);
+      unpinBtn.dataset.tooltip = unpinLabel;
+      unpinBtn.innerHTML = '<i class="fas fa-ban" aria-hidden="true"></i>';
+      unpinWrap.appendChild(unpinBtn);
+      item.appendChild(unpinWrap);
+
+      if (node.target) {
+        pinnedTargetMap.set(node.key, node.target);
+        nodeActionMap.set(node.key, node.target);
+      }
+
+      childrenWrap.appendChild(item);
+    });
+
+    details.appendChild(childrenWrap);
+    return details;
+  }
+
   function refreshDirectory(options = {}) {
     const root = document.getElementById(ROOT_ID);
     if (!root) return;
@@ -4031,7 +4596,9 @@
     indexDirectoryNodes(nodes, root);
     const fingerprint = JSON.stringify({
       lang: getLang(),
-      nodes: serializeNodesForFingerprint(nodes)
+      nodes: serializeNodesForFingerprint(nodes),
+      pinned: loadPinnedKeys(),
+      pinnedOpen: getPinnedSectionOpenState()
     });
 
     if (!options.force && fingerprint === lastFingerprint) {
@@ -4048,6 +4615,12 @@
     const container = document.createElement('div');
     container.className = 'canvas-dir-root';
     container.__directoryNodeDataMap__ = root.__directoryNodeDataMap__;
+
+    const pinnedSection = buildPinnedSection(root.__directoryNodeDataMap__, openFolderKeys);
+    if (pinnedSection) {
+      container.appendChild(pinnedSection);
+    }
+
     nodes.forEach((node) => {
       container.appendChild(renderNode(node, openFolderKeys));
     });
@@ -6306,10 +6879,10 @@
     }
 
     global.addEventListener('storage', (event) => {
-      const isFolderStateChange = !event || event.key === FOLDER_OPEN_STATES_KEY;
+      const isFolderStateChange = !event || event.key === FOLDER_OPEN_STATES_KEY || event.key === PINNED_KEYS_STORAGE_KEY || event.key === PINNED_SECTION_OPEN_KEY;
       if (isFolderStateChange) {
         queueRefresh({
-          force: true,
+          force: false,
           preferStoredFolderStates: true
         });
       } else {
@@ -6389,6 +6962,8 @@
   global.CanvasSidebarDirectory = {
     init,
     refresh,
+    unpinByEntityId,
+    unpinAllNonPermanent,
     navigateManualAnchorSlot,
     navigateTempAnchorSlot,
     locateAnchorByIndex,
