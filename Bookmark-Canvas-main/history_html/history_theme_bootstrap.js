@@ -52,6 +52,7 @@
     const normalizeSidebarState = (raw) => {
       const value = String(raw || '').toLowerCase();
       if (value === 'collapsed') return 'compact';
+      if (value === 'mini' || value === 'intermediate' || value === 'icon-only') return 'mini';
       return value === 'compact' ? 'compact' : (value === 'expanded' ? 'expanded' : null);
     };
 
@@ -354,7 +355,7 @@
       const legacy = readStorage(sidebarLayoutKeys.legacyCollapsed);
       if (legacy === 'true') return 'compact';
       if (legacy === 'false') return 'expanded';
-      return isSidePanelMode ? 'compact' : 'expanded';
+      return isSidePanelMode ? 'mini' : 'expanded';
     })();
 
     const hasManualOverride = readStorage(sidebarLayoutKeys.manualOverride) === 'true';
@@ -371,20 +372,21 @@
 
     let initialSidebarState = persistedSidebarState;
     if (collapseMode === 'auto' && !hasManualOverride) {
-      initialSidebarState = (window.innerWidth <= autoCollapseWidth) ? 'compact' : 'expanded';
+      initialSidebarState = (window.innerWidth <= autoCollapseWidth) ? (isSidePanelMode ? 'mini' : 'compact') : 'expanded';
     }
     if (!hasStoredSidebarState) {
-      initialSidebarState = isSidePanelMode ? 'compact' : 'expanded';
+      initialSidebarState = isSidePanelMode ? 'mini' : 'expanded';
     }
 
     const expandedWidthKey = sidebarDock === 'right'
       ? sidebarLayoutKeys.expandedWidthRight
       : sidebarLayoutKeys.expandedWidthLeft;
     const expandedWidth = normalizeSidebarWidth(readStorage(expandedWidthKey)) || 260;
-    const effectiveWidth = initialSidebarState === 'compact' ? 0 : expandedWidth;
+    const effectiveWidth = initialSidebarState === 'compact' ? 0 : (initialSidebarState === 'mini' ? 48 : expandedWidth);
     const widthPx = String(Math.max(0, Math.round(effectiveWidth))) + 'px';
 
     if (initialSidebarState === 'compact') root.classList.add('layout-preload-sidebar-compact');
+    if (initialSidebarState === 'mini') root.classList.add('layout-preload-sidebar-mini');
     if (sidebarDock === 'right') root.classList.add('layout-preload-sidebar-right');
 
     root.style.setProperty('--sidebar-width', widthPx);
@@ -428,12 +430,15 @@
         const sidebar = document.getElementById('sidebar');
         if (sidebar) {
           sidebar.classList.toggle('compact', initialSidebarState === 'compact');
+          sidebar.classList.toggle('mini', initialSidebarState === 'mini');
           sidebar.classList.remove('collapsed');
           sidebar.classList.toggle('position-right', sidebarDock === 'right');
           sidebar.dataset.position = sidebarDock;
           sidebar.dataset.collapseState = initialSidebarState;
           if (initialSidebarState === 'expanded') {
             sidebar.style.width = `${expandedWidth}px`;
+          } else if (initialSidebarState === 'mini') {
+            sidebar.style.width = '48px';
           } else {
             sidebar.style.removeProperty('width');
           }

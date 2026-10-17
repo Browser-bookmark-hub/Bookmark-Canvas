@@ -49,6 +49,7 @@
     /* Layout constants */
     --sidebar-collapsed-width: 60px;
     --sidebar-compact-width: 0px;
+    --sidebar-mini-width: 48px;
     --sidebar-width: 260px;
     --content-area-left: var(--sidebar-width);
     --content-area-right: 0px;
@@ -226,12 +227,21 @@ html.layout-preload-active.layout-preload-sidebar-right .sidebar .sidebar-toggle
     left: 0;
 }
 
+html.layout-preload-active.layout-preload-sidebar-mini .sidebar {
+    width: var(--sidebar-mini-width, 48px) !important;
+    padding: 0 4px !important;
+}
+
 html.layout-preload-active.layout-preload-sidebar-compact .sidebar {
     width: var(--sidebar-compact-width);
     padding: 0;
     border-right: none;
     background: var(--bg-secondary);
     overflow: visible;
+}
+
+html.layout-preload-active.layout-preload-sidebar-compact .sidebar .sidebar-resize-handle {
+    display: none !important;
 }
 
 html.layout-preload-active.layout-preload-sidebar-compact .sidebar .nav-tabs {
@@ -3277,6 +3287,33 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     height: 0;
 }
 
+/* 侧边栏极窄图标视图（中间形态） */
+.sidebar.mini {
+    width: var(--sidebar-mini-width, 48px) !important;
+    padding: 0 4px 16px 4px;
+    overflow: visible;
+}
+
+.sidebar.mini .sidebar-resize-handle {
+    pointer-events: none;
+    cursor: default;
+}
+
+.sidebar.mini .nav-tabs {
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 0;
+    padding-right: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+.sidebar.mini .nav-tabs::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
 /* 侧边栏收起状态：仅保留折叠按钮 */
 .sidebar.compact {
     width: var(--sidebar-compact-width);
@@ -3284,6 +3321,11 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     border-right: none;
     background: var(--bg-secondary);
     overflow: visible;
+}
+
+.sidebar.compact .sidebar-resize-handle {
+    display: none !important;
+    pointer-events: none;
 }
 
 .sidebar.position-right.compact {
@@ -3775,9 +3817,9 @@ body.sidebar-resizing * {
 }
 
 .canvas-dir-root>.canvas-dir-folder+.canvas-dir-folder {
-    margin-top: 8px;
-    padding-top: 6px;
-    border-top: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
 }
 
 .canvas-dir-folder {
@@ -3794,6 +3836,8 @@ body.sidebar-resizing * {
     align-items: center;
     gap: 6px;
     padding: 3px 6px;
+    min-height: 22px;
+    box-sizing: border-box;
     cursor: pointer;
     user-select: none;
     color: var(--text-secondary);
@@ -3964,11 +4008,12 @@ body.sidebar-resizing * {
 .canvas-dir-children {
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 2px;
     --canvas-tree-toggle-center: 15px;
     --canvas-tree-indent: 10px;
     margin-left: var(--canvas-tree-toggle-center);
-    padding: 0 0 1px var(--canvas-tree-indent);
+    margin-top: 2px;
+    padding: 0 0 2px var(--canvas-tree-indent);
     border-left: 1px solid color-mix(in srgb, var(--border-color) 74%, transparent);
     box-sizing: border-box;
     position: relative;
@@ -3985,6 +4030,7 @@ body.sidebar-resizing * {
     border-radius: 0;
     overflow: visible;
     position: relative;
+    box-sizing: border-box;
 }
 
 .canvas-dir-item-btn {
@@ -3995,7 +4041,9 @@ body.sidebar-resizing * {
     align-items: center;
     gap: 6px;
     text-align: left;
-    padding: 2px 6px;
+    padding: 3px 6px;
+    min-height: 22px;
+    box-sizing: border-box;
     color: var(--text-secondary);
     cursor: pointer;
     border-radius: 6px;
@@ -4010,7 +4058,7 @@ body.sidebar-resizing * {
 .canvas-dir-item-delete-wrap {
     position: absolute;
     right: 6px;
-    top: 10px;
+    top: 50%;
     transform: translateY(-50%);
     margin-left: 0;
     z-index: 2;
@@ -4407,6 +4455,148 @@ body.sidebar-resizing * {
     padding: 4px 6px;
     color: var(--text-tertiary);
     font-size: 10px;
+}
+
+/* 极窄形态下的目录树：仅保留顶层图标，隐藏子树、文字、计数、展开箭头及连线 */
+.sidebar.mini .canvas-directory-tree {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 0;
+    margin: 0;
+    overflow-x: hidden;
+}
+
+.sidebar.mini .canvas-dir-root {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+}
+
+.sidebar.mini .canvas-dir-root > .canvas-dir-folder + .canvas-dir-folder {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+    border-top: none !important;
+}
+
+.sidebar.mini .canvas-dir-children,
+.sidebar.mini .canvas-dir-folder-toggle,
+.sidebar.mini .canvas-dir-count,
+.sidebar.mini .canvas-dir-folder-delete-wrap,
+.sidebar.mini .canvas-dir-item-delete-wrap,
+.sidebar.mini .canvas-dir-preview,
+.sidebar.mini .canvas-dir-label {
+    display: none !important;
+}
+
+.sidebar.mini .canvas-dir-folder {
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+}
+
+.sidebar.mini .canvas-dir-folder > summary {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    cursor: pointer;
+    list-style: none;
+    box-sizing: border-box;
+}
+
+.sidebar.mini .canvas-dir-folder > summary::-webkit-details-marker {
+    display: none;
+}
+
+.sidebar.mini .canvas-dir-item {
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+}
+
+.sidebar.mini .canvas-dir-item-btn {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+
+.sidebar.mini .canvas-dir-icon {
+    margin: 0;
+    font-size: 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sidebar.mini .canvas-dir-icon-badge {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sidebar.mini .canvas-dir-icon-badge-hash {
+    font-size: 18px !important;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.sidebar.mini .canvas-dir-icon-badge-md {
+    font-size: 10px !important;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.1px;
+    min-width: 22px;
+    height: 18px;
+    padding: 0 3px;
+    border-radius: 4px;
+}
+
+.sidebar.mini .canvas-dir-folder > summary:hover,
+.sidebar.mini .canvas-dir-item-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+}
+
+.sidebar.mini .canvas-dir-folder > summary.active,
+.sidebar.mini .canvas-dir-item-btn.active {
+    background: color-mix(in srgb, var(--accent-light) 55%, transparent);
+    color: var(--accent-primary);
+}
+
+.sidebar.mini .canvas-dir-folder summary::before,
+.sidebar.mini .canvas-dir-folder summary::after,
+.sidebar.mini .canvas-dir-item-btn::before,
+.sidebar.mini .canvas-dir-item-btn::after {
+    display: none !important;
 }
 
 .sidebar.compact .canvas-directory-tree {

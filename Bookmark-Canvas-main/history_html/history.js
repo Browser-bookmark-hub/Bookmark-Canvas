@@ -5563,11 +5563,15 @@ function updateLanguageDependentUI() {
     // Keep controls whose labels depend on their current state in sync with language changes.
     const sidebarToggle = document.getElementById('sidebarToggle');
     if (sidebarToggle) {
-        const isExpanded = sidebarToggle.dataset.collapseState === 'expanded';
-        const key = isExpanded ? 'sidebarCollapseTitle' : 'sidebarExpandTitle';
-        const label = i18n[key] && i18n[key][currentLang]
-            ? i18n[key][currentLang]
-            : (isExpanded ? (isEn ? 'Collapse sidebar' : '收起菜单栏') : (isEn ? 'Expand sidebar' : '展开菜单栏'));
+        const state = sidebarToggle.dataset.collapseState || 'expanded';
+        let label;
+        if (state === 'expanded') {
+            label = isEn ? 'Switch to icon-only view' : '切换为极窄图标视图';
+        } else if (state === 'mini') {
+            label = isEn ? 'Collapse sidebar' : '完全收起菜单栏';
+        } else {
+            label = isEn ? 'Expand sidebar' : '展开菜单栏';
+        }
         sidebarToggle.title = label;
         sidebarToggle.setAttribute('aria-label', label);
     }
@@ -10710,7 +10714,7 @@ function initSidebarToggle() {
     const SIDEBAR_WIDTH_RIGHT_KEY = SIDEBAR_STORAGE_KEYS.widthRight;
     const SIDEBAR_TOGGLE_TOP_RATIO_KEY = SIDEBAR_STORAGE_KEYS.toggleRatio;
     const SIDEBAR_TOGGLE_TOP_MOVED_KEY = SIDEBAR_STORAGE_KEYS.toggleMoved;
-    const SIDEBAR_STATES = ['expanded', 'compact'];
+    const SIDEBAR_STATES = ['expanded', 'mini', 'compact'];
     const SIDEBAR_POSITIONS = ['left', 'right'];
     const AUTO_COLLAPSE_WIDTH_DEFAULT = 600;
     const AUTO_COLLAPSE_WIDTH_MIN = 320;
@@ -11073,7 +11077,12 @@ function initSidebarToggle() {
     function syncSidebarWidth() {
         const rect = sidebar.getBoundingClientRect();
         const actualWidth = rect && rect.width ? rect.width : 0;
-        const effectiveWidth = currentState === 'compact' ? 0 : actualWidth;
+        let effectiveWidth = actualWidth;
+        if (currentState === 'compact') {
+            effectiveWidth = 0;
+        } else if (currentState === 'mini') {
+            effectiveWidth = 48;
+        }
         const widthPx = `${Math.max(0, Math.round(effectiveWidth))}px`;
 
         document.documentElement.style.setProperty('--sidebar-width', widthPx);
@@ -11229,6 +11238,7 @@ function initSidebarToggle() {
     function normalizeSidebarState(raw) {
         const value = String(raw || '').toLowerCase();
         if (value === 'collapsed') return 'compact';
+        if (value === 'mini' || value === 'intermediate' || value === 'icon-only') return 'mini';
         return SIDEBAR_STATES.includes(value) ? value : null;
     }
 
@@ -11238,7 +11248,7 @@ function initSidebarToggle() {
         const icon = toggleBtn.querySelector('i');
         if (!icon) return;
 
-        const defaultPointTo = state === 'expanded'
+        const defaultPointTo = (state === 'expanded' || state === 'mini')
             ? (sidebarPosition === 'left' ? 'left' : 'right')
             : (sidebarPosition === 'left' ? 'right' : 'left');
 
@@ -11274,9 +11284,14 @@ function initSidebarToggle() {
 
     function updateToggleLabel(state) {
         const isEn = currentLang === 'en';
-        const collapseTitle = isEn ? 'Collapse sidebar' : '收起菜单栏';
-        const expandTitle = isEn ? 'Expand sidebar' : '展开菜单栏';
-        const circleTitle = state === 'expanded' ? collapseTitle : expandTitle;
+        let circleTitle;
+        if (state === 'expanded') {
+            circleTitle = isEn ? 'Switch to icon-only view' : '切换为极窄图标视图';
+        } else if (state === 'mini') {
+            circleTitle = isEn ? 'Collapse sidebar' : '完全收起菜单栏';
+        } else {
+            circleTitle = isEn ? 'Expand sidebar' : '展开菜单栏';
+        }
 
         toggleBtn.setAttribute('title', circleTitle);
         toggleBtn.setAttribute('aria-label', circleTitle);
@@ -11329,9 +11344,12 @@ function initSidebarToggle() {
         stabilizeCanvasLayoutSafe({ syncBounds: false });
         const nextState = normalizeSidebarState(state) || 'expanded';
         sidebar.classList.toggle('compact', nextState === 'compact');
+        sidebar.classList.toggle('mini', nextState === 'mini');
         sidebar.classList.remove('collapsed');
         if (nextState === 'expanded') {
             sidebar.style.width = `${getExpandedWidth(sidebarPosition)}px`;
+        } else if (nextState === 'mini') {
+            sidebar.style.width = '48px';
         } else {
             sidebar.style.removeProperty('width');
         }
@@ -11354,7 +11372,7 @@ function initSidebarToggle() {
         const legacy = readStorage(LEGACY_COLLAPSED_KEY);
         if (legacy === 'true') return 'compact';
         if (legacy === 'false') return 'expanded';
-        return isSidePanelMode ? 'compact' : 'expanded';
+        return isSidePanelMode ? 'mini' : 'expanded';
     }
 
     function readManualOverride() {
@@ -11379,7 +11397,7 @@ function initSidebarToggle() {
     }
 
     function getAutoState() {
-        return window.innerWidth <= autoCollapseWidth ? 'compact' : 'expanded';
+        return window.innerWidth <= autoCollapseWidth ? (isSidePanelMode ? 'mini' : 'compact') : 'expanded';
     }
 
     function setSidebarState(state, options = {}) {
@@ -11502,7 +11520,7 @@ function initSidebarToggle() {
         ;
     }
 
-    // 点击圆形按钮：展开 <-> 完全收起
+    // 点击圆形按钮：展开 -> 极窄图标 (mini) -> 完全收起 (compact) -> 展开
     toggleBtn.addEventListener('click', (e) => {
         if (suppressToggleClick) {
             suppressToggleClick = false;
@@ -11512,12 +11530,15 @@ function initSidebarToggle() {
         }
 
         e.stopPropagation();
+        let nextState = 'expanded';
         if (currentState === 'expanded') {
-            currentState = setSidebarState('compact', { manual: true });
+            nextState = 'mini';
+        } else if (currentState === 'mini') {
+            nextState = 'compact';
         } else {
-            currentState = setSidebarState('expanded', { manual: true });
+            nextState = 'expanded';
         }
-        ;
+        currentState = setSidebarState(nextState, { manual: true });
     });
 
     function clearToggleDragSession() {
@@ -11647,11 +11668,12 @@ function initSidebarToggle() {
 
     resizeHandle.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
+        if (currentState !== 'expanded') return;
 
         const rect = sidebar.getBoundingClientRect();
         const startWidth = currentState === 'compact'
             ? 0
-            : (rect && rect.width ? rect.width : getExpandedWidth(sidebarPosition));
+            : (currentState === 'mini' ? 48 : (rect && rect.width ? rect.width : getExpandedWidth(sidebarPosition)));
 
         resizeDragSession = {
             pointerId: event.pointerId,
@@ -11779,6 +11801,12 @@ function initSidebarToggle() {
     window.addEventListener('header-compact-state-will-change', () => {
         headerStateChangeAnchorY = getToggleViewportCenterY();
     });
+
+    window.setSidebarState = (state, options) => {
+        currentState = setSidebarState(state, options);
+        return currentState;
+    };
+    window.getSidebarState = () => currentState;
 }
 
 function initHeaderToggle() {

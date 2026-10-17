@@ -3735,6 +3735,21 @@
   }
 
   function handleRootClick(event) {
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && sidebar.classList.contains('mini')) {
+      event.preventDefault();
+      event.stopPropagation();
+      const folder = event.target && event.target.closest ? event.target.closest('.canvas-dir-folder') : null;
+      if (folder) {
+        folder.open = true;
+        try { handleFolderToggle(folder); } catch (_) {}
+      }
+      if (typeof window.setSidebarState === 'function') {
+        window.setSidebarState('expanded', { manual: true });
+      }
+      return;
+    }
+
     const locateBtn = event && event.target && event.target.closest ? event.target.closest('.canvas-dir-folder-locate') : null;
     if (locateBtn) {
       event.preventDefault();
@@ -5915,9 +5930,11 @@
         const badgeTitle = shortcutHint
           ? (isEn ? `Locate shortcut: ${shortcutHint}` : `定位快捷键：${shortcutHint}`)
           : (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
+        const fullSlotTitle = shortcutHint ? `${displayName} (${shortcutHint})` : displayName;
+        const rowTitle = isRemembered ? `${fullSlotTitle} [${isEn ? 'Current' : '当前'}]` : fullSlotTitle;
 
         html += `
-          <div class="anchor-slot-row${isRemembered ? ' active-slot' : ''}" data-index="${index}" title="${isRemembered ? (isEn ? 'Current remembered anchor' : '当前记忆中的锚点') : ''}">
+          <div class="anchor-slot-row${isRemembered ? ' active-slot' : ''}" data-index="${index}" title="${rowTitle}">
             <span class="anchor-slot-shortcut-badge" title="${badgeTitle}">${badgeNum}</span>
             <div class="anchor-slot-header">
               <span class="anchor-slot-name" title="${displayName}">${displayName}</span>
@@ -6014,6 +6031,12 @@
     if (settingsBtn) {
       settingsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar && sidebar.classList.contains('mini')) {
+          if (typeof window.setSidebarState === 'function') {
+            window.setSidebarState('expanded', { manual: true });
+          }
+        }
         if (anchorSettingsOpen) {
           saveSettingsOnCollapse();
           anchorSettingsOpen = false;
@@ -6137,8 +6160,22 @@
     if (!tabDir || !tabHist || !panelDir || !panelHist) return;
     
     const isEn = isEnglish();
-    tabDir.innerText = isEn ? 'Directory' : '目录';
-    tabHist.innerText = isEn ? 'Anchors' : '锚点';
+    const dirText = isEn ? 'Directory' : '目录';
+    const anchorText = isEn ? 'Anchors' : '锚点';
+    tabDir.title = dirText;
+    tabHist.title = anchorText;
+    const textDir = tabDir.querySelector('.sidebar-tab-text');
+    if (textDir) {
+      textDir.textContent = dirText;
+    } else {
+      tabDir.innerHTML = `<i class="fas fa-sitemap sidebar-tab-icon" aria-hidden="true"></i><span class="sidebar-tab-text">${dirText}</span>`;
+    }
+    const textHist = tabHist.querySelector('.sidebar-tab-text');
+    if (textHist) {
+      textHist.textContent = anchorText;
+    } else {
+      tabHist.innerHTML = `<i class="fas fa-anchor sidebar-tab-icon" aria-hidden="true"></i><span class="sidebar-tab-text">${anchorText}</span>`;
+    }
     
     const navTabs = panelHist.closest('.nav-tabs');
 
