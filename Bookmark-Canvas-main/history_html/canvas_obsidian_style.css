@@ -2257,9 +2257,11 @@ body.canvas-scrollbar-dragging * {
     position: relative;
 }
 
-.appearance-settings-modal .modal-header {
-    padding: 14px 20px;
-    min-height: 48px;
+.appearance-settings-modal .modal-header,
+.perf-settings-modal .modal-header,
+.sidepanel-settings-modal .modal-header {
+    padding: 10px 18px;
+    min-height: 44px;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
     display: flex;
@@ -2267,8 +2269,10 @@ body.canvas-scrollbar-dragging * {
     justify-content: space-between;
 }
 
-.appearance-settings-modal .modal-header h3 {
-    font-size: 16px;
+.appearance-settings-modal .modal-header h3,
+.perf-settings-modal .modal-header h3,
+.sidepanel-settings-modal .modal-header h3 {
+    font-size: 15px;
     font-weight: 600;
     margin: 0;
     line-height: 1.3;
@@ -2806,8 +2810,8 @@ body.canvas-scrollbar-dragging * {
 }
 
 .other-settings-modal .modal-header {
-    padding: 14px 20px;
-    min-height: 48px;
+    padding: 10px 18px;
+    min-height: 44px;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
     display: flex;
@@ -2816,7 +2820,7 @@ body.canvas-scrollbar-dragging * {
 }
 
 .other-settings-modal .modal-header h3 {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
     margin: 0;
     line-height: 1.3;
@@ -4091,11 +4095,24 @@ body.canvas-scrollbar-dragging * {
 
 /* 侧边栏模式与窄屏下的外观/性能/侧边栏/滚动与缩放设置弹窗优化 */
 html.side-panel-mode .modal-content.appearance-settings-modal,
-html.side-panel-mode .modal-content.perf-settings-modal,
-html.side-panel-mode .modal-content.sidepanel-settings-modal,
 html.side-panel-mode .modal-content.other-settings-modal {
-    width: calc(100% - 16px) !important;
-    max-width: calc(100% - 16px) !important;
+    width: min(calc(100% - 16px), 540px) !important;
+    max-width: min(calc(100% - 16px), 540px) !important;
+    margin: 8px auto !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28) !important;
+    box-sizing: border-box !important;
+    max-height: calc(100vh - 16px) !important;
+    max-height: calc(100dvh - 16px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+html.side-panel-mode .modal-content.perf-settings-modal,
+html.side-panel-mode .modal-content.sidepanel-settings-modal {
+    width: min(calc(100% - 16px), 460px) !important;
+    max-width: min(calc(100% - 16px), 460px) !important;
     margin: 8px auto !important;
     border-radius: 12px !important;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28) !important;
@@ -4108,18 +4125,19 @@ html.side-panel-mode .modal-content.other-settings-modal {
 }
 
 html.side-panel-mode #canvasAppearanceSettingsModal.modal,
+html.side-panel-mode #canvasOtherSettingsModal.modal,
 html.side-panel-mode #canvasPerfSettingsModal.modal,
-html.side-panel-mode #canvasSidepanelSettingsModal.modal,
-html.side-panel-mode #canvasOtherSettingsModal.modal {
-    align-items: flex-start !important;
-    padding-top: 8px !important;
+html.side-panel-mode #canvasSidePanelSettingsModal.modal,
+html.side-panel-mode #canvasSidepanelSettingsModal.modal {
+    align-items: center !important;
+    padding-top: 0 !important;
 }
 
 html.side-panel-mode .appearance-settings-modal .modal-header,
 html.side-panel-mode .perf-settings-modal .modal-header,
 html.side-panel-mode .sidepanel-settings-modal .modal-header,
 html.side-panel-mode .other-settings-modal .modal-header {
-    padding: 10px 14px !important;
+    padding: 8px 14px !important;
     min-height: 42px !important;
     border-bottom: 1px solid var(--border-color) !important;
     flex-shrink: 0 !important;
@@ -4588,346 +4606,4 @@ html.side-panel-mode .perf-settings-section {
 html.side-panel-mode .perf-tri-state button {
     font-size: 11px !important;
     padding: 2px 6px !important;
-}
-
-/* 响应式窄屏 (屏幕宽度 <= 600px) */
-@media (max-width: 600px) {
-    .modal-content.appearance-settings-modal,
-    .modal-content.perf-settings-modal,
-    .modal-content.sidepanel-settings-modal,
-    .modal-content.other-settings-modal {
-        width: calc(100% - 16px) !important;
-        max-width: calc(100% - 16px) !important;
-        margin: 8px auto !important;
-        border-radius: 12px !important;
-        max-height: calc(100vh - 16px) !important;
-        max-height: calc(100dvh - 16px) !important;
-        overflow: hidden !important;
-    }
-
-    #canvasAppearanceSettingsModal.modal,
-    #canvasPerfSettingsModal.modal,
-    #canvasSidepanelSettingsModal.modal,
-    #canvasOtherSettingsModal.modal {
-        align-items: flex-start !important;
-        padding-top: 8px !important;
-    }
-
-    .appearance-settings-modal .modal-header,
-    .perf-settings-modal .modal-header,
-    .sidepanel-settings-modal .modal-header,
-    .other-settings-modal .modal-header {
-        padding: 10px 14px !important;
-        min-height: 42px !important;
-    }
-
-    .appearance-settings-modal .modal-body,
-    .other-settings-modal .modal-body {
-        padding: 10px 10px 36px !important;
-    }
-
-    .appearance-settings-modal .detail-section,
-    .other-settings-modal .detail-section {
-        margin-bottom: 14px !important;
-    }
-
-    .appearance-settings-modal .detail-section-title,
-    .other-settings-modal .detail-section-title {
-        font-size: 11px !important;
-        font-weight: 600 !important;
-        margin: 6px 0 6px 2px !important;
-        padding-bottom: 3px !important;
-    }
-
-    .other-settings-fields-row {
-        padding: 3px 5px !important;
-        gap: 2px !important;
-    }
-
-    .other-settings-field {
-        min-height: 32px !important;
-        padding: 4px 6px !important;
-        gap: 6px !important;
-    }
-
-    .other-settings-field-label {
-        font-size: 12px !important;
-    }
-
-    .other-trackpad-speed-input {
-        width: 48px !important;
-        min-width: 48px !important;
-        height: 22px !important;
-        padding: 1px 3px !important;
-        font-size: 11px !important;
-    }
-
-    .other-trackpad-speed-unit {
-        font-size: 11px !important;
-    }
-
-    .other-zoom-input-title-trackpad {
-        padding: 6px 8px !important;
-        gap: 6px !important;
-        font-size: 12px !important;
-    }
-
-    .other-linear-rate-control .other-settings-field-label {
-        font-size: 11px !important;
-    }
-
-    #otherTrackpadZoomRate {
-        width: 46px !important;
-        min-width: 46px !important;
-        height: 20px !important;
-        font-size: 11px !important;
-    }
-
-    .other-magnet-toggle-row {
-        padding: 6px 8px !important;
-        gap: 6px 10px !important;
-        font-size: 11px !important;
-    }
-
-    .other-curve-card {
-        padding: 8px !important;
-        gap: 6px !important;
-    }
-
-    .other-curve-chart {
-        grid-template-columns: 46px 1fr !important;
-    }
-
-    .other-curve-plot {
-        height: 150px !important;
-    }
-
-    .other-curve-axis {
-        font-size: 10px !important;
-    }
-
-    .other-curve-axis-y {
-        grid-template-columns: 14px 1fr !important;
-    }
-
-    .other-curve-axis-title {
-        font-size: 10.5px !important;
-    }
-
-    .other-curve-note {
-        font-size: 10.5px !important;
-        text-align: left !important;
-    }
-
-    .appearance-row {
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        justify-content: space-between !important;
-        gap: 8px !important;
-        min-height: 32px !important;
-        padding: 4px 6px !important;
-    }
-
-    .appearance-row-label {
-        min-width: 0 !important;
-        flex: 1 1 auto !important;
-        font-size: 12px !important;
-        padding-top: 0 !important;
-    }
-
-    .appearance-row-content {
-        flex: 0 0 auto !important;
-        margin-left: auto !important;
-        max-width: 60% !important;
-    }
-
-    .appearance-name-select {
-        width: auto !important;
-        min-width: 90px !important;
-        max-width: 140px !important;
-        height: 24px !important;
-        font-size: 11.5px !important;
-        padding: 1px 6px !important;
-    }
-
-    .appearance-row.other-sub-row {
-        margin-left: 10px !important;
-        padding-left: 8px !important;
-        border-left: 2px solid var(--border-color) !important;
-        border-radius: 0 6px 6px 0 !important;
-        background: rgba(0, 0, 0, 0.012) !important;
-    }
-
-    [data-theme="dark"] .appearance-row.other-sub-row {
-        background: rgba(255, 255, 255, 0.02) !important;
-    }
-
-    .other-sub-row .appearance-row-label {
-        font-size: 11.5px !important;
-        color: var(--text-secondary) !important;
-    }
-
-    .appearance-row:has(.appearance-color-row) {
-        flex-direction: column !important;
-        align-items: stretch !important;
-        gap: 6px !important;
-        padding: 7px 9px !important;
-        margin-top: 5px !important;
-        background: var(--bg-secondary) !important;
-        border: 1px solid var(--border-color) !important;
-        border-radius: 8px !important;
-    }
-
-    .appearance-row:has(.appearance-color-row) .appearance-row-content {
-        width: 100% !important;
-        max-width: 100% !important;
-        margin-left: 0 !important;
-    }
-
-    .appearance-color-row {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: space-between !important;
-        width: 100% !important;
-        gap: 4px !important;
-        flex-wrap: nowrap !important;
-    }
-
-    .appearance-color-chips {
-        display: flex !important;
-        align-items: center !important;
-        gap: 4px !important;
-        flex-wrap: nowrap !important;
-        flex: 1 1 auto !important;
-    }
-
-    .appearance-color-chips .appearance-color-chip {
-        width: 15px !important;
-        height: 15px !important;
-        flex: 0 0 15px !important;
-    }
-
-    .appearance-color-value {
-        font-size: 10.5px !important;
-        min-width: 48px !important;
-    }
-
-    .appearance-color-input {
-        width: 22px !important;
-        height: 22px !important;
-        flex: 0 0 22px !important;
-    }
-
-    .appearance-row:has(.appearance-mode-toggle) {
-        flex-direction: column !important;
-        align-items: stretch !important;
-        gap: 6px !important;
-        padding: 7px 9px !important;
-        margin-top: 5px !important;
-        background: var(--bg-secondary) !important;
-        border: 1px solid var(--border-color) !important;
-        border-radius: 8px !important;
-    }
-
-    .appearance-row:has(.appearance-mode-toggle) .appearance-row-content {
-        width: 100% !important;
-        max-width: 100% !important;
-        margin-left: 0 !important;
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: wrap !important;
-        align-items: center !important;
-        justify-content: space-between !important;
-        gap: 6px !important;
-    }
-
-    .appearance-radio span {
-        padding: 2px 7px !important;
-        font-size: 11px !important;
-        min-height: 20px !important;
-        line-height: 16px !important;
-    }
-
-    .appearance-size-inputs {
-        font-size: 11px !important;
-    }
-
-    .appearance-size-inputs input {
-        width: 46px !important;
-        height: 22px !important;
-        padding: 1px 3px !important;
-        font-size: 11px !important;
-    }
-
-    #otherSearchPanelTableSizeRow,
-    #otherSearchPanelGridSizeRow,
-    #otherSearchPanelRootSizeRow {
-        flex-direction: column !important;
-        align-items: stretch !important;
-        gap: 6px !important;
-        padding: 7px 9px !important;
-        margin-top: 5px !important;
-        background: var(--bg-secondary) !important;
-        border: 1px solid var(--border-color) !important;
-        border-radius: 8px !important;
-    }
-
-    #otherSearchPanelTableSizeRow .appearance-row-content,
-    #otherSearchPanelGridSizeRow .appearance-row-content,
-    #otherSearchPanelRootSizeRow .appearance-row-content {
-        width: 100% !important;
-        max-width: 100% !important;
-        margin-left: 0 !important;
-        display: flex !important;
-        justify-content: flex-start !important;
-    }
-
-    /* 空白栏目尺寸卡片：左右水平排布，输入框位于文字右侧 */
-    .appearance-row:has(#appearanceBlankSizeInputs) {
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        justify-content: space-between !important;
-        gap: 8px !important;
-        padding: 7px 9px !important;
-        margin-top: 5px !important;
-        background: var(--bg-secondary) !important;
-        border: 1px solid var(--border-color) !important;
-        border-radius: 8px !important;
-    }
-
-    .appearance-row:has(#appearanceBlankSizeInputs) .appearance-row-content {
-        flex: 0 0 auto !important;
-        margin-left: auto !important;
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        justify-content: flex-end !important;
-    }
-
-    .perf-settings-modal .modal-body {
-        padding: 12px 10px !important;
-    }
-
-    .perf-stats-hero {
-        gap: 6px !important;
-        padding: 0 !important;
-    }
-
-    .perf-stats-card {
-        padding: 8px 4px !important;
-    }
-
-    .perf-stat-value {
-        font-size: 18px !important;
-    }
-
-    .perf-stat-label {
-        font-size: 10px !important;
-    }
-
-    .perf-settings-section {
-        padding: 10px 10px !important;
-    }
 }

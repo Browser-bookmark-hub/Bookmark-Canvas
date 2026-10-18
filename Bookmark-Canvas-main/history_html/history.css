@@ -5534,6 +5534,12 @@ html.side-panel-mode #bookmarkAddSecondaryModal .modal-header.compact {
     padding: 8px 14px;
 }
 
+html.side-panel-mode #bookmarkAddSecondaryModal .modal-header.compact .modal-close {
+    width: 26px;
+    height: 26px;
+    font-size: 13px;
+}
+
 html.side-panel-mode #bookmarkAddSecondaryModal .modal-body {
     padding: 14px;
 }
