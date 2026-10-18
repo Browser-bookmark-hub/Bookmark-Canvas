@@ -3239,7 +3239,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     /* 让内容区域成为稳定的滚动容器（避免撑开父级） */
     min-height: 0;
     position: relative;
-    z-index: 1;
+    z-index: auto;
 }
 
 .content-area.canvas-full-bleed {
@@ -5163,13 +5163,12 @@ a.tree-label.tree-bookmark-link:hover {
     width: auto;
 }
 
-/* 右上角快捷键二级 UI：定位在头部工具按钮正下方靠右 */
+/* 快捷键二级 UI：居中展示 */
 #shortcutsModal {
-    align-items: flex-start;
-    justify-content: flex-end;
-    padding-top: 72px;
-    /* 约等于 header 高度，刚好在四个按钮下方 */
-    padding-right: 24px;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0;
+    padding-right: 0;
 }
 
 .modal-content {
@@ -5185,7 +5184,8 @@ a.tree-label.tree-bookmark-link:hover {
 
 /* 外观设置与滚动缩放弹窗：采用现代化卡片式紧凑宽度 */
 .modal-content.appearance-settings-modal,
-.modal-content.other-settings-modal {
+.modal-content.other-settings-modal,
+.modal-content.shortcuts-settings-modal {
     width: 540px;
     max-width: 92vw;
 }

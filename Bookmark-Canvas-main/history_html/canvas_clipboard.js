@@ -715,6 +715,7 @@
             if (!modal) return;
             refreshStaticText();
             modal.style.display = 'block';
+            modal.style.zIndex = '20000';
             render();
             // Reuse the shortcut modal's settings-anchor positioning so the
             // panel follows a top- or bottom-docked title bar.

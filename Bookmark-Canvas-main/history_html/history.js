@@ -9223,6 +9223,10 @@ function initializeUI() {
     const closeShortcutsModal = document.getElementById('closeShortcutsModal');
     if (helpToggle && shortcutsModal) {
         helpToggle.addEventListener('click', () => {
+            if (currentView === 'canvas' && window.CanvasModule && typeof window.CanvasModule.openShortcuts === 'function') {
+                window.CanvasModule.openShortcuts();
+                return;
+            }
             if (typeof updateShortcutsDisplay === 'function') {
                 updateShortcutsDisplay();
             }
@@ -11428,6 +11432,9 @@ function initSidebarToggle() {
         syncSidebarWidth();
         scheduleMaximizedRefresh();
         scheduleCanvasLayoutStabilization({ syncBounds: false });
+        if (typeof window.repositionSettingsAnchoredModals === 'function') {
+            window.repositionSettingsAnchoredModals();
+        }
         return nextState;
     }
 

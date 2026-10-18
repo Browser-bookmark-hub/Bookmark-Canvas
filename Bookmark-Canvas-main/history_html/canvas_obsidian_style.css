@@ -2244,8 +2244,9 @@ body.canvas-scrollbar-dragging * {
     pointer-events: auto;
 }
 
-/* 外观设置弹窗样式（现代化卡片式统一UI） */
-.appearance-settings-modal {
+/* 外观设置弹窗样式（现代化卡片式统一UI）与快捷键弹窗样式 */
+.appearance-settings-modal,
+.shortcuts-settings-modal {
     width: 540px;
     max-width: 92vw;
     border-radius: 14px;
@@ -2259,7 +2260,8 @@ body.canvas-scrollbar-dragging * {
 
 .appearance-settings-modal .modal-header,
 .perf-settings-modal .modal-header,
-.sidepanel-settings-modal .modal-header {
+.sidepanel-settings-modal .modal-header,
+.shortcuts-settings-modal .modal-header {
     padding: 10px 18px;
     min-height: 44px;
     border-bottom: 1px solid var(--border-color);
@@ -2271,24 +2273,28 @@ body.canvas-scrollbar-dragging * {
 
 .appearance-settings-modal .modal-header h3,
 .perf-settings-modal .modal-header h3,
-.sidepanel-settings-modal .modal-header h3 {
+.sidepanel-settings-modal .modal-header h3,
+.shortcuts-settings-modal .modal-header h3 {
     font-size: 15px;
     font-weight: 600;
     margin: 0;
     line-height: 1.3;
 }
 
-.appearance-settings-modal .modal-body {
+.appearance-settings-modal .modal-body,
+.shortcuts-settings-modal .modal-body {
     padding: 14px 18px 40px;
     overflow-y: auto;
     flex: 1 1 auto;
 }
 
-.appearance-settings-modal .detail-section {
+.appearance-settings-modal .detail-section,
+.shortcuts-settings-modal .detail-section {
     margin-bottom: 16px;
 }
 
-.appearance-settings-modal .detail-section-title {
+.appearance-settings-modal .detail-section-title,
+.shortcuts-settings-modal .detail-section-title {
     font-size: 11.5px;
     font-weight: 600;
     text-transform: uppercase;
@@ -2299,9 +2305,54 @@ body.canvas-scrollbar-dragging * {
     border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
 }
 
-.appearance-settings-modal .modal-body > div[style*="height: 1px"] {
+.appearance-settings-modal .modal-body > div[style*="height: 1px"],
+.shortcuts-settings-modal .modal-body > div[style*="height: 1px"] {
     margin: 10px 0;
     opacity: 0.25;
+}
+
+/* 快捷键弹窗专用美化（卡片流式布局） */
+.shortcuts-settings-modal .canvas-shortcuts-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.shortcuts-settings-modal .canvas-help-section {
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.shortcuts-settings-modal .canvas-help-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.shortcuts-settings-modal .canvas-help-section-title {
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-tertiary, #888888);
+    margin: 4px 0 6px 2px;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.shortcuts-settings-modal .canvas-help-row {
+    padding: 5px 8px;
+    border-radius: 6px;
+    transition: background 0.15s ease;
+}
+
+.shortcuts-settings-modal .canvas-help-row:hover {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.03));
+}
+
+[data-theme="dark"] .shortcuts-settings-modal .canvas-help-row:hover {
+    background: rgba(255, 255, 255, 0.04);
 }
 
 
@@ -4093,9 +4144,10 @@ body.canvas-scrollbar-dragging * {
     transform: translateX(-50%);
 }
 
-/* 侧边栏模式与窄屏下的外观/性能/侧边栏/滚动与缩放设置弹窗优化 */
+/* 侧边栏模式与窄屏下的外观/性能/侧边栏/滚动与缩放/快捷键设置弹窗优化 */
 html.side-panel-mode .modal-content.appearance-settings-modal,
-html.side-panel-mode .modal-content.other-settings-modal {
+html.side-panel-mode .modal-content.other-settings-modal,
+html.side-panel-mode .modal-content.shortcuts-settings-modal {
     width: min(calc(100% - 16px), 540px) !important;
     max-width: min(calc(100% - 16px), 540px) !important;
     margin: 8px auto !important;
@@ -4128,7 +4180,8 @@ html.side-panel-mode #canvasAppearanceSettingsModal.modal,
 html.side-panel-mode #canvasOtherSettingsModal.modal,
 html.side-panel-mode #canvasPerfSettingsModal.modal,
 html.side-panel-mode #canvasSidePanelSettingsModal.modal,
-html.side-panel-mode #canvasSidepanelSettingsModal.modal {
+html.side-panel-mode #canvasSidepanelSettingsModal.modal,
+html.side-panel-mode #canvasShortcutsModal.modal {
     align-items: center !important;
     padding-top: 0 !important;
 }
@@ -4136,7 +4189,8 @@ html.side-panel-mode #canvasSidepanelSettingsModal.modal {
 html.side-panel-mode .appearance-settings-modal .modal-header,
 html.side-panel-mode .perf-settings-modal .modal-header,
 html.side-panel-mode .sidepanel-settings-modal .modal-header,
-html.side-panel-mode .other-settings-modal .modal-header {
+html.side-panel-mode .other-settings-modal .modal-header,
+html.side-panel-mode .shortcuts-settings-modal .modal-header {
     padding: 8px 14px !important;
     min-height: 42px !important;
     border-bottom: 1px solid var(--border-color) !important;
@@ -4146,7 +4200,8 @@ html.side-panel-mode .other-settings-modal .modal-header {
 html.side-panel-mode .appearance-settings-modal .modal-header h3,
 html.side-panel-mode .perf-settings-modal .modal-header h3,
 html.side-panel-mode .sidepanel-settings-modal .modal-header h3,
-html.side-panel-mode .other-settings-modal .modal-header h3 {
+html.side-panel-mode .other-settings-modal .modal-header h3,
+html.side-panel-mode .shortcuts-settings-modal .modal-header h3 {
     font-size: 15px !important;
     font-weight: 600 !important;
     margin: 0 !important;
@@ -4156,14 +4211,16 @@ html.side-panel-mode .other-settings-modal .modal-header h3 {
 html.side-panel-mode .appearance-settings-modal .perf-modal-close,
 html.side-panel-mode .perf-settings-modal .perf-modal-close,
 html.side-panel-mode .sidepanel-settings-modal .perf-modal-close,
-html.side-panel-mode .other-settings-modal .perf-modal-close {
+html.side-panel-mode .other-settings-modal .perf-modal-close,
+html.side-panel-mode .shortcuts-settings-modal .perf-modal-close {
     width: 26px !important;
     height: 26px !important;
     font-size: 13px !important;
 }
 
 html.side-panel-mode .appearance-settings-modal .modal-body,
-html.side-panel-mode .other-settings-modal .modal-body {
+html.side-panel-mode .other-settings-modal .modal-body,
+html.side-panel-mode .shortcuts-settings-modal .modal-body {
     padding: 10px 10px 36px !important;
     overflow-y: auto !important;
     flex: 1 1 auto !important;
@@ -4171,12 +4228,14 @@ html.side-panel-mode .other-settings-modal .modal-body {
 }
 
 html.side-panel-mode .appearance-settings-modal .detail-section,
-html.side-panel-mode .other-settings-modal .detail-section {
+html.side-panel-mode .other-settings-modal .detail-section,
+html.side-panel-mode .shortcuts-settings-modal .detail-section {
     margin-bottom: 14px !important;
 }
 
 html.side-panel-mode .appearance-settings-modal .detail-section-title,
-html.side-panel-mode .other-settings-modal .detail-section-title {
+html.side-panel-mode .other-settings-modal .detail-section-title,
+html.side-panel-mode .shortcuts-settings-modal .detail-section-title {
     font-size: 11px !important;
     font-weight: 600 !important;
     text-transform: uppercase !important;
@@ -4188,7 +4247,8 @@ html.side-panel-mode .other-settings-modal .detail-section-title {
 }
 
 html.side-panel-mode .appearance-settings-modal .modal-body > div[style*="height: 1px"],
-html.side-panel-mode .other-settings-modal .modal-body > div[style*="height: 1px"] {
+html.side-panel-mode .other-settings-modal .modal-body > div[style*="height: 1px"],
+html.side-panel-mode .shortcuts-settings-modal .modal-body > div[style*="height: 1px"] {
     margin: 8px 0 !important;
     opacity: 0.25 !important;
 }

@@ -9116,6 +9116,7 @@ function setupCanvasManageModal() {
         }
 
         manageModal.style.display = 'block';
+        manageModal.style.zIndex = '20000';
         if (anchorToSettings) {
             manageModal.dataset.anchoredTo = 'settings';
             window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(manageModal));
@@ -9172,6 +9173,7 @@ function setupCanvasManageModal() {
         }
 
         otherManageModal.style.display = 'block';
+        otherManageModal.style.zIndex = '20000';
         if (anchorToSettings) {
             otherManageModal.dataset.anchoredTo = 'settings';
             window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(otherManageModal));
@@ -9318,6 +9320,7 @@ const positionManageModalUnderSettingsBtn = (modalEl) => {
     modalEl.style.position = 'fixed';
     modalEl.style.left = `${Math.round(left)}px`;
     modalEl.style.top = `${Math.round(top)}px`;
+    modalEl.style.zIndex = '20000';
 };
 
 const positionModalNearZoomIndicator = (modalEl) => {
@@ -9369,7 +9372,7 @@ const positionModalNearZoomIndicator = (modalEl) => {
     modalEl.style.position = 'fixed';
     modalEl.style.left = `${Math.round(left)}px`;
     modalEl.style.top = `${Math.round(top)}px`;
-    modalEl.style.zIndex = '10001';
+    modalEl.style.zIndex = '20000';
     modalEl.dataset.anchoredTo = 'zoom-indicator';
 };
 
@@ -9384,7 +9387,6 @@ const SETTINGS_ANCHORED_MODAL_IDS = [
     'canvasClipboardModal',
     'canvasManageModal',
     'canvasOtherManageModal',
-    'canvasShortcutsModal',
     'canvasOpenSourceModal'
 ];
 
@@ -10127,6 +10129,12 @@ function setupCanvasShortcutsModal() {
     const closeBtn = document.getElementById('canvasShortcutsModalClose');
     const close = () => closeCanvasShortcutsModal();
     if (closeBtn) closeBtn.addEventListener('click', close);
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeCanvasShortcutsModal();
+        }
+    });
 }
 
 // =================================================================================
@@ -33681,7 +33689,7 @@ function openCanvasShortcutsModal(options = {}) {
     if (!modal) return;
     setupCanvasShortcutsModal();
 
-    const { anchorToSettings = true, scrollToTarget = null } = options;
+    const { scrollToTarget = null } = options;
 
     // 先关闭帮助弹窗和管理弹窗
     try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
@@ -33689,16 +33697,14 @@ function openCanvasShortcutsModal(options = {}) {
     try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
     try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
 
-    modal.style.display = 'block';
+    modal.style.position = '';
+    modal.style.left = '';
+    modal.style.top = '';
+    resetSettingsAnchoredModalSizing(modal);
 
-    if (anchorToSettings) {
-        window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(modal));
-    } else {
-        modal.style.position = '';
-        modal.style.left = '';
-        modal.style.top = '';
-        resetSettingsAnchoredModalSizing(modal);
-    }
+    modal.style.display = 'flex';
+    modal.classList.add('show');
+    modal.style.zIndex = '21000';
 
     updateShortcutDisplays();
     if (typeof updateShortcutsDisplay === 'function') {
@@ -33711,7 +33717,7 @@ function openCanvasShortcutsModal(options = {}) {
                 || modal.querySelector('[data-shortcut-display="anchorRecord"]')
                 || modal.querySelector('[data-shortcut-display="anchorTempWorkspace"]');
             if (targetEl) {
-                const section = targetEl.closest('.canvas-help-section') || targetEl;
+                const section = targetEl.closest('.canvas-help-section, .detail-section') || targetEl;
                 section.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         });
@@ -33720,7 +33726,10 @@ function openCanvasShortcutsModal(options = {}) {
 
 function closeCanvasShortcutsModal() {
     const modal = document.getElementById('canvasShortcutsModal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('show');
+    }
     stopShortcutRecording(null);
 }
 
@@ -33742,6 +33751,7 @@ function openCanvasOpenSourceModal() {
     try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
 
     modal.style.display = 'block';
+    modal.style.zIndex = '20000';
 
     window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(modal));
 }
@@ -34415,7 +34425,7 @@ function setupCanvasHelpModal() {
                 return;
             }
             const shortcutsModal = document.getElementById('canvasShortcutsModal');
-            if (shortcutsModal && shortcutsModal.style.display === 'block') {
+            if (shortcutsModal && (shortcutsModal.style.display === 'block' || shortcutsModal.style.display === 'flex' || shortcutsModal.classList.contains('show'))) {
                 closeCanvasShortcutsModal();
                 return;
             }
@@ -34685,6 +34695,7 @@ function openCanvasHelpModal(tabName = 'release') {
     });
 
     helpModal.style.display = 'block';
+    helpModal.style.zIndex = '20000';
 
     if (typeof positionManageModalUnderSettingsBtn === 'function') {
         window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(helpModal));

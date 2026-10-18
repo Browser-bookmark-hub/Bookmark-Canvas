@@ -275,7 +275,7 @@
     border-radius: 10px;
     padding: 0;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    z-index: 1001;
+    z-index: 20000;
     min-width: 320px;
     max-width: 520px;
 }
@@ -612,7 +612,7 @@
     border-radius: 10px;
     padding: 0;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    z-index: 1001;
+    z-index: 20000;
     min-width: 280px;
     width: min(300px, calc(100vw - 16px));
     max-width: calc(100vw - 16px);
@@ -632,7 +632,6 @@ html[lang="en"] #canvasManageModal.canvas-manage-modal {
     transform: translate(-4px, -4px);
 }
 
-#canvasShortcutsModal.canvas-manage-modal,
 #canvasOpenSourceModal.canvas-manage-modal {
     min-width: 280px;
     width: min(480px, calc(100vw - 16px));
@@ -642,7 +641,6 @@ html[lang="en"] #canvasManageModal.canvas-manage-modal {
     margin-left: -2px;
 }
 
-html[lang="en"] #canvasShortcutsModal.canvas-manage-modal,
 html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
     min-width: 280px;
     width: min(520px, calc(100vw - 16px));
@@ -832,7 +830,6 @@ html.side-panel-mode .canvas-manage-modal {
 }
 
 html.side-panel-mode .canvas-clipboard-modal,
-html.side-panel-mode #canvasShortcutsModal.canvas-manage-modal,
 html.side-panel-mode #canvasOpenSourceModal.canvas-manage-modal {
     min-width: 280px;
     width: min(480px, calc(100vw - 16px));
@@ -885,7 +882,7 @@ html.side-panel-mode .canvas-help-pointer-info {
 }
 
 #canvasShortcutsModal.show {
-    display: block !important;
+    display: flex !important;
 }
 
 html.side-panel-mode .click-to-clear-toolbar {
@@ -1221,7 +1218,7 @@ html[lang="en"] #canvasManageModal .canvas-manage-split-group.canvas-manage-hori
     border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    z-index: 1030;
+    z-index: 20100;
     padding: 4px;
     animation: dropdownFadeIn 0.15s ease-out;
 }
