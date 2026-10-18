@@ -10166,6 +10166,9 @@ function applyCanvasFloatingToolsDockState(state, options = {}) {
         }
     }
     zoomIndicator.dataset.dockEdge = normalized.edge;
+    if (typeof window.repositionSettingsAnchoredModals === 'function') {
+        window.requestAnimationFrame(() => window.repositionSettingsAnchoredModals());
+    }
 
     if (options && options.persist === true) {
         return writeCanvasFloatingToolsDockState(normalized);
@@ -10438,6 +10441,9 @@ function clearCanvasFloatingToolsDragSession() {
 
     canvasFloatingToolsDragSession = null;
     clearCanvasFloatingDragVisualState();
+    if (typeof window.repositionSettingsAnchoredModals === 'function') {
+        window.requestAnimationFrame(() => window.repositionSettingsAnchoredModals());
+    }
 }
 
 // 页面被冻结/从 BFCache 恢复时，浏览器不一定会补发 pointerup。

@@ -9117,12 +9117,11 @@ function setupCanvasManageModal() {
 
         manageModal.style.display = 'block';
         if (anchorToSettings) {
+            manageModal.dataset.anchoredTo = 'settings';
             window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(manageModal));
         } else {
-            manageModal.style.position = '';
-            manageModal.style.left = '';
-            manageModal.style.top = '';
-            resetSettingsAnchoredModalSizing(manageModal);
+            manageModal.dataset.anchoredTo = 'zoom-indicator';
+            window.requestAnimationFrame(() => positionModalNearZoomIndicator(manageModal));
         }
 
         updateShortcutDisplays();
@@ -9141,6 +9140,7 @@ function setupCanvasManageModal() {
         manageModalClose.addEventListener('click', () => {
             stopShortcutRecording(null);
             manageModal.style.display = 'none';
+            manageModal.dataset.anchoredTo = '';
             const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
             if (pop) pop.remove();
         });
@@ -9149,6 +9149,7 @@ function setupCanvasManageModal() {
     const closeOtherManageModal = () => {
         if (!otherManageModal) return;
         otherManageModal.style.display = 'none';
+        otherManageModal.dataset.anchoredTo = '';
     };
 
     const openOtherManageModal = (options = {}) => {
@@ -9166,17 +9167,17 @@ function setupCanvasManageModal() {
         const isVisible = otherManageModal.style.display === 'block';
         if (isVisible) {
             otherManageModal.style.display = 'none';
+            otherManageModal.dataset.anchoredTo = '';
             return;
         }
 
         otherManageModal.style.display = 'block';
         if (anchorToSettings) {
+            otherManageModal.dataset.anchoredTo = 'settings';
             window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(otherManageModal));
         } else {
-            otherManageModal.style.position = '';
-            otherManageModal.style.left = '';
-            otherManageModal.style.top = '';
-            resetSettingsAnchoredModalSizing(otherManageModal);
+            otherManageModal.dataset.anchoredTo = 'zoom-indicator';
+            window.requestAnimationFrame(() => positionModalNearZoomIndicator(otherManageModal));
         }
     };
 
@@ -9185,7 +9186,8 @@ function setupCanvasManageModal() {
         openOtherManageBridgeBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            openOtherManageModal({ anchorToSettings: true });
+            const fromZoomIndicator = manageModal && manageModal.dataset.anchoredTo === 'zoom-indicator';
+            openOtherManageModal({ anchorToSettings: !fromZoomIndicator });
         });
     }
 
@@ -9194,7 +9196,8 @@ function setupCanvasManageModal() {
         openManageBridgeBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            openManageModal({ anchorToSettings: true });
+            const fromZoomIndicator = otherManageModal && otherManageModal.dataset.anchoredTo === 'zoom-indicator';
+            openManageModal({ anchorToSettings: !fromZoomIndicator });
         });
     }
 
@@ -9317,16 +9320,70 @@ const positionManageModalUnderSettingsBtn = (modalEl) => {
     modalEl.style.top = `${Math.round(top)}px`;
 };
 
+const positionModalNearZoomIndicator = (modalEl) => {
+    if (!modalEl) return;
+    const zoomIndicator = document.querySelector('.canvas-zoom-indicator');
+    const manageBtn = document.getElementById('canvasManageBtn');
+    const anchorEl = (zoomIndicator && zoomIndicator.offsetHeight > 0) ? zoomIndicator : manageBtn;
+    if (!anchorEl) {
+        modalEl.style.position = '';
+        modalEl.style.left = '';
+        modalEl.style.top = '';
+        resetSettingsAnchoredModalSizing(modalEl);
+        return;
+    }
+
+    modalEl.style.maxWidth = `calc(100vw - 16px)`;
+    modalEl.style.maxHeight = `calc(100vh - 16px)`;
+
+    const anchorRect = anchorEl.getBoundingClientRect();
+    const gap = 8;
+    const viewportPadding = 8;
+    const spaceBelow = window.innerHeight - anchorRect.bottom - viewportPadding;
+    const spaceAbove = anchorRect.top - viewportPadding;
+    let modalRect = modalEl.getBoundingClientRect();
+    const placeAbove = spaceBelow < modalRect.height && spaceAbove > spaceBelow;
+    const availableHeight = Math.max(120, (placeAbove ? spaceAbove : spaceBelow) - gap);
+
+    modalEl.style.maxHeight = `${Math.round(availableHeight)}px`;
+    const modalHeader = modalEl.querySelector('.canvas-manage-modal-header, .canvas-help-modal-header');
+    const modalBody = modalEl.querySelector('.canvas-manage-modal-body, .canvas-help-modal-body');
+    if (modalBody) {
+        const headerH = modalHeader ? modalHeader.offsetHeight : 44;
+        modalBody.style.maxHeight = `${Math.max(60, Math.round(availableHeight - headerH))}px`;
+        modalBody.style.overflowY = 'auto';
+    }
+    modalRect = modalEl.getBoundingClientRect();
+
+    let top = placeAbove
+        ? anchorRect.top - modalRect.height - gap
+        : anchorRect.bottom + gap;
+    top = Math.max(viewportPadding, Math.min(top, window.innerHeight - modalRect.height - viewportPadding));
+
+    let left = anchorRect.left;
+    if (left + modalRect.width > window.innerWidth - viewportPadding) {
+        left = anchorRect.right - modalRect.width;
+    }
+    left = Math.max(viewportPadding, Math.min(left, window.innerWidth - modalRect.width - viewportPadding));
+
+    modalEl.style.position = 'fixed';
+    modalEl.style.left = `${Math.round(left)}px`;
+    modalEl.style.top = `${Math.round(top)}px`;
+    modalEl.style.zIndex = '10001';
+    modalEl.dataset.anchoredTo = 'zoom-indicator';
+};
+
 function resetSettingsAnchoredModalSizing(modalEl) {
     if (!modalEl) return;
     modalEl.style.maxHeight = '';
-    const modalBody = modalEl.querySelector('.canvas-manage-modal-body');
+    const modalBody = modalEl.querySelector('.canvas-manage-modal-body, .canvas-help-modal-body');
     if (modalBody) modalBody.style.maxHeight = '';
 }
 
 const SETTINGS_ANCHORED_MODAL_IDS = [
     'canvasClipboardModal',
     'canvasManageModal',
+    'canvasOtherManageModal',
     'canvasShortcutsModal',
     'canvasOpenSourceModal'
 ];
@@ -9337,9 +9394,18 @@ function repositionSettingsAnchoredModals() {
     SETTINGS_ANCHORED_MODAL_IDS.forEach((modalId) => {
         const modal = document.getElementById(modalId);
         if (!modal || modal.style.display === 'none' || modal.style.position !== 'fixed') return;
-        positionManageModalUnderSettingsBtn(modal);
+        if (modal.dataset.anchoredTo === 'zoom-indicator') {
+            positionModalNearZoomIndicator(modal);
+        } else {
+            positionManageModalUnderSettingsBtn(modal);
+        }
     });
+    const helpModal = document.getElementById('canvasHelpModal');
+    if (helpModal && helpModal.style.display !== 'none' && helpModal.dataset.anchoredTo === 'zoom-indicator') {
+        positionModalNearZoomIndicator(helpModal);
+    }
 }
+window.repositionSettingsAnchoredModals = repositionSettingsAnchoredModals;
 
 window.addEventListener('resize', () => {
     if (settingsAnchoredModalResizeFrame !== null) return;
@@ -34250,6 +34316,8 @@ function setupCanvasHelpModal() {
             closeCanvasHelpModal();
         } else {
             helpModal.style.display = 'block';
+            helpModal.dataset.anchoredTo = 'zoom-indicator';
+            window.requestAnimationFrame(() => positionModalNearZoomIndicator(helpModal));
             if (typeof updateShortcutDisplays === 'function') {
                 updateShortcutDisplays();
             }
