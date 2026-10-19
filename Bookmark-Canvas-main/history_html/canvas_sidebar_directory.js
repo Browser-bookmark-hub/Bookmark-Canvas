@@ -4404,16 +4404,7 @@
   }
 
   function isCanvasReadyForPruning() {
-    if (typeof window !== 'undefined' && window.__bookmarkCanvasSearchStateReady === true) {
-      return true;
-    }
-    const state = getCanvasState();
-    if (state && Array.isArray(state.tempSections) && Array.isArray(state.mdNodes)) {
-      if (document.readyState === 'complete') {
-        return true;
-      }
-    }
-    return false;
+    return typeof window !== 'undefined' && window.__bookmarkCanvasSearchStateReady === true;
   }
 
   function buildPinnedSection(directoryNodeDataMap, openFolderKeys) {
@@ -6931,6 +6922,10 @@
     });
 
     global.addEventListener('bcs:language-changed', () => {
+      queueRefresh({ force: true });
+    });
+
+    global.addEventListener('canvas-search-state-ready', () => {
       queueRefresh({ force: true });
     });
 

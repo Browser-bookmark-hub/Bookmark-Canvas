@@ -5597,11 +5597,18 @@ html:fullscreen body.header-compact .canvas-main-container {
    ============================================================================= */
 
 .sidebar-tabs-header {
+    flex: 0 0 auto;
     display: flex;
     border-bottom: 1px solid var(--border-color);
-    margin-bottom: 10px;
-    padding: 0 4px;
+    margin-bottom: 8px;
+    padding: 0 2px;
+    margin-right: 10px;
     gap: 4px;
+}
+
+.sidebar.position-right .sidebar-tabs-header {
+    margin-left: 10px;
+    margin-right: 0;
 }
 
 .sidebar-tab-btn {
@@ -5637,18 +5644,24 @@ html:fullscreen body.header-compact .canvas-main-container {
 
 /* 极窄视图下的 Tab 切换栏：纵向紧凑图标 */
 .sidebar.mini .sidebar-tabs-header {
+    flex: 0 0 auto;
     flex-direction: column;
     padding: 6px 0 4px 0;
     margin-bottom: 8px;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
     gap: 6px;
-    align-items: center;
+    align-items: flex-start;
     border-bottom: 1px solid var(--border-color);
+    width: var(--sidebar-mini-width, 48px) !important;
+    box-sizing: border-box;
 }
 
 .sidebar.mini .sidebar-tab-btn {
     width: 36px;
     height: 32px;
     padding: 0;
+    margin: 0 0 0 6px !important;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -5674,6 +5687,8 @@ html:fullscreen body.header-compact .canvas-main-container {
 .canvas-history-panel {
     display: flex;
     flex-direction: column;
+    flex: 1 1 0%;
+    min-height: 0;
     height: 100%;
     color: var(--text-primary);
 }
@@ -5803,14 +5818,16 @@ html:fullscreen body.header-compact .canvas-main-container {
 .sidebar-anchor-container {
     display: flex;
     flex-direction: column;
+    flex: 1 1 0%;
+    min-height: 0;
     height: 100%;
-    padding: 0 0 20px 0;
+    padding: 0 0 4px 0;
     gap: 0;
-    overflow: visible;
+    overflow: hidden;
 }
 
 .nav-tabs.history-tab-active {
-    overflow: visible !important;
+    overflow: hidden !important;
 }
 
 .sidebar-section-header {
@@ -5831,8 +5848,8 @@ html:fullscreen body.header-compact .canvas-main-container {
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 6px;
     margin-bottom: 6px;
-    margin-left: 8px;
-    margin-right: 8px;
+    margin-left: 2px;
+    margin-right: 10px;
     position: relative;
     height: 28px;
     box-sizing: border-box;
@@ -6101,15 +6118,15 @@ html:fullscreen body.header-compact .canvas-main-container {
     gap: 6px;
     overflow-y: auto;
     overflow-x: hidden;
+    overscroll-behavior: contain;
+    isolation: isolate;
     flex: 1 1 0%;
     min-height: 0;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(140, 140, 140, 0.25) transparent;
-    scrollbar-gutter: stable;
     padding-top: 0;
     padding-bottom: 4px;
-    margin-left: -16px;
-    padding-left: 16px;
+    margin-left: 0;
+    padding-left: 6px;
+    padding-right: 2px;
 }
 
 .sidebar-anchor-container.auto-inactive .anchor-slots-container,
@@ -6129,8 +6146,8 @@ html:fullscreen body.header-compact .canvas-main-container {
     flex-direction: column;
     gap: 6px;
     padding: 10px;
-    margin-left: 8px;
-    margin-right: 4px;
+    margin-left: 12px;
+    margin-right: 6px;
     border-radius: 6px;
     background: var(--bg-secondary, rgba(0, 0, 0, 0.2));
     border: 1px solid var(--border-color);
@@ -6346,22 +6363,30 @@ html:fullscreen body.header-compact .canvas-main-container {
     border-color: var(--accent-color);
 }
 
-/* Custom scrollbars for independent scrollable lists (Always visible thin gray thumb, transparent track) */
+/* Custom scrollbars for independent scrollable lists (Always visible clear thumb, transparent track) */
 .anchor-slots-container::-webkit-scrollbar,
 .temp-anchor-slots-container::-webkit-scrollbar,
 .history-items-container::-webkit-scrollbar {
-    width: 4px;
+    width: 6px;
 }
 .anchor-slots-container::-webkit-scrollbar-track,
 .temp-anchor-slots-container::-webkit-scrollbar-track,
 .history-items-container::-webkit-scrollbar-track {
     background: transparent;
+    margin-top: 4px;
+    margin-bottom: 8px;
 }
 .anchor-slots-container::-webkit-scrollbar-thumb,
 .temp-anchor-slots-container::-webkit-scrollbar-thumb,
 .history-items-container::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb-color, rgba(140, 140, 140, 0.25));
-    border-radius: 2px;
+    background: var(--border-hover, rgba(140, 140, 140, 0.4));
+    border-radius: 3px;
+    transition: background 0.15s ease;
+}
+.anchor-slots-container::-webkit-scrollbar-thumb:hover,
+.temp-anchor-slots-container::-webkit-scrollbar-thumb:hover,
+.history-items-container::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary, #3b82f6);
 }
 
 /* Flash highlight animation for slot rows (已移除黄色闪烁背景，保持直接纯粹切换) */
@@ -6471,8 +6496,12 @@ html:fullscreen body.header-compact .canvas-main-container {
    ============================================================================= */
 
 .sidebar.mini .sidebar-anchor-container {
-    padding: 0 0 10px 0;
+    width: var(--sidebar-mini-width, 48px) !important;
+    max-width: var(--sidebar-mini-width, 48px) !important;
+    padding: 0 0 4px 0 !important;
+    margin: 0 !important;
     overflow-x: hidden;
+    box-sizing: border-box;
 }
 
 /* 临时工作区处于激活状态时，容器左侧高亮绿条指示 */
@@ -6488,8 +6517,10 @@ html:fullscreen body.header-compact .canvas-main-container {
     padding: 4px 0 6px 0;
     margin: 0 0 6px 0;
     gap: 6px;
-    align-items: center;
+    align-items: flex-start;
     border-bottom: 1px solid var(--border-color);
+    width: var(--sidebar-mini-width, 48px) !important;
+    box-sizing: border-box;
 }
 
 .sidebar.mini .anchor-unified-header .sidebar-header-left,
@@ -6504,6 +6535,7 @@ html:fullscreen body.header-compact .canvas-main-container {
     height: 30px;
     font-size: 13px;
     border-radius: 6px;
+    margin: 0 0 0 7px !important;
 }
 
 .sidebar.mini #addAnchorBtn {
@@ -6512,6 +6544,7 @@ html:fullscreen body.header-compact .canvas-main-container {
     height: 30px;
     font-size: 13px;
     border-radius: 6px;
+    margin: 0 0 0 7px !important;
 }
 
 .sidebar.mini #tempClearBtn {
@@ -6520,6 +6553,7 @@ html:fullscreen body.header-compact .canvas-main-container {
     height: 30px;
     font-size: 13px;
     border-radius: 6px;
+    margin: 0 0 0 7px !important;
 }
 
 .sidebar.mini #anchorSettingsBtn {
@@ -6528,6 +6562,7 @@ html:fullscreen body.header-compact .canvas-main-container {
     height: 30px;
     font-size: 13px;
     border-radius: 6px;
+    margin: 0 0 0 7px !important;
 }
 
 /* 极窄形态下内联设置面板隐藏（点击设置自动展开侧边栏） */
@@ -6538,19 +6573,40 @@ html:fullscreen body.header-compact .canvas-main-container {
 /* 锚点槽位列表：纵向紧凑 34x34 圆角按钮 */
 .sidebar.mini .anchor-slots-container {
     margin: 0 !important;
-    padding: 2px 0 10px 0 !important;
+    padding: 2px 0 4px 0 !important;
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
     overflow-x: hidden;
     overflow-y: auto;
-    scrollbar-width: none;
+    overscroll-behavior: contain;
+    isolation: isolate;
+    scrollbar-gutter: auto;
+    width: var(--sidebar-mini-width, 48px) !important;
+    max-width: var(--sidebar-mini-width, 48px) !important;
+    box-sizing: border-box;
 }
 
+/* 第二形态（极窄 48px 窄边）锚点槽位独立垂直滚动条：宽度设定为 3px（加宽 1px 易辨识，且保持 4px 悬浮间距不挤占 34px 卡片） */
 .sidebar.mini .anchor-slots-container::-webkit-scrollbar {
-    width: 0;
-    height: 0;
+    width: 3px;
+}
+
+.sidebar.mini .anchor-slots-container::-webkit-scrollbar-track {
+    background: transparent;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.sidebar.mini .anchor-slots-container::-webkit-scrollbar-thumb {
+    background: var(--border-hover, rgba(140, 140, 140, 0.45));
+    border-radius: 99px;
+    transition: background 0.15s ease;
+}
+
+.sidebar.mini .anchor-slots-container::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary, #3b82f6);
 }
 
 .sidebar.mini .anchor-slot-row {
@@ -6559,7 +6615,7 @@ html:fullscreen body.header-compact .canvas-main-container {
     min-width: 34px !important;
     min-height: 34px !important;
     padding: 0 !important;
-    margin: 0 !important;
+    margin: 0 0 0 7px !important;
     box-sizing: border-box;
     border-radius: 6px;
     display: flex !important;

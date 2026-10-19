@@ -3259,10 +3259,12 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 
 /* ==================== 侧边栏 ==================== */
 .sidebar {
+    display: flex;
+    flex-direction: column;
     width: var(--sidebar-width, 260px);
     background: var(--bg-secondary);
     border-right: none;
-    padding: 0 16px 16px 16px;
+    padding: 0 0 4px 10px;
     overflow: visible;
     /* 避免在 macOS overlay scrollbar 下预留“空白条”，导致右侧看起来不贴边 */
     scrollbar-gutter: auto;
@@ -3280,6 +3282,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     order: 2;
     border-right: none;
     border-left: none;
+    padding: 0 10px 4px 0;
 }
 
 .sidebar::-webkit-scrollbar {
@@ -3290,7 +3293,7 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 /* 侧边栏极窄图标视图（中间形态） */
 .sidebar.mini {
     width: var(--sidebar-mini-width, 48px) !important;
-    padding: 0 4px 16px 4px;
+    padding: 0 0 6px 0 !important;
     overflow: visible;
 }
 
@@ -3300,18 +3303,40 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 }
 
 .sidebar.mini .nav-tabs {
-    margin-left: 0;
-    margin-right: 0;
-    padding-left: 0;
-    padding-right: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
-    scrollbar-width: none;
+    flex: 1 1 0%;
+    min-height: 0;
+    height: auto;
+    width: var(--sidebar-mini-width, 48px) !important;
+    max-width: var(--sidebar-mini-width, 48px) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    isolation: isolate;
+    scrollbar-gutter: auto;
 }
 
+/* 第二形态（极窄 48px 窄边）目录树独立垂直滚动条：宽度设定为 3px（加宽 1px 易辨识，且保持 3px 悬浮间距不挤占 36px 图标） */
 .sidebar.mini .nav-tabs::-webkit-scrollbar {
-    width: 0;
-    height: 0;
+    width: 3px;
+}
+
+.sidebar.mini .nav-tabs::-webkit-scrollbar-track {
+    background: transparent;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.sidebar.mini .nav-tabs::-webkit-scrollbar-thumb {
+    background: var(--border-hover, rgba(140, 140, 140, 0.45));
+    border-radius: 99px;
+    transition: background 0.15s ease;
+}
+
+.sidebar.mini .nav-tabs::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary, #3b82f6);
 }
 
 /* 侧边栏收起状态：仅保留折叠按钮 */
@@ -3715,18 +3740,21 @@ body.sidebar-resizing * {
 }
 
 .nav-tabs {
+    flex: 1 1 0%;
+    min-height: 0;
+    height: auto;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
-    scrollbar-width: none;
-    margin-bottom: 8px;
-    margin-left: -12px;
-    margin-right: -12px;
-    padding-left: 12px;
-    padding-right: 12px;
+    overscroll-behavior: contain;
+    isolation: isolate;
+    margin-bottom: 0;
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 0;
+    padding-right: 2px;
     opacity: 1;
     visibility: visible;
     transform: translateX(0);
@@ -3734,9 +3762,25 @@ body.sidebar-resizing * {
     will-change: opacity, transform;
 }
 
+/* 目录树垂直滚动条：纯直角矩形滚动容器，轨道透明，符合 commit 5629068749ebcaee92d4a4e078778ea9d226fb11 性能规范 */
 .nav-tabs::-webkit-scrollbar {
-    width: 0;
-    height: 0;
+    width: 6px;
+}
+
+.nav-tabs::-webkit-scrollbar-track {
+    background: transparent;
+    margin-top: 4px;
+    margin-bottom: 8px;
+}
+
+.nav-tabs::-webkit-scrollbar-thumb {
+    background: var(--border-hover, rgba(140, 140, 140, 0.4));
+    border-radius: 3px;
+    transition: background 0.15s ease;
+}
+
+.nav-tabs::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary, #3b82f6);
 }
 
 .nav-tab {
@@ -4253,7 +4297,6 @@ body.sidebar-resizing * {
     height: 14px;
     border: none;
     background: transparent;
-    color: var(--text-tertiary);
     border-radius: 3px;
     display: inline-flex;
     align-items: center;
@@ -4270,24 +4313,30 @@ body.sidebar-resizing * {
     font-size: 9px;
 }
 
+/* 未置顶项：条目悬浮露出时默认直接显示置顶金黄色 */
+.canvas-dir-pin-btn {
+    color: var(--canvas-dir-color-pinned, #eab308);
+}
+
 .canvas-dir-pin-btn:hover,
 .canvas-dir-pin-btn:focus-visible {
     background: color-mix(in srgb, var(--canvas-dir-color-pinned, #eab308) 18%, transparent);
     color: var(--canvas-dir-color-pinned, #eab308);
 }
 
-.canvas-dir-pin-btn.is-pinned {
-    color: var(--canvas-dir-color-pinned, #eab308);
-}
-
-.canvas-dir-pin-btn.is-pinned:hover {
-    background: color-mix(in srgb, #ef4444 18%, transparent);
+/* 已置顶项（取消置顶）：条目悬浮露出时默认直接显示警戒红色 */
+.canvas-dir-pin-btn.is-pinned,
+.canvas-dir-unpin-btn {
     color: #ef4444;
 }
 
-.canvas-dir-unpin-btn:hover {
+.canvas-dir-pin-btn.is-pinned:hover,
+.canvas-dir-pin-btn.is-pinned:focus-visible,
+.canvas-dir-unpin-btn:hover,
+.canvas-dir-unpin-btn:focus-visible {
     background: color-mix(in srgb, #ef4444 18%, transparent);
     color: #ef4444;
+    transition: none;
 }
 
 .canvas-dir-pin-btn[data-tooltip]::before,
@@ -4563,20 +4612,23 @@ body.sidebar-resizing * {
 .sidebar.mini .canvas-directory-tree {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     padding: 4px 0;
     margin: 0;
-    overflow-x: hidden;
+    overflow: visible !important;
+    width: var(--sidebar-mini-width, 48px) !important;
+    box-sizing: border-box;
 }
 
 .sidebar.mini .canvas-dir-root {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
     padding: 0;
     margin: 0;
-    width: 100%;
+    width: var(--sidebar-mini-width, 48px) !important;
+    box-sizing: border-box;
 }
 
 .sidebar.mini .canvas-dir-root > .canvas-dir-folder + .canvas-dir-folder {
@@ -4598,7 +4650,7 @@ body.sidebar-resizing * {
 .sidebar.mini .canvas-dir-folder {
     width: 36px;
     height: 36px;
-    margin: 0;
+    margin: 0 0 0 6px !important;
     padding: 0;
     border: none;
     display: flex;
@@ -4629,7 +4681,7 @@ body.sidebar-resizing * {
 .sidebar.mini .canvas-dir-item {
     width: 36px;
     height: 36px;
-    margin: 0;
+    margin: 0 0 0 6px !important;
     padding: 0;
     border: none;
     display: flex;
@@ -4752,7 +4804,7 @@ body.sidebar-resizing * {
     height: auto !important;
     display: flex !important;
     flex-direction: column !important;
-    align-items: center !important;
+    align-items: flex-start !important;
     margin: 0 0 6px 0 !important;
     padding: 0 0 6px 0 !important;
     border-bottom: 1px solid color-mix(in srgb, var(--border-color) 65%, transparent) !important;
@@ -4767,7 +4819,7 @@ body.sidebar-resizing * {
     justify-content: center !important;
     border-radius: 6px !important;
     padding: 0 !important;
-    margin: 0 !important;
+    margin: 0 0 0 6px !important;
     cursor: pointer !important;
 }
 
@@ -4781,18 +4833,28 @@ body.sidebar-resizing * {
 .sidebar.mini .canvas-dir-pinned-folder[open] > .canvas-dir-pinned-children {
     display: flex !important;
     flex-direction: column !important;
-    align-items: center !important;
+    align-items: flex-start !important;
     gap: 6px !important;
     margin: 6px 0 0 0 !important;
     padding: 0 !important;
     border-left: none !important;
     width: 100% !important;
+    box-sizing: border-box !important;
+    max-height: none !important;
+    overflow: visible !important;
+    scrollbar-width: none !important;
+}
+
+.sidebar.mini .canvas-dir-pinned-folder[open] > .canvas-dir-pinned-children::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
 }
 
 .sidebar.mini .canvas-dir-pinned-item {
     width: 36px !important;
     height: 36px !important;
-    margin: 0 !important;
+    margin: 0 0 0 6px !important;
     padding: 0 !important;
     border: none !important;
     display: flex !important;
