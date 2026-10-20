@@ -286,7 +286,7 @@ html.layout-preload-active.layout-preload-header-compact .history-header {
     box-shadow: none;
     background: transparent;
     pointer-events: none;
-    z-index: 180;
+    z-index: 1200;
 }
 
 html.layout-preload-active.layout-preload-header-compact .history-header .header-right,
@@ -601,13 +601,21 @@ option {
        main container when the browser restores a non-zero document scroll. */
     position: relative;
     top: 0;
-    z-index: 100;
+    /* 确保头部导航栏及其下拉组件（搜索结果/候选面板、模式菜单、历史记录等）高于画布内悬浮工具窗 (z-index: 1000) */
+    z-index: 1200;
     overflow: visible;
     /* Keep both flex children ordered explicitly.  During the early layout
        preload the dock class can briefly differ from body state; relying on
        the default order in that window leaves a stale header-sized slot. */
     order: 0;
     transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* 当搜索正在进行或结果/模式菜单展开时，进一步提升层级至 1500，确保始终覆盖画布悬浮工具窗 */
+.history-header:has(.search-container:focus-within),
+.history-header:has(.search-results-panel.visible),
+.history-header:has(.search-mode-menu.visible) {
+    z-index: 1500;
 }
 
 /* 批量面板收起后，恢复把手与悬浮工具窗一样独立停靠在画布边缘。 */
@@ -969,7 +977,7 @@ body.header-compact .history-header {
     box-shadow: none;
     background: transparent;
     pointer-events: none;
-    z-index: 180;
+    z-index: 1200;
 }
 
 body.header-compact .history-header .header-right,
