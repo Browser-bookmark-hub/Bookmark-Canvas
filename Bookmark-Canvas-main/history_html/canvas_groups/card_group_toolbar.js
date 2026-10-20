@@ -60,23 +60,27 @@ function __cardGroupToolbarBuild(node, opts) {
 
     const toolbar = document.createElement('div');
     toolbar.className = 'md-node-toolbar card-group-toolbar';
-    let memberPinState = { allPinned: false };
-    try {
-        if (typeof getCardGroupMembersPinState === 'function') {
-            memberPinState = getCardGroupMembersPinState(node.id) || memberPinState;
-        }
-    } catch (_) { }
-    const pinTitle = memberPinState.allPinned ? t.unpin : t.pin;
-    const pinIcon = memberPinState.allPinned
-        ? '<i class="fas fa-thumbtack"></i>'
-        : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+    const isGroupCanvasPinned = !!(node && node.pinned);
+    const isGroupDirPinned = (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+        ? window.CanvasSidebarDirectory.isEntityPinned('card-group', node.id)
+        : false;
+    const isGroupBothPinned = isGroupCanvasPinned && isGroupDirPinned;
+    const isGroupSinglePinned = (isGroupCanvasPinned && !isGroupDirPinned) || (!isGroupCanvasPinned && isGroupDirPinned);
+    const isEnLang = (typeof currentLang !== 'undefined' && currentLang === 'en');
+    let pinTitle = isEnLang ? 'Pin options' : '置顶选项';
+    if (isGroupBothPinned) pinTitle = isEnLang ? 'Pinned: Canvas & Directory' : '已画布置顶、目录置顶';
+    else if (isGroupCanvasPinned) pinTitle = isEnLang ? 'Pinned: Canvas' : '已画布置顶';
+    else if (isGroupDirPinned) pinTitle = isEnLang ? 'Pinned: Directory' : '已目录置顶';
+    const groupPinClass = isGroupBothPinned ? ' pinned' : (isGroupSinglePinned ? ' pinned-half' : '');
+    const groupPinOpacity = isGroupBothPinned ? '1' : (isGroupSinglePinned ? '0.7' : '0.35');
+    const pinIcon = `<i class="fas fa-thumbtack"${groupPinOpacity !== '1' ? ` style="opacity: ${groupPinOpacity};"` : ''}></i>`;
 
     toolbar.innerHTML = `
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-rename" data-tooltip="${t.rename}"><i class="fas fa-pen"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-color" data-tooltip="${t.color}"><i class="fas fa-palette"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-search" data-tooltip="${t.search}"><i class="fas fa-search"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-locate" data-tooltip="${t.locate}"><i class="fas fa-search-plus"></i></button>
-        <button class="md-node-toolbar-btn card-group-toolbar-btn${memberPinState.allPinned ? ' pinned' : ''}" data-action="card-group-pin" data-tooltip="${pinTitle}">${pinIcon}</button>
+        <button class="md-node-toolbar-btn card-group-toolbar-btn${groupPinClass}" data-action="card-group-pin" data-tooltip="${pinTitle}">${pinIcon}</button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-export" data-tooltip="${t.export}" title="${t.export}"><i class="fas fa-file-export"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-delete-frame" data-tooltip="${t.deleteFrame}">
             <span class="icon-frame-delete">
@@ -287,11 +291,16 @@ function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
             try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
         } else if (action === 'card-group-pin') {
             try {
-                if (typeof toggleCardGroupMembersPin === 'function') {
+                if (typeof window.showCanvasPinPopover === 'function') {
+                    window.showCanvasPinPopover(btn, {
+                        kind: 'card-group',
+                        id: node.id,
+                        element: element
+                    });
+                } else if (typeof toggleCardGroupMembersPin === 'function') {
                     toggleCardGroupMembersPin(node.id);
                 }
             } catch (_) { }
-            try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
         } else if (action === 'card-group-export') {
             closeColorPop();
             try {
@@ -322,18 +331,13 @@ function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
 function __cardGroupContextMenuLabels(node) {
     const lang = (typeof currentLang !== 'undefined') ? currentLang : 'zh';
     const isEn = String(lang).toLowerCase().startsWith('en');
-    let memberPinState = { allPinned: false };
-    try {
-        if (node && typeof getCardGroupMembersPinState === 'function') {
-            memberPinState = getCardGroupMembersPinState(node.id) || memberPinState;
-        }
-    } catch (_) { }
+    const isPinned = !!(node && node.pinned);
     return {
         rename: isEn ? 'Rename' : '重命名',
         color: isEn ? 'Color' : '颜色',
         search: isEn ? 'Search in current scope' : '当前范围搜索',
         locate: isEn ? 'Locate' : '定位',
-        pin: memberPinState.allPinned ? (isEn ? 'Unpin' : '取消置顶') : (isEn ? 'Pin' : '置顶'),
+        pin: isPinned ? (isEn ? 'Unpin' : '取消置顶') : (isEn ? 'Pin' : '置顶'),
         deleteFrame: isEn ? 'Delete Frame Only' : '仅删除框体',
         deleteAll: isEn ? 'Delete Frame and Members' : '删除框体与成员',
         export: isEn ? 'Export' : '导出'
@@ -507,8 +511,18 @@ function __cardGroupHandleContextMenuAction(action, node, options = {}) {
         try { if (typeof locateAndZoomToMdNode === 'function') locateAndZoomToMdNode(node.id, 'fit'); } catch (_) { }
         try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
     } else if (action === 'card-group-context-pin') {
-        try { if (typeof toggleCardGroupMembersPin === 'function') toggleCardGroupMembersPin(node.id); } catch (_) { }
-        try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
+        const groupEl = document.getElementById(node.id);
+        const pinBtn = groupEl ? groupEl.querySelector('.card-group-toolbar-btn[data-action="card-group-pin"]') : null;
+        if (typeof window.showCanvasPinPopover === 'function') {
+            window.showCanvasPinPopover(pinBtn || groupEl || document.body, {
+                kind: 'card-group',
+                id: node.id,
+                element: groupEl,
+                anchorPoint: options && options.anchorPoint ? options.anchorPoint : null
+            });
+        } else if (pinBtn) {
+            pinBtn.click();
+        }
     } else if (action === 'card-group-context-delete') {
         try {
             if (typeof removeMdNode === 'function') removeMdNode(node.id, false);
@@ -582,9 +596,12 @@ function showCardGroupContextMenu(event, node) {
             ev.preventDefault();
             ev.stopPropagation();
             const action = item.dataset.action;
-            const anchorPoint = action === 'card-group-context-rename' || action === 'card-group-context-color'
-                ? { x: point.x, y: point.y + (item.offsetTop || 0) }
-                : point;
+            const itemRect = item.getBoundingClientRect ? item.getBoundingClientRect() : null;
+            const anchorPoint = itemRect
+                ? { x: itemRect.left, y: itemRect.top }
+                : ((action === 'card-group-context-rename' || action === 'card-group-context-color' || action === 'card-group-context-pin')
+                    ? { x: point.x, y: point.y + (item.offsetTop || 0) }
+                    : point);
             if (typeof hideContextMenu === 'function') {
                 try { hideContextMenu(); } catch (_) { }
             } else {

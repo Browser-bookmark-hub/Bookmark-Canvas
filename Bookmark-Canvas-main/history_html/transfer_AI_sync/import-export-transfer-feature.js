@@ -3709,6 +3709,19 @@ function __downloadCanvasZipPackage(files, zipName, downloadFolder) {
     setTimeout(() => URL.revokeObjectURL(zipUrl), 10000);
 }
 
+function __getCardGroupExportMembers(groupNode) {
+    if (!groupNode || !groupNode.id) return [];
+    const members = [{ type: 'md-node', id: groupNode.id, data: groupNode }];
+    try {
+        const api = window.__BCSCardGroup;
+        if (api && typeof api.getRecursiveGeometricMembers === 'function') {
+            const recursive = api.getRecursiveGeometricMembers(groupNode);
+            if (Array.isArray(recursive)) members.push(...recursive);
+        }
+    } catch (_) { }
+    return members;
+}
+
 function __normalizeCanvasSubsetMembers(rawMembers, options = {}) {
     const out = {
         tempIds: new Set(),
@@ -3757,6 +3770,30 @@ function __normalizeCanvasSubsetMembers(rawMembers, options = {}) {
         if (mdId) out.mdIds.add(mdId);
     }
     (Array.isArray(rawMembers) ? rawMembers : []).forEach(addMember);
+
+    // Expand any card-group in out.mdIds to guarantee that all internal members (cards, permanent sections, temp sections, nested groups) are included
+    const state = (typeof CanvasState !== 'undefined') ? CanvasState : null;
+    const processedGroupIds = new Set();
+    const expandGroups = () => {
+        let foundNew = false;
+        Array.from(out.mdIds).forEach((mdId) => {
+            if (processedGroupIds.has(mdId)) return;
+            let node = state && Array.isArray(state.mdNodes) ? state.mdNodes.find((n) => n && n.id === mdId) : null;
+            if (!node && Array.isArray(rawMembers)) {
+                const raw = rawMembers.find((m) => m && (m.id === mdId || (m.data && m.data.id === mdId)));
+                if (raw) node = raw.data || raw;
+            }
+            if (node && node.subtype === 'card-group') {
+                processedGroupIds.add(mdId);
+                foundNew = true;
+                const nestedMembers = __getCardGroupExportMembers(node);
+                (Array.isArray(nestedMembers) ? nestedMembers : []).forEach(addMember);
+            }
+        });
+        if (foundNew) expandGroups();
+    };
+    expandGroups();
+
     return out;
 }
 
@@ -3779,19 +3816,6 @@ function __collectCanvasSubsetEdges(subset) {
         const toId = String(edge.toNode || '').trim();
         return !!(fromId && toId && nodeIds.has(fromId) && nodeIds.has(toId));
     });
-}
-
-function __getCardGroupExportMembers(groupNode) {
-    if (!groupNode || !groupNode.id) return [];
-    const members = [{ type: 'md-node', id: groupNode.id, data: groupNode }];
-    try {
-        const api = window.__BCSCardGroup;
-        if (api && typeof api.getRecursiveGeometricMembers === 'function') {
-            const recursive = api.getRecursiveGeometricMembers(groupNode);
-            if (Array.isArray(recursive)) members.push(...recursive);
-        }
-    } catch (_) { }
-    return members;
 }
 
 async function __exportCanvasSubsetPackage(rawMembers, options = {}) {

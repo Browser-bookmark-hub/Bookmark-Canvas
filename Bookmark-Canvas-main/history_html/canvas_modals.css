@@ -2101,6 +2101,7 @@ body.canvas-popover-active .temp-node-header {
 
 /* Ensure the popover itself and toolbar actions remain interactive */
 body.canvas-popover-active .temp-node-header .temp-node-actions,
+body.canvas-popover-active .permanent-section-header .permanent-section-actions,
 body.canvas-popover-active .md-node-toolbar,
 body.canvas-popover-active .md-format-popover,
 body.canvas-popover-active .md-color-popover,
@@ -2120,10 +2121,12 @@ body.canvas-popover-active .temp-node-header {
 /* Re-enable interactions for active UI elements */
 body.canvas-popover-active .md-node-toolbar,
 body.canvas-popover-active .temp-node-actions,
+body.canvas-popover-active .permanent-section-actions,
 body.canvas-popover-active .md-format-popover,
 body.canvas-popover-active .md-color-popover,
 body.canvas-popover-active .temp-color-popover,
 body.canvas-popover-active .md-delete-options-popover,
+body.canvas-popover-active .canvas-pin-popover,
 body.canvas-popover-active .md-heading-popover,
 body.canvas-popover-active .md-list-popover,
 body.canvas-popover-active .md-fontcolor-popover,
@@ -2136,6 +2139,7 @@ body.canvas-popover-active .md-align-popover {
 .md-color-popover,
 .temp-color-popover,
 .md-delete-options-popover,
+.canvas-pin-popover,
 .md-heading-popover,
 .md-list-popover,
 .md-fontcolor-popover,
@@ -2146,7 +2150,8 @@ body.canvas-popover-active .md-align-popover {
 /* Ensure buttons inside have pointer cursor */
 .md-format-btn,
 .md-color-chip,
-.temp-node-action-btn {
+.temp-node-action-btn,
+.canvas-pin-option {
     cursor: pointer;
 }
 
@@ -5545,9 +5550,9 @@ html:fullscreen body.header-compact .canvas-main-container {
     box-sizing: border-box !important;
 }
 
-/* Hide the temporary section pin button from the UI, replacing it with the search button */
+/* Temporary section pin button is enabled */
 .temp-node-pin-btn {
-    display: none !important;
+    display: inline-flex;
 }
 
 /* Align help buttons next to '双指捏合' and 'Shift键操作' horizontally with text */
@@ -5613,6 +5618,10 @@ html:fullscreen body.header-compact .canvas-main-container {
 
 .sidebar-tab-btn {
     flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
@@ -5623,6 +5632,16 @@ html:fullscreen body.header-compact .canvas-main-container {
     cursor: pointer;
     text-align: center;
     transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.sidebar-tab-btn .sidebar-tab-icon {
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.sidebar-tab-btn .sidebar-tab-text {
+    flex-shrink: 0;
 }
 
 .sidebar-tab-btn:hover {
@@ -5634,6 +5653,31 @@ html:fullscreen body.header-compact .canvas-main-container {
     color: var(--accent-color);
     border-bottom-color: var(--accent-color);
     font-weight: 600;
+}
+
+/* 英文模式下专门适配：Directory 与 Anchors 文字较长，微调文字大小为 11px，间距更紧凑，避免拥挤折行 */
+html[lang="en"] .sidebar:not(.mini) .sidebar-tab-btn,
+html:lang(en) .sidebar:not(.mini) .sidebar-tab-btn,
+.sidebar:not(.mini) .sidebar-tab-btn.lang-en,
+.sidebar:not(.mini) .sidebar-tabs-header.lang-en .sidebar-tab-btn {
+    font-size: 11px;
+    padding: 8px 2px;
+    gap: 4px;
+}
+
+html[lang="en"] .sidebar:not(.mini) .sidebar-tab-btn .sidebar-tab-text,
+html:lang(en) .sidebar:not(.mini) .sidebar-tab-btn .sidebar-tab-text,
+.sidebar:not(.mini) .sidebar-tab-btn.lang-en .sidebar-tab-text,
+.sidebar:not(.mini) .sidebar-tabs-header.lang-en .sidebar-tab-btn .sidebar-tab-text {
+    font-size: 11px;
+    letter-spacing: -0.2px;
+}
+
+html[lang="en"] .sidebar:not(.mini) .sidebar-tab-btn .sidebar-tab-icon,
+html:lang(en) .sidebar:not(.mini) .sidebar-tab-btn .sidebar-tab-icon,
+.sidebar:not(.mini) .sidebar-tab-btn.lang-en .sidebar-tab-icon,
+.sidebar:not(.mini) .sidebar-tabs-header.lang-en .sidebar-tab-btn .sidebar-tab-icon {
+    font-size: 11.5px;
 }
 
 .sidebar.compact .sidebar-tabs-header {
@@ -6687,3 +6731,152 @@ html:fullscreen body.header-compact .canvas-main-container {
 .sidebar.mini .history-empty-tip {
     display: none !important;
 }
+
+/* ==========================================================================
+   第二形态窄边（48px mini）现代气泡提示系统 (Sidebar Mini Tooltip)
+   ========================================================================== */
+.sidebar-mini-floating-tooltip {
+    position: fixed;
+    z-index: 100000;
+    pointer-events: none;
+    padding: 7px 11px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-elevated, #242526) 92%, transparent);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+    box-shadow: 0 10px 28px -4px rgba(0, 0, 0, 0.35), 0 4px 10px -2px rgba(0, 0, 0, 0.2);
+    color: var(--text-primary, #ffffff);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    white-space: nowrap;
+    max-width: 320px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-4px) scale(0.96);
+    transition: opacity 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+                visibility 0.12s;
+    user-select: none;
+    -webkit-user-select: none;
+    box-sizing: border-box;
+}
+
+.sidebar-mini-floating-tooltip.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(0) scale(1);
+}
+
+.sidebar-mini-floating-tooltip.is-on-right {
+    transform: translateX(4px) scale(0.96);
+}
+
+.sidebar-mini-floating-tooltip.is-on-right.is-visible {
+    transform: translateX(0) scale(1);
+}
+
+/* 气泡指示箭头 */
+.sidebar-mini-floating-tooltip::before {
+    content: '';
+    position: absolute;
+    top: var(--tooltip-arrow-y, 50%);
+    width: 6px;
+    height: 6px;
+    background: inherit;
+    border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+    border-left: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+    transform: translateY(-50%) rotate(-45deg);
+    pointer-events: none;
+}
+
+/* 左侧栏模式：箭头在气泡左侧（指向左侧按钮） */
+.sidebar-mini-floating-tooltip:not(.is-on-right)::before {
+    left: -4px;
+}
+
+/* 右侧栏模式：箭头在气泡右侧（指向右侧按钮） */
+.sidebar-mini-floating-tooltip.is-on-right::before {
+    right: -4px;
+    border: none;
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+    border-right: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+    transform: translateY(-50%) rotate(-45deg);
+}
+
+/* 内部内容区域 */
+.sidebar-mini-tooltip-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.sidebar-mini-tooltip-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1.35;
+}
+
+.sidebar-mini-tooltip-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-primary, #ffffff);
+    letter-spacing: 0.2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 240px;
+}
+
+/* [当前] 状态微标 */
+.sidebar-mini-tooltip-badge-current,
+.sidebar-mini-tooltip-badge-active {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--accent-primary, #3b82f6) 18%, transparent);
+    color: var(--accent-primary, #3b82f6);
+    border: 1px solid color-mix(in srgb, var(--accent-primary, #3b82f6) 35%, transparent);
+}
+
+/* 第二行：快捷键 / 辅助描述 */
+.sidebar-mini-tooltip-sub {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-secondary, #94a3b8);
+    line-height: 1.35;
+}
+
+.sidebar-mini-tooltip-sub-label {
+    font-size: 10.5px;
+    color: var(--text-tertiary, #64748b);
+}
+
+.sidebar-mini-tooltip-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 5px;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--bg-primary, #0f172a) 40%, transparent);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    color: var(--text-primary, #f8fafc);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.sidebar-mini-tooltip-sub-text {
+    font-size: 11px;
+    color: var(--text-secondary, #94a3b8);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+}
+

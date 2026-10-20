@@ -355,7 +355,7 @@
       const legacy = readStorage(sidebarLayoutKeys.legacyCollapsed);
       if (legacy === 'true') return 'compact';
       if (legacy === 'false') return 'expanded';
-      return isSidePanelMode ? 'mini' : 'expanded';
+      return 'mini';
     })();
 
     const hasManualOverride = readStorage(sidebarLayoutKeys.manualOverride) === 'true';
@@ -372,10 +372,12 @@
 
     let initialSidebarState = persistedSidebarState;
     if (collapseMode === 'auto' && !hasManualOverride) {
-      initialSidebarState = (window.innerWidth <= autoCollapseWidth) ? (isSidePanelMode ? 'mini' : 'compact') : 'expanded';
+      initialSidebarState = (window.innerWidth <= autoCollapseWidth)
+        ? (isSidePanelMode ? 'mini' : 'compact')
+        : (hasStoredSidebarState ? persistedSidebarState : 'mini');
     }
     if (!hasStoredSidebarState) {
-      initialSidebarState = isSidePanelMode ? 'mini' : 'expanded';
+      initialSidebarState = 'mini';
     }
 
     const expandedWidthKey = sidebarDock === 'right'

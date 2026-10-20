@@ -375,7 +375,7 @@ function updateCanvasPopoverState(isActive) {
     } else {
         // 延时一帧检查，确保 DOM 状态已更新
         requestAnimationFrame(() => {
-            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .desc-clear-confirm-popover, .fullscreen-delete-confirm-popover, .desc-height-settings-popover, .canvas-sidepanel-popover');
+            const hasOpen = document.querySelector('.md-format-popover.open, .temp-color-popover.open, .md-color-popover.open, .md-delete-options-popover.open, .canvas-pin-popover.open, .desc-clear-confirm-popover, .fullscreen-delete-confirm-popover, .desc-height-settings-popover, .canvas-sidepanel-popover');
             if (!hasOpen) {
                 document.body.classList.remove('canvas-popover-active');
             }
@@ -6490,25 +6490,25 @@ function __applyCanvasNodePinState(rawInput) {
     try {
         document.querySelectorAll('.permanent-bookmark-section').forEach((el) => {
             if (!el) return;
-            const nodeId = (typeof __getPermanentSectionCanvasNodeId === 'function')
-                ? __getPermanentSectionCanvasNodeId(el)
-                : (el.id || '');
-            if (!nodeId) return;
-            const pinned = permanentPinned.has(String(nodeId));
+            el.style.zIndex = '200';
+            const isCopy = typeof __isPermanentSectionCopy === 'function' && __isPermanentSectionCopy(el);
+            const copyId = isCopy ? (el.dataset.permanentSectionCopyId || el.getAttribute('data-permanent-section-copy-id')) : null;
+            const isDir = (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+                ? (isCopy ? window.CanvasSidebarDirectory.isEntityPinned('permanent-copy', copyId) : window.CanvasSidebarDirectory.isEntityPinned('permanent-main', ''))
+                : false;
             const btn = el.querySelector('.permanent-section-pin-btn');
-            el.classList.toggle('pinned', pinned);
-            el.style.zIndex = pinned ? '200' : '100';
             if (btn) {
-                const lang = getCanvasLanguage();
-                const title = pinned
-                    ? (lang === 'en' ? 'Unpin section' : '取消置顶')
-                    : (lang === 'en' ? 'Pin section' : '置顶栏目');
-                btn.classList.toggle('pinned', pinned);
-                btn.title = title;
-                btn.setAttribute('aria-label', title);
-                btn.innerHTML = pinned
-                    ? '<i class="fas fa-thumbtack"></i>'
-                    : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+                if (typeof __applyPinVisualStateToButton === 'function') {
+                    __applyPinVisualStateToButton(btn, { isPermanent: true, isDirPinned: isDir });
+                } else {
+                    btn.classList.toggle('pinned', isDir);
+                    const lang = getCanvasLanguage();
+                    const title = isDir ? (lang === 'en' ? 'Pinned: Directory' : '已目录置顶') : (lang === 'en' ? 'Directory Pin' : '目录置顶');
+                    btn.title = title;
+                    btn.setAttribute('aria-label', title);
+                    btn.setAttribute('data-tooltip', title);
+                    btn.innerHTML = isDir ? '<i class="fas fa-thumbtack"></i>' : '<i class="fas fa-thumbtack" style="opacity: 0.35;"></i>';
+                }
             }
         });
     } catch (_) { }
@@ -6559,25 +6559,25 @@ function __applyCanvasNodeUiState(rawInput) {
     try {
         document.querySelectorAll('.permanent-bookmark-section').forEach((el) => {
             if (!el) return;
-            const nodeId = (typeof __getPermanentSectionCanvasNodeId === 'function')
-                ? __getPermanentSectionCanvasNodeId(el)
-                : (el.id || '');
-            if (!nodeId) return;
-            const pinned = permanentPinned.has(String(nodeId));
+            el.style.zIndex = '200';
+            const isCopy = typeof __isPermanentSectionCopy === 'function' && __isPermanentSectionCopy(el);
+            const copyId = isCopy ? (el.dataset.permanentSectionCopyId || el.getAttribute('data-permanent-section-copy-id')) : null;
+            const isDir = (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+                ? (isCopy ? window.CanvasSidebarDirectory.isEntityPinned('permanent-copy', copyId) : window.CanvasSidebarDirectory.isEntityPinned('permanent-main', ''))
+                : false;
             const btn = el.querySelector('.permanent-section-pin-btn');
-            el.classList.toggle('pinned', pinned);
-            el.style.zIndex = pinned ? '200' : '100';
             if (btn) {
-                const lang = getCanvasLanguage();
-                const title = pinned
-                    ? (lang === 'en' ? 'Unpin section' : '取消置顶')
-                    : (lang === 'en' ? 'Pin section' : '置顶栏目');
-                btn.classList.toggle('pinned', pinned);
-                btn.title = title;
-                btn.setAttribute('aria-label', title);
-                btn.innerHTML = pinned
-                    ? '<i class="fas fa-thumbtack"></i>'
-                    : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+                if (typeof __applyPinVisualStateToButton === 'function') {
+                    __applyPinVisualStateToButton(btn, { isPermanent: true, isDirPinned: isDir });
+                } else {
+                    btn.classList.toggle('pinned', isDir);
+                    const lang = getCanvasLanguage();
+                    const title = isDir ? (lang === 'en' ? 'Pinned: Directory' : '已目录置顶') : (lang === 'en' ? 'Directory Pin' : '目录置顶');
+                    btn.title = title;
+                    btn.setAttribute('aria-label', title);
+                    btn.setAttribute('data-tooltip', title);
+                    btn.innerHTML = isDir ? '<i class="fas fa-thumbtack"></i>' : '<i class="fas fa-thumbtack" style="opacity: 0.35;"></i>';
+                }
             }
         });
     } catch (_) { }
@@ -11890,6 +11890,43 @@ function __ensurePermanentSectionCopyControlsBound() {
             return;
         }
 
+        const pinBtn = e && e.target && e.target.closest ? e.target.closest('.permanent-section-pin-btn') : null;
+        if (pinBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const existing = document.querySelector('.canvas-pin-popover.open');
+            if (existing && typeof existing.__cleanup === 'function') existing.__cleanup();
+
+            const sectionEl = pinBtn.closest('.permanent-bookmark-section') || document.getElementById('permanentSection');
+            const copyId = sectionEl ? (sectionEl.dataset.permanentSectionCopyId || sectionEl.getAttribute('data-permanent-section-copy-id')) : null;
+            if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.toggleEntityPin === 'function') {
+                const isDirPinned = window.CanvasSidebarDirectory.toggleEntityPin(copyId ? 'permanent-copy' : 'permanent-main', copyId || '');
+                const lang = getCanvasLanguage();
+                const isEn = lang === 'en';
+                const toastMsg = isDirPinned
+                    ? (isEn ? 'Pinned to directory top' : '已设为目录置顶')
+                    : (isEn ? 'Removed from directory pin' : '已取消目录置顶');
+                if (typeof showCanvasToast === 'function') showCanvasToast(toastMsg, 'info');
+            }
+            return;
+        }
+
+        const tempPinBtn = e && e.target && e.target.closest ? e.target.closest('.temp-node-pin-btn') : null;
+        if (tempPinBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const tempEl = tempPinBtn.closest('.temp-canvas-node');
+            const sectionId = tempEl ? (tempEl.dataset.sectionId || tempEl.getAttribute('data-section-id')) : null;
+            if (sectionId) {
+                showCanvasPinPopover(tempPinBtn, {
+                    kind: 'temp-section',
+                    id: sectionId,
+                    element: tempEl
+                });
+            }
+            return;
+        }
+
         const copyBtn = e && e.target && e.target.closest ? e.target.closest('.permanent-section-copy-btn') : null;
         if (copyBtn) {
             e.preventDefault();
@@ -14099,10 +14136,22 @@ function __renderMdNodeImpl(node, options = {}) {
     const pinTitle = lang === 'en' ? 'Pin' : '置顶';
     const unpinTitle = lang === 'en' ? 'Unpin' : '取消置顶';
     const copyContentTitle = lang === 'en' ? 'Copy content' : '复制内容';
-    const mdPinBtnTitle = node.pinned ? unpinTitle : pinTitle;
-    const mdPinBtnIcon = node.pinned
-        ? '<i class="fas fa-thumbtack"></i>'
-        : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+    const isMdDirPinned = (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+        ? window.CanvasSidebarDirectory.isEntityPinned('md-node', node.id)
+        : false;
+    const isMdCanvasPinned = !!node.pinned;
+    const isMdBothPinned = isMdCanvasPinned && isMdDirPinned;
+    const isMdSinglePinned = (isMdCanvasPinned && !isMdDirPinned) || (!isMdCanvasPinned && isMdDirPinned);
+    const mdPinBtnTitle = isMdBothPinned
+        ? (lang === 'en' ? 'Pinned: Canvas & Directory' : '已画布置顶、目录置顶')
+        : (isMdCanvasPinned
+            ? (lang === 'en' ? 'Pinned: Canvas' : '已画布置顶')
+            : (isMdDirPinned
+                ? (lang === 'en' ? 'Pinned: Directory' : '已目录置顶')
+                : (lang === 'en' ? 'Pin options' : '置顶选项')));
+    const mdPinBtnClass = isMdBothPinned ? ' pinned' : (isMdSinglePinned ? ' pinned-half' : '');
+    const mdPinOpacity = isMdBothPinned ? '1' : (isMdSinglePinned ? '0.7' : '0.35');
+    const mdPinBtnIcon = `<i class="fas fa-thumbtack"${mdPinOpacity !== '1' ? ` style="opacity: ${mdPinOpacity};"` : ''}></i>`;
     const fullscreenTitle = getFullscreenLabel('canvasFullscreenEnter', lang);
     const layoutZoomOutTitle = getLayoutZoomLabel('out', lang);
     const layoutZoomInTitle = getLayoutZoomLabel('in', lang);
@@ -14127,7 +14176,7 @@ function __renderMdNodeImpl(node, options = {}) {
         <button class="md-node-toolbar-btn" data-action="md-search-scope" data-tooltip="${searchScopeTitle}" title="${searchScopeTitle}"><i class="fas fa-search"></i></button>
         <button class="md-node-toolbar-btn" data-action="md-focus" data-tooltip="${focusTitle}"><i class="fas fa-search-plus"></i></button>
         <button class="md-node-toolbar-btn" data-action="md-color-toggle" data-tooltip="${colorTitle}"><i class="fas fa-palette"></i></button>
-        <button class="md-node-toolbar-btn${node.pinned ? ' pinned' : ''}" data-action="md-pin" data-tooltip="${mdPinBtnTitle}">${mdPinBtnIcon}</button>
+        <button class="md-node-toolbar-btn${mdPinBtnClass}" data-action="md-pin" data-tooltip="${mdPinBtnTitle}">${mdPinBtnIcon}</button>
         <button class="md-node-toolbar-btn" data-action="md-copy-content" data-tooltip="${copyContentTitle}" title="${copyContentTitle}"><i class="fas fa-copy"></i></button>
         <button class="md-node-toolbar-btn md-delete-danger-btn" data-action="md-delete" data-tooltip="${deleteTitle}"><i class="far fa-trash-alt"></i></button>
         <button class="md-node-toolbar-btn canvas-node-fullscreen-btn" data-action="md-fullscreen" data-tooltip="${fullscreenTitle}"><i class="fas fa-expand"></i></button>
@@ -18051,8 +18100,11 @@ function __renderMdNodeImpl(node, options = {}) {
             locateAndZoomToMdNode(node.id);
             clearMdSelection();
         } else if (action === 'md-pin') {
-            toggleMdNodePin(node.id);
-            clearMdSelection();
+            showCanvasPinPopover(btn, {
+                kind: 'md-node',
+                id: node.id,
+                element: el
+            });
         } else if (action === 'md-copy-content') {
             try {
                 let text = '';
@@ -23023,26 +23075,35 @@ function __renderTempNodeImpl(section, options = {}) {
     const pinBtn = document.createElement('button');
     pinBtn.type = 'button';
     pinBtn.className = 'temp-node-action-btn temp-node-pin-btn';
-    pinBtn.style.display = 'none';
-    const pinLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Pin section' : '置顶栏目';
-    const unpinLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Unpin section' : '取消置顶';
     const isPinned = section.pinned || false;
-    pinBtn.title = isPinned ? unpinLabel : pinLabel;
-    pinBtn.setAttribute('aria-label', pinBtn.title);
-    pinBtn.innerHTML = isPinned ? '<i class="fas fa-thumbtack"></i>' : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
-    if (isPinned) {
+    const isDirPinned = (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+        ? window.CanvasSidebarDirectory.isEntityPinned('temp-section', section.id)
+        : false;
+    const isBoth = isPinned && isDirPinned;
+    const isSingle = (isPinned && !isDirPinned) || (!isPinned && isDirPinned);
+    if (isBoth) {
         pinBtn.classList.add('pinned');
+    } else if (isSingle) {
+        pinBtn.classList.add('pinned-half');
     }
+    const isEnLang = (typeof currentLang !== 'undefined' && currentLang === 'en');
+    let pinTitle = isEnLang ? 'Pin options' : '置顶选项';
+    if (isBoth) pinTitle = isEnLang ? 'Pinned: Canvas & Directory' : '已画布置顶、目录置顶';
+    else if (isPinned) pinTitle = isEnLang ? 'Pinned: Canvas' : '已画布置顶';
+    else if (isDirPinned) pinTitle = isEnLang ? 'Pinned: Directory' : '已目录置顶';
+    pinBtn.title = pinTitle;
+    pinBtn.setAttribute('aria-label', pinTitle);
+    pinBtn.setAttribute('data-tooltip', pinTitle);
+    const pinOpacity = isBoth ? '1' : (isSingle ? '0.7' : '0.35');
+    pinBtn.innerHTML = `<i class="fas fa-thumbtack"${pinOpacity !== '1' ? ` style="opacity: ${pinOpacity};"` : ''}></i>`;
     pinBtn.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        section.pinned = !section.pinned;
-        pinBtn.classList.toggle('pinned', section.pinned);
-        pinBtn.title = section.pinned ? unpinLabel : pinLabel;
-        pinBtn.setAttribute('aria-label', pinBtn.title);
-        pinBtn.innerHTML = section.pinned ? '<i class="fas fa-thumbtack"></i>' : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
-        updateSectionZIndex(section.id, section.pinned);
-        saveCanvasNodePinState();
+        showCanvasPinPopover(pinBtn, {
+            kind: 'temp-section',
+            id: section.id,
+            element: nodeElement
+        });
     });
 
     // 搜索当前的范围按钮
@@ -24219,13 +24280,24 @@ function patchTempSectionShellInPlace(section, options = {}) {
 
     const pinBtn = nodeElement.querySelector('.temp-node-pin-btn');
     if (pinBtn) {
-        const isEn = (typeof currentLang !== 'undefined' && currentLang === 'en');
-        const pinLabel = isEn ? 'Pin section' : '置顶栏目';
-        const unpinLabel = isEn ? 'Unpin section' : '取消置顶';
-        pinBtn.classList.toggle('pinned', pinned);
-        pinBtn.title = pinned ? unpinLabel : pinLabel;
-        pinBtn.setAttribute('aria-label', pinBtn.title);
-        pinBtn.innerHTML = pinned ? '<i class="fas fa-thumbtack"></i>' : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+        const isDir = (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+            ? window.CanvasSidebarDirectory.isEntityPinned('temp-section', section.id)
+            : false;
+        if (typeof __applyPinVisualStateToButton === 'function') {
+            __applyPinVisualStateToButton(pinBtn, { isCanvasPinned: !!pinned, isDirPinned: isDir });
+        } else {
+            const isBoth = !!pinned && isDir;
+            const isSingle = (!!pinned && !isDir) || (!pinned && isDir);
+            pinBtn.classList.toggle('pinned', isBoth);
+            pinBtn.classList.toggle('pinned-half', isSingle);
+            const isEn = (typeof currentLang !== 'undefined' && currentLang === 'en');
+            const tip = isBoth ? (isEn ? 'Pinned: Canvas & Directory' : '已画布置顶、目录置顶') : (pinned ? (isEn ? 'Pinned: Canvas' : '已画布置顶') : (isDir ? (isEn ? 'Pinned: Directory' : '已目录置顶') : (isEn ? 'Pin options' : '置顶选项')));
+            pinBtn.title = tip;
+            pinBtn.setAttribute('aria-label', tip);
+            pinBtn.setAttribute('data-tooltip', tip);
+            const opacity = isBoth ? '1' : (isSingle ? '0.7' : '0.35');
+            pinBtn.innerHTML = `<i class="fas fa-thumbtack"${opacity !== '1' ? ` style="opacity: ${opacity};"` : ''}></i>`;
+        }
     }
 
     if (!section.dormant && !isCanvasBlockDormancyEnabled()) {
@@ -27450,40 +27522,47 @@ function setupPermanentSectionPinButton() {
     // 应用初始状态
     updatePermanentSectionPinState(isPinned, pinBtn, permanentSection);
 
-    // 添加点击事件
+    // 添加点击事件：直接切换目录置顶
     pinBtn.addEventListener('click', (e) => {
+        e.preventDefault();
         e.stopPropagation();
-        isPinned = !isPinned;
-        updatePermanentSectionPinState(isPinned, pinBtn, permanentSection);
+        const existing = document.querySelector('.canvas-pin-popover.open');
+        if (existing && typeof existing.__cleanup === 'function') existing.__cleanup();
 
-        // 保存状态
-        try {
-            saveSharedState('permanent-section-pinned', isPinned.toString(), { asJSON: false });
-            saveCanvasNodePinState();
-        } catch (error) {
-            console.error('[Canvas] 保存永久栏目置顶状态失败:', error);
+        if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.toggleEntityPin === 'function') {
+            const isDirPinned = window.CanvasSidebarDirectory.toggleEntityPin('permanent-main', '');
+            const lang = getCanvasLanguage();
+            const isEn = lang === 'en';
+            const toastMsg = isDirPinned
+                ? (isEn ? 'Pinned to directory top' : '已设为目录置顶')
+                : (isEn ? 'Removed from directory pin' : '已取消目录置顶');
+            if (typeof showCanvasToast === 'function') showCanvasToast(toastMsg, 'info');
         }
     });
 }
 
 function updatePermanentSectionPinState(isPinned, pinBtn, permanentSection) {
-    const pinLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Pin section' : '置顶栏目';
-    const unpinLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Unpin section' : '取消置顶';
+    const isEn = (typeof currentLang !== 'undefined' && currentLang === 'en');
+    const isDirPinned = (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+        ? window.CanvasSidebarDirectory.isEntityPinned('permanent-main', '')
+        : false;
 
-    if (isPinned) {
-        pinBtn.classList.add('pinned');
-        pinBtn.title = unpinLabel;
-        pinBtn.setAttribute('aria-label', unpinLabel);
-        pinBtn.setAttribute('data-tooltip', unpinLabel);
-        pinBtn.innerHTML = '<i class="fas fa-thumbtack"></i>';
+    if (pinBtn) {
+        if (typeof __applyPinVisualStateToButton === 'function') {
+            __applyPinVisualStateToButton(pinBtn, { isPermanent: true, isDirPinned });
+        } else {
+            pinBtn.classList.toggle('pinned', isDirPinned);
+            const tip = isDirPinned ? (isEn ? 'Pinned: Directory' : '已目录置顶') : (isEn ? 'Directory Pin' : '目录置顶');
+            pinBtn.title = tip;
+            pinBtn.setAttribute('aria-label', tip);
+            pinBtn.setAttribute('data-tooltip', tip);
+            pinBtn.innerHTML = isDirPinned
+                ? '<i class="fas fa-thumbtack"></i>'
+                : '<i class="fas fa-thumbtack" style="opacity: 0.35;"></i>';
+        }
+    }
+    if (permanentSection) {
         permanentSection.style.zIndex = '200';
-    } else {
-        pinBtn.classList.remove('pinned');
-        pinBtn.title = pinLabel;
-        pinBtn.setAttribute('aria-label', pinLabel);
-        pinBtn.setAttribute('data-tooltip', pinLabel);
-        pinBtn.innerHTML = '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
-        permanentSection.style.zIndex = '100';
     }
 }
 
@@ -27522,13 +27601,21 @@ function refreshPermanentSectionActionLabels(scope = null) {
 
         const pinBtn = section.querySelector('.permanent-section-pin-btn');
         if (pinBtn) {
-            const pinned = pinBtn.classList.contains('pinned') || section.style.zIndex === '200';
-            setLabel('.permanent-section-pin-btn', __getPermanentSectionI18nText(
-                pinned ? 'permanentSectionUnpinTitle' : 'permanentSectionPinTitle',
-                pinned ? '取消置顶' : '置顶栏目',
-                pinned ? 'Unpin section' : 'Pin section',
-                lang
-            ));
+            const isCopy = typeof __isPermanentSectionCopy === 'function' && __isPermanentSectionCopy(section);
+            const copyId = isCopy ? (section.dataset.permanentSectionCopyId || section.getAttribute('data-permanent-section-copy-id')) : null;
+            const isDirPinned = (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+                ? (isCopy ? window.CanvasSidebarDirectory.isEntityPinned('permanent-copy', copyId) : window.CanvasSidebarDirectory.isEntityPinned('permanent-main', ''))
+                : false;
+            if (typeof __applyPinVisualStateToButton === 'function') {
+                __applyPinVisualStateToButton(pinBtn, { isPermanent: true, isDirPinned });
+            } else {
+                const isEn = lang === 'en';
+                const tip = isDirPinned ? (isEn ? 'Pinned: Directory' : '已目录置顶') : (isEn ? 'Directory Pin' : '目录置顶');
+                setLabel('.permanent-section-pin-btn', tip);
+                pinBtn.classList.toggle('pinned', isDirPinned);
+                const icon = pinBtn.querySelector('i');
+                if (icon) icon.style.opacity = isDirPinned ? '1' : '0.35';
+            }
         }
 
         setLabel('.permanent-section-search-btn', __getPermanentSectionI18nText(
@@ -31465,11 +31552,18 @@ function renderEdges() {
     const existingRecords = __collectEdgeDomRecords(svg);
     const staleEdgeIds = new Set(existingRecords.keys());
 
-    // Stable z-order: render selected edge last to keep it on top
+    // Stable z-order: render selected edge last to keep it on top, pinned edges above normal edges
     const selectedId = normalizeEdgeId(CanvasState.selectedEdgeId) || null;
-    const edgesToRender = selectedId
-        ? CanvasState.edges.filter(e => !isSameEdgeId(e && e.id, selectedId)).concat(CanvasState.edges.filter(e => isSameEdgeId(e && e.id, selectedId)))
-        : CanvasState.edges.slice();
+    const edgesToRender = CanvasState.edges.slice().sort((a, b) => {
+        const aPinned = a && a.pinned ? 1 : 0;
+        const bPinned = b && b.pinned ? 1 : 0;
+        if (aPinned !== bPinned) return aPinned - bPinned;
+        if (selectedId) {
+            if (isSameEdgeId(a && a.id, selectedId)) return 1;
+            if (isSameEdgeId(b && b.id, selectedId)) return -1;
+        }
+        return 0;
+    });
 
     let needsRetry = false;
     const labelBgColor = CanvasState.lowDetailActive ? null : __getCanvasEdgeLabelBackgroundColor();
@@ -32118,6 +32212,22 @@ function showEdgeToolbar(edgeId, x, y) {
     const focusTitle = lang === 'en' ? 'Locate and zoom' : '定位并放大';
     const directionTitle = lang === 'en' ? 'Line direction' : '连接线方向';
     const labelTitle = lang === 'en' ? 'Edit label' : '编辑标签';
+    const isEdgeDirPinned = (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+        ? window.CanvasSidebarDirectory.isEntityPinned('edge', edge.id)
+        : false;
+    const isEdgeCanvasPinned = !!edge.pinned;
+    const isEdgeBothPinned = isEdgeCanvasPinned && isEdgeDirPinned;
+    const isEdgeSinglePinned = (isEdgeCanvasPinned && !isEdgeDirPinned) || (!isEdgeCanvasPinned && isEdgeDirPinned);
+    const pinTitle = isEdgeBothPinned
+        ? (lang === 'en' ? 'Pinned: Canvas & Directory' : '已画布置顶、目录置顶')
+        : (isEdgeCanvasPinned
+            ? (lang === 'en' ? 'Pinned: Canvas' : '已画布置顶')
+            : (isEdgeDirPinned
+                ? (lang === 'en' ? 'Pinned: Directory' : '已目录置顶')
+                : (lang === 'en' ? 'Pin options' : '置顶选项')));
+    const edgePinClass = isEdgeBothPinned ? ' pinned' : (isEdgeSinglePinned ? ' pinned-half' : '');
+    const edgePinOpacity = isEdgeBothPinned ? '1' : (isEdgeSinglePinned ? '0.7' : '0.35');
+    const pinIcon = `<i class="fas fa-thumbtack"${edgePinOpacity !== '1' ? ` style="opacity: ${edgePinOpacity};"` : ''}></i>`;
 
     toolbar.innerHTML = `
         <button class="md-node-toolbar-btn" data-action="edge-label" data-tooltip="${labelTitle}">
@@ -32131,6 +32241,9 @@ function showEdgeToolbar(edgeId, x, y) {
         </button>
         <button class="md-node-toolbar-btn" data-action="edge-direction" data-tooltip="${directionTitle}">
             <i class="fas fa-arrows-alt-h"></i>
+        </button>
+        <button class="md-node-toolbar-btn${edgePinClass}" data-action="edge-pin" data-tooltip="${pinTitle}">
+            ${pinIcon}
         </button>
         <button class="md-node-toolbar-btn" data-action="edge-delete" data-tooltip="${deleteTitle}">
             <i class="far fa-trash-alt"></i>
@@ -32184,6 +32297,11 @@ function __handleEdgeToolbarAction(toolbar, btn) {
         toggleEdgeDirectionPopover(toolbar, currentEdge, btn);
     } else if (action === 'edge-label') {
         editEdgeLabel(currentEdgeId);
+    } else if (action === 'edge-pin') {
+        showCanvasPinPopover(btn, {
+            kind: 'edge',
+            id: currentEdgeId
+        });
     } else if (action === 'md-color-preset') {
         const preset = String(btn.getAttribute('data-color') || '').trim();
         // 更新颜色历史
@@ -32630,35 +32748,19 @@ function locateAndZoomToEdge(edgeId, targetZoom = null) {
 function togglePermanentSectionPin(sectionEl) {
     const section = sectionEl || document.getElementById('permanentSection');
     if (!section) return false;
-    const btn = section.querySelector('.permanent-section-pin-btn');
-    const currentlyPinned = !!(btn && btn.classList && btn.classList.contains('pinned'))
-        || section.style.zIndex === '200';
+    section.style.zIndex = '200';
+    const isCopy = typeof __isPermanentSectionCopy === 'function' && __isPermanentSectionCopy(section);
+    const copyId = isCopy ? (section.dataset.permanentSectionCopyId || section.getAttribute('data-permanent-section-copy-id')) : null;
+    const btn = section.querySelector('.permanent-section-pin-btn') || (!isCopy ? document.getElementById('permanentSectionPinBtn') : null);
 
-    if (!__isPermanentSectionCopy(section)) {
-        const isPinned = !currentlyPinned;
-        updatePermanentSectionPinState(isPinned, btn || document.getElementById('permanentSectionPinBtn'), section);
-        try { saveSharedState('permanent-section-pinned', isPinned.toString(), { asJSON: false }); } catch (_) { }
-        try { saveCanvasNodePinState(); } catch (_) { }
-        return isPinned;
+    if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.toggleEntityPin === 'function') {
+        const isDirPinned = window.CanvasSidebarDirectory.toggleEntityPin(isCopy ? 'permanent-copy' : 'permanent-main', copyId || '');
+        if (btn && typeof __applyPinVisualStateToButton === 'function') {
+            __applyPinVisualStateToButton(btn, { isPermanent: true, isDirPinned });
+        }
+        return isDirPinned;
     }
-
-    const isPinned = !currentlyPinned;
-    section.classList.toggle('pinned', isPinned);
-    section.style.zIndex = isPinned ? '200' : '100';
-    if (btn) {
-        const lang = getCanvasLanguage();
-        const title = isPinned
-            ? (lang === 'en' ? 'Unpin section' : '取消置顶')
-            : (lang === 'en' ? 'Pin section' : '置顶栏目');
-        btn.classList.toggle('pinned', isPinned);
-        btn.title = title;
-        btn.setAttribute('aria-label', title);
-        btn.innerHTML = isPinned
-            ? '<i class="fas fa-thumbtack"></i>'
-            : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
-    }
-    try { saveCanvasNodePinState(); } catch (_) { }
-    return isPinned;
+    return false;
 }
 
 function toggleTempSectionPin(sectionId) {
@@ -32670,16 +32772,24 @@ function toggleTempSectionPin(sectionId) {
         const el = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(section.id)}"]`);
         const btn = el ? el.querySelector('.temp-node-pin-btn') : null;
         if (btn) {
-            const lang = getCanvasLanguage();
-            const title = section.pinned
-                ? (lang === 'en' ? 'Unpin section' : '取消置顶')
-                : (lang === 'en' ? 'Pin section' : '置顶栏目');
-            btn.classList.toggle('pinned', section.pinned);
-            btn.title = title;
-            btn.setAttribute('aria-label', title);
-            btn.innerHTML = section.pinned
-                ? '<i class="fas fa-thumbtack"></i>'
-                : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+            const isDir = (typeof window !== 'undefined' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+                ? window.CanvasSidebarDirectory.isEntityPinned('temp-section', section.id)
+                : false;
+            if (typeof __applyPinVisualStateToButton === 'function') {
+                __applyPinVisualStateToButton(btn, { isCanvasPinned: !!section.pinned, isDirPinned: isDir });
+            } else {
+                const isBoth = !!section.pinned && isDir;
+                const isSingle = (!!section.pinned && !isDir) || (!section.pinned && isDir);
+                btn.classList.toggle('pinned', isBoth);
+                btn.classList.toggle('pinned-half', isSingle);
+                const lang = getCanvasLanguage();
+                const title = isBoth ? (lang === 'en' ? 'Pinned: Canvas & Directory' : '已画布置顶、目录置顶') : (section.pinned ? (lang === 'en' ? 'Pinned: Canvas' : '已画布置顶') : (isDir ? (lang === 'en' ? 'Pinned: Directory' : '已目录置顶') : (lang === 'en' ? 'Pin options' : '置顶选项')));
+                btn.title = title;
+                btn.setAttribute('aria-label', title);
+                btn.setAttribute('data-tooltip', title);
+                const opacity = isBoth ? '1' : (isSingle ? '0.7' : '0.35');
+                btn.innerHTML = `<i class="fas fa-thumbtack"${opacity !== '1' ? ` style="opacity: ${opacity};"` : ''}></i>`;
+            }
         }
     } catch (_) { }
     saveCanvasNodePinState();
@@ -33366,6 +33476,14 @@ function __applyMdNodePinnedStateToElement(node) {
         if (el.classList && el.classList.contains('card-group-canvas-node')) {
             el.classList.toggle('pinned', !!node.pinned);
         }
+        const pinBtn = el.querySelector('.md-node-toolbar-btn[data-action="md-pin"], .card-group-toolbar-btn[data-action="card-group-pin"]');
+        if (pinBtn && typeof __applyPinVisualStateToButton === 'function') {
+            const isGroup = node.subtype === 'card-group';
+            const isDir = (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+                ? window.CanvasSidebarDirectory.isEntityPinned(isGroup ? 'card-group' : 'md-node', node.id)
+                : false;
+            __applyPinVisualStateToButton(pinBtn, { isCanvasPinned: !!node.pinned, isDirPinned: isDir });
+        }
     }
 }
 
@@ -33378,16 +33496,24 @@ function __setTempSectionPinnedState(sectionId, isPinned) {
         const el = document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(section.id)}"]`);
         const btn = el ? el.querySelector('.temp-node-pin-btn') : null;
         if (btn) {
-            const lang = getCanvasLanguage();
-            const title = section.pinned
-                ? (lang === 'en' ? 'Unpin section' : '取消置顶')
-                : (lang === 'en' ? 'Pin section' : '置顶栏目');
-            btn.classList.toggle('pinned', section.pinned);
-            btn.title = title;
-            btn.setAttribute('aria-label', title);
-            btn.innerHTML = section.pinned
-                ? '<i class="fas fa-thumbtack"></i>'
-                : '<i class="fas fa-thumbtack" style="opacity: 0.5;"></i>';
+            const isDir = (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function')
+                ? window.CanvasSidebarDirectory.isEntityPinned('temp-section', section.id)
+                : false;
+            if (typeof __applyPinVisualStateToButton === 'function') {
+                __applyPinVisualStateToButton(btn, { isCanvasPinned: !!section.pinned, isDirPinned: isDir });
+            } else {
+                const isBoth = !!section.pinned && isDir;
+                const isSingle = (!!section.pinned && !isDir) || (!section.pinned && isDir);
+                btn.classList.toggle('pinned', isBoth);
+                btn.classList.toggle('pinned-half', isSingle);
+                const lang = getCanvasLanguage();
+                const title = isBoth ? (lang === 'en' ? 'Pinned: Canvas & Directory' : '已画布置顶、目录置顶') : (section.pinned ? (lang === 'en' ? 'Pinned: Canvas' : '已画布置顶') : (isDir ? (lang === 'en' ? 'Pinned: Directory' : '已目录置顶') : (lang === 'en' ? 'Pin options' : '置顶选项')));
+                btn.title = title;
+                btn.setAttribute('aria-label', title);
+                btn.setAttribute('data-tooltip', title);
+                const opacity = isBoth ? '1' : (isSingle ? '0.7' : '0.35');
+                btn.innerHTML = `<i class="fas fa-thumbtack"${opacity !== '1' ? ` style="opacity: ${opacity};"` : ''}></i>`;
+            }
         }
     } catch (_) { }
     return true;
@@ -33407,11 +33533,8 @@ function __getPinStateOfCanvasMember(member) {
         return !!member.data.pinned;
     }
     if (member.type === 'permanent-section') {
-        const el = member.data._permanentElement
-            || ((typeof __resolveCanvasNodeElementById === 'function') ? __resolveCanvasNodeElementById(member.data.id) : document.getElementById(member.data.id));
-        if (!el) return null;
-        const btn = el.querySelector('.permanent-section-pin-btn');
-        return !!(btn && btn.classList && btn.classList.contains('pinned')) || el.style.zIndex === '200';
+        // 永久栏目和永久栏目副本始终都是画布置顶的
+        return true;
     }
     return null;
 }
@@ -33425,13 +33548,8 @@ function __setPinStateOfCanvasMember(member, isPinned) {
         return __setMdNodePinnedState(member.data.id, isPinned);
     }
     if (member.type === 'permanent-section') {
-        const current = __getPinStateOfCanvasMember(member);
-        if (current === null || current === !!isPinned) return false;
-        const el = member.data._permanentElement
-            || ((typeof __resolveCanvasNodeElementById === 'function') ? __resolveCanvasNodeElementById(member.data.id) : document.getElementById(member.data.id));
-        if (!el || typeof togglePermanentSectionPin !== 'function') return false;
-        togglePermanentSectionPin(el);
-        return true;
+        // 永久栏目和永久栏目副本始终都是画布置顶的，卡片组操作不改动其画布置顶
+        return false;
     }
     return false;
 }
@@ -33442,34 +33560,46 @@ function __getCardGroupMemberPinTargets(groupNode) {
     try {
         return (getRecursiveGeometricMembers(groupNode) || [])
             .filter((member) => member && member.data && member.data.id && member.data.id !== groupNode.id)
-            .filter((member) => member.type === 'temp-section' || member.type === 'md-node' || member.type === 'permanent-section')
-            .filter((member) => !(member.type === 'md-node' && member.data && member.data.subtype === 'card-group'));
+            .filter((member) => member.type === 'temp-section' || member.type === 'md-node' || member.type === 'permanent-section');
     } catch (_) {
         return [];
     }
 }
 
 function getCardGroupMembersPinState(groupId) {
-    const group = getMdNodeById(groupId);
+    const group = (typeof getMdNodeById === 'function') ? getMdNodeById(groupId) : null;
+    const isPinned = group ? !!group.pinned : false;
     const members = __getCardGroupMemberPinTargets(group);
     const pinnable = members.filter((member) => __getPinStateOfCanvasMember(member) !== null);
     return {
         hasTargets: pinnable.length > 0,
-        allPinned: pinnable.length > 0 && pinnable.every((member) => __getPinStateOfCanvasMember(member) === true)
+        allPinned: isPinned || (pinnable.length > 0 && pinnable.every((member) => __getPinStateOfCanvasMember(member) === true))
     };
 }
 
-function toggleCardGroupMembersPin(groupId) {
-    const group = getMdNodeById(groupId);
+function toggleCardGroupMembersPin(groupId, forcedPinned) {
+    const group = (typeof getMdNodeById === 'function') ? getMdNodeById(groupId) : null;
+    if (!group) return false;
     const members = __getCardGroupMemberPinTargets(group);
     const pinnable = members.filter((member) => __getPinStateOfCanvasMember(member) !== null);
-    if (pinnable.length === 0) return false;
-    const shouldPin = pinnable.some((member) => __getPinStateOfCanvasMember(member) !== true);
+
+    let nextPinned;
+    if (typeof forcedPinned === 'boolean') {
+        nextPinned = forcedPinned;
+    } else {
+        const anyUnpinned = !group.pinned || (pinnable.length > 0 && pinnable.some((member) => __getPinStateOfCanvasMember(member) !== true));
+        nextPinned = anyUnpinned;
+    }
+
+    group.pinned = nextPinned;
+    if (typeof __applyMdNodePinnedStateToElement === 'function') {
+        __applyMdNodePinnedStateToElement(group);
+    }
     pinnable.forEach((member) => {
-        try { __setPinStateOfCanvasMember(member, shouldPin); } catch (_) { }
+        try { __setPinStateOfCanvasMember(member, nextPinned); } catch (_) { }
     });
-    saveCanvasNodePinState();
-    return shouldPin;
+    if (typeof saveCanvasNodePinState === 'function') saveCanvasNodePinState();
+    return group.pinned;
 }
 
 function toggleMdNodePin(nodeId) {
@@ -33479,6 +33609,650 @@ function toggleMdNodePin(nodeId) {
     __setMdNodePinnedState(node.id, nextPinned);
     saveCanvasNodePinState();
     return node.pinned;
+}
+
+/**
+ * 统一置顶按钮视觉状态应用函数（支持三档透明度分级：0.35 未置顶 / 0.7 单置顶 / 1.0 全置顶）
+ * 永久栏目和永久栏目副本天然画布置顶，仅具有 0.35（未置顶）与 1.0（已目录置顶）两档状态。
+ */
+function __applyPinVisualStateToButton(btn, {
+    isPermanent = false,
+    isCanvasPinned = false,
+    isDirPinned = false,
+    isGroup = false,
+    allCanvasPinned = false,
+    allDirPinned = false,
+    anyCanvasPinned = false,
+    anyDirPinned = false
+} = {}) {
+    if (!btn || typeof btn.classList !== 'object') return;
+    const isEn = (typeof currentLang !== 'undefined' && currentLang === 'en');
+    const icon = btn.querySelector('i.fa-thumbtack') || btn.querySelector('i');
+
+    if (isPermanent) {
+        // 永久栏目 / 永久栏目副本：画布置顶天然开启，置顶按钮仅代表目录置顶，只有 0.35 与 1.0 两档，无 0.7 单置顶态
+        btn.classList.toggle('pinned', !!isDirPinned);
+        btn.classList.remove('pinned-half');
+        if (icon) {
+            icon.style.opacity = isDirPinned ? '1' : '0.35';
+        }
+        const tip = isDirPinned
+            ? (isEn ? 'Pinned: Directory' : '已目录置顶')
+            : (isEn ? 'Directory Pin' : '目录置顶');
+        btn.setAttribute('aria-label', tip);
+        if (!btn.classList.contains('has-active-popover')) {
+            btn.title = tip;
+            btn.setAttribute('data-tooltip', tip);
+        }
+        return;
+    }
+
+    if (isGroup) {
+        // 框选临时组 (temp-group)
+        const isBoth = allCanvasPinned && allDirPinned;
+        const isNone = !anyCanvasPinned && !anyDirPinned;
+        const isHalf = !isBoth && !isNone;
+
+        btn.classList.toggle('pinned', isBoth);
+        btn.classList.toggle('pinned-half', isHalf);
+        if (icon) {
+            icon.style.opacity = isBoth ? '1' : (isHalf ? '0.7' : '0.35');
+        }
+
+        let tip = isEn ? 'Pin options' : '置顶选项';
+        if (allCanvasPinned && allDirPinned) {
+            tip = isEn ? 'Pinned: Canvas & Directory' : '已画布置顶、目录置顶';
+        } else if (allCanvasPinned && !anyDirPinned) {
+            tip = isEn ? 'Pinned: Canvas' : '已画布置顶';
+        } else if (allDirPinned && !anyCanvasPinned) {
+            tip = isEn ? 'Pinned: Directory' : '已目录置顶';
+        } else if (isHalf) {
+            tip = isEn ? 'Partially pinned' : '部分已置顶';
+        }
+
+        btn.setAttribute('aria-label', tip);
+        if (!btn.classList.contains('has-active-popover')) {
+            btn.title = tip;
+            btn.setAttribute('data-tooltip', tip);
+        }
+        return;
+    }
+
+    // 常规卡片 / 临时栏目 / 卡片组 / 连接线
+    const isBoth = isCanvasPinned && isDirPinned;
+    const isSingle = (isCanvasPinned && !isDirPinned) || (!isCanvasPinned && isDirPinned);
+    const isNone = !isCanvasPinned && !isDirPinned;
+
+    btn.classList.toggle('pinned', isBoth);
+    btn.classList.toggle('pinned-half', isSingle);
+    if (icon) {
+        icon.style.opacity = isBoth ? '1' : (isSingle ? '0.7' : '0.35');
+    }
+
+    let tip = isEn ? 'Pin options' : '置顶选项';
+    if (isBoth) {
+        tip = isEn ? 'Pinned: Canvas & Directory' : '已画布置顶、目录置顶';
+    } else if (isCanvasPinned) {
+        tip = isEn ? 'Pinned: Canvas' : '已画布置顶';
+    } else if (isDirPinned) {
+        tip = isEn ? 'Pinned: Directory' : '已目录置顶';
+    }
+
+    btn.setAttribute('aria-label', tip);
+    if (!btn.classList.contains('has-active-popover')) {
+        btn.title = tip;
+        btn.setAttribute('data-tooltip', tip);
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.__applyPinVisualStateToButton = __applyPinVisualStateToButton;
+}
+
+/**
+ * Universal Dual-Pin Popover (画布置顶 & 目录置顶)
+ * Supported entities: permanent-main, permanent-copy, temp-section, md-node, card-group, edge
+ */
+function showCanvasPinPopover(anchorBtn, descriptor = {}) {
+    if (!anchorBtn && !descriptor.anchorPoint && !descriptor.element) return;
+    const btn = anchorBtn || descriptor.element || document.body;
+
+    // 1. If this popover is already open on this button, clicking again closes it (toggle behavior)
+    const existing = document.querySelector('.canvas-pin-popover.open');
+    if (existing) {
+        const wasSameAnchor = existing.__anchorBtn === anchorBtn && !descriptor.anchorPoint;
+        if (typeof existing.__cleanup === 'function') {
+            existing.__cleanup();
+        } else {
+            try { existing.remove(); } catch (_) { }
+            updateCanvasPopoverState(false);
+        }
+        if (wasSameAnchor) return;
+    }
+
+    // Temporarily suppress tooltips on anchor button while popover is open
+    let savedTitle = (anchorBtn && typeof anchorBtn.getAttribute === 'function') ? (anchorBtn.getAttribute('title') || '') : '';
+    let savedTooltip = (anchorBtn && typeof anchorBtn.getAttribute === 'function') ? (anchorBtn.getAttribute('data-tooltip') || '') : '';
+    if (anchorBtn && typeof anchorBtn.removeAttribute === 'function') {
+        anchorBtn.removeAttribute('title');
+        anchorBtn.removeAttribute('data-tooltip');
+        anchorBtn.classList.add('has-active-popover');
+    }
+
+    const kind = String(descriptor.kind || '').trim();
+    const entityId = String(descriptor.id || '').trim();
+    const lang = (typeof currentLang !== 'undefined') ? currentLang : 'zh';
+    const isEn = lang === 'en' || String(lang).toLowerCase().startsWith('en');
+
+    // 2. Resolve entity states
+    const getCanvasPin = () => {
+        if (typeof descriptor.getCanvasPin === 'function') return descriptor.getCanvasPin();
+        if (kind === 'permanent-main') {
+            const el = document.getElementById('permanentSection');
+            return el ? (el.classList.contains('pinned') || el.style.zIndex === '200') : true;
+        }
+        if (kind === 'permanent-copy') {
+            const el = descriptor.element || document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${CSS.escape(entityId)}"]`);
+            return el ? (el.classList.contains('pinned') || el.style.zIndex === '200') : false;
+        }
+        if (kind === 'temp-section') {
+            const sec = (typeof getTempSection === 'function') ? getTempSection(entityId) : null;
+            return sec ? !!sec.pinned : false;
+        }
+        if (kind === 'md-node') {
+            const node = (typeof getMdNodeById === 'function') ? getMdNodeById(entityId) : null;
+            return node ? !!node.pinned : false;
+        }
+        if (kind === 'card-group') {
+            const group = (typeof getMdNodeById === 'function') ? getMdNodeById(entityId) : null;
+            if (!group) return false;
+            const members = __getCardGroupMemberPinTargets(group);
+            const pinnable = members.filter((member) => __getPinStateOfCanvasMember(member) !== null);
+            return group.pinned && (pinnable.length === 0 || pinnable.every((m) => __getPinStateOfCanvasMember(m) === true));
+        }
+        if (kind === 'edge') {
+            const edge = (typeof getEdgeById === 'function') ? getEdgeById(entityId) : null;
+            return edge ? !!edge.pinned : false;
+        }
+        return false;
+    };
+
+    const toggleCanvasPin = () => {
+        if (typeof descriptor.toggleCanvasPin === 'function') return descriptor.toggleCanvasPin();
+        if (kind === 'permanent-main') {
+            const el = document.getElementById('permanentSection');
+            return (typeof togglePermanentSectionPin === 'function') ? togglePermanentSectionPin(el) : false;
+        }
+        if (kind === 'permanent-copy') {
+            const el = descriptor.element || document.querySelector(`.permanent-bookmark-section[data-permanent-section-copy-id="${CSS.escape(entityId)}"]`);
+            return (typeof togglePermanentSectionPin === 'function') ? togglePermanentSectionPin(el) : false;
+        }
+        if (kind === 'temp-section') {
+            return (typeof toggleTempSectionPin === 'function') ? toggleTempSectionPin(entityId) : false;
+        }
+        if (kind === 'md-node') {
+            return (typeof toggleMdNodePin === 'function') ? toggleMdNodePin(entityId) : false;
+        }
+        if (kind === 'card-group') {
+            const res = (typeof toggleCardGroupMembersPin === 'function') ? toggleCardGroupMembersPin(entityId) : false;
+            const toastMsg = res
+                ? (isEn ? 'Pinned all group items to canvas' : '已全部画布置顶')
+                : (isEn ? 'Unpinned all group items from canvas' : '已取消全部画布置顶');
+            if (typeof showCanvasToast === 'function') showCanvasToast(toastMsg, 'info');
+            return res;
+        }
+        if (kind === 'edge') {
+            const edge = (typeof getEdgeById === 'function') ? getEdgeById(entityId) : null;
+            if (edge) {
+                edge.pinned = !edge.pinned;
+                try { renderEdges(); } catch (_) { }
+                try { saveCanvasManifestOnly(); } catch (_) { }
+                return edge.pinned;
+            }
+            return false;
+        }
+        return false;
+    };
+
+    const getDirPin = () => {
+        if (typeof descriptor.getDirectoryPin === 'function') return descriptor.getDirectoryPin();
+        if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function') {
+            if (kind === 'card-group') {
+                const isGroupPinned = window.CanvasSidebarDirectory.isEntityPinned('card-group', entityId);
+                const group = (typeof getMdNodeById === 'function') ? getMdNodeById(entityId) : null;
+                const members = group ? __getCardGroupMemberPinTargets(group) : [];
+                const allMembersPinned = members.length === 0 || members.every((m) => {
+                    const mType = m.type;
+                    const mId = m.data && m.data.id;
+                    if (!mId) return true;
+                    if (mType === 'permanent-section') {
+                        const el = (typeof __resolveMemberElement === 'function') ? __resolveMemberElement(m) : null;
+                        const isCopy = el && typeof __isPermanentSectionCopy === 'function' && __isPermanentSectionCopy(el);
+                        const copyId = isCopy ? (el.dataset.permanentSectionCopyId || el.getAttribute('data-permanent-section-copy-id') || mId) : null;
+                        return isCopy ? window.CanvasSidebarDirectory.isEntityPinned('permanent-copy', copyId) : window.CanvasSidebarDirectory.isEntityPinned('permanent-main', '');
+                    }
+                    return window.CanvasSidebarDirectory.isEntityPinned(mType, mId);
+                });
+                return isGroupPinned && allMembersPinned;
+            }
+            return window.CanvasSidebarDirectory.isEntityPinned(kind, entityId);
+        }
+        return false;
+    };
+
+    const toggleDirPin = () => {
+        if (typeof descriptor.toggleDirectoryPin === 'function') return descriptor.toggleDirectoryPin();
+        if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.toggleEntityPin === 'function') {
+            if (kind === 'card-group') {
+                const group = (typeof getMdNodeById === 'function') ? getMdNodeById(entityId) : null;
+                const members = group ? __getCardGroupMemberPinTargets(group) : [];
+                const isGroupPinned = window.CanvasSidebarDirectory.isEntityPinned('card-group', entityId);
+                const anyMemberUnpinned = !isGroupPinned || members.some((m) => {
+                    const mType = m.type;
+                    const mId = m.data && m.data.id;
+                    if (!mId) return false;
+                    if (mType === 'permanent-section') {
+                        const el = (typeof __resolveMemberElement === 'function') ? __resolveMemberElement(m) : null;
+                        const isCopy = el && typeof __isPermanentSectionCopy === 'function' && __isPermanentSectionCopy(el);
+                        const copyId = isCopy ? (el.dataset.permanentSectionCopyId || el.getAttribute('data-permanent-section-copy-id') || mId) : null;
+                        return !(isCopy ? window.CanvasSidebarDirectory.isEntityPinned('permanent-copy', copyId) : window.CanvasSidebarDirectory.isEntityPinned('permanent-main', ''));
+                    }
+                    return !window.CanvasSidebarDirectory.isEntityPinned(mType, mId);
+                });
+                const targetState = anyMemberUnpinned;
+
+                if (window.CanvasSidebarDirectory.isEntityPinned('card-group', entityId) !== targetState) {
+                    window.CanvasSidebarDirectory.toggleEntityPin('card-group', entityId);
+                }
+                members.forEach((m) => {
+                    const mType = m.type;
+                    const mId = m.data && m.data.id;
+                    if (!mId) return;
+                    let kindToToggle = mType;
+                    let idToToggle = mId;
+                    if (mType === 'permanent-section') {
+                        const el = (typeof __resolveMemberElement === 'function') ? __resolveMemberElement(m) : null;
+                        const isCopy = el && typeof __isPermanentSectionCopy === 'function' && __isPermanentSectionCopy(el);
+                        const copyId = isCopy ? (el.dataset.permanentSectionCopyId || el.getAttribute('data-permanent-section-copy-id') || mId) : '';
+                        kindToToggle = isCopy ? 'permanent-copy' : 'permanent-main';
+                        idToToggle = isCopy ? copyId : '';
+                    }
+                    if (window.CanvasSidebarDirectory.isEntityPinned(kindToToggle, idToToggle) !== targetState) {
+                        window.CanvasSidebarDirectory.toggleEntityPin(kindToToggle, idToToggle);
+                    }
+                });
+
+                const toastMsg = targetState
+                    ? (isEn ? 'Pinned all group items to directory' : '已全部目录置顶')
+                    : (isEn ? 'Unpinned all group items from directory' : '已取消全部目录置顶');
+                if (typeof showCanvasToast === 'function') showCanvasToast(toastMsg, 'info');
+                return targetState;
+            }
+            return window.CanvasSidebarDirectory.toggleEntityPin(kind, entityId);
+        }
+        return false;
+    };
+
+    let isCanvasPinned = getCanvasPin();
+    let isDirPinned = getDirPin();
+
+    // 3. Create Popover DOM
+    const pop = document.createElement('div');
+    pop.className = 'canvas-pin-popover open';
+    pop.__anchorBtn = anchorBtn;
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', isEn ? 'Pin Options' : '置顶选项');
+
+    // Determine parent card element and whether it is maximized
+    const cardEl = descriptor.element || (anchorBtn && anchorBtn.closest ? anchorBtn.closest('.permanent-bookmark-section, .temp-canvas-node, .md-canvas-node, .card-group-canvas-node') : null);
+
+    // Header buttons (Category 1) pop down by default (only when not context anchored)
+    const isHeaderBtn = !descriptor.anchorPoint && anchorBtn && anchorBtn.closest ? !!anchorBtn.closest('.permanent-section-header, .temp-node-header, .temp-node-actions, .permanent-section-actions') : false;
+    if (isHeaderBtn) {
+        pop.classList.add('popover-down');
+    }
+
+    // Build items: strictly "画布置顶" and "目录置顶" (4 characters)
+    // Note: permanent-main and permanent-copy are inherently canvas-pinned, so they only show "目录置顶"
+    const isPermanent = kind === 'permanent-main' || kind === 'permanent-copy' || !!descriptor.disableCanvasPin;
+    const canvasLabel = isEn ? 'Canvas Pin' : '画布置顶';
+    const dirLabel = isEn ? 'Directory Pin' : '目录置顶';
+
+    let optionsHtml = '';
+    if (!isPermanent) {
+        optionsHtml += `
+        <button type="button" class="canvas-pin-option${isCanvasPinned ? ' is-active' : ''}" data-pin-type="canvas" title="${canvasLabel}">
+            <span class="canvas-pin-option-label">
+                <i class="fas fa-layer-group"></i>
+                <span>${canvasLabel}</span>
+            </span>
+            <i class="fas fa-check canvas-pin-option-check"></i>
+        </button>`;
+    }
+    optionsHtml += `
+        <button type="button" class="canvas-pin-option${isDirPinned ? ' is-active' : ''}" data-pin-type="directory" title="${dirLabel}">
+            <span class="canvas-pin-option-label">
+                <i class="fas fa-thumbtack"></i>
+                <span>${dirLabel}</span>
+            </span>
+            <i class="fas fa-check canvas-pin-option-check"></i>
+        </button>
+    `;
+
+    pop.innerHTML = optionsHtml;
+
+    preventCanvasEventsPropagation(pop);
+
+    const anchorPoint = descriptor.anchorPoint || null;
+    if (anchorPoint) {
+        const overlay = (typeof getOverlayContainer === 'function' ? getOverlayContainer() : null) || document.body;
+        overlay.appendChild(pop);
+        pop.classList.add('context-anchored');
+        pop.style.position = 'fixed';
+        pop.style.zIndex = '10001';
+        pop.style.left = `${Math.round(Number(anchorPoint.x) || 0)}px`;
+        pop.style.top = `${Math.round(Number(anchorPoint.y) || 0)}px`;
+        pop.style.right = 'auto';
+        pop.style.bottom = 'auto';
+        pop.style.transform = 'none';
+    } else {
+        const mountContainer = (anchorBtn && anchorBtn.parentElement) ? anchorBtn.parentElement : (anchorBtn || document.body);
+        mountContainer.appendChild(pop);
+    }
+
+    // Reposition / boundary check
+    const updatePosition = () => {
+        if (!pop.isConnected) return;
+
+        if (anchorPoint) {
+            pop.classList.add('context-anchored');
+            pop.classList.remove('popover-down', 'popover-up');
+            pop.style.position = 'fixed';
+            pop.style.right = 'auto';
+            pop.style.bottom = 'auto';
+            pop.style.transform = 'none';
+            pop.style.zIndex = '10001';
+
+            const rect = pop.getBoundingClientRect();
+            const margin = 8;
+            const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+            const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+            const width = rect.width || pop.offsetWidth || 0;
+            const height = rect.height || pop.offsetHeight || 0;
+            let left = Number(anchorPoint.x);
+            let top = Number(anchorPoint.y);
+            if (!Number.isFinite(left)) left = margin;
+            if (!Number.isFinite(top)) top = margin;
+            if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
+            if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
+            if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
+            if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
+            pop.style.left = `${Math.round(left)}px`;
+            pop.style.top = `${Math.round(top)}px`;
+            return;
+        }
+
+        if (!anchorBtn || !anchorBtn.isConnected) return;
+
+        const mountContainer = anchorBtn.parentElement || anchorBtn;
+        const btnLeft = anchorBtn.offsetLeft;
+        const btnWidth = anchorBtn.offsetWidth;
+        const btnTop = anchorBtn.offsetTop;
+        const btnHeight = anchorBtn.offsetHeight;
+        const mountHeight = mountContainer.offsetHeight || 0;
+
+        pop.style.left = `${btnLeft + (btnWidth / 2)}px`;
+        pop.style.transform = 'translateX(-50%)';
+        pop.style.right = 'auto';
+
+        const isMaximized = !!(cardEl && cardEl.classList.contains('canvas-node-maximized'));
+        const rect = pop.getBoundingClientRect();
+
+        if (isMaximized) {
+            if (isHeaderBtn) {
+                pop.classList.add('popover-down');
+                pop.classList.remove('popover-up');
+                pop.style.bottom = 'auto';
+                pop.style.top = `${btnTop + btnHeight + 6}px`;
+            } else {
+                pop.classList.remove('popover-down');
+                pop.classList.add('popover-up');
+                pop.style.top = 'auto';
+                pop.style.bottom = `${(mountHeight - btnTop) + 6}px`;
+            }
+        } else if (isHeaderBtn) {
+            if (rect.bottom > (window.innerHeight - 8) && rect.top > rect.height + 16) {
+                pop.classList.remove('popover-down');
+                pop.classList.add('popover-up');
+                pop.style.top = 'auto';
+                pop.style.bottom = `${(mountHeight - btnTop) + 6}px`;
+            } else {
+                pop.classList.add('popover-down');
+                pop.classList.remove('popover-up');
+                pop.style.bottom = 'auto';
+                pop.style.top = `${btnTop + btnHeight + 6}px`;
+            }
+        } else {
+            if (rect.top < 8) {
+                pop.classList.remove('popover-up');
+                pop.classList.add('popover-down');
+                pop.style.bottom = 'auto';
+                pop.style.top = `${btnTop + btnHeight + 6}px`;
+            } else {
+                pop.classList.add('popover-up');
+                pop.classList.remove('popover-down');
+                pop.style.top = 'auto';
+                pop.style.bottom = `${(mountHeight - btnTop) + 6}px`;
+            }
+        }
+
+        const updatedRect = pop.getBoundingClientRect();
+        if (updatedRect.left < 8) {
+            pop.style.transform = 'none';
+            pop.style.left = '4px';
+        } else if (updatedRect.right > (window.innerWidth - 8)) {
+            pop.style.transform = 'none';
+            pop.style.left = 'auto';
+            pop.style.right = '4px';
+        }
+    };
+    requestAnimationFrame(updatePosition);
+
+    updateCanvasPopoverState(true);
+
+    const updateAnchorBtnState = () => {
+        if (anchorBtn && typeof anchorBtn.classList === 'object') {
+            __applyPinVisualStateToButton(anchorBtn, {
+                isPermanent,
+                isCanvasPinned,
+                isDirPinned
+            });
+            const tip = anchorBtn.getAttribute('aria-label') || '';
+            savedTitle = tip;
+            savedTooltip = tip;
+            if (!pop.isConnected || isClosed) {
+                anchorBtn.title = tip;
+                anchorBtn.setAttribute('data-tooltip', tip);
+            }
+        }
+
+        if (typeof descriptor.onStateChange === 'function') {
+            descriptor.onStateChange({ isCanvasPinned, isDirPinned });
+        }
+    };
+
+    let isClosed = false;
+    const cleanup = () => {
+        if (isClosed) return;
+        isClosed = true;
+        if (anchorBtn && typeof anchorBtn.classList === 'object') {
+            anchorBtn.classList.remove('has-active-popover');
+            if (savedTitle) anchorBtn.setAttribute('title', savedTitle);
+            if (savedTooltip) anchorBtn.setAttribute('data-tooltip', savedTooltip);
+        }
+        try { pop.remove(); } catch (_) { }
+        document.removeEventListener('mousedown', onDocDown, true);
+        document.removeEventListener('keydown', onDocKey, true);
+        window.removeEventListener('resize', cleanup);
+        window.removeEventListener('canvas-zoom-changed', cleanup);
+        window.removeEventListener('canvas-pan-changed', cleanup);
+        updateCanvasPopoverState(false);
+    };
+    pop.__cleanup = cleanup;
+
+    const isContextAnchored = !!descriptor.anchorPoint;
+    const isBodyOrRoot = !anchorBtn || anchorBtn === document.body || anchorBtn === document.documentElement;
+
+    const onDocDown = (e) => {
+        const isAnchorClick = !isContextAnchored && !isBodyOrRoot && anchorBtn && anchorBtn.contains && anchorBtn.contains(e.target);
+        if (!pop.contains(e.target) && !isAnchorClick) {
+            cleanup();
+        }
+    };
+
+    const onDocKey = (e) => {
+        if (e.key === 'Escape' || e.code === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof e.stopImmediatePropagation === 'function') {
+                e.stopImmediatePropagation();
+            }
+            cleanup();
+        }
+    };
+
+    setTimeout(() => {
+        if (!isClosed) {
+            document.addEventListener('mousedown', onDocDown, true);
+        }
+    }, 0);
+    document.addEventListener('keydown', onDocKey, true);
+    window.addEventListener('resize', cleanup);
+    window.addEventListener('canvas-zoom-changed', cleanup);
+    window.addEventListener('canvas-pan-changed', cleanup);
+
+    // Option clicks
+    const canvasBtn = pop.querySelector('[data-pin-type="canvas"]');
+    const dirBtn = pop.querySelector('[data-pin-type="directory"]');
+
+    if (canvasBtn) {
+        canvasBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isCanvasPinned = toggleCanvasPin();
+            canvasBtn.classList.toggle('is-active', isCanvasPinned);
+
+            // Handle maximized card z-index dataset sync & toast
+            if (cardEl && cardEl.classList.contains('canvas-node-maximized')) {
+                cardEl.dataset.maxPrevZ = isCanvasPinned ? '200' : '100';
+                const toastMsg = isCanvasPinned
+                    ? (isEn ? 'Canvas pin enabled (active on canvas after exiting fullscreen)' : '已设为画布置顶（退出全屏后将在画布顶层显示）')
+                    : (isEn ? 'Canvas pin disabled' : '已取消画布置顶');
+                if (typeof showCanvasToast === 'function') showCanvasToast(toastMsg, 'info');
+            }
+            updateAnchorBtnState();
+        });
+    }
+
+    if (dirBtn) {
+        dirBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isDirPinned = toggleDirPin();
+            dirBtn.classList.toggle('is-active', isDirPinned);
+            if (kind !== 'temp-group' && kind !== 'card-group') {
+                const toastMsg = isDirPinned
+                    ? (isEn ? 'Pinned to directory top' : '已设为目录置顶')
+                    : (isEn ? 'Removed from directory pin' : '已取消目录置顶');
+                if (typeof showCanvasToast === 'function') showCanvasToast(toastMsg, 'info');
+            }
+            updateAnchorBtnState();
+        });
+    }
+
+    updateAnchorBtnState();
+}
+
+function __syncAllPinButtonsVisualState() {
+    if (typeof window === 'undefined' || !window.CanvasSidebarDirectory) return;
+
+    // 1. Primary permanent section
+    const permBtn = document.getElementById('permanentSectionPinBtn');
+    const permEl = document.getElementById('permanentSection');
+    if (permEl) permEl.style.zIndex = '200';
+    if (permBtn) {
+        const isDir = window.CanvasSidebarDirectory.isEntityPinned('permanent-main', '');
+        __applyPinVisualStateToButton(permBtn, { isPermanent: true, isDirPinned: isDir });
+    }
+
+    // 2. Permanent copies
+    document.querySelectorAll('.permanent-bookmark-section').forEach((sec) => {
+        if (!__isPermanentSectionCopy(sec)) return;
+        sec.style.zIndex = '200';
+        const copyId = sec.dataset.permanentSectionCopyId || sec.getAttribute('data-permanent-section-copy-id');
+        const btn = sec.querySelector('.permanent-section-pin-btn');
+        if (!btn) return;
+        const isDir = copyId ? window.CanvasSidebarDirectory.isEntityPinned('permanent-copy', copyId) : false;
+        __applyPinVisualStateToButton(btn, { isPermanent: true, isDirPinned: isDir });
+    });
+
+    // 3. Temp sections
+    document.querySelectorAll('.temp-canvas-node').forEach((nodeEl) => {
+        const sectionId = nodeEl.dataset.sectionId || nodeEl.getAttribute('data-section-id');
+        const btn = nodeEl.querySelector('.temp-node-pin-btn');
+        if (!btn || !sectionId) return;
+        const sec = (typeof getTempSection === 'function') ? getTempSection(sectionId) : null;
+        const isCanvas = sec ? !!sec.pinned : false;
+        const isDir = window.CanvasSidebarDirectory.isEntityPinned('temp-section', sectionId);
+        __applyPinVisualStateToButton(btn, { isCanvasPinned: isCanvas, isDirPinned: isDir });
+    });
+
+    // 4. Markdown nodes
+    document.querySelectorAll('.md-canvas-node').forEach((nodeEl) => {
+        const nodeId = nodeEl.id;
+        const btn = nodeEl.querySelector('.md-node-toolbar-btn[data-action="md-pin"]');
+        if (!btn || !nodeId) return;
+        const node = (typeof getMdNodeById === 'function') ? getMdNodeById(nodeId) : null;
+        const isCanvas = node ? !!node.pinned : false;
+        const isDir = window.CanvasSidebarDirectory.isEntityPinned('md-node', nodeId);
+        __applyPinVisualStateToButton(btn, { isCanvasPinned: isCanvas, isDirPinned: isDir });
+    });
+
+    // 5. Card groups
+    document.querySelectorAll('.card-group-canvas-node').forEach((groupEl) => {
+        const groupId = groupEl.id;
+        const btn = groupEl.querySelector('.card-group-toolbar-btn[data-action="card-group-pin"]');
+        if (!btn || !groupId) return;
+        const groupNode = (typeof getMdNodeById === 'function') ? getMdNodeById(groupId) : null;
+        const isCanvas = groupNode ? !!groupNode.pinned : false;
+        const isDir = window.CanvasSidebarDirectory.isEntityPinned('card-group', groupId);
+        __applyPinVisualStateToButton(btn, { isCanvasPinned: isCanvas, isDirPinned: isDir });
+    });
+
+    // 6. Edge toolbar
+    const edgeToolbar = document.querySelector('.md-node-toolbar.edge-toolbar');
+    if (edgeToolbar) {
+        const edgeId = normalizeEdgeId(edgeToolbar.dataset.edgeId);
+        const btn = edgeToolbar.querySelector('.md-node-toolbar-btn[data-action="edge-pin"]');
+        if (btn && edgeId) {
+            const edge = (typeof getEdgeById === 'function') ? getEdgeById(edgeId) : null;
+            const isCanvas = edge ? !!edge.pinned : false;
+            const isDir = window.CanvasSidebarDirectory.isEntityPinned('edge', edgeId);
+            __applyPinVisualStateToButton(btn, { isCanvasPinned: isCanvas, isDirPinned: isDir });
+        }
+    }
+
+    // 7. Temp group toolbar (box selection)
+    if (typeof window.__syncTempGroupPinButton === 'function') {
+        try { window.__syncTempGroupPinButton(); } catch (_) { }
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.showCanvasPinPopover = showCanvasPinPopover;
+    window.addEventListener('canvas-directory-pinned-keys-changed', () => {
+        try { __syncAllPinButtonsVisualState(); } catch (_) { }
+    });
 }
 
 function openMdNodeColorPicker(nodeId, options = {}) {

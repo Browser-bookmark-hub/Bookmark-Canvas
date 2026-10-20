@@ -4270,12 +4270,12 @@ const i18n = {
         'en': 'Copy permanent section'
     },
     permanentSectionPinTitle: {
-        'zh_CN': '置顶栏目',
-        'en': 'Pin section'
+        'zh_CN': '目录置顶',
+        'en': 'Directory pin'
     },
     permanentSectionUnpinTitle: {
-        'zh_CN': '取消置顶',
-        'en': 'Unpin section'
+        'zh_CN': '取消目录置顶',
+        'en': 'Unpin from directory'
     },
     permanentSectionSearchTitle: {
         'zh_CN': '搜索当前的范围',
@@ -5568,12 +5568,27 @@ function updateLanguageDependentUI() {
         if (state === 'expanded') {
             label = isEn ? 'Switch to icon-only view' : '切换为极窄图标视图';
         } else if (state === 'mini') {
-            label = isEn ? 'Collapse sidebar' : '完全收起菜单栏';
+            label = isEn ? 'Sidebar controls' : '侧边栏切换';
         } else {
             label = isEn ? 'Expand sidebar' : '展开菜单栏';
         }
-        sidebarToggle.title = label;
+        if (state === 'mini') {
+            sidebarToggle.removeAttribute('title');
+        } else {
+            sidebarToggle.title = label;
+        }
         sidebarToggle.setAttribute('aria-label', label);
+
+        const pillExpand = sidebarToggle.querySelector('.pill-expand');
+        const pillCollapse = sidebarToggle.querySelector('.pill-collapse');
+        if (pillExpand && pillCollapse) {
+            const expandTitle = isEn ? 'Expand sidebar' : '展开菜单栏';
+            const collapseTitle = isEn ? 'Collapse sidebar' : '完全收起菜单栏';
+            pillExpand.removeAttribute('title');
+            pillExpand.setAttribute('aria-label', expandTitle);
+            pillCollapse.removeAttribute('title');
+            pillCollapse.setAttribute('aria-label', collapseTitle);
+        }
     }
 
     if (typeof updateScrollbarControls === 'function') {
@@ -9628,6 +9643,7 @@ let currentHeaderState = 'expanded';
 let currentHeaderDockSide = isSidePanelMode ? 'bottom' : 'top';
 const LAYOUT_PRELOAD_CLASSES = [
     'layout-preload-active',
+    'layout-preload-sidebar-mini',
     'layout-preload-sidebar-compact',
     'layout-preload-sidebar-right',
     'layout-preload-header-compact',
@@ -10919,6 +10935,8 @@ function initSidebarToggle() {
         right: normalizeSidebarWidth(readStorage(SIDEBAR_WIDTH_RIGHT_KEY)) || defaultExpandedWidth
     };
     let sidebarPosition = normalizeSidebarPosition(readStorage(SIDEBAR_POSITION_KEY)) || 'left';
+    const hasStoredSidebarState = readStorage(SIDEBAR_STATE_KEY) != null
+        || readStorage(LEGACY_COLLAPSED_KEY) != null;
     const storedToggleTopRatio = normalizeToggleRatio(readStorage(SIDEBAR_TOGGLE_TOP_RATIO_KEY));
     const hasStoredToggleTopRatio = storedToggleTopRatio != null;
     const hasToggleTopMoved = readStorage(SIDEBAR_TOGGLE_TOP_MOVED_KEY) === 'true';
@@ -11255,7 +11273,7 @@ function initSidebarToggle() {
     let currentState = readSidebarState();
 
     function updateToggleIcon(state) {
-        const icon = toggleBtn.querySelector('i');
+        const icon = toggleBtn.querySelector('.sidebar-toggle-main-icon') || toggleBtn.querySelector('i');
         if (!icon) return;
 
         const defaultPointTo = (state === 'expanded' || state === 'mini')
@@ -11266,30 +11284,30 @@ function initSidebarToggle() {
 
         if (toggleHoldVisualActive) {
             if (toggleDragGuideDirection === 'up') {
-                icon.className = 'fas fa-chevron-up';
+                icon.className = 'fas fa-chevron-up sidebar-toggle-main-icon';
                 return;
             }
             if (toggleDragGuideDirection === 'down') {
-                icon.className = 'fas fa-chevron-down';
+                icon.className = 'fas fa-chevron-down sidebar-toggle-main-icon';
                 return;
             }
 
             const outwardPointTo = sidebarPosition === 'left' ? 'right' : 'left';
             if (toggleDragGuideDirection === 'outward') {
-                icon.className = `fas fa-chevron-${outwardPointTo}`;
+                icon.className = `fas fa-chevron-${outwardPointTo} sidebar-toggle-main-icon`;
                 return;
             }
 
             if (toggleDragGuideDirection === 'inward') {
-                icon.className = `fas fa-chevron-${defaultPointTo}`;
+                icon.className = `fas fa-chevron-${defaultPointTo} sidebar-toggle-main-icon`;
                 return;
             }
 
-            icon.className = `fas fa-chevron-${outwardPointTo}`;
+            icon.className = `fas fa-chevron-${outwardPointTo} sidebar-toggle-main-icon`;
             return;
         }
 
-        icon.className = `fas fa-chevron-${defaultPointTo}`;
+        icon.className = `fas fa-chevron-${defaultPointTo} sidebar-toggle-main-icon`;
     }
 
     function updateToggleLabel(state) {
@@ -11298,17 +11316,44 @@ function initSidebarToggle() {
         if (state === 'expanded') {
             circleTitle = isEn ? 'Switch to icon-only view' : '切换为极窄图标视图';
         } else if (state === 'mini') {
-            circleTitle = isEn ? 'Collapse sidebar' : '完全收起菜单栏';
+            circleTitle = isEn ? 'Sidebar controls' : '侧边栏切换';
         } else {
-            circleTitle = isEn ? 'Expand sidebar' : '展开菜单栏';
+            circleTitle = isEn ? 'Expand to icon-only view' : '展开为极窄图标栏';
         }
 
-        toggleBtn.setAttribute('title', circleTitle);
+        if (state === 'mini') {
+            toggleBtn.removeAttribute('title');
+        } else {
+            toggleBtn.setAttribute('title', circleTitle);
+        }
         toggleBtn.setAttribute('aria-label', circleTitle);
         toggleBtn.setAttribute('aria-expanded', state === 'expanded' ? 'true' : 'false');
         toggleBtn.dataset.collapseState = state;
         updateToggleIcon(state);
         updateToggleHintDirection();
+
+        const pillExpand = toggleBtn.querySelector('.pill-expand');
+        const pillCollapse = toggleBtn.querySelector('.pill-collapse');
+        if (pillExpand && pillCollapse) {
+            const expandTitle = isEn ? 'Expand sidebar' : '展开菜单栏';
+            const collapseTitle = isEn ? 'Collapse sidebar' : '完全收起菜单栏';
+            pillExpand.removeAttribute('title');
+            pillExpand.setAttribute('aria-label', expandTitle);
+            pillCollapse.removeAttribute('title');
+            pillCollapse.setAttribute('aria-label', collapseTitle);
+
+            const expandIcon = pillExpand.querySelector('i');
+            const collapseIcon = pillCollapse.querySelector('i');
+            if (expandIcon && collapseIcon) {
+                // 上半部分始终为展开（expand），下半部分始终为收起（collapse）
+                // 左侧栏：展开往右 (right)，收起往左 (left)
+                // 右侧栏：展开往左 (left)，收起往右 (right)
+                const expandDir = sidebarPosition === 'left' ? 'right' : 'left';
+                const collapseDir = sidebarPosition === 'left' ? 'left' : 'right';
+                expandIcon.className = `fas fa-chevron-${expandDir}`;
+                collapseIcon.className = `fas fa-chevron-${collapseDir}`;
+            }
+        }
     }
 
     function applySidebarPosition(position, options = {}) {
@@ -11352,7 +11397,7 @@ function initSidebarToggle() {
     function applySidebarState(state) {
         clearSideSwitchAnimation();
         stabilizeCanvasLayoutSafe({ syncBounds: false });
-        const nextState = normalizeSidebarState(state) || 'expanded';
+        const nextState = normalizeSidebarState(state) || 'mini';
         sidebar.classList.toggle('compact', nextState === 'compact');
         sidebar.classList.toggle('mini', nextState === 'mini');
         sidebar.classList.remove('collapsed');
@@ -11365,12 +11410,15 @@ function initSidebarToggle() {
         }
         sidebar.dataset.collapseState = nextState;
         updateToggleLabel(nextState);
+        if (nextState !== 'mini' && window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.hideSidebarMiniTooltip === 'function') {
+            window.CanvasSidebarDirectory.hideSidebarMiniTooltip(true);
+        }
         return nextState;
     }
 
     function persistSidebarState(state) {
         if (!persistEnabled) return;
-        const safeState = normalizeSidebarState(state) || 'expanded';
+        const safeState = normalizeSidebarState(state) || 'mini';
         writeStorage(SIDEBAR_STATE_KEY, safeState);
         const legacyValue = safeState === 'expanded' ? 'false' : 'true';
         writeStorage(LEGACY_COLLAPSED_KEY, legacyValue);
@@ -11382,7 +11430,7 @@ function initSidebarToggle() {
         const legacy = readStorage(LEGACY_COLLAPSED_KEY);
         if (legacy === 'true') return 'compact';
         if (legacy === 'false') return 'expanded';
-        return isSidePanelMode ? 'mini' : 'expanded';
+        return 'mini';
     }
 
     function readManualOverride() {
@@ -11407,7 +11455,9 @@ function initSidebarToggle() {
     }
 
     function getAutoState() {
-        return window.innerWidth <= autoCollapseWidth ? (isSidePanelMode ? 'mini' : 'compact') : 'expanded';
+        return window.innerWidth <= autoCollapseWidth
+            ? (isSidePanelMode ? 'mini' : 'compact')
+            : (hasStoredSidebarState ? currentState : 'mini');
     }
 
     function setSidebarState(state, options = {}) {
@@ -11520,7 +11570,7 @@ function initSidebarToggle() {
         } else if (readManualOverride()) {
             currentState = setSidebarState(currentState, { manual: true });
         } else {
-            currentState = setSidebarState(getAutoState(), { manual: false });
+            currentState = setSidebarState(hasStoredSidebarState ? currentState : getAutoState(), { manual: false });
         }
         if (currentState !== 'expanded') {
             ;
@@ -11533,7 +11583,10 @@ function initSidebarToggle() {
         ;
     }
 
-    // 点击圆形按钮：展开 -> 极窄图标 (mini) -> 完全收起 (compact) -> 展开
+    // 点击折叠按钮：
+    // - 在 expanded 态：点击切换为 mini 极窄图标态（第二形态）
+    // - 在 mini 态：点击上半区（展开）回到 expanded（第一形态），点击下半区（收起）进入 compact 完全收起（第三形态）
+    // - 在 compact 态：点击展开为 mini 极窄图标态（第二形态）
     toggleBtn.addEventListener('click', (e) => {
         if (suppressToggleClick) {
             suppressToggleClick = false;
@@ -11543,11 +11596,31 @@ function initSidebarToggle() {
         }
 
         e.stopPropagation();
-        let nextState = 'expanded';
+
+        if (currentState === 'mini') {
+            const expandAction = e.target && e.target.closest ? e.target.closest('.pill-expand') : null;
+            const collapseAction = e.target && e.target.closest ? e.target.closest('.pill-collapse') : null;
+
+            let targetState;
+            if (expandAction) {
+                targetState = 'expanded';
+            } else if (collapseAction) {
+                targetState = 'compact';
+            } else {
+                // 坐标兜底：上半部展开，下半部收起
+                const rect = toggleBtn.getBoundingClientRect();
+                const isTopHalf = e.clientY < (rect.top + rect.height / 2);
+                targetState = isTopHalf ? 'expanded' : 'compact';
+            }
+            currentState = setSidebarState(targetState, { manual: true });
+            return;
+        }
+
+        let nextState = 'mini';
         if (currentState === 'expanded') {
             nextState = 'mini';
-        } else if (currentState === 'mini') {
-            nextState = 'compact';
+        } else if (currentState === 'compact') {
+            nextState = 'mini';
         } else {
             nextState = 'expanded';
         }

@@ -196,6 +196,7 @@
     display: flex;
     gap: 6px;
     align-items: center;
+    position: relative;
 }
 
 .permanent-section-action-btn {
@@ -224,6 +225,20 @@
 .permanent-section-action-btn.pinned {
     background: var(--permanent-action-hover-bg, rgba(255, 255, 255, 0.35));
     border-color: var(--permanent-action-outline, rgba(255, 255, 255, 0.5));
+}
+
+.permanent-section-action-btn.pinned i {
+    opacity: 1 !important;
+}
+
+/* 置顶按钮默认未激活态透明度统一为 0.35 */
+.permanent-section-pin-btn:not(.pinned) i,
+.temp-node-pin-btn:not(.pinned):not(.pinned-half) i,
+.md-node-toolbar-btn[data-action="md-pin"]:not(.pinned):not(.pinned-half) i,
+.md-node-toolbar-btn[data-action="card-group-pin"]:not(.pinned):not(.pinned-half) i,
+.md-node-toolbar-btn[data-action="edge-pin"]:not(.pinned):not(.pinned-half) i,
+.md-node-toolbar-btn[data-action="temp-group-pin"]:not(.pinned):not(.pinned-half) i {
+    opacity: 0.35;
 }
 
 /* 默认隐藏删除按钮：仅在“永久栏目副本”上显示 */
@@ -1000,6 +1015,26 @@
 .temp-node-action-btn:focus-visible {
     outline: 2px solid var(--temp-action-outline, rgba(255, 255, 255, 0.82));
     outline-offset: 2px;
+}
+
+.temp-node-action-btn.pinned-half {
+    background: rgba(255, 255, 255, 0.28);
+    border-color: rgba(255, 255, 255, 0.55);
+    color: #ffffff;
+}
+
+.temp-node-action-btn.pinned-half i {
+    opacity: 0.7 !important;
+}
+
+.temp-node-action-btn.pinned {
+    background: var(--temp-action-hover-bg, rgba(255, 255, 255, 0.38));
+    border-color: var(--temp-action-outline, rgba(255, 255, 255, 0.8));
+    color: #ffffff;
+}
+
+.temp-node-action-btn.pinned i {
+    opacity: 1 !important;
 }
 
 .temp-node-rename-btn.active {
@@ -2783,12 +2818,7 @@ body.canvas-node-maximized-active #canvasContent>.canvas-node-maximized {
 }
 
 /* Maximize tweaks: hide certain controls + reposition toolbars/popovers */
-.permanent-bookmark-section.canvas-node-maximized .permanent-section-copy-btn,
-.permanent-bookmark-section.canvas-node-maximized .permanent-section-pin-btn {
-    display: none !important;
-}
-
-.temp-canvas-node.canvas-node-maximized .temp-node-pin-btn {
+.permanent-bookmark-section.canvas-node-maximized .permanent-section-copy-btn {
     display: none !important;
 }
 
@@ -3266,6 +3296,27 @@ body.canvas-node-maximized-active .canvas-edge-label {
     color: #2563eb;
 }
 
+/* 置顶按钮分级视觉：.pinned（全置顶：画布置顶 + 目录置顶）、.pinned-half（单置顶：满足其一） */
+.md-node-toolbar-btn.pinned-half {
+    border-color: rgba(9, 105, 218, 0.4);
+    background: rgba(9, 105, 218, 0.05);
+    color: #0969da;
+}
+
+.md-node-toolbar-btn.pinned-half i {
+    opacity: 0.7 !important;
+}
+
+.md-node-toolbar-btn.pinned {
+    border-color: #2563eb;
+    background: rgba(37, 99, 235, 0.14);
+    color: #2563eb;
+}
+
+.md-node-toolbar-btn.pinned i {
+    opacity: 1 !important;
+}
+
 /* 连接线方向：沿用一级工具按钮的方形结构，方向选项保持中性，不使用蓝色 chip。 */
 .md-direction-popover {
     display: inline-flex;
@@ -3740,6 +3791,26 @@ body.canvas-node-maximized-active .canvas-edge-label {
     border-color: rgba(88, 166, 255, 0.55);
 }
 
+[data-theme="dark"] .md-node-toolbar-btn.pinned-half {
+    border-color: rgba(88, 166, 255, 0.4);
+    background: rgba(56, 139, 253, 0.08);
+    color: #58a6ff;
+}
+
+[data-theme="dark"] .md-node-toolbar-btn.pinned-half i {
+    opacity: 0.7 !important;
+}
+
+[data-theme="dark"] .md-node-toolbar-btn.pinned {
+    border-color: #388bfd;
+    background: rgba(56, 139, 253, 0.18);
+    color: #58a6ff;
+}
+
+[data-theme="dark"] .md-node-toolbar-btn.pinned i {
+    opacity: 1 !important;
+}
+
 /* 删除 tooltip 样式 - 无延迟，快速显示 */
 .md-node-toolbar-btn,
 .md-delete-option {
@@ -3818,6 +3889,31 @@ body.canvas-node-maximized-active .canvas-edge-label {
 
 [data-theme="dark"] .md-node-toolbar-btn:hover::before {
     border-top-color: rgba(255, 255, 255, 0.9);
+}
+
+/* 当置顶弹窗或其他二级弹窗打开时，立即隐藏工具栏及操作按钮的说明气泡提示，防止与弹窗重叠 */
+body.canvas-popover-active .md-node-toolbar-btn:hover::before,
+body.canvas-popover-active .md-node-toolbar-btn:hover::after,
+body.canvas-popover-active .temp-node-action-btn:hover::before,
+body.canvas-popover-active .temp-node-action-btn:hover::after,
+body.canvas-popover-active .permanent-section-action-btn:hover::before,
+body.canvas-popover-active .permanent-section-action-btn:hover::after,
+.md-node-toolbar-btn.has-active-popover::before,
+.md-node-toolbar-btn.has-active-popover::after,
+.temp-node-action-btn.has-active-popover::before,
+.temp-node-action-btn.has-active-popover::after,
+.permanent-section-action-btn.has-active-popover::before,
+.permanent-section-action-btn.has-active-popover::after,
+.md-node-toolbar:has(.canvas-pin-popover.open) .md-node-toolbar-btn:hover::before,
+.md-node-toolbar:has(.canvas-pin-popover.open) .md-node-toolbar-btn:hover::after,
+.temp-group-toolbar:has(.canvas-pin-popover.open) .temp-group-toolbar-btn:hover::before,
+.temp-group-toolbar:has(.canvas-pin-popover.open) .temp-group-toolbar-btn:hover::after,
+.card-group-toolbar:has(.canvas-pin-popover.open) .card-group-toolbar-btn:hover::before,
+.card-group-toolbar:has(.canvas-pin-popover.open) .card-group-toolbar-btn:hover::after {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
 }
 
 /* 色盘弹出层 - 相对于工具栏定位 */
@@ -4037,6 +4133,146 @@ body.canvas-node-maximized-active .canvas-edge-label {
     background: rgba(248, 81, 73, 0.12);
     border-color: rgba(248, 81, 73, 0.35);
     color: #f85149;
+}
+
+/* 置顶选项弹窗样式（画布置顶 & 目录置顶） */
+.canvas-pin-popover {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #ffffff;
+    border: 1px solid rgba(27, 31, 36, 0.25);
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
+    padding: 6px;
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 1000;
+    white-space: nowrap;
+    min-width: 140px;
+    pointer-events: auto;
+    user-select: none;
+}
+
+.canvas-pin-popover.open {
+    display: flex;
+}
+
+/* 头部按钮默认向下弹出 */
+.canvas-pin-popover.popover-down {
+    top: calc(100% + 6px);
+    bottom: auto;
+}
+
+/* 右键上下文菜单定位 */
+.canvas-pin-popover.context-anchored {
+    position: fixed !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    z-index: 10001 !important;
+}
+
+/* 全屏模式下或强制向上弹出 */
+.canvas-pin-popover.popover-up,
+.canvas-node-maximized .md-node-toolbar .canvas-pin-popover {
+    bottom: calc(100% + 8px);
+    top: auto;
+}
+
+.canvas-pin-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 12px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: #24292f;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: 13px;
+    text-align: left;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.canvas-pin-option-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.canvas-pin-option-label i {
+    font-size: 13px;
+    width: 16px;
+    text-align: center;
+    color: #57606a;
+}
+
+.canvas-pin-option-check {
+    font-size: 12px;
+    color: transparent;
+    transition: color 0.15s ease;
+}
+
+.canvas-pin-option:hover {
+    background: rgba(9, 105, 218, 0.08);
+    border-color: rgba(9, 105, 218, 0.25);
+}
+
+.canvas-pin-option:active {
+    transform: scale(0.98);
+}
+
+/* 激活状态 */
+.canvas-pin-option.is-active {
+    background: rgba(9, 105, 218, 0.12);
+    border-color: rgba(9, 105, 218, 0.35);
+    color: #0969da;
+    font-weight: 500;
+}
+
+.canvas-pin-option.is-active .canvas-pin-option-label i {
+    color: #0969da;
+}
+
+.canvas-pin-option.is-active .canvas-pin-option-check {
+    color: #0969da;
+}
+
+/* 深色模式 */
+[data-theme="dark"] .canvas-pin-popover {
+    background: #2c2d2e;
+    border-color: rgba(99, 110, 123, 0.45);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .canvas-pin-option {
+    color: #e4e6eb;
+}
+
+[data-theme="dark"] .canvas-pin-option-label i {
+    color: #8b949e;
+}
+
+[data-theme="dark"] .canvas-pin-option:hover {
+    background: rgba(88, 166, 255, 0.12);
+    border-color: rgba(88, 166, 255, 0.35);
+}
+
+[data-theme="dark"] .canvas-pin-option.is-active {
+    background: rgba(56, 139, 253, 0.2);
+    border-color: rgba(56, 139, 253, 0.4);
+    color: #58a6ff;
+}
+
+[data-theme="dark"] .canvas-pin-option.is-active .canvas-pin-option-label i,
+[data-theme="dark"] .canvas-pin-option.is-active .canvas-pin-option-check {
+    color: #58a6ff;
 }
 
 [data-theme="dark"] .md-delete-option.md-delete-option-danger:hover i {

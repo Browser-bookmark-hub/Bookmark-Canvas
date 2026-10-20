@@ -19610,13 +19610,52 @@ function __handleBookmarkTreeObjectMenuAction(action, target, options = {}) {
         });
     }
     if (action === 'pin') {
-        if (type === 'temporary' && canvas.toggleTempSectionPin) return canvas.toggleTempSectionPin(target.sectionId);
-        if (type === 'md-node' && canvas.toggleMdNodePin) {
-            const res = canvas.toggleMdNodePin(target.nodeId);
-            if (canvas.clearMdSelection) canvas.clearMdSelection();
-            return res;
+        const anchorPoint = options && options.anchorPoint ? options.anchorPoint : null;
+        if (type === 'temporary') {
+            const el = target.sectionElement || document.querySelector(`.temp-canvas-node[data-section-id="${CSS.escape(target.sectionId)}"]`);
+            const pinBtn = el ? el.querySelector('.temp-node-pin-btn') : null;
+            if (typeof window.showCanvasPinPopover === 'function') {
+                window.showCanvasPinPopover(pinBtn || el || document.body, {
+                    kind: 'temp-section',
+                    id: target.sectionId,
+                    element: el,
+                    anchorPoint: anchorPoint
+                });
+                return true;
+            }
+            if (canvas.toggleTempSectionPin) return canvas.toggleTempSectionPin(target.sectionId);
         }
-        if (canvas.togglePermanentSectionPin) return canvas.togglePermanentSectionPin(sectionEl);
+        if (type === 'md-node') {
+            const el = target.sectionElement || document.getElementById(target.nodeId);
+            const pinBtn = el ? el.querySelector('[data-action="md-pin"]') : null;
+            const isCardGroup = (target.nodeData && target.nodeData.subtype === 'card-group')
+                || (el && el.classList && el.classList.contains('card-group-canvas-node'));
+            if (typeof window.showCanvasPinPopover === 'function') {
+                window.showCanvasPinPopover(pinBtn || el || document.body, {
+                    kind: isCardGroup ? 'card-group' : 'md-node',
+                    id: target.nodeId,
+                    element: el,
+                    anchorPoint: anchorPoint
+                });
+                return true;
+            }
+            if (canvas.toggleMdNodePin) return canvas.toggleMdNodePin(target.nodeId);
+        }
+        if (type === 'permanent' || type === 'permanent-copy') {
+            const copyId = target.copyId || (target.sectionElement && (target.sectionElement.dataset.permanentSectionCopyId || target.sectionElement.getAttribute('data-permanent-section-copy-id')));
+            const isCopy = !!copyId;
+            const kind = isCopy ? 'permanent-copy' : 'permanent-main';
+            const entityId = isCopy ? copyId : '';
+            if (window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.toggleEntityPin === 'function') {
+                const isDirPinned = window.CanvasSidebarDirectory.toggleEntityPin(kind, entityId);
+                const isEn = (currentLang || 'zh_CN') === 'en';
+                const toastMsg = isDirPinned
+                    ? (isEn ? 'Pinned to directory top' : '已设为目录置顶')
+                    : (isEn ? 'Removed from directory pin' : '已取消目录置顶');
+                if (typeof showCanvasToast === 'function') showCanvasToast(toastMsg, 'info');
+                return true;
+            }
+        }
     }
     if (action === 'duplicate' && canvas.createPermanentSectionCopy) return canvas.createPermanentSectionCopy(sectionEl);
     if (action === 'color') {
@@ -19638,6 +19677,22 @@ function __handleBookmarkTreeObjectMenuAction(action, target, options = {}) {
             __showBookmarkTreeObjectToast((currentLang || 'zh_CN') === 'zh_CN' ? '已复制当前栏目文字。' : 'Current section text copied.');
             if (canvas.clearMdSelection) canvas.clearMdSelection();
         });
+    }
+    if (action === 'edge-pin') {
+        const anchorPoint = options && options.anchorPoint ? options.anchorPoint : null;
+        if (canvas.selectEdge) {
+            try { canvas.selectEdge(target.edgeId); } catch (_) { }
+        }
+        const edgeToolbar = document.querySelector('.md-node-toolbar.edge-toolbar');
+        const pinBtn = edgeToolbar ? edgeToolbar.querySelector('.md-node-toolbar-btn[data-action="edge-pin"]') : null;
+        if (typeof window.showCanvasPinPopover === 'function') {
+            window.showCanvasPinPopover(pinBtn || edgeToolbar || document.body, {
+                kind: 'edge',
+                id: target.edgeId,
+                anchorPoint: anchorPoint
+            });
+            return true;
+        }
     }
     if (action === 'edge-color' && canvas.openEdgeColorPicker) return canvas.openEdgeColorPicker(target.edgeId, {
         anchorPoint: options.anchorPoint || null
@@ -19727,29 +19782,15 @@ function showBookmarkTreeObjectContextMenu(e, target) {
     }
 
     const lang = currentLang || 'zh_CN';
-    const isCurrentlyPinned = (() => {
-        if (type === 'temporary') {
-            const section = typeof getTempSection === 'function' ? getTempSection(target.sectionId) : null;
-            return section ? !!section.pinned : false;
-        }
-        if (type === 'md-node') {
-            const isPinnedFromData = target.nodeData ? !!target.nodeData.pinned : false;
-            if (isPinnedFromData) return true;
-            const el = target.sectionElement || document.getElementById(target.nodeId);
-            const pinBtn = el ? el.querySelector('[data-action="md-pin"]') : null;
-            return pinBtn ? pinBtn.classList.contains('pinned') : false;
-        }
-        if (type === 'permanent' || type === 'permanent-copy') {
-            const el = target.sectionElement || document.getElementById('permanentSection');
-            const pinBtn = el ? el.querySelector('.permanent-section-pin-btn') : null;
-            return pinBtn ? pinBtn.classList.contains('pinned') : false;
-        }
-        return false;
-    })();
-
-    const pinLabel = isCurrentlyPinned
-        ? (lang === 'zh_CN' ? '取消置顶' : 'Unpin')
-        : (lang === 'zh_CN' ? '置顶' : 'Pin');
+    const isEn = lang === 'en' || String(lang).toLowerCase().startsWith('en');
+    let pinLabel = labels.pin || (lang === 'zh_CN' ? '置顶' : 'Pin');
+    if (type === 'permanent' || type === 'permanent-copy') {
+        const copyId = target.copyId || (target.sectionElement && (target.sectionElement.dataset.permanentSectionCopyId || target.sectionElement.getAttribute('data-permanent-section-copy-id')));
+        const isDir = window.CanvasSidebarDirectory && typeof window.CanvasSidebarDirectory.isEntityPinned === 'function'
+            ? (copyId ? window.CanvasSidebarDirectory.isEntityPinned('permanent-copy', copyId) : window.CanvasSidebarDirectory.isEntityPinned('permanent-main', ''))
+            : false;
+        pinLabel = isDir ? (isEn ? 'Unpin from directory' : '取消目录置顶') : (isEn ? 'Directory pin' : '目录置顶');
+    }
 
     items.push({ action: 'search-scope', label: labels.searchScope, icon: 'search' });
     if (type === 'permanent' || type === 'permanent-copy') {
@@ -19791,10 +19832,12 @@ function showBookmarkTreeObjectContextMenu(e, target) {
             event.preventDefault();
             event.stopPropagation();
             const action = item.dataset.action;
+            const itemRect = item.getBoundingClientRect ? item.getBoundingClientRect() : null;
+            const itemAnchorPoint = itemRect ? { x: itemRect.left, y: itemRect.top } : null;
             const actionPoint = (action === 'rename' || action === 'edit-special-label')
                 ? target.contextMenuRenamePoint
-                : (action === 'color' ? target.contextMenuColorPoint : null);
-            const anchorPoint = actionPoint || (target && target.contextMenuPoint ? target.contextMenuPoint : null);
+                : (action === 'color' ? target.contextMenuColorPoint : (action === 'pin' ? target.contextMenuPinPoint : null));
+            const anchorPoint = itemAnchorPoint || actionPoint || (target && target.contextMenuPoint ? target.contextMenuPoint : null);
             hideContextMenu();
             try { await __handleBookmarkTreeObjectMenuAction(action, target, { anchorPoint }); } catch (error) {
                 console.error('[右键菜单] 书签树对象操作失败:', error);
@@ -19814,6 +19857,13 @@ function showBookmarkTreeObjectContextMenu(e, target) {
         target.contextMenuColorPoint = {
             x: e.clientX,
             y: e.clientY + (colorItem.offsetTop || 0)
+        };
+    }
+    const pinItem = menu.querySelector('.context-menu-item[data-action="pin"]');
+    if (pinItem) {
+        target.contextMenuPinPoint = {
+            x: e.clientX,
+            y: e.clientY + (pinItem.offsetTop || 0)
         };
     }
     const renameItem = menu.querySelector('.context-menu-item[data-action="rename"]');
@@ -19840,6 +19890,7 @@ function showCanvasEdgeObjectContextMenu(e, edgeId) {
         { action: 'edge-color', label: labels.color, icon: 'palette' },
         { action: 'edge-locate', label: labels.locate, icon: 'crosshairs' },
         { action: 'edge-direction', label: labels.edgeDirection, icon: 'arrows-alt-h' },
+        { action: 'edge-pin', label: labels.pin || ((currentLang || 'zh_CN') === 'en' ? 'Pin' : '置顶'), icon: 'thumbtack' },
         { action: 'edge-delete', label: labels.delete, icon: 'trash-alt', className: 'color-red' }
     ];
     const menu = document.getElementById('bookmark-context-menu');
@@ -19858,9 +19909,11 @@ function showCanvasEdgeObjectContextMenu(e, edgeId) {
             event.preventDefault();
             event.stopPropagation();
             const action = item.dataset.action;
-            const actionPoint = target.contextMenuActionPoints && target.contextMenuActionPoints[action]
+            const itemRect = item.getBoundingClientRect ? item.getBoundingClientRect() : null;
+            const itemAnchorPoint = itemRect ? { x: itemRect.left, y: itemRect.top } : null;
+            const actionPoint = itemAnchorPoint || (target.contextMenuActionPoints && target.contextMenuActionPoints[action]
                 ? target.contextMenuActionPoints[action]
-                : target.contextMenuPoint;
+                : target.contextMenuPoint);
             hideContextMenu();
             try { await __handleBookmarkTreeObjectMenuAction(action, target, { anchorPoint: actionPoint }); } catch (error) {
                 console.error('[右键菜单] 连接线操作失败:', error);

@@ -229,7 +229,12 @@ html.layout-preload-active.layout-preload-sidebar-right .sidebar .sidebar-toggle
 
 html.layout-preload-active.layout-preload-sidebar-mini .sidebar {
     width: var(--sidebar-mini-width, 48px) !important;
-    padding: 0 4px !important;
+    padding: 0 0 6px 0 !important;
+}
+
+html.layout-preload-active.layout-preload-sidebar-mini .sidebar .sidebar-resize-handle {
+    pointer-events: none;
+    cursor: default;
 }
 
 html.layout-preload-active.layout-preload-sidebar-compact .sidebar {
@@ -3409,6 +3414,114 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     font-size: 14px;
     transition: transform 0.2s ease;
     transform: translateX(0.3px);
+}
+
+/* 第二形态（mini 极窄图标态）：变为极细纵向双向胶囊 */
+.sidebar.mini .sidebar-toggle {
+    width: 28px;
+    height: 64px;
+    border-radius: 14px;
+    padding: 3px 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.sidebar.mini .sidebar-toggle:hover,
+.sidebar.mini .sidebar-toggle:focus-visible {
+    transform: translate(-50%, -50%);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+.sidebar.mini .sidebar-toggle .sidebar-toggle-main-icon {
+    display: none !important;
+}
+
+.sidebar.mini .sidebar-toggle .sidebar-toggle-vertical-pill {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 100%;
+}
+
+.sidebar.mini .sidebar-toggle::before {
+    content: "";
+    position: absolute;
+    inset: -6px -8px;
+    border-radius: 18px;
+    background: transparent;
+    pointer-events: auto;
+    z-index: -1;
+}
+
+/* 非 mini 状态下隐藏纵向胶囊 */
+.sidebar-toggle .sidebar-toggle-vertical-pill {
+    display: none;
+}
+
+/* 纵向胶囊内部上下两个子动作项 */
+.sidebar-toggle .pill-action {
+    flex: 1 1 0%;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 11px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: background 0.18s ease, color 0.18s ease;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.sidebar-toggle .pill-action i {
+    font-size: 12px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.18s ease;
+    pointer-events: none;
+    will-change: transform;
+}
+
+.sidebar-toggle .pill-action:hover {
+    background: var(--hover-bg);
+    color: var(--primary-color);
+}
+
+/* 鼠标悬停在上面或下面时，对应图标稍微放大，富有灵动的微交互反馈 */
+.sidebar-toggle .pill-action:hover i,
+.sidebar-toggle .pill-action:focus-visible i {
+    transform: scale(1.24);
+}
+
+.sidebar-toggle .pill-action:active i {
+    transform: scale(0.96);
+}
+
+/* 中间极细分割线 */
+.sidebar-toggle .pill-divider {
+    width: 16px;
+    height: 1px;
+    background: var(--border-color);
+    opacity: 0.55;
+    margin: 1px 0;
+    flex-shrink: 0;
+    pointer-events: none;
+}
+
+.sidebar.mini .sidebar-toggle.sidebar-toggle-dragging,
+.sidebar.mini .sidebar-toggle.sidebar-toggle-dragging:hover,
+.sidebar.mini .sidebar-toggle.sidebar-toggle-dragging:focus-visible {
+    width: 28px;
+    height: 64px;
+    border-radius: 14px;
+    transform: translate(-50%, -50%) scale(1.04);
 }
 
 .sidebar-toggle-hint {

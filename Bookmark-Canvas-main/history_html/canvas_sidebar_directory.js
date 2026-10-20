@@ -30,6 +30,9 @@
     try {
       const clean = Array.isArray(keys) ? keys.filter(Boolean) : [];
       localStorage.setItem(PINNED_KEYS_STORAGE_KEY, JSON.stringify(clean));
+      if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('canvas-directory-pinned-keys-changed', { detail: { keys: clean } }));
+      }
     } catch (_) {}
   }
 
@@ -2827,6 +2830,12 @@
         summary.classList.add('canvas-dir-no-icon');
       }
       summary.appendChild(buildLabelElement(node));
+      if (node.title) {
+        summary.dataset.miniTooltipTitle = node.title;
+      }
+      if (typeof node.count === 'number') {
+        summary.dataset.miniTooltipSub = `${node.count} ${t('个条目', 'items')}`;
+      }
       if (node.defaultColor) {
         summary.style.setProperty('--canvas-dir-node-default-color', node.defaultColor);
       }
@@ -2902,6 +2911,12 @@
     btn.type = 'button';
     btn.className = 'canvas-dir-item-btn';
     btn.dataset.nodeKey = node.key;
+    if (node.title) {
+      btn.dataset.miniTooltipTitle = node.title;
+    }
+    if (node.preview) {
+      btn.dataset.miniTooltipSub = clampText(node.preview, 30);
+    }
     if (node.variant) btn.dataset.nodeVariant = node.variant;
     if (node.defaultColor) {
       btn.style.setProperty('--canvas-dir-node-default-color', node.defaultColor);
@@ -2982,7 +2997,93 @@
     if (root && root.__directoryNodeDataMap__) {
       return root.__directoryNodeDataMap__;
     }
+    if (!directoryNodeDataMap || !directoryNodeDataMap.size) {
+      try {
+        const nodes = buildDirectoryData();
+        const treeRoot = document.getElementById(ROOT_ID);
+        indexDirectoryNodes(nodes, treeRoot);
+      } catch (_) {}
+    }
     return directoryNodeDataMap;
+  }
+
+  function findDirectoryNodeByTarget(kind, id) {
+    const rawKind = normalizeText(kind);
+    const rawId = normalizeText(id);
+    const map = getDirectoryNodeDataMap();
+    if (!map || !map.size) return null;
+
+    for (const [key, node] of map.entries()) {
+      const tgt = node && node.target;
+      if (!tgt || node.placeholder) continue;
+      const tKind = normalizeText(tgt.kind);
+      if (rawKind === 'permanent-main' && tKind === 'permanent-main') {
+        return node;
+      }
+      if (rawKind === 'permanent-copy' && tKind === 'permanent-copy' && normalizeText(tgt.copyId) === rawId) {
+        return node;
+      }
+      if (rawKind === 'temp-section' && tKind === 'temp-section' && normalizeText(tgt.sectionId) === rawId) {
+        return node;
+      }
+      if (rawKind === 'card-group') {
+        if (tKind === 'md-node' && (normalizeText(tgt.subtype) === 'card-group' || node.variant === 'card-group-item') && normalizeText(tgt.nodeId) === rawId) {
+          return node;
+        }
+      }
+      if (rawKind === 'md-node' && tKind === 'md-node' && normalizeText(tgt.subtype) !== 'card-group' && normalizeText(tgt.nodeId) === rawId) {
+        return node;
+      }
+      if (rawKind === 'edge' && tKind === 'edge' && normalizeText(tgt.edgeId) === rawId) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  function isEntityPinned(kind, id) {
+    const rawKind = normalizeText(kind);
+    const rawId = normalizeText(id);
+    const node = findDirectoryNodeByTarget(rawKind, rawId);
+    if (node && node.key) {
+      return isNodeKeyPinned(node.key);
+    }
+    if (rawKind === 'permanent-main') {
+      return isNodeKeyPinned('permanent-main') || isNodeKeyPinned('folder-permanent');
+    }
+    if (!rawId) return false;
+    const keys = loadPinnedKeys();
+    return keys.some((k) => k === rawId || k.endsWith(`-${rawId}`) || k.includes(`-${rawId}-`));
+  }
+
+  function toggleEntityPin(kind, id) {
+    const rawKind = normalizeText(kind);
+    const rawId = normalizeText(id);
+    const node = findDirectoryNodeByTarget(rawKind, rawId);
+    if (node && node.key) {
+      togglePinnedNodeKey(node.key);
+      return isNodeKeyPinned(node.key);
+    }
+    let fallbackKey = '';
+    if (rawKind === 'permanent-main') fallbackKey = 'permanent-main';
+    else if (rawKind === 'permanent-copy') fallbackKey = `permanent-copy-${rawId}`;
+    else if (rawKind === 'temp-section') fallbackKey = `temp-split-${rawId}`;
+    else if (rawKind === 'card-group') fallbackKey = `card-group-item-${rawId}`;
+    else if (rawKind === 'md-node') fallbackKey = `blank-${rawId}`;
+    else if (rawKind === 'edge') fallbackKey = `edge-unlabeled-${rawId}`;
+
+    if (fallbackKey) {
+      const keys = loadPinnedKeys();
+      const existing = keys.find((k) => k === rawId || k.endsWith(`-${rawId}`) || k.includes(`-${rawId}-`));
+      if (existing) {
+        removePinnedNodeKey(existing);
+        return false;
+      } else {
+        togglePinnedNodeKey(fallbackKey);
+        return true;
+      }
+    }
+    return false;
   }
 
   function hydrateFolderChildren(details, openFolderKeys) {
@@ -4417,10 +4518,31 @@
     const validKeys = [];
     let hasStaleKeys = false;
     rawKeys.forEach((key) => {
-      const node = directoryNodeDataMap.get(key);
+      let node = directoryNodeDataMap.get(key);
+      if (!node) {
+        const cleanKey = normalizeText(key);
+        for (const candidate of directoryNodeDataMap.values()) {
+          const tgt = candidate && candidate.target;
+          if (!tgt || candidate.placeholder) continue;
+          const sId = normalizeText(tgt.sectionId);
+          const nId = normalizeText(tgt.nodeId);
+          const eId = normalizeText(tgt.edgeId);
+          const cId = normalizeText(tgt.copyId);
+          if (
+            (sId && (cleanKey === sId || cleanKey.endsWith(`-${sId}`) || cleanKey.includes(`-${sId}-`))) ||
+            (nId && (cleanKey === nId || cleanKey.endsWith(`-${nId}`) || cleanKey.includes(`-${nId}-`))) ||
+            (eId && (cleanKey === eId || cleanKey.endsWith(`-${eId}`) || cleanKey.includes(`-${eId}-`))) ||
+            (cId && (cleanKey === cId || cleanKey.endsWith(`-${cId}`) || cleanKey.includes(`-${cId}-`))) ||
+            (tgt.kind === 'permanent-main' && (cleanKey === 'permanent-main' || cleanKey === 'folder-permanent'))
+          ) {
+            node = candidate;
+            break;
+          }
+        }
+      }
       if (node && node.target && !node.placeholder) {
         pinnedNodes.push(node);
-        validKeys.push(key);
+        validKeys.push(node.key);
         pinnedTargetMap.set(node.key, node.target);
       } else {
         hasStaleKeys = true;
@@ -4480,6 +4602,7 @@
     summary.className = 'canvas-dir-pinned-summary canvas-dir-folder-summary-btn';
     summary.dataset.nodeKey = 'folder-pinned';
     summary.title = isEn ? `Pinned (${pinnedNodes.length})` : `置顶 (${pinnedNodes.length})`;
+    summary.dataset.miniTooltipTitle = summary.title;
 
     const iconWrap = document.createElement('span');
     iconWrap.className = 'canvas-dir-icon';
@@ -4525,6 +4648,10 @@
         btn.classList.add('canvas-dir-node-colored');
       }
       btn.title = node.title || '';
+      btn.dataset.miniTooltipTitle = node.title || '';
+      if (node.preview) {
+        btn.dataset.miniTooltipSub = clampText(node.preview, 30);
+      }
 
       const iconToUse = node.icon || (node.iconText ? '' : 'fas fa-thumbtack');
       if (iconToUse || node.iconText) {
@@ -5948,7 +6075,9 @@
         if (badge) {
           const badgeNum = String((idx + 1) % 10);
           const shortcutHint = `${locateModifier}+${badgeNum}`;
-          badge.title = isEn ? `Locate shortcut: ${shortcutHint}` : `定位快捷键：${shortcutHint}`;
+          badge.dataset.badgeTitle = isEn ? `Locate shortcut: ${shortcutHint}` : `定位快捷键：${shortcutHint}`;
+          badge.removeAttribute('title');
+          row.dataset.miniTooltipShortcut = shortcutHint;
         }
       }
     });
@@ -6419,22 +6548,22 @@
         <!-- Unified Header: Left: Settings, Center: Temp Workspace, Right: Clear (in temp mode) + Add -->
         <div class="sidebar-section-header anchor-unified-header">
           <div class="sidebar-header-left">
-            <button class="sidebar-action-btn" id="anchorSettingsBtn" title="${isEn ? 'Anchor Settings' : '锚点设置'}">
+            <button class="sidebar-action-btn" id="anchorSettingsBtn" title="${isEn ? 'Anchor Settings' : '锚点设置'}" data-mini-tooltip-title="${isEn ? 'Anchor Settings' : '锚点设置'}">
               <i class="fas fa-cog"></i>
             </button>
           </div>
           <div class="sidebar-header-center">
-            <button class="sidebar-action-btn sidebar-temp-workspace-btn${isTempWorkspaceMode ? ' active' : ''}" id="tempWorkspaceToggleBtn" type="button" title="${isEn ? `Toggle Temporary Workspace (${anchorTempWorkspaceDisplay})` : `进入/退出临时工作区 (${anchorTempWorkspaceDisplay})`}">
+            <button class="sidebar-action-btn sidebar-temp-workspace-btn${isTempWorkspaceMode ? ' active' : ''}" id="tempWorkspaceToggleBtn" type="button" title="${isEn ? `Toggle Temporary Workspace (${anchorTempWorkspaceDisplay})` : `进入/退出临时工作区 (${anchorTempWorkspaceDisplay})`}" data-mini-tooltip-title="${isTempWorkspaceMode ? (isEn ? 'Exit Temporary Workspace' : '退出临时工作区') : (isEn ? 'Enter Temporary Workspace' : '进入临时工作区')}" data-mini-tooltip-shortcut="${anchorTempWorkspaceDisplay ? (isEn ? `Shortcut: ${anchorTempWorkspaceDisplay}` : `快捷键：${anchorTempWorkspaceDisplay}`) : ''}" data-mini-tooltip-current="${isTempWorkspaceMode ? 'true' : 'false'}">
               <i class="fas fa-layer-group"></i>
             </button>
           </div>
           <div class="sidebar-header-right">
             ${isTempWorkspaceMode ? `
-              <button class="sidebar-action-btn" id="tempClearBtn" title="${isEn ? 'Clear Temporary Anchors' : '一键清空临时锚点'}" style="${savedTempSlots.length === 0 ? 'opacity: 0.5;' : ''}">
+              <button class="sidebar-action-btn" id="tempClearBtn" title="${isEn ? 'Clear Temporary Anchors' : '一键清空临时锚点'}" data-mini-tooltip-title="${isEn ? 'Clear Temporary Anchors' : '一键清空临时锚点'}" style="${savedTempSlots.length === 0 ? 'opacity: 0.5;' : ''}">
                 <i class="fas fa-trash-alt"></i>
               </button>
             ` : ''}
-            <button class="sidebar-action-btn${isFull ? ' is-full' : ''}${isCardFullscreen ? ' is-disabled' : ''}" id="addAnchorBtn" type="button" title="${isTempWorkspaceMode ? (isEn ? 'Add Temp Anchor' : '添加临时锚点') : (isEn ? 'Add Anchor' : '添加锚点')}">
+            <button class="sidebar-action-btn${isFull ? ' is-full' : ''}${isCardFullscreen ? ' is-disabled' : ''}" id="addAnchorBtn" type="button" title="${isTempWorkspaceMode ? (isEn ? 'Add Temp Anchor' : '添加临时锚点') : (isEn ? 'Add Anchor' : '添加锚点')}" data-mini-tooltip-title="${isTempWorkspaceMode ? (isEn ? 'Add Temp Anchor' : '添加临时锚点') : (isEn ? 'Add Anchor' : '添加锚点')}" data-mini-tooltip-shortcut="${anchorRecordDisplay ? (isEn ? `Shortcut: ${anchorRecordDisplay}` : `快捷键：${anchorRecordDisplay}`) : ''}">
               <i class="fas fa-plus"></i>
             </button>
           </div>
@@ -6498,8 +6627,8 @@
         const rowTitle = isRemembered ? `${fullSlotTitle} [${isEn ? 'Current' : '当前'}]` : fullSlotTitle;
 
         html += `
-          <div class="anchor-slot-row${isRemembered ? ' active-slot' : ''}" data-index="${index}" title="${rowTitle}">
-            <span class="anchor-slot-shortcut-badge" title="${badgeTitle}">${badgeNum}</span>
+          <div class="anchor-slot-row${isRemembered ? ' active-slot' : ''}" data-index="${index}" title="${rowTitle}" data-mini-tooltip-title="${escapeHtml(displayName)}" data-mini-tooltip-shortcut="${escapeHtml(shortcutHint ? (isEn ? `Shortcut: ${shortcutHint}` : `快捷键：${shortcutHint}`) : '')}" data-mini-tooltip-current="${isRemembered ? 'true' : 'false'}">
+            <span class="anchor-slot-shortcut-badge" data-badge-title="${badgeTitle}">${badgeNum}</span>
             <div class="anchor-slot-header">
               <span class="anchor-slot-name" title="${displayName}">${displayName}</span>
               <div class="anchor-slot-actions">
@@ -6715,6 +6844,308 @@
     });
   }
 
+  // ==========================================================================
+  // 第二形态窄边（48px mini）现代气泡提示系统 (Sidebar Mini Tooltip)
+  // ==========================================================================
+  let miniTooltipEl = null;
+  let miniTooltipTimer = null;
+  let miniTooltipHideTimer = null;
+  let activeMiniTooltipTarget = null;
+  let lastTooltipHideTime = 0;
+  const MINI_TOOLTIP_WARM_MS = 300;
+  const MINI_TOOLTIP_COLD_DELAY_MS = 100;
+
+  function ensureMiniTooltipElement() {
+    if (miniTooltipEl && miniTooltipEl.parentNode) return miniTooltipEl;
+    miniTooltipEl = document.getElementById('sidebarMiniFloatingTooltip');
+    if (!miniTooltipEl) {
+      miniTooltipEl = document.createElement('div');
+      miniTooltipEl.id = 'sidebarMiniFloatingTooltip';
+      miniTooltipEl.className = 'sidebar-mini-floating-tooltip';
+      miniTooltipEl.setAttribute('role', 'tooltip');
+      miniTooltipEl.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(miniTooltipEl);
+    }
+    return miniTooltipEl;
+  }
+
+  function suppressNativeTitles(target) {
+    if (!target) return;
+    if (target.hasAttribute('title')) {
+      target.dataset.originalTitleBackup = target.getAttribute('title');
+      target.removeAttribute('title');
+    }
+    target.querySelectorAll('[title]').forEach(child => {
+      child.dataset.originalTitleBackup = child.getAttribute('title');
+      child.removeAttribute('title');
+    });
+  }
+
+  function restoreNativeTitles(target) {
+    if (!target) return;
+    if (target.dataset.originalTitleBackup !== undefined) {
+      target.setAttribute('title', target.dataset.originalTitleBackup);
+      delete target.dataset.originalTitleBackup;
+    }
+    target.querySelectorAll('[data-original-title-backup]').forEach(child => {
+      child.setAttribute('title', child.dataset.originalTitleBackup);
+      delete child.dataset.originalTitleBackup;
+    });
+  }
+
+  function hideSidebarMiniTooltip(immediate = false) {
+    if (miniTooltipTimer) {
+      clearTimeout(miniTooltipTimer);
+      miniTooltipTimer = null;
+    }
+    if (activeMiniTooltipTarget) {
+      restoreNativeTitles(activeMiniTooltipTarget);
+      activeMiniTooltipTarget = null;
+    }
+    const tooltip = miniTooltipEl;
+    if (!tooltip) return;
+
+    if (immediate) {
+      if (miniTooltipHideTimer) {
+        clearTimeout(miniTooltipHideTimer);
+        miniTooltipHideTimer = null;
+      }
+      tooltip.classList.remove('is-visible');
+      tooltip.style.visibility = 'hidden';
+      lastTooltipHideTime = Date.now();
+    } else {
+      if (miniTooltipHideTimer) clearTimeout(miniTooltipHideTimer);
+      miniTooltipHideTimer = setTimeout(() => {
+        miniTooltipHideTimer = null;
+        tooltip.classList.remove('is-visible');
+        tooltip.style.visibility = 'hidden';
+        lastTooltipHideTime = Date.now();
+      }, 40);
+    }
+  }
+
+  function resolveSidebarMiniTooltipInfo(target) {
+    if (!target) return null;
+    const isEn = isEnglish();
+
+    // 1. 锚点槽位行（anchor slot row 或其内部元素）
+    const anchorRow = target.closest('.anchor-slot-row');
+    if (anchorRow) {
+      const title = anchorRow.dataset.miniTooltipTitle || (isEn ? 'Anchor Slot' : '锚点槽位');
+      const shortcut = anchorRow.dataset.miniTooltipShortcut || '';
+      const isCurrent = anchorRow.dataset.miniTooltipCurrent === 'true' || anchorRow.classList.contains('active-slot');
+      return {
+        target: anchorRow,
+        title,
+        shortcut,
+        isCurrent,
+        type: 'anchor'
+      };
+    }
+
+    // 2. 具有明确 data-mini-tooltip-title 的按钮或元素
+    const withExplicit = target.closest('[data-mini-tooltip-title]');
+    if (withExplicit) {
+      const title = withExplicit.dataset.miniTooltipTitle;
+      const shortcut = withExplicit.dataset.miniTooltipShortcut || '';
+      const sub = withExplicit.dataset.miniTooltipSub || '';
+      const isCurrent = withExplicit.dataset.miniTooltipCurrent === 'true';
+      return {
+        target: withExplicit,
+        title,
+        shortcut,
+        sub,
+        isCurrent,
+        type: 'explicit'
+      };
+    }
+
+    // 3. 目录树项或文件夹 summary
+    const dirBtn = target.closest('.canvas-dir-item-btn, .canvas-dir-folder > summary, .canvas-dir-pinned-summary');
+    if (dirBtn) {
+      const titleEl = dirBtn.querySelector('.canvas-dir-title');
+      const title = (titleEl && titleEl.textContent ? titleEl.textContent.trim() : '') ||
+                    dirBtn.getAttribute('title') ||
+                    dirBtn.dataset.originalTitleBackup || '';
+      if (!title) return null;
+      const countEl = dirBtn.querySelector('.canvas-dir-count');
+      const countText = countEl && countEl.textContent ? countEl.textContent.trim() : '';
+      const sub = countText ? `${countText} ${isEn ? 'items' : '个条目'}` : '';
+      return {
+        target: dirBtn,
+        title,
+        sub,
+        type: 'dir'
+      };
+    }
+
+    // 4. Tab 切换按钮
+    const tabBtn = target.closest('.sidebar-tab-btn');
+    if (tabBtn) {
+      const tabType = tabBtn.dataset.tab;
+      const title = tabType === 'anchor' ? (isEn ? 'Anchors' : '锚点') : (isEn ? 'Directory' : '目录');
+      return {
+        target: tabBtn,
+        title,
+        type: 'tab'
+      };
+    }
+
+    // 5. 侧边栏折叠按钮（无需说明气泡）
+    const toggleBtn = target.closest('#sidebarToggle');
+    if (toggleBtn) {
+      return null;
+    }
+
+    // 6. 通用按钮兜底
+    const anyBtn = target.closest('button, [role="button"]');
+    if (anyBtn) {
+      const title = anyBtn.getAttribute('title') || anyBtn.dataset.originalTitleBackup || anyBtn.getAttribute('aria-label');
+      if (title && title.trim()) {
+        return {
+          target: anyBtn,
+          title: title.trim(),
+          type: 'generic'
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function showSidebarMiniTooltip(info) {
+    if (!info || !info.target) return;
+    const sidebar = document.getElementById('sidebar');
+    if (!sidebar || !sidebar.classList.contains('mini')) {
+      hideSidebarMiniTooltip(true);
+      return;
+    }
+
+    if (miniTooltipHideTimer) {
+      clearTimeout(miniTooltipHideTimer);
+      miniTooltipHideTimer = null;
+    }
+
+    const target = info.target;
+    if (activeMiniTooltipTarget && activeMiniTooltipTarget !== target) {
+      restoreNativeTitles(activeMiniTooltipTarget);
+    }
+    activeMiniTooltipTarget = target;
+    suppressNativeTitles(target);
+
+    const tooltip = ensureMiniTooltipElement();
+    const isEn = isEnglish();
+
+    let html = '<div class="sidebar-mini-tooltip-inner">';
+    html += '<div class="sidebar-mini-tooltip-row">';
+    html += `<span class="sidebar-mini-tooltip-name">${escapeHtml(info.title)}</span>`;
+    if (info.isCurrent) {
+      html += `<span class="sidebar-mini-tooltip-badge-current">${isEn ? 'Current' : '当前'}</span>`;
+    }
+    html += '</div>';
+
+    if (info.shortcut) {
+      let cleanKey = info.shortcut;
+      let labelText = isEn ? 'Shortcut' : '快捷键';
+      if (cleanKey.includes('：') || cleanKey.includes(':')) {
+        const parts = cleanKey.split(/[:：]/);
+        labelText = parts[0].trim();
+        cleanKey = parts.slice(1).join(':').trim();
+      }
+      html += '<div class="sidebar-mini-tooltip-sub">';
+      html += `<span class="sidebar-mini-tooltip-sub-label">${escapeHtml(labelText)}</span>`;
+      html += `<kbd class="sidebar-mini-tooltip-kbd">${escapeHtml(cleanKey)}</kbd>`;
+      html += '</div>';
+    } else if (info.sub) {
+      html += '<div class="sidebar-mini-tooltip-sub">';
+      html += `<span class="sidebar-mini-tooltip-sub-text">${escapeHtml(info.sub)}</span>`;
+      html += '</div>';
+    }
+    html += '</div>';
+
+    tooltip.innerHTML = html;
+    tooltip.style.visibility = 'hidden';
+    tooltip.style.display = 'block';
+
+    const rect = target.getBoundingClientRect();
+    const isRight = sidebar.classList.contains('position-right');
+    const gap = 10;
+    const margin = 8;
+
+    const tooltipW = tooltip.offsetWidth || 120;
+    const tooltipH = tooltip.offsetHeight || 36;
+
+    let left = isRight ? (rect.left - gap - tooltipW) : (rect.right + gap);
+    let top = rect.top + rect.height / 2;
+
+    const minTop = margin + tooltipH / 2;
+    const maxTop = window.innerHeight - margin - tooltipH / 2;
+    const clampedTop = Math.max(minTop, Math.min(maxTop, top));
+
+    const arrowOffsetY = Math.max(8, Math.min(tooltipH - 8, tooltipH / 2 + (top - clampedTop)));
+    tooltip.style.setProperty('--tooltip-arrow-y', `${Math.round(arrowOffsetY)}px`);
+
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(clampedTop - tooltipH / 2)}px`;
+    tooltip.classList.toggle('is-on-right', isRight);
+
+    tooltip.style.visibility = '';
+    tooltip.classList.add('is-visible');
+  }
+
+  function setupSidebarMiniTooltip() {
+    const sidebar = document.getElementById('sidebar');
+    if (!sidebar || sidebar.dataset.miniTooltipBound === 'true') return;
+    sidebar.dataset.miniTooltipBound = 'true';
+
+    sidebar.addEventListener('pointerover', (e) => {
+      if (!sidebar.classList.contains('mini')) return;
+      const info = resolveSidebarMiniTooltipInfo(e.target);
+      if (!info) {
+        hideSidebarMiniTooltip();
+        return;
+      }
+
+      if (activeMiniTooltipTarget === info.target && miniTooltipEl && miniTooltipEl.classList.contains('is-visible')) {
+        return;
+      }
+
+      if (miniTooltipTimer) {
+        clearTimeout(miniTooltipTimer);
+        miniTooltipTimer = null;
+      }
+
+      const now = Date.now();
+      const isWarm = (now - lastTooltipHideTime) < MINI_TOOLTIP_WARM_MS;
+      const delay = isWarm ? 0 : MINI_TOOLTIP_COLD_DELAY_MS;
+
+      if (delay === 0) {
+        showSidebarMiniTooltip(info);
+      } else {
+        miniTooltipTimer = setTimeout(() => {
+          miniTooltipTimer = null;
+          showSidebarMiniTooltip(info);
+        }, delay);
+      }
+    }, true);
+
+    sidebar.addEventListener('pointerout', (e) => {
+      const related = e.relatedTarget;
+      if (activeMiniTooltipTarget && related && activeMiniTooltipTarget.contains(related)) {
+        return;
+      }
+      hideSidebarMiniTooltip();
+    }, true);
+
+    sidebar.addEventListener('pointerdown', () => {
+      hideSidebarMiniTooltip(true);
+    }, true);
+
+    window.addEventListener('scroll', () => {
+      hideSidebarMiniTooltip(true);
+    }, true);
+  }
+
   function setupSidebarTabs() {
     const tabDir = document.getElementById('sidebarTabDirectory');
     const tabHist = document.getElementById('sidebarTabAnchor');
@@ -6728,6 +7159,14 @@
     const anchorText = isEn ? 'Anchors' : '锚点';
     tabDir.title = dirText;
     tabHist.title = anchorText;
+    tabDir.dataset.miniTooltipTitle = dirText;
+    tabHist.dataset.miniTooltipTitle = anchorText;
+    tabDir.classList.toggle('lang-en', isEn);
+    tabHist.classList.toggle('lang-en', isEn);
+    const tabsHeader = tabDir.closest('.sidebar-tabs-header');
+    if (tabsHeader) {
+      tabsHeader.classList.toggle('lang-en', isEn);
+    }
     const textDir = tabDir.querySelector('.sidebar-tab-text');
     if (textDir) {
       textDir.textContent = dirText;
@@ -6819,6 +7258,7 @@
     global.addEventListener('keydown', handleAnchorShortcutKeydown, true);
 
     try { setupSidebarTabs(); } catch (_) {}
+    try { setupSidebarMiniTooltip(); } catch (_) {}
 
     // Event-driven: 监听 BCS 及底层的持久化存储变动（跨标签页、跨侧边栏秒级响应）
     setupStorageChangeListener();
@@ -6847,6 +7287,9 @@
     if (sidebar && typeof MutationObserver !== 'undefined') {
       try {
         const sidebarObserver = new MutationObserver(() => {
+          if (!sidebar.classList.contains('mini')) {
+            hideSidebarMiniTooltip(true);
+          }
           if (isSidebarDirectoryVisible()) {
             onBecameVisible();
           }
@@ -6957,6 +7400,9 @@
   global.CanvasSidebarDirectory = {
     init,
     refresh,
+    isEntityPinned,
+    toggleEntityPin,
+    findDirectoryNodeByTarget,
     unpinByEntityId,
     unpinAllNonPermanent,
     navigateManualAnchorSlot,
@@ -6997,6 +7443,8 @@
         if (!at && bt) return 1;
         return compareText(a && a.id, b && b.id);
       });
-    }
+    },
+    hideSidebarMiniTooltip
   };
 })(window);
+

@@ -446,7 +446,16 @@
         <aside class="sidebar" id="sidebar">
             <!-- 侧边栏收起按钮 -->
             <button class="sidebar-toggle" id="sidebarToggle" title="收起菜单栏" aria-label="收起菜单栏">
-                <i class="fas fa-chevron-left"></i>
+                <i class="fas fa-chevron-left sidebar-toggle-main-icon"></i>
+                <div class="sidebar-toggle-vertical-pill" aria-hidden="true">
+                    <span class="pill-action pill-expand" data-action="expand" aria-label="展开菜单栏">
+                        <i class="fas fa-chevron-right"></i>
+                    </span>
+                    <span class="pill-divider"></span>
+                    <span class="pill-action pill-collapse" data-action="collapse" aria-label="完全收起菜单栏">
+                        <i class="fas fa-chevron-left"></i>
+                    </span>
+                </div>
             </button>
             <div class="sidebar-resize-handle" id="sidebarResizeHandle" aria-hidden="true"></div>
 
@@ -1017,10 +1026,10 @@
                                     data-i18n-title="permanentSectionCopyTitle" title="复制永久栏目" aria-label="复制永久栏目">
                                     <i class="fas fa-copy"></i>
                                 </button>
-                                <button class="permanent-section-action-btn permanent-section-pin-btn pinned"
+                                <button class="permanent-section-action-btn permanent-section-pin-btn"
                                     id="permanentSectionPinBtn" data-i18n-title="permanentSectionPinTitle"
-                                    title="置顶栏目" aria-label="置顶栏目">
-                                    <i class="fas fa-thumbtack"></i>
+                                    title="目录置顶" aria-label="目录置顶">
+                                    <i class="fas fa-thumbtack" style="opacity: 0.35;"></i>
                                 </button>
                                 <button class="permanent-section-action-btn permanent-section-search-btn"
                                     data-i18n-title="permanentSectionSearchTitle" title="搜索当前的范围"
