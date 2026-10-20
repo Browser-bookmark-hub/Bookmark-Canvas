@@ -6475,6 +6475,394 @@
     } catch (_) {}
   }
 
+  // ==========================================================================
+  // 锚点指针拖拽排序系统 (Anchor Pointer Drag Reorder System)
+  // 支持两形态（常规与窄边迷你形态）、滚轮/触控板滚动落位、防抖与序号快捷键实时重排
+  // ==========================================================================
+  let anchorDragState = {
+    isDragging: false,
+    hasMoved: false,
+    startX: 0,
+    startY: 0,
+    fromIndex: -1,
+    draggedRow: null,
+    container: null,
+    ghost: null,
+    indicator: null,
+    targetNewIndex: null,
+    autoScrollTimer: null,
+    autoScrollSpeed: 0,
+    isMini: false,
+    preventClick: false
+  };
+  let preventNextAnchorRowClick = false;
+  let isAnchorReorderDragging = false;
+  let lastAnchorPointerEvent = null;
+
+  function reorderAnchorSlots(fromIndex, toIndex, isTemp) {
+    const slots = isTemp ? loadTempAnchorSlots() : loadAnchorSlots();
+    const validSlots = slots.filter(s => s !== null && typeof s === 'object');
+    if (fromIndex < 0 || fromIndex >= validSlots.length || toIndex < 0 || toIndex >= validSlots.length) {
+      return;
+    }
+    if (fromIndex === toIndex) return;
+
+    const [moved] = validSlots.splice(fromIndex, 1);
+    validSlots.splice(toIndex, 0, moved);
+
+    // 默认命名前缀检测与自适应更新（如果用户未自定义名字，则序号自动同步）
+    const isEn = isEnglish();
+    const defaultRegex = /^(Slot|槽位|Temp Slot|临时槽位)\s*(\d+)$/i;
+    validSlots.forEach((slot, idx) => {
+      if (slot && slot.name && defaultRegex.test(slot.name)) {
+        const prefix = isTemp ? (isEn ? 'Temp Slot ' : '临时槽位 ') : (isEn ? 'Slot ' : '槽位 ');
+        slot.name = `${prefix}${idx + 1}`;
+      }
+    });
+
+    // 同步更新当前激活槽位记忆索引
+    if (isTemp) {
+      if (rememberedTempSlotIndex !== null) {
+        if (rememberedTempSlotIndex === fromIndex) {
+          rememberedTempSlotIndex = toIndex;
+        } else if (fromIndex < rememberedTempSlotIndex && toIndex >= rememberedTempSlotIndex) {
+          rememberedTempSlotIndex -= 1;
+        } else if (fromIndex > rememberedTempSlotIndex && toIndex <= rememberedTempSlotIndex) {
+          rememberedTempSlotIndex += 1;
+        }
+      }
+      highlightTempSlotIndex = toIndex;
+    } else {
+      if (rememberedSlotIndex !== null) {
+        let newRemembered = rememberedSlotIndex;
+        if (rememberedSlotIndex === fromIndex) {
+          newRemembered = toIndex;
+        } else if (fromIndex < rememberedSlotIndex && toIndex >= rememberedSlotIndex) {
+          newRemembered -= 1;
+        } else if (fromIndex > rememberedSlotIndex && toIndex <= rememberedSlotIndex) {
+          newRemembered += 1;
+        }
+        saveRememberedSlotIndex(newRemembered);
+      }
+      highlightSlotIndex = toIndex;
+    }
+
+    const limit = isTemp ? getTempAnchorLimit() : getManualAnchorLimit();
+    const newSlots = [...validSlots];
+    while (newSlots.length < limit) {
+      newSlots.push(null);
+    }
+
+    if (isTemp) {
+      saveTempAnchorSlots(newSlots);
+    } else {
+      saveAnchorSlots(newSlots);
+    }
+
+    renderHistoryPanel();
+
+    const toastMsg = isEn ? 'Anchor order updated' : '已调整锚点顺序';
+    const badgeNum = (toIndex < 10) ? String((toIndex + 1) % 10) : String(toIndex + 1);
+    showSidebarToast(toastMsg, { type: 'info', badge: badgeNum, isTemp: isTemp });
+  }
+
+  function handleAnchorRowPointerDown(e) {
+    if (e.button !== 0) return; // 仅限鼠标主键或单指触摸
+    const row = e.currentTarget || (e.target && e.target.closest('.anchor-slot-row'));
+    if (!row) return;
+
+    // 点击按钮或行内重命名输入框时不启动拖拽
+    if (e.target.closest('.anchor-slot-btn') || 
+        e.target.closest('.anchor-slot-rename-input') || 
+        e.target.closest('input, button, textarea')) {
+      return;
+    }
+
+    const container = row.closest('.anchor-slots-container');
+    if (!container) return;
+
+    // 只有一个或没有锚点时无需拖拽调整
+    const totalRows = container.querySelectorAll('.anchor-slot-row').length;
+    if (totalRows <= 1) return;
+
+    const fromIndex = parseInt(row.dataset.index, 10);
+    if (isNaN(fromIndex)) return;
+
+    const sidebar = document.getElementById('sidebar');
+    const isMini = !!(sidebar && sidebar.classList.contains('mini'));
+
+    anchorDragState = {
+      isDragging: false,
+      hasMoved: false,
+      startX: e.clientX,
+      startY: e.clientY,
+      fromIndex: fromIndex,
+      draggedRow: row,
+      container: container,
+      ghost: null,
+      indicator: null,
+      targetNewIndex: fromIndex,
+      autoScrollTimer: null,
+      autoScrollSpeed: 0,
+      isMini: isMini,
+      preventClick: false
+    };
+    lastAnchorPointerEvent = e;
+
+    document.addEventListener('pointermove', onAnchorPointerMove);
+    document.addEventListener('pointerup', onAnchorPointerUp);
+    document.addEventListener('pointercancel', onAnchorPointerCancel);
+    document.addEventListener('keydown', onAnchorKeyDown, true);
+    container.addEventListener('scroll', onContainerScrollDuringDrag, { passive: true });
+  }
+
+  function onAnchorPointerMove(e) {
+    if (!anchorDragState.draggedRow) return;
+    lastAnchorPointerEvent = e;
+
+    const dx = e.clientX - anchorDragState.startX;
+    const dy = e.clientY - anchorDragState.startY;
+    const dist = Math.hypot(dx, dy);
+
+    // 防抖机制：位移小于 5px 视为单纯点击或微颤，不触发拖拽
+    if (!anchorDragState.isDragging) {
+      if (dist < 5) return;
+      startAnchorDrag(e);
+    }
+
+    if (anchorDragState.isDragging) {
+      e.preventDefault();
+      updateAnchorGhostPosition(e);
+      updateAnchorDropIndicator(e);
+      handleAnchorAutoScroll(e);
+    }
+  }
+
+  function startAnchorDrag(e) {
+    anchorDragState.isDragging = true;
+    anchorDragState.hasMoved = true;
+    anchorDragState.preventClick = true;
+    preventNextAnchorRowClick = true;
+    isAnchorReorderDragging = true;
+
+    hideSidebarMiniTooltip(true);
+
+    const row = anchorDragState.draggedRow;
+    row.classList.add('is-dragging');
+
+    // 构造跟随指针的拖拽悬浮镜像
+    const ghost = document.createElement('div');
+    ghost.className = 'anchor-drag-ghost' + 
+      (anchorDragState.isMini ? ' mini' : '') + 
+      (isTempWorkspaceMode ? ' in-temp-mode' : '');
+
+    const badge = row.querySelector('.anchor-slot-shortcut-badge');
+    const nameEl = row.querySelector('.anchor-slot-name');
+    const badgeText = badge ? badge.textContent.trim() : String((anchorDragState.fromIndex + 1) % 10);
+    const nameText = nameEl ? nameEl.textContent.trim() : '';
+
+    if (anchorDragState.isMini) {
+      ghost.innerHTML = `<span class="anchor-drag-ghost-badge">${escapeHtml(badgeText)}</span>`;
+    } else {
+      ghost.innerHTML = `
+        <span class="anchor-drag-ghost-badge">${escapeHtml(badgeText)}</span>
+        <span class="anchor-drag-ghost-name">${escapeHtml(nameText)}</span>
+      `;
+    }
+
+    document.body.appendChild(ghost);
+    anchorDragState.ghost = ghost;
+
+    // 构造落位指示线 (Drop Indicator)
+    const indicator = document.createElement('div');
+    indicator.className = 'anchor-drop-indicator' + 
+      (anchorDragState.isMini ? ' mini' : '') + 
+      (isTempWorkspaceMode ? ' in-temp-mode' : '');
+    anchorDragState.indicator = indicator;
+
+    updateAnchorGhostPosition(e);
+    updateAnchorDropIndicator(e);
+  }
+
+  function updateAnchorGhostPosition(e) {
+    if (!anchorDragState.ghost) return;
+    if (anchorDragState.isMini) {
+      anchorDragState.ghost.style.left = `${e.clientX + 8}px`;
+      anchorDragState.ghost.style.top = `${e.clientY - 17}px`;
+    } else {
+      anchorDragState.ghost.style.left = `${e.clientX + 12}px`;
+      anchorDragState.ghost.style.top = `${e.clientY + 8}px`;
+    }
+  }
+
+  function updateAnchorDropIndicator(e) {
+    const container = anchorDragState.container;
+    const indicator = anchorDragState.indicator;
+    if (!container || !indicator) return;
+
+    const rows = Array.from(container.querySelectorAll('.anchor-slot-row:not(.is-dragging)'));
+    if (rows.length === 0) return;
+
+    const fromIndex = anchorDragState.fromIndex;
+    const clientY = e.clientY;
+
+    let targetRow = null;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const rect = r.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (clientY < midY) {
+        targetRow = r;
+        break;
+      }
+    }
+
+    if (!targetRow) {
+      const lastRow = rows[rows.length - 1];
+      if (indicator.parentNode !== container || indicator.previousElementSibling !== lastRow) {
+        lastRow.after(indicator);
+      }
+      anchorDragState.targetNewIndex = rows.length;
+    } else {
+      if (indicator.parentNode !== container || indicator.nextElementSibling !== targetRow) {
+        container.insertBefore(indicator, targetRow);
+      }
+      const targetOrigIdx = parseInt(targetRow.dataset.index, 10);
+      if (targetOrigIdx > fromIndex) {
+        anchorDragState.targetNewIndex = targetOrigIdx - 1;
+      } else {
+        anchorDragState.targetNewIndex = targetOrigIdx;
+      }
+    }
+  }
+
+  function handleAnchorAutoScroll(e) {
+    const container = anchorDragState.container;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const zone = Math.max(28, Math.min(60, Math.round(rect.height * 0.15)));
+    const maxSpeed = 16;
+
+    let speed = 0;
+    if (e.clientY >= rect.top && e.clientY < rect.top + zone) {
+      const ratio = (rect.top + zone - e.clientY) / zone;
+      speed = -maxSpeed * Math.max(0.2, ratio);
+    } else if (e.clientY <= rect.bottom && e.clientY > rect.bottom - zone) {
+      const ratio = (e.clientY - (rect.bottom - zone)) / zone;
+      speed = maxSpeed * Math.max(0.2, ratio);
+    }
+
+    if (speed !== 0) {
+      anchorDragState.autoScrollSpeed = speed;
+      if (!anchorDragState.autoScrollTimer) {
+        const loop = () => {
+          if (!anchorDragState.isDragging || !anchorDragState.autoScrollSpeed || !anchorDragState.container) {
+            anchorDragState.autoScrollTimer = null;
+            return;
+          }
+          anchorDragState.container.scrollTop += anchorDragState.autoScrollSpeed;
+          if (lastAnchorPointerEvent) {
+            updateAnchorDropIndicator(lastAnchorPointerEvent);
+          }
+          anchorDragState.autoScrollTimer = requestAnimationFrame(loop);
+        };
+        anchorDragState.autoScrollTimer = requestAnimationFrame(loop);
+      }
+    } else {
+      anchorDragState.autoScrollSpeed = 0;
+      if (anchorDragState.autoScrollTimer) {
+        cancelAnimationFrame(anchorDragState.autoScrollTimer);
+        anchorDragState.autoScrollTimer = null;
+      }
+    }
+  }
+
+  function onContainerScrollDuringDrag() {
+    if (anchorDragState.isDragging && lastAnchorPointerEvent) {
+      updateAnchorDropIndicator(lastAnchorPointerEvent);
+    }
+  }
+
+  function onAnchorPointerUp(e) {
+    if (!anchorDragState.draggedRow) return;
+
+    const wasDragging = anchorDragState.isDragging;
+    const fromIndex = anchorDragState.fromIndex;
+    const targetNewIndex = anchorDragState.targetNewIndex;
+
+    cleanUpAnchorDrag();
+
+    if (wasDragging) {
+      const maxIndex = isTempWorkspaceMode 
+        ? (loadTempAnchorSlots().filter(s => s && typeof s === 'object').length - 1)
+        : (loadAnchorSlots().filter(s => s && typeof s === 'object').length - 1);
+      
+      if (typeof targetNewIndex === 'number' && maxIndex >= 0) {
+        const clampedNewIndex = Math.max(0, Math.min(maxIndex, targetNewIndex));
+        if (clampedNewIndex !== fromIndex) {
+          reorderAnchorSlots(fromIndex, clampedNewIndex, isTempWorkspaceMode);
+        }
+      }
+      setTimeout(() => {
+        preventNextAnchorRowClick = false;
+      }, 80);
+    } else {
+      preventNextAnchorRowClick = false;
+    }
+  }
+
+  function onAnchorPointerCancel() {
+    cleanUpAnchorDrag();
+    preventNextAnchorRowClick = false;
+  }
+
+  function onAnchorKeyDown(e) {
+    if (e.key === 'Escape' && anchorDragState.isDragging) {
+      cleanUpAnchorDrag();
+      preventNextAnchorRowClick = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  function cleanUpAnchorDrag() {
+    if (anchorDragState.autoScrollTimer) {
+      cancelAnimationFrame(anchorDragState.autoScrollTimer);
+      anchorDragState.autoScrollTimer = null;
+    }
+    anchorDragState.autoScrollSpeed = 0;
+
+    if (anchorDragState.ghost && anchorDragState.ghost.parentNode) {
+      anchorDragState.ghost.remove();
+      anchorDragState.ghost = null;
+    }
+
+    if (anchorDragState.indicator && anchorDragState.indicator.parentNode) {
+      anchorDragState.indicator.remove();
+      anchorDragState.indicator = null;
+    }
+
+    if (anchorDragState.draggedRow) {
+      anchorDragState.draggedRow.classList.remove('is-dragging');
+    }
+
+    document.removeEventListener('pointermove', onAnchorPointerMove);
+    document.removeEventListener('pointerup', onAnchorPointerUp);
+    document.removeEventListener('pointercancel', onAnchorPointerCancel);
+    document.removeEventListener('keydown', onAnchorKeyDown, true);
+
+    if (anchorDragState.container) {
+      anchorDragState.container.removeEventListener('scroll', onContainerScrollDuringDrag);
+    }
+
+    anchorDragState.isDragging = false;
+    anchorDragState.draggedRow = null;
+    anchorDragState.container = null;
+    lastAnchorPointerEvent = null;
+    isAnchorReorderDragging = false;
+  }
+
   function renderHistoryPanelActual() {
     const panel = document.getElementById('canvasHistoryPanel');
     if (!panel || panel.style.display === 'none') return;
@@ -6605,7 +6993,7 @@
     if (activeSavedSlots.length === 0) {
       html += `
         <div class="history-empty-tip">
-          ${isTempWorkspaceMode ? (isEn ? 'No temporary anchors yet.' : '暂无临时锚点') : (isEn ? 'No manual anchors yet.' : '暂无手动锚点')}
+          ${isTempWorkspaceMode ? (isEn ? 'No temporary anchors yet' : '暂无临时锚点') : (isEn ? 'No manual anchors yet' : '暂无手动锚点')}
         </div>
       `;
     } else {
@@ -6822,9 +7210,15 @@
     panel.querySelectorAll('.anchor-slots-container .anchor-slot-row').forEach(row => {
       row.addEventListener('click', (e) => {
         if (e.target.closest('.anchor-slot-btn') || e.target.closest('.anchor-slot-rename-input')) return;
+        if (preventNextAnchorRowClick) {
+          preventNextAnchorRowClick = false;
+          return;
+        }
         const index = parseInt(row.dataset.index, 10);
         locateAnchorByIndex(index);
       });
+      row.addEventListener('pointerdown', handleAnchorRowPointerDown);
+      row.addEventListener('dragstart', (e) => { e.preventDefault(); });
     });
 
     panel.querySelectorAll('.anchor-slots-container .anchor-slot-btn').forEach(btn => {
@@ -6926,6 +7320,7 @@
 
   function resolveSidebarMiniTooltipInfo(target) {
     if (!target) return null;
+    if (isAnchorReorderDragging) return null;
     const isEn = isEnglish();
 
     // 1. 锚点槽位行（anchor slot row 或其内部元素）
