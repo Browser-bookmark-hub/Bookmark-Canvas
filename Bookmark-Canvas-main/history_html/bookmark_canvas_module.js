@@ -10533,8 +10533,7 @@ function locateToPermanentSection(targetZoom = null) {
 
     const zoom = __resolveCanvasLocateZoom(targetZoom);
     if (zoom !== CanvasState.zoom) {
-        const rect = workspace.getBoundingClientRect();
-        setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
+        setCanvasZoom(zoom, null, null, { recomputeBounds: true });
     }
 
     // 获取永久栏目的位置和尺寸（在canvas-content坐标系中）
@@ -10615,8 +10614,7 @@ function locateToIntroCardsCenter() {
     const zoom = clampCanvasZoom(Math.min(1.0, fitZoom));
 
     if (zoom !== CanvasState.zoom) {
-        const rect = workspace.getBoundingClientRect();
-        setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
+        setCanvasZoom(zoom, null, null, { recomputeBounds: true });
     }
 
     const centerX = left + width / 2;
@@ -10639,10 +10637,7 @@ function navigateToViewport(anchor) {
     if (!workspace) return false;
 
     const zoom = clampCanvasZoom(anchor.zoom || 1.0);
-    const rect = workspace.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    setCanvasZoom(zoom, cx, cy, { recomputeBounds: true });
+    setCanvasZoom(zoom, null, null, { recomputeBounds: false, skipScrollbarUpdate: true });
 
     if (anchor.coordType === 'world') {
         const wsW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 800);
@@ -10685,8 +10680,7 @@ function locateToElement(el, targetZoom = null) {
         zoom = __resolveCanvasLocateZoom(targetZoom);
     }
     if (zoom !== CanvasState.zoom) {
-        const rect = workspace.getBoundingClientRect();
-        setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
+        setCanvasZoom(zoom, null, null, { recomputeBounds: true });
     }
     const left = parseFloat(el.style.left) || 0;
     const top = parseFloat(el.style.top) || 0;
@@ -18719,18 +18713,20 @@ function __positionMdColorPopoverAtViewportPoint(toolbar, pop, anchorPoint) {
 
     const popRect = pop.getBoundingClientRect();
     const margin = 8;
-    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
-    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const workspace = document.getElementById('canvasWorkspace');
+    const wsRect = workspace ? workspace.getBoundingClientRect() : null;
+    const minX = wsRect ? wsRect.left + margin : margin;
+    const maxX = wsRect ? wsRect.right - margin : (window.innerWidth || document.documentElement.clientWidth || 0) - margin;
+    const minY = wsRect ? wsRect.top + margin : margin;
+    const maxY = wsRect ? wsRect.bottom - margin : (window.innerHeight || document.documentElement.clientHeight || 0) - margin;
     const width = popRect.width || pop.offsetWidth || 0;
     const height = popRect.height || pop.offsetHeight || 0;
     let left = Number(anchorPoint.x);
     let top = Number(anchorPoint.y);
-    if (!Number.isFinite(left)) left = margin;
-    if (!Number.isFinite(top)) top = margin;
-    if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
-    if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
-    if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
-    if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
+    if (!Number.isFinite(left)) left = minX;
+    if (!Number.isFinite(top)) top = minY;
+    if (maxX) left = Math.min(Math.max(minX, left), Math.max(minX, maxX - width));
+    if (maxY) top = Math.min(Math.max(minY, top), Math.max(minY, maxY - height));
     pop.style.left = `${Math.round(left)}px`;
     pop.style.top = `${Math.round(top)}px`;
 }
@@ -18873,8 +18869,7 @@ function locateAndZoomToMdNode(nodeId, targetZoom = null) {
         zoom = __resolveCanvasLocateZoom(targetZoom);
     }
     if (zoom !== CanvasState.zoom) {
-        const rect = workspace.getBoundingClientRect();
-        setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
+        setCanvasZoom(zoom, null, null, { recomputeBounds: true });
     }
 
     const nodeLeft = parseFloat(el.style.left) || 0;
@@ -23078,18 +23073,20 @@ function __renderTempNodeImpl(section, options = {}) {
 
         const popRect = colorPopover.getBoundingClientRect();
         const margin = 8;
-        const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
-        const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+        const workspace = document.getElementById('canvasWorkspace');
+        const wsRect = workspace ? workspace.getBoundingClientRect() : null;
+        const minX = wsRect ? wsRect.left + margin : margin;
+        const maxX = wsRect ? wsRect.right - margin : (window.innerWidth || document.documentElement.clientWidth || 0) - margin;
+        const minY = wsRect ? wsRect.top + margin : margin;
+        const maxY = wsRect ? wsRect.bottom - margin : (window.innerHeight || document.documentElement.clientHeight || 0) - margin;
         const width = popRect.width || colorPopover.offsetWidth || 0;
         const height = popRect.height || colorPopover.offsetHeight || 0;
         let left = Number(anchorPoint.x);
         let top = Number(anchorPoint.y);
-        if (!Number.isFinite(left)) left = 0;
-        if (!Number.isFinite(top)) top = 0;
-        if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
-        if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
-        if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
-        if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
+        if (!Number.isFinite(left)) left = minX;
+        if (!Number.isFinite(top)) top = minY;
+        if (maxX) left = Math.min(Math.max(minX, left), Math.max(minX, maxX - width));
+        if (maxY) top = Math.min(Math.max(minY, top), Math.max(minY, maxY - height));
         colorPopover.style.left = `${Math.round(left)}px`;
         colorPopover.style.top = `${Math.round(top)}px`;
     };
@@ -32838,18 +32835,20 @@ function __positionEdgeFloatingPopover(popover, anchorPoint) {
     popover.style.top = '0px';
     const rect = popover.getBoundingClientRect();
     const margin = 8;
-    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
-    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const workspace = document.getElementById('canvasWorkspace');
+    const wsRect = workspace ? workspace.getBoundingClientRect() : null;
+    const minX = wsRect ? wsRect.left + margin : margin;
+    const maxX = wsRect ? wsRect.right - margin : (window.innerWidth || document.documentElement.clientWidth || 0) - margin;
+    const minY = wsRect ? wsRect.top + margin : margin;
+    const maxY = wsRect ? wsRect.bottom - margin : (window.innerHeight || document.documentElement.clientHeight || 0) - margin;
     const width = rect.width || popover.offsetWidth || 0;
     const height = rect.height || popover.offsetHeight || 0;
     let left = Number(anchor.x);
     let top = Number(anchor.y);
-    if (!Number.isFinite(left)) left = margin;
-    if (!Number.isFinite(top)) top = margin;
-    if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
-    if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
-    if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
-    if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
+    if (!Number.isFinite(left)) left = minX;
+    if (!Number.isFinite(top)) top = minY;
+    if (maxX) left = Math.min(Math.max(minX, left), Math.max(minX, maxX - width));
+    if (maxY) top = Math.min(Math.max(minY, top), Math.max(minY, maxY - height));
     popover.style.left = `${Math.round(left)}px`;
     popover.style.top = `${Math.round(top)}px`;
 }
@@ -32931,8 +32930,7 @@ function locateAndZoomToEdge(edgeId, targetZoom = null) {
 
     const zoom = __resolveCanvasLocateZoom(targetZoom);
     if (zoom !== CanvasState.zoom) {
-        const rect = workspace.getBoundingClientRect();
-        setCanvasZoom(zoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
+        setCanvasZoom(zoom, null, null, { recomputeBounds: true });
     }
 
     // 计算连接线曲线中心点，右键定位与连接线标签/工具栏保持一致。
@@ -33012,18 +33010,20 @@ function __positionTempFloatingPopoverAtPoint(popover, anchorPoint) {
 
     const popRect = popover.getBoundingClientRect();
     const margin = 8;
-    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
-    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const workspace = document.getElementById('canvasWorkspace');
+    const wsRect = workspace ? workspace.getBoundingClientRect() : null;
+    const minX = wsRect ? wsRect.left + margin : margin;
+    const maxX = wsRect ? wsRect.right - margin : (window.innerWidth || document.documentElement.clientWidth || 0) - margin;
+    const minY = wsRect ? wsRect.top + margin : margin;
+    const maxY = wsRect ? wsRect.bottom - margin : (window.innerHeight || document.documentElement.clientHeight || 0) - margin;
     const width = popRect.width || popover.offsetWidth || 0;
     const height = popRect.height || popover.offsetHeight || 0;
     let left = Number(anchorPoint.x);
     let top = Number(anchorPoint.y);
-    if (!Number.isFinite(left)) left = margin;
-    if (!Number.isFinite(top)) top = margin;
-    if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
-    if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
-    if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
-    if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
+    if (!Number.isFinite(left)) left = minX;
+    if (!Number.isFinite(top)) top = minY;
+    if (maxX) left = Math.min(Math.max(minX, left), Math.max(minX, maxX - width));
+    if (maxY) top = Math.min(Math.max(minY, top), Math.max(minY, maxY - height));
     popover.style.left = `${Math.round(left)}px`;
     popover.style.top = `${Math.round(top)}px`;
 }
@@ -34184,18 +34184,20 @@ function showCanvasPinPopover(anchorBtn, descriptor = {}) {
 
             const rect = pop.getBoundingClientRect();
             const margin = 8;
-            const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
-            const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+            const workspace = document.getElementById('canvasWorkspace');
+            const wsRect = workspace ? workspace.getBoundingClientRect() : null;
+            const minX = wsRect ? wsRect.left + margin : margin;
+            const maxX = wsRect ? wsRect.right - margin : (window.innerWidth || document.documentElement.clientWidth || 0) - margin;
+            const minY = wsRect ? wsRect.top + margin : margin;
+            const maxY = wsRect ? wsRect.bottom - margin : (window.innerHeight || document.documentElement.clientHeight || 0) - margin;
             const width = rect.width || pop.offsetWidth || 0;
             const height = rect.height || pop.offsetHeight || 0;
             let left = Number(anchorPoint.x);
             let top = Number(anchorPoint.y);
-            if (!Number.isFinite(left)) left = margin;
-            if (!Number.isFinite(top)) top = margin;
-            if (viewportW && left + width > viewportW - margin) left = Math.max(margin, viewportW - width - margin);
-            if (viewportH && top + height > viewportH - margin) top = Math.max(margin, viewportH - height - margin);
-            if (viewportW) left = Math.min(Math.max(margin, left), Math.max(margin, viewportW - width - margin));
-            if (viewportH) top = Math.min(Math.max(margin, top), Math.max(margin, viewportH - height - margin));
+            if (!Number.isFinite(left)) left = minX;
+            if (!Number.isFinite(top)) top = minY;
+            if (maxX) left = Math.min(Math.max(minX, left), Math.max(minX, maxX - width));
+            if (maxY) top = Math.min(Math.max(minY, top), Math.max(minY, maxY - height));
             pop.style.left = `${Math.round(left)}px`;
             pop.style.top = `${Math.round(top)}px`;
             return;
