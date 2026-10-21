@@ -4423,7 +4423,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong>快照包导入</strong>：文件夹或压缩包可作为画布快照包导入，用于恢复或对比一整套画布结构</li>
 <li><strong>覆盖导入</strong>：可用快照包覆盖当前画布内容，适合明确要恢复到某份备份时使用</li>
 <li><strong>此位置导入</strong>：在画布空白处或元素右键导入，可把文件夹/压缩包作为快照包导入到当前画布位置附近</li>
-<li><strong>拖入</strong>：支持直接拖入文件或书签到画布空白处。包括单个 JSON/HTML 文件的拖入恢复，以及书签横栏（书签栏）中的文件夹直接拖入的检测（注：Edge 侧边栏书签不支持拖拽到书签画布，Chrome 支持；Chrome 与 Edge 在横向条的拖拽只支持普通书签/链接）</li>
+<li><strong>拖入</strong>：支持直接拖入文件或书签到画布空白处。包括单个快照文件夹、单个 ZIP 压缩包快照的直接恢复，以及单个 JSON/HTML 书签文件的单独拖入恢复，和书签横栏（书签栏）中的文件夹直接拖入的检测（注：Edge 侧边栏书签不支持拖拽到书签画布，Chrome 支持；Chrome 与 Edge 在横向条的拖拽只支持普通书签/链接）</li>
 <li><strong><mark>AI</mark> 指南</strong>：导出包可生成 <code>AGENTS.md</code> 或 <code>CLAUDE.md</code>，用于约束 <code>AI</code> 编辑画布包时保留结构</li>
 </ul>
 
@@ -4483,7 +4483,7 @@ _Shortcuts can be customized in the "Manage" button at top-left_
 <li><strong>Snapshot package import</strong>: Folders or zip files can be imported as canvas snapshot packages for restoring or comparing a full canvas structure</li>
 <li><strong>Overwrite import</strong>: A snapshot package can overwrite the current canvas when you explicitly want to restore a backup</li>
 <li><strong>Import at this position</strong>: Right-click a blank canvas area or an element to import a folder/zip snapshot package near the current canvas position</li>
-<li><strong>Drag and Drop</strong>: Supports dragging files/bookmarks directly onto the canvas. Includes single JSON/HTML file recovery detection, and folder drops from the bookmarks bar (Note: Edge side panel bookmarks do not support drag-and-drop, Chrome does; horizontal bookmarks bar drag-and-drop only supports single bookmarks in both Chrome & Edge)</li>
+<li><strong>Drag and Drop</strong>: Supports dragging files/bookmarks directly onto the canvas. Includes single snapshot folder, single ZIP archive, single JSON/HTML bookmark file recovery, and folder drops from the bookmarks bar (Note: Edge side panel bookmarks do not support drag-and-drop, Chrome does; horizontal bookmarks bar drag-and-drop only supports single bookmarks in both Chrome & Edge)</li>
 <li><strong><mark>AI</mark> guide</strong>: Export packages can generate <code>AGENTS.md</code> or <code>CLAUDE.md</code> to guide <code>AI</code> edits while preserving structure</li>
 </ul>
 
@@ -4714,7 +4714,7 @@ JSON or HTML backup files exported by these projects can be directly **dragged**
 - **快照包导入**：文件夹或压缩包可作为画布快照包导入，用于恢复或对比一整套画布结构
 - **覆盖导入**：可用快照包覆盖当前画布内容，适合明确要恢复到某份备份时使用
 - **此位置导入**：在画布空白处或元素右键导入，可把文件夹/压缩包作为快照包导入到当前画布位置附近
-- **拖入**：支持直接拖入文件或书签到画布空白处。包括单个 JSON/HTML 文件的拖入恢复，以及书签横栏（书签栏）中的文件夹直接拖入的检测（注：Edge 侧边栏书签不支持拖拽到书签画布，Chrome 支持；Chrome 与 Edge 在横向条的拖拽只支持普通书签/链接）
+- **拖入**：支持直接拖入文件或书签到画布空白处。包括单个快照文件夹、单个 ZIP 压缩包快照的直接恢复，以及单个 JSON/HTML 书签文件的单独拖入恢复，和书签横栏（书签栏）中的文件夹直接拖入的检测（注：Edge 侧边栏书签不支持拖拽到书签画布，Chrome 支持；Chrome 与 Edge 在横向条的拖拽只支持普通书签/链接）
 - **==AI== 指南**：导出包可生成 \`AGENTS.md\` 或 \`CLAUDE.md\`，用于约束 ==AI== 编辑画布包时保留结构
 
 ---
@@ -4768,7 +4768,7 @@ _提示：此卡片可自由编辑或删除_
 - **Snapshot package import**: Folders or zip files can be imported as canvas snapshot packages for restoring or comparing a full canvas structure
 - **Overwrite import**: A snapshot package can overwrite the current canvas when you explicitly want to restore a backup
 - **Import at this position**: Right-click a blank canvas area or an element to import a folder/zip snapshot package near the current canvas position
-- **Drag and Drop**: Supports dragging files/bookmarks directly onto the canvas. Includes single JSON/HTML file recovery detection, and folder drops from the bookmarks bar (Note: Edge side panel bookmarks do not support drag-and-drop, Chrome does; horizontal bookmarks bar drag-and-drop only supports single bookmarks in both Chrome & Edge)
+- **Drag and Drop**: Supports dragging files/bookmarks directly onto the canvas. Includes single snapshot folder, single ZIP archive, single JSON/HTML bookmark file recovery, and folder drops from the bookmarks bar (Note: Edge side panel bookmarks do not support drag-and-drop, Chrome does; horizontal bookmarks bar drag-and-drop only supports single bookmarks in both Chrome & Edge)
 - **==AI== guide**: Export packages can generate \`AGENTS.md\` or \`CLAUDE.md\` to guide ==AI== edits while preserving structure
 
 ---
@@ -7240,29 +7240,238 @@ function setupCanvasDropFeedback() {
         const dropX = (e.clientX - rect.left - CanvasState.panOffsetX) / zoom;
         const dropY = (e.clientY - rect.top - CanvasState.panOffsetY) / zoom;
 
-        // Check for single JSON/HTML file drop on the blank canvas area
-        if (dt.files && dt.files.length === 1) {
-            const file = dt.files[0];
-            const fileName = file.name || '';
-            const isJson = /\.json$/i.test(fileName);
-            const isHtml = /\.html$/i.test(fileName);
-            if (isJson || isHtml) {
-                try {
-                    const text = await file.text();
-                    if (isJson) {
-                        await importJsonBookmarks(text, fileName, {
-                            canvasPosition: { x: dropX, y: dropY }
-                        });
-                    } else if (isHtml) {
-                        await importHtmlBookmarks(text, fileName, {
-                            canvasPosition: { x: dropX, y: dropY }
-                        });
+        // -----------------------------------------------------------------
+        // A. 本地文件夹拖入检测 (Chromium FileSystem Directory Entry)
+        // -----------------------------------------------------------------
+        let directoryEntries = [];
+        if (dt.items && dt.items.length) {
+            for (const item of Array.from(dt.items)) {
+                if (item && item.kind === 'file' && typeof item.webkitGetAsEntry === 'function') {
+                    try {
+                        const entry = item.webkitGetAsEntry();
+                        if (entry && entry.isDirectory) {
+                            directoryEntries.push(entry);
+                        }
+                    } catch (_) { }
+                }
+            }
+        }
+
+        if (directoryEntries.length > 0) {
+            const dirEntry = directoryEntries[0];
+            const folderName = dirEntry.name || 'Folder';
+            try {
+                // 递归读取文件夹结构构建 Map<string, Uint8Array>
+                const folderFiles = new Map();
+                let fileCount = 0;
+                let hasCanvasFile = false;
+                const maxFiles = 300;
+                const maxDepth = 6;
+
+                const readBatch = (reader) => new Promise((resolve, reject) => {
+                    reader.readEntries(resolve, reject);
+                });
+
+                const readFileEntry = (fileEntry) => new Promise((resolve, reject) => {
+                    fileEntry.file((file) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(new Uint8Array(reader.result));
+                        reader.onerror = () => reject(reader.error || new Error('File read error'));
+                        reader.readAsArrayBuffer(file);
+                    }, reject);
+                });
+
+                const scanDirectory = async (entry, currentRelPath, depth) => {
+                    if (depth > maxDepth || fileCount >= maxFiles) return;
+                    const reader = entry.createReader();
+                    let entries = [];
+                    while (true) {
+                        const batch = await readBatch(reader);
+                        if (!batch || batch.length === 0) break;
+                        entries.push(...batch);
+                        if (fileCount + entries.length >= maxFiles) break;
                     }
-                } catch (fileError) {
-                    console.error('[Canvas] Failed to read dropped file:', fileError);
-                    showCanvasToast(isEn ? 'Failed to read file' : '读取文件失败', 'error');
+
+                    // 根目录短路嗅探：根层既没有 .canvas 也没有子目录时，视为非快照直接跳过
+                    if (depth === 0) {
+                        const rootHasCanvas = entries.some(e => e.isFile && e.name.endsWith('.canvas'));
+                        const rootHasDirs = entries.some(e => e.isDirectory);
+                        if (!rootHasCanvas && !rootHasDirs) {
+                            return;
+                        }
+                    }
+
+                    for (const child of entries) {
+                        if (fileCount >= maxFiles) break;
+                        const childRelPath = currentRelPath ? `${currentRelPath}/${child.name}` : child.name;
+                        if (child.isFile) {
+                            fileCount++;
+                            if (child.name.endsWith('.canvas')) {
+                                hasCanvasFile = true;
+                            }
+                            try {
+                                const content = await readFileEntry(child);
+                                folderFiles.set(childRelPath, content);
+                                // 同时保存带根文件夹名的 key，兼容不同的路径查找习惯
+                                folderFiles.set(`${folderName}/${childRelPath}`, content);
+                            } catch (readErr) {
+                                console.warn('[Canvas] 读取文件夹子文件失败:', childRelPath, readErr);
+                            }
+                        } else if (child.isDirectory) {
+                            await scanDirectory(child, childRelPath, depth + 1);
+                        }
+                    }
+                };
+
+                await scanDirectory(dirEntry, '', 0);
+
+                if (!hasCanvasFile) {
+                    showCanvasToast(
+                        isEn
+                            ? 'Unrecognized folder: Missing .canvas snapshot file.'
+                            : '无法识别该文件夹：未找到 .canvas 画布快照描述文件。',
+                        'error'
+                    );
+                    return;
+                }
+
+                if (typeof parseCanvasPackageFromFolderFiles === 'function' && typeof __processImportedPackage === 'function') {
+                    const parsed = await parseCanvasPackageFromFolderFiles(folderFiles, folderName);
+                    if (typeof __setCanvasImportRuntimeMode === 'function') {
+                        __setCanvasImportRuntimeMode('permanent');
+                    }
+                    await __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, folderName, {
+                        source: 'folder',
+                        trigger: 'canvas-drop-import',
+                        canvasPosition: { left: dropX, top: dropY }
+                    }, {
+                        deferRuntimeRender: false,
+                        willReloadAfterImport: false
+                    });
+                    showCanvasToast(
+                        isEn ? 'Snapshot package folder imported successfully.' : '快照包文件夹导入成功。',
+                        'success'
+                    );
+                } else {
+                    throw new Error(isEn ? 'Folder snapshot parser not loaded.' : '文件夹快照解析器未就绪。');
+                }
+            } catch (folderErr) {
+                console.error('[Canvas] 导入拖入文件夹失败:', folderErr);
+                showCanvasToast(
+                    (isEn ? 'Folder import failed: ' : '文件夹导入失败：') + (folderErr && folderErr.message ? folderErr.message : folderErr),
+                    'error'
+                );
+            }
+            return;
+        }
+
+        // -----------------------------------------------------------------
+        // B. 本地文件拖入检测 (ZIP / 7z / JSON / HTML)
+        // -----------------------------------------------------------------
+        const droppedFiles = Array.from((dt.files && dt.files.length) ? dt.files : []);
+        if (droppedFiles.length > 0) {
+            const zipFile = droppedFiles.find(f => /\.zip$/i.test(f.name || ''));
+            const sevenZipFile = droppedFiles.find(f => /\.7z$/i.test(f.name || ''));
+
+            // 1. .7z 友好拦截引导
+            if (sevenZipFile && !zipFile) {
+                showCanvasToast(
+                    isEn
+                        ? '.7z format is not supported directly. Please extract and drop the folder instead.'
+                        : '.7z 格式暂不支持直接解压，请解压后直接拖入文件夹。',
+                    'warning'
+                );
+                return;
+            }
+
+            // 2. .zip 画布快照包拖入解析
+            if (zipFile) {
+                try {
+                    if (typeof parseCanvasPackageFromZipFile === 'function' && typeof __processImportedPackage === 'function') {
+                        const parsed = await parseCanvasPackageFromZipFile(zipFile);
+                        if (typeof __setCanvasImportRuntimeMode === 'function') {
+                            __setCanvasImportRuntimeMode('permanent');
+                        }
+                        await __processImportedPackage(parsed.tempState, parsed.storage, parsed.primaryState, zipFile.name, {
+                            source: 'zip',
+                            trigger: 'canvas-drop-import',
+                            canvasPosition: { left: dropX, top: dropY }
+                        }, {
+                            deferRuntimeRender: false,
+                            willReloadAfterImport: false
+                        });
+                        showCanvasToast(
+                            isEn ? 'Snapshot package imported successfully.' : '快照包导入成功。',
+                            'success'
+                        );
+                    } else {
+                        throw new Error(isEn ? 'ZIP package parser not loaded.' : 'ZIP 快照包解析器未就绪。');
+                    }
+                } catch (zipErr) {
+                    console.error('[Canvas] 导入拖入 ZIP 失败:', zipErr);
+                    showCanvasToast(
+                        (isEn ? 'Archive import failed: ' : '压缩包导入失败：') + (zipErr && zipErr.message ? zipErr.message : zipErr),
+                        'error'
+                    );
                 }
                 return;
+            }
+
+            // 3. JSON / HTML 书签文件（支持单文件与多文件批量排版）
+            const jsonFiles = droppedFiles.filter(f => /\.json$/i.test(f.name || ''));
+            const htmlFiles = droppedFiles.filter(f => /\.html$/i.test(f.name || ''));
+            const bookmarkFiles = [...jsonFiles, ...htmlFiles];
+
+            if (bookmarkFiles.length > 0) {
+                if (bookmarkFiles.length === 1) {
+                    const file = bookmarkFiles[0];
+                    const fileName = file.name || '';
+                    const isJson = /\.json$/i.test(fileName);
+                    try {
+                        const text = await file.text();
+                        if (isJson) {
+                            await importJsonBookmarks(text, fileName, {
+                                canvasPosition: { x: dropX, y: dropY }
+                            });
+                        } else {
+                            await importHtmlBookmarks(text, fileName, {
+                                canvasPosition: { x: dropX, y: dropY }
+                            });
+                        }
+                    } catch (fileError) {
+                        console.error('[Canvas] 读取拖入书签文件失败:', fileError);
+                        showCanvasToast(isEn ? 'Failed to read file' : '读取文件失败', 'error');
+                    }
+                    return;
+                } else {
+                    // 多文件批量排版导入
+                    try {
+                        if (typeof __importBookmarkFilesBatch === 'function' && (jsonFiles.length === 0 || htmlFiles.length === 0)) {
+                            const type = jsonFiles.length > 0 ? 'json' : 'html';
+                            await __importBookmarkFilesBatch(type, bookmarkFiles, {
+                                canvasPosition: { left: dropX, top: dropY }
+                            });
+                        } else {
+                            for (let i = 0; i < bookmarkFiles.length; i++) {
+                                const f = bookmarkFiles[i];
+                                const text = await f.text();
+                                const offsetPos = { x: dropX + (i % 5) * 360, y: dropY + Math.floor(i / 5) * 440 };
+                                if (/\.json$/i.test(f.name)) {
+                                    await importJsonBookmarks(text, f.name, { canvasPosition: offsetPos });
+                                } else {
+                                    await importHtmlBookmarks(text, f.name, { canvasPosition: offsetPos });
+                                }
+                            }
+                        }
+                    } catch (batchErr) {
+                        console.error('[Canvas] 批量书签文件导入失败:', batchErr);
+                        showCanvasToast(
+                            (isEn ? 'Batch import failed: ' : '批量导入失败: ') + (batchErr && batchErr.message ? batchErr.message : batchErr),
+                            'error'
+                        );
+                    }
+                    return;
+                }
             }
         }
 

@@ -3938,7 +3938,7 @@ const i18n = {
 <li><strong>快照包导入</strong>：文件夹或压缩包可作为画布快照包导入，用于恢复或对比一整套画布结构</li>
 <li><strong>覆盖导入</strong>：可用快照包覆盖当前画布内容，适合明确要恢复到某份备份时使用</li>
 <li><strong>此位置导入</strong>：在画布空白处或元素右键导入，可把文件夹/压缩包作为快照包导入到当前画布位置附近</li>
-<li><strong>拖入</strong>：支持直接拖入文件或书签到画布空白处。包括单个 JSON/HTML 文件的拖入恢复，以及书签横栏（书签栏）中的文件夹直接拖入的检测（注：Edge 侧边栏书签不支持拖拽到书签画布，Chrome 支持；Chrome 与 Edge 在横向条的拖拽只支持普通书签/链接）</li>
+<li><strong>拖入</strong>：支持直接拖入文件或书签到画布空白处。包括单个快照文件夹、单个 ZIP 压缩包快照的直接恢复，以及单个 JSON/HTML 书签文件的单独拖入恢复，和书签横栏（书签栏）中的文件夹直接拖入的检测（注：Edge 侧边栏书签不支持拖拽到书签画布，Chrome 支持；Chrome 与 Edge 在横向条的拖拽只支持普通书签/链接）</li>
 <li><strong><mark>AI</mark> 指南</strong>：导出包可生成 <code>AGENTS.md</code> 或 <code>CLAUDE.md</code>，用于约束 <code>AI</code> 编辑画布包时保留结构</li>
 </ul>
 <hr>
@@ -3988,7 +3988,7 @@ const i18n = {
 <li><strong>Snapshot package import</strong>: Folders or zip files can be imported as canvas snapshot packages for restoring or comparing a full canvas structure</li>
 <li><strong>Overwrite import</strong>: A snapshot package can overwrite the current canvas when you explicitly want to restore a backup</li>
 <li><strong>Import at this position</strong>: Right-click a blank canvas area or an element to import a folder/zip snapshot package near the current canvas position</li>
-<li><strong>Drag and Drop</strong>: Supports dragging files/bookmarks directly onto the canvas. Includes single JSON/HTML file recovery detection, and folder drops from the bookmarks bar (Note: Edge side panel bookmarks do not support drag-and-drop, Chrome does; horizontal bookmarks bar drag-and-drop only supports single bookmarks in both Chrome & Edge)</li>
+<li><strong>Drag and Drop</strong>: Supports dragging files/bookmarks directly onto the canvas. Includes single snapshot folder, single ZIP archive, single JSON/HTML bookmark file recovery, and folder drops from the bookmarks bar (Note: Edge side panel bookmarks do not support drag-and-drop, Chrome does; horizontal bookmarks bar drag-and-drop only supports single bookmarks in both Chrome & Edge)</li>
 <li><strong><mark>AI</mark> guide</strong>: Export packages can generate <code>AGENTS.md</code> or <code>CLAUDE.md</code> to guide <code>AI</code> edits while preserving structure</li>
 </ul>
 <hr>
