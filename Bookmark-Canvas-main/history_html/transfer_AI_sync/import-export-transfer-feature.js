@@ -2390,11 +2390,14 @@ function showImportDialog(options = {}) {
             Supports <span style="color: #f97316; font-weight: 600;">Overwrite Import</span> (apply permanent bookmarks incrementally below the selected threshold, or fully rebuild them at or above it, then restore the package layout) or <span style="color: #f97316; font-weight: 600;">Import as Package</span> (load as a grouped canvas section card).
         </div>
         <div style="margin-bottom: 8px; line-height: 1.4;">
-            <strong>Bookmarks (HTML / JSON - can be dragged directly onto canvas)</strong><br>
-            Import standard HTML browser bookmarks or exported section JSON files. Imported bookmarks will create a <span style="color: #f97316; font-weight: 600;">new temporary section</span>.
+            <strong>Bookmarks (HTML / JSON)</strong><br>
+            Import standard HTML browser bookmarks or exported section JSON files to create a new <span style="color: #f97316; font-weight: 600;">temporary section</span>.
         </div>
         <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
-            💡 <strong>Import Here Tip</strong>: You can right-click any blank canvas area and select <span style="color: #f97316; font-weight: 600;">"Import Here"</span> to import files at the clicked coordinates without affecting your current canvas layout.
+            💡 <strong>Direct Drag Tip</strong>: Dragging a ZIP / folder (generates a snapshot card group) or HTML / JSON (creates a temporary section) directly into blank canvas areas will place it at your mouse coordinates without disturbing existing bookmarks.
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
+            💡 <strong>Import Here Tip</strong>: You can right-click any blank canvas area and select <span style="color: #f97316; font-weight: 600;">"Import Here"</span> to import bookmark files at your mouse coordinates without disturbing your layout.
         </div>
         <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
             💡 A safety backup is saved before local overwrite import and Git pull overwrite import. See <button type="button" id="importBackupJumpBtn" style="border: 0; background: transparent; padding: 0; color: #2563eb; text-decoration: underline; cursor: pointer; font: inherit;">Backup</button> for details.
@@ -2407,8 +2410,11 @@ function showImportDialog(options = {}) {
             支持<span style="color: #f97316; font-weight: 600;">覆盖导入</span>（永久书签按所选阈值处理：小于阈值时增量更新，达到或超过阈值时全量重建，并恢复包内排版）或<span style="color: #f97316; font-weight: 600;">快照包导入</span>（导入为当前画布下的一个分组卡片）。
         </div>
         <div style="margin-bottom: 8px; line-height: 1.4;">
-            <strong>书签文件 (HTML / JSON - 可直接在画布中拖入)</strong><br>
+            <strong>书签文件 (HTML / JSON)</strong><br>
             导入普通的 HTML 浏览器书签或导出的临时/永久栏目 JSON，导入后将创建为一块<span style="color: #f97316; font-weight: 600;">新的临时栏目</span>。
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
+            💡 <strong>直接拖入提示</strong>：支持直接将 ZIP / 文件夹（生成快照卡片组）或 HTML / JSON（新建临时栏目）拖入画布空白处，自动在鼠标落点处创建，且不会破坏现有画布布局与书签。
         </div>
         <div style="border-top: 1px solid var(--border-color); padding-top: 6px; margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.4;">
             💡 <strong>此位置导入提示</strong>：您也可以在画布空白处右键并选择<span style="color: #f97316; font-weight: 600;">「此位置导入」</span>，即可在鼠标指定的坐标处导入书签文件，以防意外破坏您当前的画布布局。
@@ -2421,21 +2427,23 @@ function showImportDialog(options = {}) {
     dialog.innerHTML = `
         <div class="import-dialog-content" style="max-width: 400px; position: relative;">
             <div class="import-dialog-header">
-                <h3 style="display: flex; align-items: center; justify-content: flex-start; margin: 0; width: 100%;">
-                    <span>${titleText}</span>
-                    <button type="button" class="canvas-import-info-btn" id="importInfoBtn" style="background: none; border: none; padding: 0 4px; color: var(--text-secondary); opacity: 0.8; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; line-height: 1; vertical-align: middle; margin-top: 1.5px;" title="${isEn ? 'View explanation' : '查看说明'}">
-                        <i class="fas fa-info-circle" style="font-size: 14px;"></i>
+                <h3 style="display: flex; align-items: center; justify-content: flex-start; margin: 0; flex: 1; min-width: 0; gap: 5px; line-height: 1;">
+                    <span style="white-space: nowrap; flex-shrink: 0; font-size: 15px; font-weight: 600; line-height: 1; color: var(--text-primary); display: inline-flex; align-items: center;">${titleText}</span>
+                    <button type="button" class="canvas-import-info-btn" id="importInfoBtn" style="background: none; border: none; padding: 0; margin: 0; cursor: pointer; color: var(--accent-primary, #7c3aed); display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 13px; line-height: 1; transform: translateY(-0.5px); flex-shrink: 0;" title="${isEn ? 'View explanation' : '查看说明'}">
+                        <i class="fas fa-info-circle" style="font-size: 13px; line-height: 1; display: inline-block;"></i>
                     </button>
+                    <span style="color: var(--text-secondary); opacity: 0.65; font-size: 12px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; height: 16px; transform: translateY(-1.5px); flex-shrink: 0; user-select: none;">:</span>
+                    <span id="importDragHintBadge" style="display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 6px; font-size: 11px; line-height: 18px; color: var(--text-secondary); background: var(--bg-tertiary, #f8fafc); border: 1px solid var(--border-color, #cbd5e1); border-radius: 4px; box-sizing: border-box; white-space: nowrap; flex-shrink: 0; cursor: pointer;" title="${isEn ? 'Snapshots and bookmarks can both be dragged directly into the canvas' : '画布快照与书签文件均支持直接拖入画布空白处'}">${isEn ? 'Direct canvas drag supported' : '均支持直接拖入画布'}</span>
                 </h3>
                 <button class="import-dialog-close" id="closeImportDialog" type="button"><i class="fas fa-times"></i></button>
             </div>
             <!-- Popover -->
-            <div id="importInfoPopover" style="display: none; position: absolute; left: 16px; top: 52px; right: 16px; background: var(--bg-elevated, #ffffff); border: 1px solid var(--accent-primary, #7c3aed); border-radius: 8px; padding: 12px; box-shadow: var(--shadow-lg, 0 6px 16px rgba(0,0,0,0.15)); z-index: 1000; font-size: 12px; line-height: 1.5; color: var(--text-primary); text-align: left;">
+            <div id="importInfoPopover" style="display: none; position: absolute; left: 16px; top: 52px; right: 16px; max-height: calc(100% - 64px); overflow-y: auto; background: var(--bg-elevated, #ffffff); border: 1px solid var(--accent-primary, #7c3aed); border-radius: 8px; padding: 12px; box-shadow: var(--shadow-lg, 0 6px 16px rgba(0,0,0,0.15)); z-index: 1000; font-size: 12px; line-height: 1.5; color: var(--text-primary); text-align: left;">
                 ${importInfoHtml}
             </div>
             <div class="import-dialog-body">
                 <div class="import-options">
-                    <div class="import-section-label-large">${isEn ? 'Canvas Snapshot' : '画布快照'}</div>
+                    <div class="import-section-label-large">${isEn ? 'Canvas Snapshot (ZIP / Folder)' : '画布快照 (ZIP / 文件夹)'}</div>
                     <div class="import-row import-row-2cols">
                         <button class="import-option-btn-compact" id="importCanvasFolderBtn" title="${isEn ? 'Import Folder' : '导入文件夹快照'}">
                             <i class="fas fa-folder-open"></i>
@@ -2446,7 +2454,7 @@ function showImportDialog(options = {}) {
                             <span>${isEn ? 'Archive' : '压缩包'}</span>
                         </button>
                     </div>
-                    <div class="import-section-label-large" style="margin-top: 12px;">${isEn ? 'Bookmarks (can be dragged directly onto an empty canvas area)' : '书签文件（可直接拖入画布空白处）'}</div>
+                    <div class="import-section-label-large" style="margin-top: 12px;">${isEn ? 'Bookmarks (HTML / JSON)' : '书签文件 (HTML / JSON)'}</div>
                     <div class="import-row import-row-2cols">
                         <button class="import-option-btn-compact" id="importHtmlBtn" title="${isEn ? 'Import HTML Bookmarks' : '导入 HTML 书签'}">
                             <i class="fas fa-code"></i>
@@ -2468,14 +2476,21 @@ function showImportDialog(options = {}) {
 
     // 事件监听
     const importInfoBtn = dialog.querySelector('#importInfoBtn');
+    const importDragHintBadge = dialog.querySelector('#importDragHintBadge');
     const importInfoPopover = dialog.querySelector('#importInfoPopover');
-    if (importInfoBtn && importInfoPopover) {
-        importInfoBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+    const togglePopover = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (importInfoPopover) {
             const visible = importInfoPopover.style.display === 'block';
             importInfoPopover.style.display = visible ? 'none' : 'block';
-        });
+        }
+    };
+    if (importInfoBtn) {
+        importInfoBtn.addEventListener('click', togglePopover);
+    }
+    if (importDragHintBadge) {
+        importDragHintBadge.addEventListener('click', togglePopover);
     }
 
     const importBackupJumpBtn = dialog.querySelector('#importBackupJumpBtn');
@@ -2497,7 +2512,7 @@ function showImportDialog(options = {}) {
             dialog.remove();
             return;
         }
-        if (importInfoPopover && importInfoPopover.style.display === 'block' && !e.target.closest('#importInfoPopover') && !e.target.closest('#importInfoBtn')) {
+        if (importInfoPopover && importInfoPopover.style.display === 'block' && !e.target.closest('#importInfoPopover') && !e.target.closest('#importInfoBtn') && !e.target.closest('#importDragHintBadge')) {
             importInfoPopover.style.display = 'none';
         }
     });
