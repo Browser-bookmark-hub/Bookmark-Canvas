@@ -264,10 +264,14 @@ html.layout-preload-active.layout-preload-sidebar-compact .sidebar .sidebar-togg
     width: 18px;
     height: 24px;
     padding: 0;
-    border-radius: 0;
+    border-radius: 0 4px 4px 0;
     border: none;
     background: transparent;
     box-shadow: none;
+}
+
+html.layout-preload-active.layout-preload-sidebar-compact.layout-preload-sidebar-right .sidebar .sidebar-toggle {
+    border-radius: 4px 0 0 4px;
 }
 
 html.layout-preload-active.layout-preload-sidebar-compact:not(.layout-preload-sidebar-right) .sidebar .sidebar-toggle {
@@ -647,12 +651,12 @@ option {
 
 .batch-panel-restore-btn:hover,
 .batch-panel-restore-btn:focus-visible {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     color: var(--text-primary);
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: 50%;
+    border-radius: 7px;
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
     outline: none;
 }
@@ -675,31 +679,47 @@ option {
     height: 18px;
 }
 
+.batch-panel-restore-btn[data-dock-edge="left"] {
+    border-radius: 0 4px 4px 0;
+}
+
+.batch-panel-restore-btn[data-dock-edge="right"] {
+    border-radius: 4px 0 0 4px;
+}
+
+.batch-panel-restore-btn[data-dock-edge="top"] {
+    border-radius: 0 0 4px 4px;
+}
+
+.batch-panel-restore-btn[data-dock-edge="bottom"] {
+    border-radius: 4px 4px 0 0;
+}
+
 .batch-panel-restore-btn[data-dock-edge="left"]:hover,
 .batch-panel-restore-btn[data-dock-edge="left"]:focus-visible {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     transform: translateY(-4px) scale(1.05);
 }
 
 .batch-panel-restore-btn[data-dock-edge="right"]:hover,
 .batch-panel-restore-btn[data-dock-edge="right"]:focus-visible {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     transform: translate(-14px, -4px) scale(1.05);
 }
 
 .batch-panel-restore-btn[data-dock-edge="top"]:hover,
 .batch-panel-restore-btn[data-dock-edge="top"]:focus-visible {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     transform: translateX(-4px) scale(1.05);
 }
 
 .batch-panel-restore-btn[data-dock-edge="bottom"]:hover,
 .batch-panel-restore-btn[data-dock-edge="bottom"]:focus-visible {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     transform: translate(-4px, -14px) scale(1.05);
 }
 
@@ -1026,9 +1046,9 @@ body.header-compact .history-header .header-toggle-btn {
 body.header-compact .history-header .header-toggle-btn:hover,
 body.header-compact .history-header .header-toggle-btn:focus-visible {
     top: 8px;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
 
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
@@ -3383,153 +3403,317 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     transform: translateX(10px);
 }
 
-/* 侧边栏切换按钮 - 单按钮 */
+/* -------------------------------------------------------------------------
+   侧边栏折叠切换按钮（极简隐藏线段形态 -> 纵向延伸流动 -> 平滑形成微圆角边框）
+   - 静止形态：纯粹 2px 细线段紧贴边框分割线（深色模式浅白、浅色模式深黑）
+   - 悬浮展开动效（优雅两阶段流动，总时长约 0.3s）：
+     1. 第一阶段（0~70ms）：线段先自中心向上下延伸流动拉长；
+     2. 第二阶段（60~300ms）：自延伸线段平滑横向展开为微圆角矩形，边框与底色柔和渐变融合，无突兀闪烁；
+     3. 离开时：平滑横向折叠为细线，再纵向收缩回静止长度。
+   ------------------------------------------------------------------------- */
 .sidebar-toggle {
     position: absolute;
     left: 100%;
     top: var(--sidebar-toggle-top, 60%);
     bottom: auto;
     transform: translate(-50%, -50%);
-    width: 30px;
-    height: 30px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 50%;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, color 0.15s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease, border-radius 0.2s ease, border-color 0.2s ease;
     color: var(--text-secondary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     z-index: 14;
     touch-action: none;
+    box-sizing: border-box;
+    padding: 0 !important;
+    margin: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+    /* 离开时收拢过渡：先横向收拢为线（0~0.18s），再纵向平滑回缩至静止长度（0.04s~0.20s） */
+    transition: width 0.18s cubic-bezier(0.25, 1, 0.5, 1) 0s,
+                height 0.16s cubic-bezier(0.25, 1, 0.5, 1) 0.04s,
+                border-radius 0.18s cubic-bezier(0.25, 1, 0.5, 1) 0s,
+                padding 0.16s cubic-bezier(0.25, 1, 0.5, 1) 0s,
+                background 0.16s ease 0s,
+                border-color 0.22s cubic-bezier(0.25, 1, 0.5, 1) 0s,
+                box-shadow 0.16s ease 0s,
+                transform 0.16s cubic-bezier(0.25, 1, 0.5, 1) 0s;
 }
 
 .sidebar.position-right .sidebar-toggle {
     left: 0;
 }
 
-.sidebar-toggle:hover,
-.sidebar-toggle:focus-visible {
-    background: var(--hover-bg);
-    color: var(--primary-color);
-    transform: translate(-50%, -50%) scale(1.08);
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
-}
-
-.sidebar-toggle i {
-    font-size: 14px;
-    transition: transform 0.2s ease;
-    transform: translateX(0.3px);
-}
-
-/* 第二形态（mini 极窄图标态）：变为极细纵向双向胶囊 */
-.sidebar.mini .sidebar-toggle {
-    width: 28px;
-    height: 64px;
-    border-radius: 14px;
-    padding: 3px 0;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-}
-
-.sidebar.mini .sidebar-toggle:hover,
-.sidebar.mini .sidebar-toggle:focus-visible {
+/* 扩展隐形交互热区（抗抖动迟滞包络机制）：
+   1. 静止时以中心对称向两侧提供 26px 灵敏吸附区（覆盖细线两侧各 12px），确保接近分割线时稳定触发展开；
+   2. 悬停展开与形变过程中包络严格单调向外扩张（至 40px~44px），形成“进入阈值 (13px) < 离开阈值 (20px)”的物理迟滞区间，从根源上杜绝边缘悬停判定循环抖动；
+   3. 全程保持 pointer-events: auto 与 z-index: -1，层级位于动作按钮（z-index: 2）下方，既不遮挡子项点击，又保障边界交互判定绝对平稳。 */
+.sidebar:not(.compact) .sidebar-toggle::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
     transform: translate(-50%, -50%);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
+    width: 26px;
+    height: calc(100% + 14px);
+    background: transparent;
+    pointer-events: auto;
+    z-index: -1;
 }
 
+.sidebar:not(.compact) .sidebar-toggle:hover::before,
+.sidebar:not(.compact) .sidebar-toggle:focus-visible::before {
+    width: calc(100% + 16px);
+    min-width: 26px;
+    height: calc(100% + 14px);
+    pointer-events: auto;
+    z-index: -1;
+}
+
+/* 静止线段由容器边框自身充当（width: 2px 时左右边框紧贴即为纯净 2px 柔和线段，展开时直接撑开为边框并在展开过程中平滑减缓亮度，杜绝刺眼闪亮） */
+.sidebar:not(.compact) .sidebar-toggle::after {
+    display: none !important;
+}
+
+/* -------------------------------------------------------------------------
+   第一形态（展开态 / 单按钮）：彻底消除第二形态残留，静止时为单根 22px 纯净细线段
+   ------------------------------------------------------------------------- */
+/* 非 mini 模式下彻底隐藏第二形态的纵向分段控制器（包含上下按钮和分割线） */
+.sidebar:not(.mini) .sidebar-toggle .sidebar-toggle-vertical-pill {
+    display: none !important;
+}
+
+.sidebar:not(.mini):not(.compact) .sidebar-toggle {
+    width: 2px;
+    height: 22px;
+    padding: 0 !important;
+    background: transparent;
+    border: 1px solid var(--accent-color, var(--text-secondary));
+    box-shadow: none;
+    border-radius: 1px;
+}
+
+.sidebar:not(.mini):not(.compact) .sidebar-toggle:hover,
+.sidebar:not(.mini):not(.compact) .sidebar-toggle:focus-visible {
+    width: 28px;
+    height: 28px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-hover);
+    border-radius: 7px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+    color: var(--text-primary);
+    transform: translate(-50%, -50%);
+    /* 悬停展开流动动效：纵向率先延伸（0.18s），横向舒展自然承接，边框亮度自初始微光随形变过程零延迟柔和衰减沉降（0.26s），杜绝瞬间闪亮感 */
+    transition: height 0.18s cubic-bezier(0.22, 1, 0.36, 1) 0s,
+                width 0.20s cubic-bezier(0.22, 1, 0.36, 1) 0.04s,
+                border-radius 0.20s cubic-bezier(0.22, 1, 0.36, 1) 0.04s,
+                background 0.20s cubic-bezier(0.22, 1, 0.36, 1) 0s,
+                border-color 0.26s cubic-bezier(0.22, 1, 0.36, 1) 0s,
+                box-shadow 0.22s ease-out 0s,
+                transform 0.18s cubic-bezier(0.22, 1, 0.36, 1) 0s;
+}
+
+.sidebar:not(.mini):not(.compact) .sidebar-toggle:active {
+    transform: translate(-50%, -50%) scale(0.96);
+}
+
+/* 第一形态主图标：绝对居中定位，成型后浮动放大显露，继承与标题栏折叠按钮一致的自然亮色微光（非蓝色主题色） */
+.sidebar:not(.mini):not(.compact) .sidebar-toggle .sidebar-toggle-main-icon {
+    position: absolute;
+    z-index: 2;
+    font-size: 13px;
+    line-height: 1;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.75);
+    pointer-events: none;
+    transition: opacity 0.10s ease 0s,
+                transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
+                visibility 0.10s ease 0s,
+                color 0.15s ease;
+}
+
+.sidebar:not(.mini):not(.compact) .sidebar-toggle:hover .sidebar-toggle-main-icon,
+.sidebar:not(.mini):not(.compact) .sidebar-toggle:focus-visible .sidebar-toggle-main-icon {
+    opacity: 1;
+    visibility: visible;
+    transform: scale(1.14);
+    color: var(--text-primary);
+    transition: opacity 0.16s ease 0.08s,
+                transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) 0.08s,
+                visibility 0s linear 0s,
+                color 0.15s ease;
+}
+
+.sidebar:not(.mini):not(.compact) .sidebar-toggle:active .sidebar-toggle-main-icon {
+    transform: scale(0.92);
+}
+
+/* -------------------------------------------------------------------------
+   第二形态（mini 极窄图标态 / 双按钮）：静止为单根 36px 连续长线段；悬浮纵向延展后展开为 24x56 分段小矩形
+   ------------------------------------------------------------------------- */
+/* mini 模式下隐藏第一形态的单按钮主图标 */
 .sidebar.mini .sidebar-toggle .sidebar-toggle-main-icon {
     display: none !important;
 }
 
+.sidebar.mini .sidebar-toggle {
+    width: 2px;
+    height: 36px;
+    background: transparent;
+    border: 1px solid var(--accent-color, var(--text-secondary));
+    box-shadow: none;
+    border-radius: 1px;
+    padding: 0 !important;
+}
+
+.sidebar.mini .sidebar-toggle:hover,
+.sidebar.mini .sidebar-toggle:focus-visible {
+    width: 24px;
+    height: 56px;
+    border-radius: 6px;
+    padding: 2px !important;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-hover);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+    color: var(--text-primary);
+    transform: translate(-50%, -50%);
+    /* 悬停展开流动动效：纵向率先延伸（0.18s），横向舒展自然承接，边框亮度自初始微光随形变过程零延迟柔和衰减沉降（0.26s），杜绝瞬间闪亮感 */
+    transition: height 0.18s cubic-bezier(0.22, 1, 0.36, 1) 0s,
+                width 0.20s cubic-bezier(0.22, 1, 0.36, 1) 0.04s,
+                border-radius 0.20s cubic-bezier(0.22, 1, 0.36, 1) 0.04s,
+                padding 0.20s cubic-bezier(0.22, 1, 0.36, 1) 0.04s,
+                background 0.20s cubic-bezier(0.22, 1, 0.36, 1) 0s,
+                border-color 0.26s cubic-bezier(0.22, 1, 0.36, 1) 0s,
+                box-shadow 0.22s ease-out 0s,
+                transform 0.18s cubic-bezier(0.22, 1, 0.36, 1) 0s;
+}
+
 .sidebar.mini .sidebar-toggle .sidebar-toggle-vertical-pill {
+    position: relative;
+    z-index: 2;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: space-between;
     width: 100%;
     height: 100%;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.85);
+    pointer-events: none;
+    transition: opacity 0.10s ease 0s,
+                transform 0.11s ease 0s,
+                visibility 0.10s ease 0s;
 }
 
-.sidebar.mini .sidebar-toggle::before {
-    content: "";
-    position: absolute;
-    inset: -6px -8px;
-    border-radius: 18px;
-    background: transparent;
+.sidebar.mini .sidebar-toggle:hover .sidebar-toggle-vertical-pill,
+.sidebar.mini .sidebar-toggle:focus-visible .sidebar-toggle-vertical-pill {
+    opacity: 1;
+    visibility: visible;
+    transform: scale(1);
     pointer-events: auto;
-    z-index: -1;
+    transition: opacity 0.16s ease 0.08s,
+                transform 0.18s cubic-bezier(0.25, 1, 0.5, 1) 0.08s,
+                visibility 0s linear 0s;
 }
 
-/* 非 mini 状态下隐藏纵向胶囊 */
-.sidebar-toggle .sidebar-toggle-vertical-pill {
-    display: none;
-}
-
-/* 纵向胶囊内部上下两个子动作项 */
+/* 分段小矩形内部上下两个微圆角动作项 */
 .sidebar-toggle .pill-action {
+    position: relative;
+    z-index: 2;
     flex: 1 1 0%;
     width: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 11px;
+    border-radius: 4px;
     cursor: pointer;
     color: var(--text-secondary);
-    transition: background 0.18s ease, color 0.18s ease;
+    transition: background 0.15s ease, color 0.15s ease;
     user-select: none;
     -webkit-user-select: none;
 }
 
 .sidebar-toggle .pill-action i {
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.18s ease;
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.15s ease;
     pointer-events: none;
     will-change: transform;
 }
 
-.sidebar-toggle .pill-action:hover {
-    background: var(--hover-bg);
-    color: var(--primary-color);
+.sidebar.mini .sidebar-toggle .pill-action:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
 }
 
-/* 鼠标悬停在上面或下面时，对应图标稍微放大，富有灵动的微交互反馈 */
-.sidebar-toggle .pill-action:hover i,
-.sidebar-toggle .pill-action:focus-visible i {
-    transform: scale(1.24);
+/* 鼠标悬停在上面（展开）或下面（收缩）时，对应图标稍微放大浮动，继承与标题栏一致的自然亮色微光（非蓝色主题色） */
+.sidebar.mini .sidebar-toggle .pill-action:hover i,
+.sidebar.mini .sidebar-toggle .pill-action:focus-visible i {
+    transform: scale(1.22);
+    color: var(--text-primary);
 }
 
-.sidebar-toggle .pill-action:active i {
-    transform: scale(0.96);
+.sidebar.mini .sidebar-toggle .pill-action:active i {
+    transform: scale(0.94);
 }
 
 /* 中间极细分割线 */
 .sidebar-toggle .pill-divider {
-    width: 16px;
+    width: 14px;
     height: 1px;
     background: var(--border-color);
-    opacity: 0.55;
+    opacity: 0.65;
     margin: 1px 0;
     flex-shrink: 0;
     pointer-events: none;
 }
 
+/* 拖拽中始终保持完整实体按钮形态 */
+.sidebar-toggle.sidebar-toggle-dragging,
+.sidebar-toggle.sidebar-toggle-dragging:hover,
+.sidebar-toggle.sidebar-toggle-dragging:focus-visible {
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 7px !important;
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--border-color) !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2) !important;
+    transform: translate(-50%, -50%) scale(1.04) !important;
+}
+
 .sidebar.mini .sidebar-toggle.sidebar-toggle-dragging,
 .sidebar.mini .sidebar-toggle.sidebar-toggle-dragging:hover,
 .sidebar.mini .sidebar-toggle.sidebar-toggle-dragging:focus-visible {
-    width: 28px;
-    height: 64px;
-    border-radius: 14px;
-    transform: translate(-50%, -50%) scale(1.04);
+    width: 24px !important;
+    height: 56px !important;
+    border-radius: 6px !important;
+    padding: 2px !important;
+}
+
+.sidebar-toggle.sidebar-toggle-dragging::after,
+.sidebar.mini .sidebar-toggle.sidebar-toggle-dragging::after {
+    opacity: 0 !important;
+}
+
+.sidebar:not(.mini) .sidebar-toggle.sidebar-toggle-dragging .sidebar-toggle-main-icon {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: scale(1) !important;
+}
+
+.sidebar.mini .sidebar-toggle.sidebar-toggle-dragging .sidebar-toggle-vertical-pill {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: scale(1) !important;
+    pointer-events: auto !important;
 }
 
 .sidebar-toggle-hint {
@@ -3721,14 +3905,15 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 .sidebar-toggle.sidebar-toggle-dragging:hover,
 .sidebar-toggle.sidebar-toggle-dragging:focus-visible {
     transform: translate(-50%, -50%) scale(1.04);
+    border-radius: 7px;
 }
 
 .sidebar.compact .sidebar-toggle.sidebar-toggle-dragging,
 .sidebar.compact .sidebar-toggle.sidebar-toggle-dragging:hover,
 .sidebar.compact .sidebar-toggle.sidebar-toggle-dragging:focus-visible {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
@@ -3737,13 +3922,13 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 .sidebar.compact:not(.position-right) .sidebar-toggle.sidebar-toggle-dragging,
 .sidebar.compact:not(.position-right) .sidebar-toggle.sidebar-toggle-dragging:hover,
 .sidebar.compact:not(.position-right) .sidebar-toggle.sidebar-toggle-dragging:focus-visible {
-    transform: translateY(-50%) scale(1.04);
+    transform: translate(6px, -50%) scale(1.04);
 }
 
 .sidebar.compact.position-right .sidebar-toggle.sidebar-toggle-dragging,
 .sidebar.compact.position-right .sidebar-toggle.sidebar-toggle-dragging:hover,
 .sidebar.compact.position-right .sidebar-toggle.sidebar-toggle-dragging:focus-visible {
-    transform: translate(-100%, -50%) scale(1.04);
+    transform: translate(calc(-100% - 6px), -50%) scale(1.04);
 }
 
 .sidebar-side-switch-animating {
@@ -3753,16 +3938,20 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     backface-visibility: hidden;
 }
 
-/* 完全收起时：按钮贴边悬浮 */
+/* 完全收起时：按钮贴边悬浮（对标标题栏收起贴边挂耳） */
 .sidebar.compact .sidebar-toggle {
     left: 0;
     width: 18px;
     height: 24px;
     padding: 0;
-    border-radius: 0;
+    border-radius: 0 4px 4px 0;
     border: none;
     background: transparent;
     box-shadow: none;
+}
+
+.sidebar.compact.position-right .sidebar-toggle {
+    border-radius: 4px 0 0 4px;
 }
 
 .sidebar.compact:not(.position-right) .sidebar-toggle {
@@ -3771,6 +3960,21 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 
 .sidebar.compact.position-right .sidebar-toggle {
     transform: translate(-100%, -50%);
+}
+
+.sidebar.compact .sidebar-toggle::after {
+    display: none !important;
+}
+
+.sidebar.compact .sidebar-toggle .sidebar-toggle-main-icon {
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: none !important;
+}
+
+.sidebar.compact .sidebar-toggle .sidebar-toggle-vertical-pill {
+    display: none !important;
 }
 
 .sidebar.compact .sidebar-toggle::before {
@@ -3793,9 +3997,9 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 
 .sidebar.compact .sidebar-toggle:hover,
 .sidebar.compact .sidebar-toggle:focus-visible {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
@@ -3803,12 +4007,12 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 
 .sidebar.compact:not(.position-right) .sidebar-toggle:hover,
 .sidebar.compact:not(.position-right) .sidebar-toggle:focus-visible {
-    transform: translateY(-50%) scale(1.05);
+    transform: translate(6px, -50%) scale(1.05);
 }
 
 .sidebar.compact.position-right .sidebar-toggle:hover,
 .sidebar.compact.position-right .sidebar-toggle:focus-visible {
-    transform: translate(-100%, -50%) scale(1.05);
+    transform: translate(calc(-100% - 6px), -50%) scale(1.05);
 }
 
 .sidebar-resize-handle {

@@ -4727,13 +4727,13 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
 /* Base Hover State */
 .canvas-floating-toggle-mini:hover,
 .canvas-floating-toggle-mini:focus-visible {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
     color: var(--text-primary) !important;
-    border-radius: 50% !important;
+    border-radius: 7px !important;
     /* Transforms handled per edge below */
 }
 
@@ -4778,8 +4778,8 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
 
 .canvas-zoom-indicator:not([data-dock-edge]) .canvas-floating-toggle-mini:hover,
 .canvas-zoom-indicator[data-dock-edge="left"] .canvas-floating-toggle-mini:hover {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     transform: translate(0, -50%) scale(1.05);
 }
 
@@ -4807,8 +4807,8 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
 }
 
 .canvas-zoom-indicator[data-dock-edge="right"] .canvas-floating-toggle-mini:hover {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     transform: translate(0, -50%) scale(1.05);
 }
 
@@ -4836,8 +4836,8 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
 }
 
 .canvas-zoom-indicator[data-dock-edge="top"] .canvas-floating-toggle-mini:hover {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     transform: translate(-50%, 0) scale(1.05);
 }
 
@@ -4876,8 +4876,8 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
 }
 
 .canvas-zoom-indicator[data-dock-edge="bottom"] .canvas-floating-toggle-mini:hover {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     transform: translate(-50%, 0) scale(1.05);
 }
 

@@ -5957,8 +5957,8 @@ html:fullscreen body.header-compact .canvas-main-container {
 }
 
 .sidebar-tab-btn.active {
-    color: var(--accent-color);
-    border-bottom-color: var(--accent-color);
+    color: var(--accent-color, var(--text-secondary));
+    border-bottom-color: var(--accent-color, var(--text-secondary));
     font-weight: 600;
 }
 
