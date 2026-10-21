@@ -6,11 +6,15 @@
 
 ### 书签聚合研究插件
 
-[插件仓库与安装说明（Codex、Claude Code、Pi、DSH）→](https://github.com/Browser-bookmark-hub/Bookmark-Research)
+专为书签画布导出包打造的配套只读研究插件（Skill + 本地 MCP）。方便各类 Coding Agent 宿主（**Claude Code**、**Codex**、**DeepSeek Harness** 等 harness 运行环境）直接索引、检索与调研书签内容，无需手动解析大型画布 JSON 且不修改包结构。
 
-### AI 编辑数据的约束文件
+[插件仓库与安装说明（Codex、Claude Code、DeepSeek Harness (dsh)）→](https://github.com/Browser-bookmark-hub/Bookmark-Research)
 
-如果您临时需要一份供 AI 编辑使用的约束文件，或希望了解本项目导出数据的格式与处理边界，请按以下说明操作。对于 `.canvas` 数据包（包括整张画布、卡片组或临时选区导出的数据包），使用包内附带的约束文件（示例：`AGENTS.md`）。<ins>对于单独导出的 JSON 或 HTML，请复制下方与任务语言对应的模板链接地址，直接提供给 Agents 即可。</ins>
+### AI Agent 编辑数据的约束文件
+
+如需供 AI Agent 编辑的约束文件，或了解本项目导出数据的格式与处理边界：
+  - **对于 `.canvas` 数据包**（包括整张画布、卡片组或临时选区导出的数据包），使用包内附带的约束文件（示例：`AGENTS.md`）。
+  - **对于单独导出的 JSON 或 HTML**，请复制下方与任务语言对应的模板链接地址，直接提供给 Agents 即可。
 
 `AGENTS_template_en.md`：
 

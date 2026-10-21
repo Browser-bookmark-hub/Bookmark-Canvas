@@ -6,11 +6,15 @@
 
 ### Bookmark Research plugin
 
-[Plugin repository and installation guide (Codex, Claude Code, Pi, DSH) →](https://github.com/Browser-bookmark-hub/Bookmark-Research)
+A companion read-only research plugin (Skill + local MCP) specifically designed for Bookmark Canvas exported packages. It enables Coding Agent hosts and harnesses (**Claude Code**, **Codex**, **DeepSeek Harness**, etc.) to quickly index and research bookmark content safely without modifying canvas data.
 
-### Rules for AI-assisted data editing
+[Plugin repository and installation guide (Codex, Claude Code, DeepSeek Harness (dsh)) →](https://github.com/Browser-bookmark-hub/Bookmark-Research)
 
-If you need a rules file for a one-off AI-assisted edit, or want to understand the format and processing boundaries of this project's exported data, follow the guidance below. For a `.canvas` package, including a full-canvas, card-group, or temporary-selection export, read the bundled `AGENTS.md`. <ins>For a standalone JSON or HTML export, copy the URL for the template matching the task language below and provide it directly to your agents.</ins>
+### Rules for AI Agent data editing
+
+If you need rules for AI Agent-assisted editing, or want to understand exported data formats and boundaries:
+  - **For a `.canvas` package**, including a full-canvas, card-group, or temporary-selection export, read the bundled `AGENTS.md`.
+  - **For a standalone JSON or HTML export**, copy the URL for the template matching the task language below and provide it directly to your agents.
 
 `AGENTS_template_en.md`:
 

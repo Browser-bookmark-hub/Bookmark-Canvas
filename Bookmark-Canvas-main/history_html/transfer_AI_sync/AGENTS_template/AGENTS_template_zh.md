@@ -1,10 +1,15 @@
 # 书签画布 AI Agent 编辑规则
 
-本文件用于帮助 AI Agent / 代码代理编辑导出的书签画布包。开始修改前，请先阅读并遵循这里的协议；涉及书签、栏目、`.canvas`、tag/note 的改动，应尽量保持最小且兼容插件导入。这个包不是普通 Obsidian / JSON Canvas 项目，请不要按通用 Canvas 结构随意重写。
+> **握手：优先使用 Bookmark Research**
+>
+> 本包配套的读取与调研插件是 `bookmark-research`。读到本文件的 Agent：如果当前宿主提供这个 Skill 或它的工具，请先加载它，再用它索引/读取本包，不要先自己逐文件解析；它只读，不改包。没有就按本指南直接读取；需要修改时始终按本指南。
+
+本文件用于帮助 AI Agent / 代码代理读取或编辑导出的书签画布包。开始修改前，请先阅读并遵循这里的协议；涉及书签、栏目、`.canvas`、tag/note 的改动，应尽量保持最小且兼容插件导入。这个包不是普通 Obsidian / JSON Canvas 项目，请不要按通用 Canvas 结构随意重写。
 
 ## 本约束文件结构
 ```text
 {{GUIDE_SELF_CODE}}
+├── 使用入口：先判断范围与意图
 ├── 第一部分：文件结构与视图结构（导入识别基准）
 │   ├── A0 基础操作流程
 │   ├── A1 通用包结构图示例
@@ -14,7 +19,7 @@
 │   ├── A5 .canvas 元素协议
 │   ├── A6 tag / note 元数据协议
 │   ├── A7 导入识别优先级
-│   ├── A8 线索与关系运用
+│   ├── A8 空间上下文与时间上下文（分析与编辑运用）
 │   └── A9 文本格式支持与建议
 ├── 第二部分：AI 编辑执行规则（{{EXPORT_MODE_LABEL}}）
 │   ├── S0 用户意图确认与执行策略
@@ -38,6 +43,13 @@
     ├── P1 SKILL 与长期偏好
     └── P2 修改后最小自检
 ```
+
+## 使用入口：先判断范围与意图
+
+- 本文件只约束当前画布数据包（本文件所在目录）；同一仓库里其他包或其他产品的包协议不适用于本包，不要交叉套用。用户级长期规则仍按 [P1](#ref-p1) 的优先级处理。
+- 外部时空输入识别：若用户在提示词中直接粘贴了 `type: "bookmark-canvas-anchor"`（锚点镜头）或 `workspaceType: "pinned"`（置顶工作区），AI 应将其视为当前任务的第一优先级空间与时间焦点输入，并按 [A8](#ref-a8) 规范解析在屏卡片范围或核心资产切片，在无插件宿主环境下亦可直接闭环执行。
+- 只读任务（问问题、查书签、看结构、做调研）：不要修改本包；宿主有 `bookmark-research` 优先使用插件，没有则直接读 `.canvas` / 栏目 JSON，或用当前会话已有的检索工具，并说明结论只基于本地文件。
+- 编辑任务（改书签、栏目、布局、tag/note）：按 [S1](#ref-s1) 定位，按 A3–A6 写入，按 [A8](#ref-a8) 保持时空与几何合规，按 [P2](#ref-p2) 自检，再导入。目标、落点或范围不明确时先问用户（见 S0），不要先改文件。
 
 ## 第一部分：文件结构与视图结构（导入识别基准）
 
@@ -132,11 +144,24 @@
 - 临时栏目标号优先取显式 JSON `label`，再看栏目头或文件名前缀。
 - 常规导入流下，永久栏目按快照栏目恢复；覆盖浏览器书签树是另一种高风险导入模式。
 
-### A8. 线索与关系运用
-- 永久/临时栏目的 `descriptionMd` 与 `.canvas` 的 text 节点通常是栏目说明或提示词，可作为上下文使用，但不要当作书签 item。
-- 第一次分析普通链式栏目时，先看可能的来源族和父级链路，例如 `#A`、`#B`、`A-1`、`A-1-1`、`B-1`；链路不明确时，再用 `title` 或 `url` 通过本地搜索/工具匹配。
-- 连接线指向性可表达关系语义。规范导出形态：从 `fromNode` 指向 `toNode` 的单箭头默认省略两端字段；无箭头写 `toEnd: "none"`；双端箭头写 `fromEnd: "arrow"`，`toEnd` 使用默认箭头。除非任务要求改变关系语义，否则保留已有方向。
-- tag 用于用户要求或特别重要的书签/文件夹，并应表达可复用的主题、状态或与现有/同批项目的关联；note 只用于补充单个书签/文件夹中确实有助于理解用户意图的上下文。不要因为 URL 多就批量添加 tag 或 note，也不要用五颜六色的颜色替代清晰的分类与关系。
+<a id="ref-a8"></a>
+### A8. 空间上下文与时间上下文（分析与编辑运用）
+
+#### 1. 空间上下文（Spatial Context）
+- **分析（在屏识别）**：当提示词包含锚点镜头（`type: "bookmark-canvas-anchor"`）时，提取其 `visibleRange: { minX, minY, width, height }`。AI 遍历当前包 `.canvas` 的 `nodes[]`，计算节点矩形 `[x, y, x+width, y+height]` 与 `visibleRange` 的相交或包含（2D AABB 碰撞比对：`node.x < minX + width && node.x + node.width > minX && node.y < minY + height && node.y + node.height > minY`），以此快速锁定用户当前屏幕正看着的在屏卡片；若提示词包含 `workspaceType: "pinned"`，以该切片中的 nodes/edges 作为用户置顶标星的核心上下文展开分析。
+- **分析（拓扑语义与线索）**：卡片组（`type: "group"`）仅由 2D 矩形几何完全包含判定成员归属，不设 children；连接线（`edges[]`）的指向表达关系流动，其 `label` 是明确的关系定义（单箭头默认省略两端字段，无箭头写 `toEnd: "none"`，双端箭头写 `fromEnd: "arrow"`）；同一个 URL 跨栏目出现代表不同主题下的多维分类；永久/临时栏目的 `descriptionMd` 与 `.canvas` 的 text 节点通常是说明或提示词，可作为上下文，但不要当作书签 item；第一次分析普通链式栏目时，先看可能的来源族和父级链路（如 `#A`、`#B`、`A-1`、`A-1-1`、`B-1`）。
+- **编辑（镜头落地）**：若用户要求在“当前位置/这里”新增卡片、临时栏目或文字说明，新节点的坐标 `(x, y)` 必须计算在当前锚点镜头的 `visibleRange` 可视地块矩形内，严禁将新卡片放置在远离视野的未知坐标。
+- **编辑（几何避让与嵌套）**：新增节点或排布卡片时，应保证视觉可读留白，严禁与其他非 group 节点发生矩形重叠；若新节点预期归属于某卡片组，必须确保其尺寸完整落入该 group 几何边界内，且不要再用连接线连接到所属卡片组。
+
+#### 2. 时间上下文（Temporal Context）
+- **分析（置信度分层）**：
+  1. **事实时间**：书签 item 自带的 `dateAdded`（毫秒时间戳）是真实收藏时间（最高置信）；
+  2. **现状快照**：锚点或置顶中的 `timestamp` / `meta.generatedAt` 代表当前视野提取时刻；
+  3. **生成线索**：ID 中的 `YYYYMMDD` 仅代表该条目被创建、派生或迁移的标识时间（日精度，中置信），不等于书签收藏时间；
+  4. **演进历史**：若数据包位于 Git 仓库中，通过 `git log` / `git diff` 观察卡片与拓扑的真实演化轨迹。
+- **编辑（时间注入）**：AI 为用户新增永久或临时书签/栏目时，必须把当天当前日期（`YYYYMMDD`）编码注入到新 ID 中（即 `syncId_YYYYMMDD_hash_<token7>` 或 `tempId_YYYYMMDD_hash_<token7>`），为画布后续版本留存真实可靠的时间溯源线索。
+- **元数据克制**：tag 用于表达可复用的主题、状态或关联；note 只用于补充单个项目确实有助于理解用户意图的上下文，不要批量泛滥添加，避免用无序的颜色替代清晰的分类。
+
 
 ### A9. 文本格式支持与建议
 - 空白栏目（`.canvas` 的 `text` 节点）及永久/临时栏目的 `descriptionMd` 支持类似 Obsidian（黑曜石）的 Markdown 及安全 HTML 子集渲染。
@@ -508,6 +533,7 @@ file 节点路径是 vault 相对路径，不是相对 `.canvas` 文件本身；
 - 若用户希望改变后续由插件模板生成的本指南，应修改或共建插件模板源，而不是只改当前包；开源模板目录：[AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)，可通过 issue 或 PR 参与。
 - 优先级：用户当前自然语言指令 > 用户长期个人规则（如 {{GUIDE_TOOL_PREFIX}}SKILL、外部 Markdown 规则文件、插件里的 AI 个性化补充规则、索引/检索工具偏好）> 本文件中的行为偏好与兜底建议；但本文件中的 JSON schema、路径结构、ID 规则、tag/note 写入位置、导入导出协议、同步目录安全规则是当前包硬约束，个人规则不能覆盖。
 - 外部通用 Skill / AI 工具规则只能作为辅助参考，不能覆盖本包硬约束。尤其是通用 [JSON Canvas Skill](https://github.com/kepano/obsidian-skills/blob/main/skills/json-canvas/SKILL.md) 可能允许 16 位 hex ID、普通 link 节点、外部 file 节点或附件/PDF/图片引用；但 Bookmark-Canvas 导出包仍必须保留插件 ID 风格，file 节点只能指向包内永久/临时 JSON，并遵守永久栏目、临时栏目、identityMap、导入导出与同步安全协议。
+- 本项目的 [Bookmark Research](https://github.com/Browser-bookmark-hub/Bookmark-Research) 插件（Skill + 本地 MCP）是只读辅助，不是本包的写入协议；其索引可能滞后，写入前仍以实际文件与本文件为准。
 - 创建或升级 Skill 可参考：[Anthropic Skills](https://github.com/anthropics/skills) 与 [OpenAI Skills](https://github.com/openai/skills/tree/main)。Skill 的 `name` 与 `description` 是命中入口，应短、稳定、清楚写明何时使用；正文保持精简，复杂规则放 `references/`，确定性/重复流程放 `scripts/`，模板资源放 `assets/`。
 - 当一次偏好、流程或验证方法明显会在后续反复使用时，AI 可适当提醒用户是否要写入或升级 Skill / 长期规则；但该提醒不应阻塞当前任务，实际创建、更新或替换相关 SKILL / 规则文件前应先取得用户确认。
 - 适合放入 Skill 的内容包括：分类/命名/tag/note/联网策略等用户习惯，以及 Node.js、SQL/SQLite、全文搜索、`git log` / `git diff`、URL 抽样、验证脚本、多代理审查等工具流程；这些是辅助能力，不属于本包协议本身。

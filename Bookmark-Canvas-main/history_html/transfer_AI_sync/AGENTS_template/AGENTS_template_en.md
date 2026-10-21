@@ -1,10 +1,15 @@
 # Bookmark Canvas AI Agent Editing Rules
 
-This file helps AI agents and coding agents edit an exported Bookmark Canvas package. Before modifying files, read and follow this protocol. Changes to bookmarks, sections, `.canvas` nodes/edges, and tag/note metadata should stay minimal and compatible with plugin import. This package is not a generic Obsidian or JSON Canvas project, so avoid rewriting it by general Canvas assumptions.
+> **Handshake: Prefer Bookmark Research**
+>
+> The companion reader and research plugin for this package is `bookmark-research`. Agent reading this file: if the current host provides that Skill or its tools, load it first and use it to index/read this package instead of parsing files ad hoc first; it is read-only and does not modify the package. If it is unavailable, read the files directly per this guide; when editing, always follow this guide.
+
+This file helps AI agents and coding agents read and edit an exported Bookmark Canvas package. Before modifying files, read and follow this protocol. Changes to bookmarks, sections, `.canvas` nodes/edges, and tag/note metadata should stay minimal and compatible with plugin import. This package is not a generic Obsidian or JSON Canvas project, so avoid rewriting it by general Canvas assumptions.
 
 ## Guide Structure
 ```text
 {{GUIDE_SELF_CODE}}
+├── Usage Entry: Determine Scope and Intent First
 ├── Part A. Package & View Structure
 │   ├── A0 Basic workflow
 │   ├── A1 Generic package structure diagram example
@@ -14,7 +19,7 @@ This file helps AI agents and coding agents edit an exported Bookmark Canvas pac
 │   ├── A5 .canvas element contract
 │   ├── A6 Tag / note metadata contract
 │   ├── A7 Import recognition priority
-│   ├── A8 Signal and relationship use
+│   ├── A8 Spatial and temporal context (analysis and editing)
 │   └── A9 Text formatting support
 ├── Part B. AI Editing Execution Rules ({{EXPORT_MODE_LABEL}})
 │   ├── S0 User intent confirmation and execution strategy
@@ -38,6 +43,13 @@ This file helps AI agents and coding agents edit an exported Bookmark Canvas pac
     ├── P1 SKILL and long-term preferences
     └── P2 Minimal post-edit checklist
 ```
+
+## Usage Entry: Determine Scope and Intent First
+
+- This file governs only the current canvas data package (the directory containing this file). Package protocols for other packages or other products in the same repository do not apply here; do not cross-apply them. User-level long-term rules still follow the priority order in [P1](#ref-p1).
+- External spatial/temporal input recognition: If the prompt directly provides `type: "bookmark-canvas-anchor"` (anchor camera) or `workspaceType: "pinned"` (pinned workspace), AI should treat it as the highest-priority spatial and temporal focus input for the current task, and resolve the visible card range or core asset slice per [A8](#ref-a8), enabling end-to-end execution even in plugin-less host environments.
+- Read-only tasks (asking questions, finding bookmarks, inspecting structure, researching): do not modify this package; if the host has `bookmark-research`, prefer the plugin; otherwise read `.canvas` / section JSON directly or use available session tools, stating conclusions are based solely on local files.
+- Edit tasks (bookmarks, sections, layout, tag/note): locate with [S1](#ref-s1), write per A3–A6, maintain spatial/temporal/geometric compliance per [A8](#ref-a8), self-check with [P2](#ref-p2), then import. If the target, destination, or scope is unclear, ask the user first (see S0); do not edit files first.
 
 ## Part A. Package & View Structure
 
@@ -132,11 +144,24 @@ This file helps AI agents and coding agents edit an exported Bookmark Canvas pac
 - Temporary labels are resolved by explicit JSON `label`, then header/filename prefix.
 - In normal import flow, permanent files are restored as snapshot sections. Browser-tree overwrite is a separate high-risk import mode.
 
-### A8. Signal and Relationship Use
-- Permanent/temporary `descriptionMd` and `.canvas` text nodes are notes or prompts about the nearby bookmark tree. Use them as context, but do not treat them as bookmark items.
-- For first-pass analysis of a regular chain section, inspect its likely source family and parent chain first, such as `#A`, `#B`, `A-1`, `A-1-1`, or `B-1`. If lineage is ambiguous, match by `title` or `url` with local search/tools.
-- Edge direction can encode relationship semantics. Canonical export form: single arrow from `fromNode` to `toNode` omits both ends; no arrow sets `toEnd: "none"`; two-ended arrow sets `fromEnd: "arrow"` and relies on the default `toEnd` arrow. Preserve existing direction unless the task asks to change the relationship.
-- Tags should mark user-requested or especially important items and express a reusable theme, state, or relationship to existing or newly organized items. Notes should add only context that materially helps explain user intent for an individual bookmark/folder item. Do not add tags or notes in bulk merely because many URLs are present, and do not substitute a rainbow of colors for clear categorization and relationships.
+<a id="ref-a8"></a>
+### A8. Spatial and Temporal Context (Analysis and Editing)
+
+#### 1. Spatial Context
+- **Analysis (On-screen identification)**: When the prompt contains an anchor camera (`type: "bookmark-canvas-anchor"`), extract its `visibleRange: { minX, minY, width, height }`. AI iterates over `nodes[]` in the package's `.canvas`, calculating intersection or containment between node rectangle `[x, y, x+width, y+height]` and `visibleRange` (2D AABB bounding box collision: `node.x < minX + width && node.x + node.width > minX && node.y < minY + height && node.y + node.height > minY`) to rapidly filter the on-screen cards the user is currently viewing. If the prompt contains `workspaceType: "pinned"`, prioritize the nodes/edges in that slice as the user's pinned core context.
+- **Analysis (Topology semantics & signals)**: Card groups (`type: "group"`) determine membership strictly by 2D geometric containment without a `children` field. Edge (`edges[]`) direction indicates relationship flow, and edge `label` provides explicit relationship definitions (default single arrow omits both ends, no arrow sets `toEnd: "none"`, two-ended arrow sets `fromEnd: "arrow"`). The same URL appearing across sections indicates multi-dimensional categorization across topics. Permanent/temporary `descriptionMd` and `.canvas` text nodes serve as explanatory context/prompts, not bookmark items. For first-pass analysis of regular chain sections, inspect source family and parent lineage first (`#A`, `#B`, `A-1`, `A-1-1`, `B-1`).
+- **Editing (Camera viewport grounding)**: When the user asks to add a card, temporary section, or note "at current location / here", the new node's `(x, y)` coordinates must be placed within the current anchor camera's `visibleRange` world bounding box, never at an arbitrary distant location.
+- **Editing (Geometric collision avoidance & nesting)**: When adding or rearranging cards, maintain readable spacing and strictly prevent rectangular overlap with other non-group nodes. If a new node is intended to belong to a card group, ensure its bounding box is completely contained within that group's geometry, and do not draw an extra edge to that parent group.
+
+#### 2. Temporal Context
+- **Analysis (Confidence tiers)**:
+  1. **Factual addition time**: The bookmark item's `dateAdded` (millisecond timestamp) is the true collection time (highest confidence).
+  2. **Present snapshot**: The anchor's `timestamp` or pinned slice's `meta.generatedAt` marks the capture moment of the current viewport.
+  3. **Generation clue**: `YYYYMMDD` in IDs indicates only the day when identity was created, branched, or migrated (day precision, medium confidence); it does not equal collection time.
+  4. **Evolutionary history**: When the package is in a Git repository, use `git log` / `git diff` to trace actual content and layout changes over time.
+- **Editing (Timestamp injection)**: When AI adds new permanent or temporary bookmarks/sections for the user, it must inject today's date (`YYYYMMDD`) into newly minted IDs (`syncId_YYYYMMDD_hash_<token7>` or `tempId_YYYYMMDD_hash_<token7>`), preserving reliable provenance for future versions.
+- **Metadata restraint**: Tags should express reusable themes, states, or relationships; notes should only provide context that materially explains user intent. Avoid bulk tagging and do not substitute colors for clear categories.
+
 
 ### A9. Text Formatting Support
 - Blank cards (`.canvas` `text` nodes) and permanent/temporary `descriptionMd` support Obsidian-style Markdown and a safe HTML rendering subset.
@@ -509,6 +534,7 @@ This is only a structural example. In real edits, do not treat `.canvas` as a te
 - If the user wants to change future guide files generated from the plugin template, change or contribute to the plugin template source rather than only editing the current package. Open-source template directory: [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template); users can contribute through issues or pull requests.
 - Priority order: the user's current natural-language instruction > the user's long-term personal rules, such as {{GUIDE_TOOL_PREFIX}}SKILLs, external Markdown rule files, plugin-level AI custom rules, or indexing/retrieval tool preferences > this file's behavior preferences and fallback suggestions. However, this file's JSON schema, path structure, ID rules, tag/note write locations, import/export protocol, and sync-directory safety rules are hard constraints for the current package and cannot be overridden by personal rules.
 - External general-purpose Skills / AI tool rules are only auxiliary references and must not override this package's hard constraints. In particular, the general [JSON Canvas Skill](https://github.com/kepano/obsidian-skills/blob/main/skills/json-canvas/SKILL.md) may allow 16-character hex IDs, regular link nodes, external file nodes, or attachment/PDF/image references; Bookmark-Canvas export packages must still preserve plugin-style IDs, keep file nodes limited to in-package permanent/temporary JSON files, and follow the permanent section, temporary section, identityMap, import/export, and sync-safety protocols.
+- The [Bookmark Research](https://github.com/Browser-bookmark-hub/Bookmark-Research) plugin from this project (Skill + local MCP) is a read-only aid, not this package's write protocol; its index may lag, so the actual files and this guide still govern before writing.
 - For creating or upgrading Skills, use these references: [Anthropic Skills](https://github.com/anthropics/skills) and [OpenAI Skills](https://github.com/openai/skills/tree/main). A Skill's `name` and `description` are the trigger surface; keep them short, stable, and clear about when to use the Skill. Keep the body concise, put complex rules in `references/`, deterministic/repetitive workflows in `scripts/`, and reusable templates/resources in `assets/`.
 - When a preference, workflow, or validation method is likely to be reused, AI may briefly suggest writing it into or upgrading a Skill / long-term rule. This reminder should not block the current task, and AI should get user confirmation before actually creating, updating, or replacing related SKILLs / rule files.
 - Good Skill contents include user habits such as categorization, naming, tag/note, and web-research strategy, plus tool workflows such as Node.js, SQL/SQLite, full-text search, `git log` / `git diff`, URL sampling, validation scripts, and multi-agent review. These are auxiliary capabilities, not part of the package protocol itself.
