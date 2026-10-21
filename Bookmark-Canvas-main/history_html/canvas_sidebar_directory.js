@@ -3634,7 +3634,7 @@
     let navigated = false;
     if (module && typeof module.navigateToViewport === 'function') {
       try {
-        navigated = module.navigateToViewport({ x: panX, y: panY, zoom: targetZoom }) !== false;
+        navigated = module.navigateToViewport({ x: center.x, y: center.y, zoom: targetZoom, coordType: 'world' }) !== false;
       } catch (_) {
         navigated = false;
       }
@@ -3661,6 +3661,9 @@
       }
       if (typeof global.updateCanvasTransform === 'function') {
         try { global.requestAnimationFrame(() => global.updateCanvasTransform(false)); } catch (_) { }
+      }
+      if (typeof global.savePanOffsetThrottled === 'function') {
+        try { global.savePanOffsetThrottled(); } catch (_) { }
       }
     }
 

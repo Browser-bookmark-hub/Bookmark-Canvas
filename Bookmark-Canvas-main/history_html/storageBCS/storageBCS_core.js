@@ -6184,13 +6184,17 @@ async function __processImportedPackage(tempState, storage, primaryState, import
         try {
             const cx = containerNode.x + containerNode.width / 2;
             const cy = containerNode.y + containerNode.height / 2;
-            const fitZoom = Math.min(1, (window.innerWidth - 100) / containerNode.width);
+            const ws = document.getElementById('canvasWorkspace') || document.querySelector('.canvas-workspace');
+            const viewW = (ws && ws.clientWidth > 50) ? ws.clientWidth : (window.innerWidth || 1200);
+            const viewH = (ws && ws.clientHeight > 50) ? ws.clientHeight : (window.innerHeight || 800);
+            const fitZoom = Math.min(1, (viewW - 100) / (containerNode.width || 1));
             const z = Math.max(0.2, Math.min(1, fitZoom));
             if (typeof setCanvasZoom === 'function') {
-                setCanvasZoom(z, cx, cy, { recomputeBounds: false });
+                setCanvasZoom(z, null, null, { recomputeBounds: false });
             }
-            CanvasState.panOffsetX = (window.innerWidth / 2) - (cx * z);
-            CanvasState.panOffsetY = (window.innerHeight / 2) - (cy * z);
+            CanvasState.panOffsetX = (viewW / 2) - (cx * z);
+            CanvasState.panOffsetY = (viewH / 2) - (cy * z);
+            if (typeof applyPanOffset === 'function') applyPanOffset();
             if (typeof savePanOffsetThrottled === 'function') savePanOffsetThrottled();
         } catch (_) { }
         __setCanvasImportRuntimeMode('permanent');

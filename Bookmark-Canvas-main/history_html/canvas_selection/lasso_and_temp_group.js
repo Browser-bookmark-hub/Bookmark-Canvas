@@ -885,8 +885,7 @@ function __locateToTempGroup() {
         : Math.min(1.0, fitZoom);
     if (typeof setCanvasZoom === 'function' && Math.abs(targetZoom - (CanvasState.zoom || 1)) > 0.01) {
         try {
-            const rect = workspace.getBoundingClientRect();
-            setCanvasZoom(targetZoom, rect.left + rect.width / 2, rect.top + rect.height / 2, { recomputeBounds: true });
+            setCanvasZoom(targetZoom, null, null, { recomputeBounds: true });
         } catch (_) { }
     }
     const cx = r.x + r.w / 2;
@@ -1340,10 +1339,20 @@ function __positionTempGroupContextColorPopover(pop, anchorPoint) {
     pop.style.zIndex = '10001';
     requestAnimationFrame(() => {
         const rect = pop.getBoundingClientRect();
+        const workspace = document.getElementById('canvasWorkspace');
+        const wsRect = workspace ? workspace.getBoundingClientRect() : null;
+        const pad = 8;
+        const minX = wsRect ? wsRect.left + pad : pad;
+        const maxX = wsRect ? wsRect.right - pad : window.innerWidth - pad;
+        const minY = wsRect ? wsRect.top + pad : pad;
+        const maxY = wsRect ? wsRect.bottom - pad : window.innerHeight - pad;
+
         let nextLeft = x;
         let nextTop = y;
-        if (rect.right > window.innerWidth - 8) nextLeft = Math.max(8, window.innerWidth - rect.width - 8);
-        if (rect.bottom > window.innerHeight - 8) nextTop = Math.max(8, window.innerHeight - rect.height - 8);
+        if (nextLeft + rect.width > maxX) nextLeft = Math.max(minX, maxX - rect.width);
+        if (nextLeft < minX) nextLeft = minX;
+        if (nextTop + rect.height > maxY) nextTop = Math.max(minY, maxY - rect.height);
+        if (nextTop < minY) nextTop = minY;
         pop.style.left = nextLeft + 'px';
         pop.style.top = nextTop + 'px';
     });
