@@ -1,10 +1,15 @@
 # Bookmark Canvas AI Agent Editing Rules
 
-This file helps AI agents and coding agents edit an exported Bookmark Canvas package. Before modifying files, read and follow this protocol. Changes to bookmarks, sections, `.canvas` nodes/edges, and tag/note metadata should stay minimal and compatible with plugin import. This package is not a generic Obsidian or JSON Canvas project, so avoid rewriting it by general Canvas assumptions.
+> **Handshake: Prefer Bookmark Research**
+>
+> The companion reader and research plugin for this package is `bookmark-research`. Agent reading this file: if the current host provides that Skill or its tools, load it first and use it to index/read this package instead of parsing files ad hoc first; it is read-only and does not modify the package. If it is unavailable, read the files directly per this guide; when editing, always follow this guide.
+
+This file helps AI agents and coding agents read and edit an exported Bookmark Canvas package. Before modifying files, read and follow this protocol. Changes to bookmarks, sections, `.canvas` nodes/edges, and tag/note metadata should stay minimal and compatible with plugin import. This package is not a generic Obsidian or JSON Canvas project, so avoid rewriting it by general Canvas assumptions.
 
 ## Guide Structure
 ```text
 {{GUIDE_SELF_CODE}}
+├── Usage Entry: Determine Scope and Intent First
 ├── Part A. Package & View Structure
 │   ├── A0 Basic workflow
 │   ├── A1 Generic package structure diagram example
@@ -38,6 +43,12 @@ This file helps AI agents and coding agents edit an exported Bookmark Canvas pac
     ├── P1 SKILL and long-term preferences
     └── P2 Minimal post-edit checklist
 ```
+
+## Usage Entry: Determine Scope and Intent First
+
+- This file governs only the current canvas data package (the directory containing this file). Package protocols for other packages or other products in the same repository do not apply here; do not cross-apply them. User-level long-term rules still follow the priority order in [P1](#ref-p1).
+- Read-only tasks (asking questions, finding bookmarks, inspecting structure, researching): do not modify this package; read `.canvas` / section JSON directly, or use the retrieval tools already available in the session, and state that the answer is based only on local files.
+- Edit tasks (bookmarks, sections, layout, tag/note): locate with [S1](#ref-s1), write per A3–A6, self-check with [P2](#ref-p2), then import. If the target, destination, or scope is unclear, ask the user first (see S0); do not edit files first.
 
 ## Part A. Package & View Structure
 
@@ -509,6 +520,7 @@ This is only a structural example. In real edits, do not treat `.canvas` as a te
 - If the user wants to change future guide files generated from the plugin template, change or contribute to the plugin template source rather than only editing the current package. Open-source template directory: [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template); users can contribute through issues or pull requests.
 - Priority order: the user's current natural-language instruction > the user's long-term personal rules, such as {{GUIDE_TOOL_PREFIX}}SKILLs, external Markdown rule files, plugin-level AI custom rules, or indexing/retrieval tool preferences > this file's behavior preferences and fallback suggestions. However, this file's JSON schema, path structure, ID rules, tag/note write locations, import/export protocol, and sync-directory safety rules are hard constraints for the current package and cannot be overridden by personal rules.
 - External general-purpose Skills / AI tool rules are only auxiliary references and must not override this package's hard constraints. In particular, the general [JSON Canvas Skill](https://github.com/kepano/obsidian-skills/blob/main/skills/json-canvas/SKILL.md) may allow 16-character hex IDs, regular link nodes, external file nodes, or attachment/PDF/image references; Bookmark-Canvas export packages must still preserve plugin-style IDs, keep file nodes limited to in-package permanent/temporary JSON files, and follow the permanent section, temporary section, identityMap, import/export, and sync-safety protocols.
+- The [Bookmark Research](https://github.com/Browser-bookmark-hub/Bookmark-Research) plugin from this project (Skill + local MCP) is a read-only aid, not this package's write protocol; its index may lag, so the actual files and this guide still govern before writing.
 - For creating or upgrading Skills, use these references: [Anthropic Skills](https://github.com/anthropics/skills) and [OpenAI Skills](https://github.com/openai/skills/tree/main). A Skill's `name` and `description` are the trigger surface; keep them short, stable, and clear about when to use the Skill. Keep the body concise, put complex rules in `references/`, deterministic/repetitive workflows in `scripts/`, and reusable templates/resources in `assets/`.
 - When a preference, workflow, or validation method is likely to be reused, AI may briefly suggest writing it into or upgrading a Skill / long-term rule. This reminder should not block the current task, and AI should get user confirmation before actually creating, updating, or replacing related SKILLs / rule files.
 - Good Skill contents include user habits such as categorization, naming, tag/note, and web-research strategy, plus tool workflows such as Node.js, SQL/SQLite, full-text search, `git log` / `git diff`, URL sampling, validation scripts, and multi-agent review. These are auxiliary capabilities, not part of the package protocol itself.
