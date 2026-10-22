@@ -4223,6 +4223,7 @@
       return;
     }
 
+
     const pinnedSummary = event && event.target && event.target.closest
       ? event.target.closest('.canvas-dir-pinned-summary')
       : null;
@@ -4619,6 +4620,22 @@
     titleEl.textContent = isEn ? 'Pinned' : '置顶';
     label.appendChild(titleEl);
     summary.appendChild(label);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'canvas-dir-pinned-copy-btn';
+    const copyTitle = isEn ? 'Copy Pinned Workspace (.canvas)' : '复制置顶工作区数据 (.canvas)';
+    copyBtn.title = copyTitle;
+    copyBtn.dataset.miniTooltipTitle = copyTitle;
+    copyBtn.setAttribute('aria-label', copyTitle);
+    copyBtn.innerHTML = '<i class="fas fa-copy" aria-hidden="true"></i>';
+    copyBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handleCopyPinnedWorkspace();
+    });
+    copyBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    summary.appendChild(copyBtn);
 
     const count = document.createElement('span');
     count.className = 'canvas-dir-count';
@@ -5058,6 +5075,426 @@
     return !isCanvasNodeFullscreenActive();
   }
 
+  async function copyTextToClipboardSafe(text) {
+    const value = String(text == null ? '' : text);
+    if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch (_) {
+        return fallbackCopyTextToClipboard(value);
+      }
+    }
+    return fallbackCopyTextToClipboard(value);
+  }
+
+  function fallbackCopyTextToClipboard(text) {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.name = 'clipboard-copy-helper';
+      textarea.value = text;
+      textarea.setAttribute('readonly', 'readonly');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const ok = document.execCommand('copy');
+      textarea.remove();
+      return !!ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function countBookmarksInItemsLocal(items) {
+    let count = 0;
+    function walk(list) {
+      if (!Array.isArray(list)) return;
+      for (const item of list) {
+        if (!item) continue;
+        if (item.type === 'bookmark' || item.url) {
+          count++;
+        }
+        if (Array.isArray(item.children)) {
+          walk(item.children);
+        }
+      }
+    }
+    walk(items);
+    return count;
+  }
+
+  function getAllCanvasNodesSnapshot() {
+    const nodes = [];
+    const isEn = isEnglish();
+    const state = getCanvasState() || (global.CanvasModule && global.CanvasModule.CanvasState) || (window.CanvasModule && window.CanvasModule.CanvasState) || window.CanvasState;
+
+    // 1. Permanent Main
+    const permMainEl = document.getElementById('permanentSection') || document.querySelector('.permanent-bookmark-section:not([data-copy-id])');
+    if (permMainEl) {
+      const left = parseFloat(permMainEl.style.left) || 0;
+      const top = parseFloat(permMainEl.style.top) || 0;
+      const width = permMainEl.offsetWidth || 600;
+      const height = permMainEl.offsetHeight || 600;
+      const tip = getPermanentDescription(null);
+      const isPinned = isNodeKeyPinned('permanent-main') || isNodeKeyPinned('folder-permanent');
+      const titleEl = permMainEl.querySelector('.section-title') || permMainEl.querySelector('.canvas-node-title');
+      const title = titleEl ? titleEl.textContent.trim() : (isEn ? 'Permanent Bookmarks' : '永久书签');
+      const dirNode = directoryNodeDataMap.get('permanent-main') || directoryNodeDataMap.get('folder-permanent');
+      const bmCount = (dirNode && typeof dirNode.count === 'number') ? dirNode.count : undefined;
+      nodes.push({
+        id: 'permanent-section',
+        type: 'file',
+        label: title,
+        x: Math.round(left),
+        y: Math.round(top),
+        width: Math.round(width),
+        height: Math.round(height),
+        isPinned: isPinned,
+        description: tip || undefined,
+        bookmarkCount: bmCount,
+        color: '#3b82f6'
+      });
+    }
+
+    // 2. Permanent Copies
+    document.querySelectorAll('.permanent-bookmark-section.permanent-section-copy, .permanent-bookmark-section[data-permanent-section-copy-id], .permanent-bookmark-section[data-copy-id]').forEach((copyEl) => {
+      const copyId = normalizeText(copyEl.dataset.permanentSectionCopyId || copyEl.dataset.copyId);
+      if (!copyId) return;
+      const left = parseFloat(copyEl.style.left) || 0;
+      const top = parseFloat(copyEl.style.top) || 0;
+      const width = copyEl.offsetWidth || 600;
+      const height = copyEl.offsetHeight || 600;
+      const tip = getPermanentDescription(copyId);
+      const isPinned = isNodeKeyPinned(`copy-${copyId}`) || isNodeKeyPinned(`permanent-copy-${copyId}`) || isEntityPinned('permanent-copy', copyId);
+      const titleEl = copyEl.querySelector('.section-title') || copyEl.querySelector('.canvas-node-title') || copyEl.querySelector('.permanent-section-title h3');
+      const title = titleEl ? titleEl.textContent.trim() : (isEn ? `Permanent Copy #${copyId}` : `永久副本 #${copyId}`);
+      const dirCopyNode = directoryNodeDataMap.get(`permanent-copy-${copyId}`);
+      const bmCount = (dirCopyNode && typeof dirCopyNode.count === 'number') ? dirCopyNode.count : undefined;
+      nodes.push({
+        id: `permanent-section-copy-${copyId}`,
+        type: 'file',
+        label: title,
+        copyId: copyId,
+        x: Math.round(left),
+        y: Math.round(top),
+        width: Math.round(width),
+        height: Math.round(height),
+        isPinned: isPinned,
+        description: tip || undefined,
+        bookmarkCount: bmCount,
+        color: '#3b82f6'
+      });
+    });
+
+    // 3. Temporary Sections
+    const tempSecs = (state && Array.isArray(state.tempSections)) ? state.tempSections : [];
+    tempSecs.forEach((sec) => {
+      if (!sec || !sec.id) return;
+      let w = Number(sec.width) || 0;
+      let h = Number(sec.height) || 0;
+      let x = Number(sec.x) || 0;
+      let y = Number(sec.y) || 0;
+      const el = document.getElementById(sec.id);
+      if (el) {
+        if (w <= 0) w = el.offsetWidth || 0;
+        if (h <= 0) h = el.offsetHeight || 0;
+        if (!sec.x && el.style.left) x = parseFloat(el.style.left) || 0;
+        if (!sec.y && el.style.top) y = parseFloat(el.style.top) || 0;
+      }
+      const isPinned = isNodeKeyPinned(sec.id) || isNodeKeyPinned(`temp-split-${sec.id}`) || isEntityPinned('temp-section', sec.id);
+      const totalBms = countBookmarksInItemsLocal(sec.items);
+      const desc = sec.descriptionMd || sec.description || '';
+      nodes.push({
+        id: sec.id,
+        type: 'group',
+        label: sec.title || sec.label || (isEn ? 'Temporary Section' : '临时栏目'),
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(w),
+        height: Math.round(h),
+        color: sec.color || undefined,
+        isPinned: isPinned,
+        description: desc || undefined,
+        bookmarkCount: totalBms
+      });
+    });
+
+    // 4. Markdown Nodes & Card Groups
+    const mdNodes = (state && Array.isArray(state.mdNodes)) ? state.mdNodes : [];
+    mdNodes.forEach((md) => {
+      if (!md || !md.id) return;
+      let w = Number(md.width) || 0;
+      let h = Number(md.height) || 0;
+      let x = Number(md.x) || 0;
+      let y = Number(md.y) || 0;
+      const el = document.getElementById(md.id);
+      if (el) {
+        if (w <= 0) w = el.offsetWidth || 0;
+        if (h <= 0) h = el.offsetHeight || 0;
+        if (!md.x && el.style.left) x = parseFloat(el.style.left) || 0;
+        if (!md.y && el.style.top) y = parseFloat(el.style.top) || 0;
+      }
+      const isGroup = (md.subtype === 'card-group');
+      const isPinned = isNodeKeyPinned(md.id) || isNodeKeyPinned(`blank-${md.id}`) || isNodeKeyPinned(`card-group-item-${md.id}`) || isEntityPinned(isGroup ? 'card-group' : 'md-node', md.id);
+      nodes.push({
+        id: md.id,
+        type: isGroup ? 'group' : 'text',
+        label: isGroup ? (md.label || (isEn ? 'Card Group' : '卡片组')) : undefined,
+        text: isGroup ? undefined : (md.text || ''),
+        description: isGroup ? (md.text || md.description || '') : undefined,
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(w),
+        height: Math.round(h),
+        color: md.color || undefined,
+        isPinned: isPinned
+      });
+    });
+
+    // 5. Edges
+    const edges = (state && Array.isArray(state.edges)) ? state.edges.map(e => ({
+      id: e.id,
+      fromNode: e.fromNode,
+      toNode: e.toNode,
+      label: e.label || undefined,
+      fromSide: e.fromSide || undefined,
+      toSide: e.toSide || undefined
+    })) : [];
+
+    return { nodes, edges };
+  }
+
+  function formatWorkspaceCanvasJson(payload) {
+    if (!payload || typeof payload !== 'object') return JSON.stringify(payload);
+    const { nodes = [], edges = [], meta, ...rest } = payload;
+    const lines = ['{'];
+
+    // 1. Root properties
+    Object.keys(rest).forEach((key) => {
+      lines.push(`  "${key}": ${JSON.stringify(rest[key])},`);
+    });
+
+    // 2. Compact meta fields
+    if (meta && typeof meta === 'object') {
+      lines.push('  "meta": {');
+      const metaKeys = Object.keys(meta);
+      metaKeys.forEach((mKey, idx) => {
+        const suffix = idx < metaKeys.length - 1 ? ',' : '';
+        lines.push(`    "${mKey}": ${JSON.stringify(meta[mKey])}${suffix}`);
+      });
+      lines.push('  },');
+    }
+
+    // 3. Nodes: compact single line per node matching standard .canvas
+    if (nodes.length === 0) {
+      lines.push('  "nodes": [],');
+    } else {
+      lines.push('  "nodes": [');
+      nodes.forEach((node, idx) => {
+        const suffix = idx < nodes.length - 1 ? ',' : '';
+        lines.push(`    ${JSON.stringify(node)}${suffix}`);
+      });
+      lines.push('  ],');
+    }
+
+    // 4. Edges: compact single line per edge matching standard .canvas
+    if (edges.length === 0) {
+      lines.push('  "edges": []');
+    } else {
+      lines.push('  "edges": [');
+      edges.forEach((edge, idx) => {
+        const suffix = idx < edges.length - 1 ? ',' : '';
+        lines.push(`    ${JSON.stringify(edge)}${suffix}`);
+      });
+      lines.push('  ]');
+    }
+
+    lines.push('}');
+    return lines.join('\n');
+  }
+
+  function formatAnchorJsonCompact(payload) {
+    if (!payload || typeof payload !== 'object') return JSON.stringify(payload);
+    const lines = ['{'];
+    const keys = Object.keys(payload);
+    keys.forEach((key, idx) => {
+      const val = payload[key];
+      const suffix = idx < keys.length - 1 ? ',' : '';
+      lines.push(`  "${key}": ${JSON.stringify(val)}${suffix}`);
+    });
+    lines.push('}');
+    return lines.join('\n');
+  }
+
+  function handleCopyPinnedWorkspace() {
+    const isEn = isEnglish();
+    try {
+      const snapshot = getAllCanvasNodesSnapshot();
+      let pinnedNodes = snapshot.nodes.filter(n => n.isPinned);
+
+      // If there are pinned keys in directory that are not direct canvas root nodes (e.g. pinned subfolders),
+      // ensure they are also captured from directoryNodeDataMap
+      const pinnedKeys = loadPinnedKeys();
+      pinnedKeys.forEach((key) => {
+        const dirNode = directoryNodeDataMap.get(key);
+        if (!dirNode || !dirNode.title) return;
+
+        const isAlreadyCaptured = pinnedNodes.some((n) => {
+          if (n.id === key) return true;
+          if (dirNode.target) {
+            const tgt = dirNode.target;
+            if (tgt.nodeId && n.id === tgt.nodeId) return true;
+            if (tgt.sectionId && n.id === tgt.sectionId) return true;
+            if (tgt.kind === 'permanent-main' && n.id === 'permanent-section') return true;
+            if (tgt.kind === 'permanent-copy' && (n.id === `permanent-section-copy-${tgt.copyId}` || n.copyId === tgt.copyId)) return true;
+          }
+          if (key === 'permanent-main' || key === 'folder-permanent') {
+            if (n.id === 'permanent-section') return true;
+          }
+          if (key.startsWith('permanent-copy-') || key.startsWith('copy-')) {
+            const cId = key.replace(/^(permanent-copy-|copy-)/, '');
+            if (n.id === `permanent-section-copy-${cId}` || n.copyId === cId) return true;
+          }
+          return false;
+        });
+
+        if (!isAlreadyCaptured) {
+          pinnedNodes.push({
+            id: key,
+            type: 'file',
+            label: dirNode.title,
+            isPinned: true,
+            description: dirNode.preview || undefined,
+            bookmarkCount: dirNode.count || undefined,
+            x: 0,
+            y: 0,
+            width: 300,
+            height: 200
+          });
+        }
+      });
+
+      if (pinnedNodes.length === 0) {
+        showSidebarToast(isEn ? 'No pinned items to copy' : '当前暂无置顶内容', { type: 'warning', forceFresh: true });
+        return;
+      }
+
+      const pinnedNodeIdSet = new Set(pinnedNodes.map(n => n.id));
+      const matchedEdges = snapshot.edges.filter(e => pinnedNodeIdSet.has(e.fromNode) && pinnedNodeIdSet.has(e.toNode));
+      let totalBookmarks = 0;
+      pinnedNodes.forEach(n => {
+        if (typeof n.bookmarkCount === 'number') totalBookmarks += n.bookmarkCount;
+      });
+
+      const payload = {
+        $schema: 'https://jsoncanvas.org/spec/1.0/',
+        workspaceType: 'pinned',
+        title: isEn ? 'Pinned Workspace' : '置顶工作区',
+        description: isEn
+          ? 'Bookmark Canvas pinned workspace slice, compliant with JSON Canvas 1.0 (https://jsoncanvas.org). Contains user-pinned core assets, all locatable in files with .canvas extension in the project.'
+          : '书签画布置顶切片，遵循 JSON Canvas 1.0 规范 (https://jsoncanvas.org)。包含用户显式置顶的核心资产，均可在项目中后缀为 .canvas 的文件中直接找到。',
+        meta: {
+          generatedAt: new Date().toISOString(),
+          stats: {
+            totalNodes: pinnedNodes.length,
+            totalEdges: matchedEdges.length,
+            totalBookmarks: totalBookmarks
+          }
+        },
+        nodes: pinnedNodes,
+        edges: matchedEdges
+      };
+
+      copyTextToClipboardSafe(formatWorkspaceCanvasJson(payload)).then((ok) => {
+        if (ok === false) {
+          showSidebarToast(isEn ? 'Failed to copy to clipboard' : '复制到剪贴板失败', { type: 'warning', forceFresh: true });
+          return;
+        }
+        showSidebarToast(
+          isEn ? 'Pinned workspace copied (.canvas)' : '已复制置顶工作区数据 (.canvas)',
+          { type: 'success', forceFresh: true }
+        );
+      }).catch((e) => {
+        console.error('Pinned copy failed:', e);
+        showSidebarToast(isEn ? 'Failed to copy to clipboard' : '复制到剪贴板失败', { type: 'warning', forceFresh: true });
+      });
+    } catch (e) {
+      console.error('Failed to prepare pinned workspace payload:', e);
+      showSidebarToast(isEn ? 'Failed to extract pinned workspace' : '提取置顶工作区失败', { type: 'error', forceFresh: true });
+    }
+  }
+
+  function handleCopyAnchorWorkspace(slot, slotIndex, isTemp) {
+    if (!slot) return;
+    const isEn = isEnglish();
+    try {
+      const workspace = document.getElementById('canvasWorkspace');
+      const fallbackW = (workspace && workspace.clientWidth > 50) ? workspace.clientWidth : (window.innerWidth > 50 ? window.innerWidth : 1920);
+      const fallbackH = (workspace && workspace.clientHeight > 50) ? workspace.clientHeight : (window.innerHeight > 50 ? window.innerHeight : 1080);
+      const viewW = Math.round(Number(slot.viewW) || fallbackW);
+      const viewH = Math.round(Number(slot.viewH) || fallbackH);
+      const z = (Number(slot.zoom) && Number(slot.zoom) > 0) ? Number(slot.zoom) : 1;
+      const worldW = Math.round(viewW / z);
+      const worldH = Math.round(viewH / z);
+
+      // 向下兼容旧版锚点数据（如 v1.0.4 未打标记 coordType === 'world'，存的是物理屏幕平移偏移 panOffsetX/Y）
+      let focalX = Number(slot.x) || 0;
+      let focalY = Number(slot.y) || 0;
+      if (slot.coordType !== 'world') {
+        focalX = (viewW / 2 - focalX) / z;
+        focalY = (viewH / 2 - focalY) / z;
+      }
+
+      const minX = Math.round(focalX - worldW / 2);
+      const minY = Math.round(focalY - worldH / 2);
+
+      const slotTitle = slot.name || (isTemp
+        ? (isEn ? `Temp Slot ${slotIndex + 1}` : `临时槽位 ${slotIndex + 1}`)
+        : (isEn ? `Slot ${slotIndex + 1}` : `槽位 ${slotIndex + 1}`));
+
+      const payload = {
+        type: 'bookmark-canvas-anchor',
+        workspaceType: isTemp ? 'temp-anchor' : 'anchor',
+        slotIndex: slotIndex + 1,
+        title: slotTitle,
+        description: isEn
+          ? 'Bookmark Canvas anchor camera. "camera" defines focal center and zoom; "visibleRange" defines the 2D world bounding box (top-left minX, minY with width, height) to directly filter visible elements from files with .canvas extension in the project.'
+          : '书签画布锚点镜头。camera 为视线中心与缩放倍率；visibleRange 为该镜头在画布上的实际可视地块矩形（左上角 minX, minY 与宽高 width, height），可直接与项目中后缀为 .canvas 的文件中的元素坐标比对以筛选在屏元素。',
+        camera: {
+          x: Math.round(focalX),
+          y: Math.round(focalY),
+          zoom: Math.round(z * 100) / 100
+        },
+        visibleRange: {
+          minX: minX,
+          minY: minY,
+          width: worldW,
+          height: worldH
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      copyTextToClipboardSafe(formatAnchorJsonCompact(payload)).then((ok) => {
+        if (ok === false) {
+          showSidebarToast(isEn ? 'Failed to copy to clipboard' : '复制到剪贴板失败', { type: 'warning', forceFresh: true });
+          return;
+        }
+        showSidebarToast(
+          isEn ? 'Anchor camera copied' : '已复制锚点镜头数据',
+          { type: 'success', forceFresh: true }
+        );
+      }).catch((e) => {
+        console.error('Anchor copy failed:', e);
+        showSidebarToast(isEn ? 'Failed to copy to clipboard' : '复制到剪贴板失败', { type: 'warning', forceFresh: true });
+      });
+    } catch (e) {
+      console.error('Failed to prepare anchor payload:', e);
+      showSidebarToast(isEn ? 'Failed to extract anchor' : '提取锚点失败', { type: 'error', forceFresh: true });
+    }
+  }
+
   async function navigateToViewportFromAnchor(anchor) {
     if (!anchor) return false;
 
@@ -5160,6 +5597,8 @@
         x: worldX,
         y: worldY,
         zoom: z,
+        viewW: Math.round(wsW),
+        viewH: Math.round(wsH),
         coordType: 'world',
         timestamp: Date.now()
       };
@@ -5181,6 +5620,11 @@
       const badgeNum = (index < 10) ? String((index + 1) % 10) : String(slotNum);
       const displayName = slot.name || (isEn ? `Slot ${slotNum}` : `槽位 ${slotNum}`);
       showSidebarToast(isEn ? `Anchor: ${displayName}` : `已切换至锚点：${displayName}`, { type: 'info', badge: badgeNum, isTemp: false });
+    }
+    else if (action === 'copy') {
+      const slot = slots[index];
+      if (!slot) return;
+      handleCopyAnchorWorkspace(slot, index, false);
     }
     else if (action === 'rename') {
       const slot = slots[index];
@@ -5734,6 +6178,8 @@
       x: worldX,
       y: worldY,
       zoom: z,
+      viewW: Math.round(wsW),
+      viewH: Math.round(wsH),
       coordType: 'world',
       timestamp: Date.now()
     };
@@ -5819,6 +6265,8 @@
       x: worldX,
       y: worldY,
       zoom: z,
+      viewW: Math.round(wsW),
+      viewH: Math.round(wsH),
       coordType: 'world',
       timestamp: Date.now()
     };
@@ -6304,6 +6752,8 @@
         x: worldX,
         y: worldY,
         zoom: z,
+        viewW: Math.round(wsW),
+        viewH: Math.round(wsH),
         coordType: 'world',
         timestamp: Date.now()
       };
@@ -6325,6 +6775,11 @@
       const badgeNum = (index < 10) ? String((index + 1) % 10) : String(slotNum);
       const displayName = slot.name || (isEn ? `Temp Slot ${slotNum}` : `临时槽位 ${slotNum}`);
       showSidebarToast(isEn ? `Temp Anchor: ${displayName}` : `已切换至临时锚点：${displayName}`, { type: 'info', badge: badgeNum, isTemp: true });
+    }
+    else if (action === 'copy') {
+      const slot = slots[index];
+      if (!slot) return;
+      handleCopyAnchorWorkspace(slot, index, true);
     }
     else if (action === 'rename') {
       const slot = slots[index];
@@ -7026,6 +7481,9 @@
                 <button class="anchor-slot-btn rename-btn" data-index="${index}" title="${isTempWorkspaceMode ? (isEn ? 'Rename temp slot' : '重命名临时槽位') : (isEn ? 'Rename slot' : '重命名槽位')}">
                   <i class="fas fa-edit"></i>
                 </button>
+                <button class="anchor-slot-btn copy-btn" data-index="${index}" title="${isTempWorkspaceMode ? (isEn ? 'Copy temp slot camera' : '复制临时锚点镜头') : (isEn ? 'Copy slot camera' : '复制锚点镜头')}" aria-label="${isTempWorkspaceMode ? (isEn ? 'Copy temp slot camera' : '复制临时锚点镜头') : (isEn ? 'Copy slot camera' : '复制锚点镜头')}">
+                  <i class="fas fa-copy"></i>
+                </button>
                 <button class="anchor-slot-btn delete-btn" data-index="${index}" title="${isTempWorkspaceMode ? (isEn ? 'Clear temp slot' : '清除临时槽位') : (isEn ? 'Clear slot' : '清除槽位')}">
                   <i class="fas fa-trash-alt"></i>
                 </button>
@@ -7229,6 +7687,7 @@
       const action = btn.classList.contains('locate-btn') ? 'locate' :
                      btn.classList.contains('save-btn') ? 'save' :
                      btn.classList.contains('rename-btn') ? 'rename' :
+                     btn.classList.contains('copy-btn') ? 'copy' :
                      btn.classList.contains('delete-btn') ? 'delete' : null;
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
