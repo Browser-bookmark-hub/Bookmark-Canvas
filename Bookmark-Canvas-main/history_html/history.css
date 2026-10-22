@@ -5098,6 +5098,42 @@ body.sidebar-resizing * {
     color: var(--canvas-dir-color-pinned, #eab308);
 }
 
+.canvas-dir-pinned-copy-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 11px;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary, var(--text-secondary, #94a3b8));
+    opacity: 0;
+    pointer-events: none;
+    margin-right: 4px;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    padding: 0;
+}
+
+.canvas-dir-pinned-folder > summary:hover .canvas-dir-pinned-copy-btn,
+.canvas-dir-pinned-folder > summary:focus-within .canvas-dir-pinned-copy-btn {
+    opacity: 0.7;
+    pointer-events: auto;
+}
+
+.canvas-dir-pinned-copy-btn:hover {
+    opacity: 1 !important;
+    color: var(--accent-primary, #2b85e4);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    transform: scale(1.08);
+}
+
+.sidebar.mini .canvas-dir-pinned-copy-btn {
+    display: none !important;
+}
+
 .canvas-dir-pinned-children {
     margin-top: 2px;
 }

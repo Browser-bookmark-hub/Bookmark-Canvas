@@ -6765,6 +6765,10 @@ html:lang(en) .sidebar:not(.mini) .sidebar-tab-btn .sidebar-tab-icon,
     color: #e9973f;
 }
 
+.anchor-slot-btn.copy-btn:hover {
+    color: var(--accent-color, #2b85e4);
+}
+
 .anchor-slot-btn.delete-btn:hover {
     background: rgba(239, 68, 68, 0.15);
     color: var(--danger, #ff4d4f);
@@ -7023,7 +7027,7 @@ html:lang(en) .sidebar:not(.mini) .sidebar-tab-btn .sidebar-tab-icon,
     box-shadow: none;
 }
 
-/* 顶部操作按钮纵向排列：临时工作区切换（🗂️）、添加（➕）、清空（🗑️）、设置（⚙️） */
+/* 顶部操作按钮纵向排列：设置（⚙️）、临时工作区切换（🗂️）、清空（🗑️）、添加（➕） */
 .sidebar.mini .anchor-unified-header {
     display: flex;
     flex-direction: column;
@@ -7043,7 +7047,7 @@ html:lang(en) .sidebar:not(.mini) .sidebar-tab-btn .sidebar-tab-icon,
     display: contents;
 }
 
-.sidebar.mini #tempWorkspaceToggleBtn {
+.sidebar.mini #anchorSettingsBtn {
     order: 1;
     width: 34px;
     height: 30px;
@@ -7052,7 +7056,7 @@ html:lang(en) .sidebar:not(.mini) .sidebar-tab-btn .sidebar-tab-icon,
     margin: 0 0 0 7px !important;
 }
 
-.sidebar.mini #addAnchorBtn {
+.sidebar.mini #tempWorkspaceToggleBtn {
     order: 2;
     width: 34px;
     height: 30px;
@@ -7070,7 +7074,7 @@ html:lang(en) .sidebar:not(.mini) .sidebar-tab-btn .sidebar-tab-icon,
     margin: 0 0 0 7px !important;
 }
 
-.sidebar.mini #anchorSettingsBtn {
+.sidebar.mini #addAnchorBtn {
     order: 4;
     width: 34px;
     height: 30px;
