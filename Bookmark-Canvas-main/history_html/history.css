@@ -8755,6 +8755,7 @@ html.side-panel-mode .bookmark-add-secondary-actions .modal-btn {
 }
 
 .batch-panel-content .context-menu-item[data-action="batch-copy"].action-success,
+.batch-panel-content .context-menu-item[data-action="batch-copy-links"].action-success,
 .batch-panel-content .context-menu-item[data-action="batch-cut"].action-success {
     border-color: #22c55e !important;
     box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.45);
@@ -9362,8 +9363,16 @@ html.side-panel-mode .bookmark-add-secondary-actions .modal-btn {
     display: none;
 }
 
+/* 确保批量操作面板在可见状态下始终强制保持 flex 列布局，防止因外部或行内样式误设为 block 导致内部 flex-item 无法缩小而丢失垂直滚动条 */
+.batch-action-panel:not([style*="display: none"]) {
+    display: flex !important;
+    flex-direction: column !important;
+}
+
 /* 纵向布局样式 */
 .batch-action-panel.vertical-batch-layout {
+    display: flex;
+    flex-direction: column;
     /* 移除 !important，允许JavaScript动态调整大小 */
     /* 这些值会被JavaScript在切换布局时设置 */
     max-height: 80vh;

@@ -87,9 +87,11 @@
     'br',
     'center',
     'p',
-    'img'
+    'img',
+    'details',
+    'summary'
   ]);
-  const allowedAttrs = new Set(['color', 'style', 'class', 'align', 'src', 'alt', 'width', 'height']);
+  const allowedAttrs = new Set(['color', 'style', 'class', 'align', 'src', 'alt', 'width', 'height', 'open']);
 
   const sanitizeStyle = (style = '') => {
     const out = [];

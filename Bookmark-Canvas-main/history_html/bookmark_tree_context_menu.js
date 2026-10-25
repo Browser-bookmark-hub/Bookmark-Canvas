@@ -4275,8 +4275,9 @@ function __ensureBatchHelpAnchors() {
     // 2) Temp / Merge
     add('batch-to-temp-section', 2);
     add('batch-merge-folder', 2);
-    // 3) Copy / Cut
+    // 3) Copy / Cut / Copy Links
     add('batch-copy', 3);
+    add('batch-copy-links', 3);
     add('batch-cut', 3);
     // 4) Export
     add('batch-export-html', 4);
@@ -4308,8 +4309,9 @@ function getBatchHelpHtml(lang) {
 </div>
 
 <div class="batch-help-card" id="batch-help-card-copy-cut">
-  <div class="batch-help-card-title"><span class="batch-help-badge">3</span>复制 / 剪切</div>
+  <div class="batch-help-card-title"><span class="batch-help-badge">3</span>复制 / 复制链接 / 剪切</div>
   <div class="batch-help-line">复制/剪切会写入剪贴板；可在目标文件夹上<strong>右键</strong>选择“粘贴”，也可用 <strong>Ctrl / Command + V</strong> 按光标位置粘贴。</div>
+  <div class="batch-help-line"><strong>复制链接</strong>：全量递归复制所选书签及文件夹内全部书签，自动采用 <code>&lt;details&gt;</code> 路径分块折叠（专为大模型读取与排版收起优化，空目录自动剔除）。</div>
   <div class="batch-help-line">文件夹会按结构复制/剪切（包含子文件夹）。</div>
   <div class="batch-help-shortcuts" aria-label="通用快捷键">
     <div class="batch-help-shortcuts-title">通用快捷键（批量模式）</div>
@@ -4353,8 +4355,9 @@ function getBatchHelpHtml(lang) {
 </div>
 
 <div class="batch-help-card" id="batch-help-card-copy-cut">
-  <div class="batch-help-card-title"><span class="batch-help-badge">3</span>Copy / Cut</div>
+  <div class="batch-help-card-title"><span class="batch-help-badge">3</span>Copy / Copy Links / Cut</div>
   <div class="batch-help-line">Copy/Cut writes into clipboard; <strong>right-click</strong> the target folder and Paste, or use <strong>Ctrl / Command + V</strong> to paste at the cursor location.</div>
+  <div class="batch-help-line"><strong>Copy Links</strong>: Copies all bookmarks recursively with <code>&lt;details&gt;</code> collapsible path blocks (optimized for AI models and Markdown readers, empty folders pruned).</div>
   <div class="batch-help-line">Folders preserve structure (recursive).</div>
   <div class="batch-help-shortcuts" aria-label="General shortcuts">
     <div class="batch-help-shortcuts-title">General Shortcuts (Batch Mode)</div>
@@ -4641,13 +4644,18 @@ function fitBatchPanelToContent(panel, options = {}) {
             desiredHeight = panelRect.height;
         }
 
+        const maxAvailableWidth = viewportWidth - margin * 2;
         let minWidth = parseFloat(panel.style.minWidth);
         let maxWidth = parseFloat(panel.style.maxWidth);
         let minHeight = parseFloat(panel.style.minHeight);
         let maxHeight = parseFloat(panel.style.maxHeight);
         if (!Number.isFinite(minWidth)) minWidth = 0;
         if (!Number.isFinite(minHeight)) minHeight = 0;
-        if (!Number.isFinite(maxWidth)) maxWidth = viewportWidth - margin * 2;
+        // 如果当前视口拓宽了，更新 maxWidth，防止旧的窄屏幕 maxWidth 锁死宽度
+        if (!Number.isFinite(maxWidth) || maxWidth < maxAvailableWidth) {
+            maxWidth = maxAvailableWidth;
+            panel.style.maxWidth = `${maxWidth}px`;
+        }
         if (!Number.isFinite(maxHeight)) maxHeight = viewportHeight - margin * 2;
 
         desiredWidth = Math.max(minWidth, Math.min(maxWidth, desiredWidth));
@@ -12357,6 +12365,10 @@ async function handleMenuAction(action, context) {
                 await copySelected();
                 break;
 
+            case 'batch-copy-links':
+                await batchCopyLinks();
+                break;
+
             case 'batch-cut':
                 await batchCut();
                 break;
@@ -14442,6 +14454,525 @@ async function copySelected() {
     }
 }
 
+// 批量复制链接（全量递归，支持本地存储直接读取、绕开DOM懒加载、剔除无用属性与 <details> 路径折叠）
+async function batchCopyLinks() {
+    const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
+    let rawSelectionIds = (typeof window !== 'undefined' && typeof window.getEffectiveBookmarkDragSelectionIds === 'function')
+        ? window.getEffectiveBookmarkDragSelectionIds()
+        : Array.from(selectedNodes);
+
+    if (!rawSelectionIds || rawSelectionIds.length === 0) {
+        rawSelectionIds = Array.from(selectedNodes);
+    }
+
+    if (!rawSelectionIds || rawSelectionIds.length === 0) {
+        const msg = lang === 'zh_CN' ? '没有选中的项目' : 'No items selected';
+        if (typeof showToast === 'function') {
+            showToast(msg);
+        } else {
+            alert(msg);
+        }
+        return;
+    }
+
+    // 复制前数据预处理：
+    // 1) 物理树序重排：严格按照 DOM 树自上而下的物理顺序（compareDocumentPosition）排序，
+    //    确保无论用户鼠标在界面上是以何种乱序多选，数据提取与编号顺序均忠实反映实际树形展示顺序。
+    let selectionIds = Array.from(new Set(rawSelectionIds));
+    try {
+        selectionIds.sort((idA, idB) => {
+            const elA = document.querySelector(`.tree-item[data-node-id="${idA}"]`);
+            const elB = document.querySelector(`.tree-item[data-node-id="${idB}"]`);
+            if (!elA || !elB || elA === elB || typeof elA.compareDocumentPosition !== 'function') return 0;
+            const pos = elA.compareDocumentPosition(elB);
+            return (pos & 4) ? -1 : 1;
+        });
+    } catch (_) {}
+
+    // 2) 包含关系去重：如果父文件夹已被选中，其下属子项（子书签/子文件夹）由父文件夹完整递归解析，
+    //    从外层列表中剔除独立的子项，防止子书签被提前提取导致原文件夹被掏空或位置倒挂。
+    const selectedIdSet = new Set(selectionIds);
+    try {
+        selectionIds = selectionIds.filter(id => {
+            const el = document.querySelector(`.tree-item[data-node-id="${id}"]`);
+            if (!el) return true;
+            let treeNode = el.closest ? el.closest('.tree-node') : null;
+            let parentTreeNode = treeNode && treeNode.parentElement ? treeNode.parentElement.closest('.tree-node') : null;
+            while (parentTreeNode) {
+                const parentItem = parentTreeNode.querySelector(':scope > .tree-item[data-node-id]');
+                if (parentItem && selectedIdSet.has(parentItem.dataset.nodeId)) {
+                    return false;
+                }
+                parentTreeNode = parentTreeNode.parentElement ? parentTreeNode.parentElement.closest('.tree-node') : null;
+            }
+            return true;
+        });
+    } catch (_) {}
+
+    const seenUrls = new Set();
+    const collectedItems = [];
+    const manager = (typeof getTempManager === 'function') ? getTempManager() : null;
+
+    // 提取节点绑定的标签列表
+    function extractNodeTags(node) {
+        if (!node) return [];
+        let rawTags = null;
+        if (Array.isArray(node.tags)) {
+            rawTags = node.tags;
+        } else if (typeof node.tags === 'string' && node.tags.trim()) {
+            rawTags = node.tags.split(',').map(s => s.trim()).filter(Boolean);
+        }
+        if (!rawTags || !rawTags.length) return [];
+        return rawTags.map(t => {
+            if (typeof t === 'string') return t.trim();
+            if (t && typeof t === 'object') return String(t.text || '').trim();
+            return '';
+        }).filter(Boolean);
+    }
+
+    // 提取节点绑定的备注信息
+    function extractNodeNote(node) {
+        if (!node) return '';
+        let rawNote = '';
+        if (typeof node.note === 'string') {
+            rawNote = node.note;
+        } else if (node.note && typeof node.note === 'object') {
+            rawNote = String(node.note.note || node.note.text || '');
+        } else if (node.noteMeta && typeof node.noteMeta === 'object') {
+            rawNote = String(node.noteMeta.note || '');
+        }
+        return String(rawNote || '').trim();
+    }
+
+    // 格式化原生 #标签 字符串
+    function formatTagsString(tags) {
+        if (!Array.isArray(tags) || !tags.length) return '';
+        const cleanTags = tags.map(t => {
+            const str = String(t || '').trim().replace(/^#+/, '').replace(/\s+/g, '_');
+            return str ? `#${str}` : '';
+        }).filter(Boolean);
+        return cleanTags.length ? ` ${cleanTags.join(' ')}` : '';
+    }
+
+    // 格式化缩进便签形式的备注块 (> 📝 ...)
+    function formatNoteBlock(note, baseIndent) {
+        if (!note || typeof note !== 'string') return [];
+        const trimmed = note.trim();
+        if (!trimmed) return [];
+        const noteLines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (!noteLines.length) return [];
+        return noteLines.map((line, idx) => {
+            const prefix = idx === 0 ? '📝 ' : '';
+            return `${baseIndent}   > ${prefix}${line}`;
+        });
+    }
+
+    // 递归构建文件夹树结构（自动过滤重复 URL，自动剔除空目录，保留 tag 与 note）
+    function buildFolderTree(node) {
+        if (!node) return null;
+        if (node.url) {
+            const rawUrl = String(node.url || '').trim();
+            if (!rawUrl || seenUrls.has(rawUrl)) return null;
+            seenUrls.add(rawUrl);
+            const title = String(node.title || rawUrl).trim();
+            return {
+                type: 'bookmark',
+                title,
+                url: rawUrl,
+                tags: extractNodeTags(node),
+                note: extractNodeNote(node)
+            };
+        }
+        const title = String(node.title || (lang === 'zh_CN' ? '文件夹' : 'Folder')).trim();
+        const children = [];
+        if (Array.isArray(node.children)) {
+            for (const child of node.children) {
+                const item = buildFolderTree(child);
+                if (item) children.push(item);
+            }
+        }
+        if (children.length === 0) return null;
+        return {
+            type: 'folder',
+            title,
+            children,
+            tags: extractNodeTags(node),
+            note: extractNodeNote(node)
+        };
+    }
+
+    // 统计文件夹内全部书签链接数量
+    function countFolderLinks(folderNode) {
+        let count = 0;
+        if (!folderNode || !Array.isArray(folderNode.children)) return 0;
+        for (const child of folderNode.children) {
+            if (child.type === 'bookmark') count += 1;
+            else if (child.type === 'folder') count += countFolderLinks(child);
+        }
+        return count;
+    }
+
+    // 递归生成标准嵌套列表（文件夹作为无序号分类标头，内部书签统一共享卡片全局连续序号）
+    function renderFolderTreeToMarkdown(folderNode, depth, counter) {
+        const indent = '   '.repeat(depth);
+        const lines = [];
+        if (!folderNode || !Array.isArray(folderNode.children)) return lines;
+        for (const child of folderNode.children) {
+            if (child.type === 'bookmark') {
+                const cleanTitle = String(child.title || child.url || '')
+                    .replace(/\r?\n+/g, ' ')
+                    .replace(/\[/g, '［')
+                    .replace(/\]/g, '］')
+                    .trim();
+                const cleanUrl = String(child.url || '').trim();
+                const tagStr = formatTagsString(child.tags);
+                lines.push(`${indent}${counter.index}. [${cleanTitle}](${cleanUrl})${tagStr}`);
+                const noteLines = formatNoteBlock(child.note, indent);
+                if (noteLines.length) lines.push(...noteLines);
+                counter.index += 1;
+            } else if (child.type === 'folder') {
+                const tagStr = formatTagsString(child.tags);
+                lines.push(`${indent}📁 **${child.title}**${tagStr}`);
+                const noteLines = formatNoteBlock(child.note, indent);
+                if (noteLines.length) lines.push(...noteLines);
+                lines.push(...renderFolderTreeToMarkdown(child, depth + 1, counter));
+            }
+        }
+        return lines;
+    }
+
+    // 渲染同一卡片内的条目（文件夹作为分类标头不占号，卡片内所有书签严格按出现顺序连续排 1..N）
+    function renderCardEntriesToMarkdown(entries) {
+        const lines = [];
+        const counter = { index: 1 };
+        for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            if (entry.type === 'bookmark') {
+                const cleanTitle = String(entry.title || entry.url || '')
+                    .replace(/\r?\n+/g, ' ')
+                    .replace(/\[/g, '［')
+                    .replace(/\]/g, '］')
+                    .trim();
+                const cleanUrl = String(entry.url || '').trim();
+                const tagStr = formatTagsString(entry.tags);
+                lines.push(`${counter.index}. [${cleanTitle}](${cleanUrl})${tagStr}`);
+                const noteLines = formatNoteBlock(entry.note, '');
+                if (noteLines.length) lines.push(...noteLines);
+                counter.index += 1;
+            } else if (entry.type === 'folder') {
+                if (lines.length > 0 && lines[lines.length - 1] !== '') {
+                    lines.push('');
+                }
+                const tagStr = formatTagsString(entry.tree.tags);
+                lines.push(`📁 **${entry.tree.title}**${tagStr}`);
+                const noteLines = formatNoteBlock(entry.tree.note, '');
+                if (noteLines.length) lines.push(...noteLines);
+                lines.push(...renderFolderTreeToMarkdown(entry.tree, 1, counter));
+                if (i < entries.length - 1) {
+                    lines.push('');
+                }
+            }
+        }
+        return lines;
+    }
+
+    // 解析节点所属的卡片范围（包含序号前缀、标题与卡片标识）
+    function resolveNodeScope(nodeId, meta, foundSecId) {
+        const isExplicitTemp = (meta && meta.treeType === 'temporary') || !!foundSecId || (meta && meta.sectionId);
+        let treeType = (meta && meta.treeType) || (isExplicitTemp ? 'temporary' : 'permanent');
+        let sectionId = foundSecId || (meta && meta.sectionId) || null;
+
+        let domEl = null;
+        let sectionEl = null;
+        try {
+            domEl = document.querySelector(`.tree-item[data-node-id="${nodeId}"]`);
+            if (domEl) {
+                sectionEl = domEl.closest('.temp-canvas-node, .permanent-bookmark-section');
+                if (!sectionId && domEl.dataset.sectionId) sectionId = domEl.dataset.sectionId;
+                if (!sectionId && sectionEl && sectionEl.dataset.sectionId) sectionId = sectionEl.dataset.sectionId;
+                if (domEl.dataset.treeType) treeType = domEl.dataset.treeType;
+            }
+            if (!sectionEl && sectionId) {
+                sectionEl = document.querySelector(`.temp-canvas-node[data-section-id="${sectionId}"]`);
+            }
+        } catch (_) {}
+
+        const nodeContext = {
+            treeType,
+            sectionId,
+            node: domEl || sectionEl,
+            permanentCopyId: domEl ? (domEl.dataset.permanentCopyId || domEl.dataset.permanentSectionCopyId) : null,
+            permanentDisplayIndex: domEl ? domEl.dataset.permanentDisplayIndex : null
+        };
+
+        let scope = null;
+        try {
+            if (typeof getScopeFromContext === 'function') {
+                scope = getScopeFromContext(nodeContext);
+            }
+        } catch (_) {}
+
+        if (!scope) {
+            scope = {
+                key: treeType === 'temporary' ? `temp:${sectionId || 'unknown'}` : 'permanent',
+                prefix: '',
+                kind: treeType,
+                title: treeType === 'temporary' ? (lang === 'zh_CN' ? '临时栏目' : 'Temp Section') : (lang === 'zh_CN' ? '书签树 (永久栏目)' : 'Bookmarks')
+            };
+        }
+
+        if (sectionEl) {
+            if (!scope.prefix || scope.prefix === 'unknown') {
+                const badge = sectionEl.querySelector('.temp-node-sequence-badge');
+                if (badge && badge.textContent) {
+                    scope.prefix = badge.textContent.trim();
+                }
+            }
+            if (!scope.title || scope.title === (lang === 'zh_CN' ? '临时栏目' : 'Temp Section')) {
+                const titleInput = sectionEl.querySelector('.temp-node-title-input');
+                if (titleInput) {
+                    const val = (titleInput.value || titleInput.textContent || '').trim();
+                    if (val) scope.title = val;
+                }
+            }
+        }
+
+        return scope;
+    }
+
+    // 按用户选中的原始顺序遍历并提取
+    for (const nodeId of selectionIds) {
+        if (!nodeId) continue;
+        const meta = (typeof selectedNodeMeta !== 'undefined' && selectedNodeMeta) ? selectedNodeMeta.get(nodeId) : null;
+        const isExplicitTemp = (meta && meta.treeType === 'temporary') || (meta && meta.sectionId);
+
+        let targetNode = null;
+        let foundSecId = meta && meta.sectionId ? meta.sectionId : null;
+
+        // 1) 优先从临时栏目本地存储（Snapshot）读取
+        if (isExplicitTemp || (manager && manager.sections)) {
+            if (manager) {
+                if (meta && meta.sectionId) {
+                    try {
+                        const entry = manager.findItem(meta.sectionId, nodeId);
+                        if (entry && entry.item) {
+                            targetNode = entry.item;
+                            foundSecId = meta.sectionId;
+                        }
+                    } catch (_) {}
+                }
+                if (!targetNode && manager.sections) {
+                    for (const secId of Object.keys(manager.sections)) {
+                        try {
+                            const entry = manager.findItem(secId, nodeId);
+                            if (entry && entry.item) {
+                                targetNode = entry.item;
+                                foundSecId = secId;
+                                break;
+                            }
+                        } catch (_) {}
+                    }
+                }
+            }
+        }
+
+        // 2) 永久书签：从 BCS 本地快照或 Chrome Bookmarks API 读取
+        if (!targetNode) {
+            if (typeof readPermanentNodeForPayload === 'function') {
+                try {
+                    targetNode = await readPermanentNodeForPayload(nodeId);
+                } catch (_) {}
+            }
+            if (!targetNode && typeof chrome !== 'undefined' && chrome.bookmarks && typeof chrome.bookmarks.getSubTree === 'function') {
+                try {
+                    const subTrees = await chrome.bookmarks.getSubTree(nodeId);
+                    if (subTrees && subTrees[0]) {
+                        targetNode = subTrees[0];
+                    }
+                } catch (_) {}
+            }
+            if (!targetNode && typeof chrome !== 'undefined' && chrome.bookmarks && typeof chrome.bookmarks.get === 'function') {
+                try {
+                    const nodes = await chrome.bookmarks.get(nodeId);
+                    if (nodes && nodes[0]) {
+                        targetNode = nodes[0];
+                    }
+                } catch (_) {}
+            }
+        }
+
+        // 3) DOM 兜底
+        if (!targetNode) {
+            const domEl = document.querySelector(`.tree-item[data-node-id="${nodeId}"]`);
+            if (domEl) {
+                const url = domEl.dataset.nodeUrl;
+                const title = domEl.dataset.nodeTitle || domEl.querySelector('.tree-label')?.textContent?.trim() || url || nodeId;
+                targetNode = { title, url };
+            }
+        }
+
+        if (!targetNode) continue;
+
+        // 尝试补充永久书签的 tags 和 note 元数据
+        if (!isExplicitTemp && targetNode) {
+            const bridge = (typeof window !== 'undefined') ? window.CanvasProtocolBridge : null;
+            if (bridge) {
+                if ((!targetNode.tags || !targetNode.tags.length) && typeof bridge.readPermanentNodeTags === 'function') {
+                    try {
+                        const pTags = await bridge.readPermanentNodeTags(nodeId);
+                        if (Array.isArray(pTags) && pTags.length) targetNode.tags = pTags;
+                    } catch (_) {}
+                }
+                if (!targetNode.note && typeof bridge.readPermanentNodeNoteMeta === 'function') {
+                    try {
+                        const pMeta = await bridge.readPermanentNodeNoteMeta(nodeId);
+                        if (pMeta && pMeta.note) targetNode.note = pMeta.note;
+                    } catch (_) {}
+                }
+            }
+        }
+
+        const scope = resolveNodeScope(nodeId, meta, foundSecId);
+
+        // 判断是独立书签还是文件夹
+        if (targetNode.url) {
+            const rawUrl = String(targetNode.url || '').trim();
+            if (rawUrl && !seenUrls.has(rawUrl)) {
+                seenUrls.add(rawUrl);
+                const title = String(targetNode.title || rawUrl).trim();
+                collectedItems.push({
+                    scope,
+                    entry: {
+                        type: 'bookmark',
+                        title,
+                        url: rawUrl,
+                        tags: extractNodeTags(targetNode),
+                        note: extractNodeNote(targetNode)
+                    }
+                });
+            }
+        } else {
+            const folderTree = buildFolderTree(targetNode);
+            if (folderTree) {
+                const folderLinksCount = countFolderLinks(folderTree);
+                if (folderLinksCount > 0) {
+                    collectedItems.push({
+                        scope,
+                        entry: {
+                            type: 'folder',
+                            tree: folderTree,
+                            totalCount: folderLinksCount
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    // 按卡片分组（保持首次选中的卡片顺序）
+    const cardGroups = [];
+    const cardGroupMap = new Map();
+
+    let totalLinks = 0;
+    for (const item of collectedItems) {
+        const cardKey = item.scope ? item.scope.key : 'default';
+        let group = cardGroupMap.get(cardKey);
+        if (!group) {
+            group = {
+                key: cardKey,
+                scope: item.scope,
+                entries: []
+            };
+            cardGroupMap.set(cardKey, group);
+            cardGroups.push(group);
+        }
+        group.entries.push(item.entry);
+        if (item.entry.type === 'bookmark') {
+            totalLinks += 1;
+        } else if (item.entry.type === 'folder') {
+            totalLinks += item.entry.totalCount;
+        }
+    }
+
+    if (totalLinks === 0 || cardGroups.length === 0) {
+        const emptyMsg = lang === 'zh_CN' ? '未找到可复制的书签链接' : 'No bookmark links found to copy';
+        if (typeof showToast === 'function') {
+            showToast(emptyMsg);
+        } else {
+            alert(emptyMsg);
+        }
+        return;
+    }
+
+    let textToCopy = '';
+
+    // 若选中的书签/文件夹来自不同卡片，则按卡片隔离输出，并带上卡片的序号与标题
+    if (cardGroups.length > 1) {
+        const groupBlocks = cardGroups.map((group, idx) => {
+            const rawPrefix = String(group.scope?.prefix || '').trim();
+            const cleanPrefix = (rawPrefix && rawPrefix !== 'unknown')
+                ? rawPrefix.replace(/^#/, '')
+                : String(idx + 1);
+            const cardTitle = String(group.scope?.title || '').trim() || (lang === 'zh_CN' ? '书签栏目' : 'Bookmark Section');
+            const headerLine = lang === 'zh_CN'
+                ? `🗂️ 卡片 ${cleanPrefix} - ${cardTitle}`
+                : `🗂️ Card ${cleanPrefix} - ${cardTitle}`;
+            const itemLines = renderCardEntriesToMarkdown(group.entries);
+            return [headerLine, '', ...itemLines].join('\n');
+        });
+        textToCopy = groupBlocks.join('\n\n');
+    } else {
+        // 单个卡片内：直接输出层级列表，无需冗余的卡片头与概览引用块
+        const outputLines = renderCardEntriesToMarkdown(cardGroups[0].entries);
+        textToCopy = outputLines.join('\n');
+    }
+
+    let copySuccess = false;
+    try {
+        if (typeof __copyBookmarkTreeObjectText === 'function') {
+            await __copyBookmarkTreeObjectText(textToCopy);
+            copySuccess = true;
+        } else if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(textToCopy);
+            copySuccess = true;
+        } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = textToCopy;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            copySuccess = document.execCommand('copy');
+            textarea.remove();
+        }
+    } catch (err) {
+        console.error('[批量复制链接] 写入剪贴板失败:', err);
+    }
+
+    if (copySuccess) {
+        flashBatchActionStatus('batch-copy-links');
+        const toastMsg = lang === 'zh_CN'
+            ? (cardGroups.length > 1
+                ? `已复制 ${totalLinks} 个书签链接（跨 ${cardGroups.length} 个卡片）`
+                : `已复制 ${totalLinks} 个书签链接`)
+            : (cardGroups.length > 1
+                ? `Copied ${totalLinks} bookmark link(s) across ${cardGroups.length} cards`
+                : `Copied ${totalLinks} bookmark link(s)`);
+        if (typeof __showBookmarkTreeObjectToast === 'function') {
+            __showBookmarkTreeObjectToast(toastMsg, 'success');
+        } else if (typeof showToast === 'function') {
+            showToast(toastMsg);
+        }
+    } else {
+        const failMsg = lang === 'zh_CN' ? '复制到剪贴板失败' : 'Failed to copy to clipboard';
+        if (typeof showToast === 'function') {
+            showToast(failMsg);
+        } else {
+            alert(failMsg);
+        }
+    }
+}
+
 // 删除选中的项
 async function deleteSelected() {
     await batchDelete();
@@ -14739,7 +15270,7 @@ function showBatchContextMenu(e) {
     if (batchPanel) {
         // 如果已存在，只需确保显示
         hideBatchPanelRestoreButton();
-        batchPanel.style.display = 'block';
+        batchPanel.style.display = 'flex';
         if (batchPanel.parentNode !== getOverlayContainer()) {
             getOverlayContainer().appendChild(batchPanel);
         }
@@ -14796,6 +15327,7 @@ function showBatchContextMenu(e) {
             name: lang === 'zh_CN' ? '编辑' : 'Edit',
             items: [
                 { action: 'batch-copy', label: lang === 'zh_CN' ? '复制' : 'Copy', icon: 'copy' },
+                { action: 'batch-copy-links', label: lang === 'zh_CN' ? '复制链接' : 'Copy Links', icon: 'link' },
                 { action: 'batch-cut', label: lang === 'zh_CN' ? '剪切' : 'Cut', icon: 'cut', disabled: cutDisabled },
                 { action: 'batch-delete', label: lang === 'zh_CN' ? '删除' : 'DELETE', icon: 'trash-alt' },
                 { action: 'batch-rename', label: lang === 'zh_CN' ? '改名' : 'Rename', icon: 'edit' },
@@ -14898,6 +15430,8 @@ function showBatchContextMenu(e) {
                 await batchToTempSection(e);
             } else if (action === 'batch-copy') {
                 await copySelected();
+            } else if (action === 'batch-copy-links') {
+                await batchCopyLinks();
             } else if (action === 'batch-cut') {
                 await batchCut();
             } else if (action === 'batch-delete') {
@@ -17489,6 +18023,9 @@ function restoreBatchPanelState(panel, anchorInfo) {
         }
 
         panel.style.position = 'fixed';
+        if (panel.style.display !== 'none') {
+            panel.style.display = 'flex';
+        }
         const margin = 16;
         const defaultHorizontalBottom = 80;
 
@@ -17597,7 +18134,7 @@ function restoreBatchPanelState(panel, anchorInfo) {
             panel.classList.add('vertical-batch-layout');
 
             const maxH = Math.max(300, viewportHeight - margin * 2);
-            const maxW = Math.max(160, Math.min(480, viewportWidth - margin * 2));
+            const maxW = Math.max(160, Math.min(800, viewportWidth - margin * 2));
             const minW = 160;
             const minH = 160;
 
@@ -17608,7 +18145,7 @@ function restoreBatchPanelState(panel, anchorInfo) {
 
             panel.style.width = `${widthValue}px`;
             panel.style.minWidth = `${minW}px`;
-            panel.style.maxWidth = `${maxW}px`;
+            panel.style.maxWidth = `${Math.max(widthValue, viewportWidth - margin * 2)}px`;
             if (Number.isFinite(heightValue)) {
                 panel.style.height = `${heightValue}px`;
             } else {
@@ -17648,7 +18185,7 @@ function restoreBatchPanelState(panel, anchorInfo) {
             panel.classList.add('horizontal-batch-layout');
             panel.classList.remove('vertical-batch-layout');
 
-            const horizontalMaxWidth = viewportWidth - margin * 2;
+            const horizontalMaxWidth = Math.max(320, viewportWidth - margin * 2);
             const storedWidth = globalState.horizontal.width;
             const storedHeight = globalState.horizontal.height;
 
@@ -17955,6 +18492,8 @@ function updateTallLayoutClass(panel, height) {
 function initBatchPanelResize(panel) {
     const handles = panel.querySelectorAll('.resize-handle');
     if (handles.length === 0) return;
+    if (panel.__resizeHandlesBound) return;
+    panel.__resizeHandlesBound = true;
 
     let isResizing = false;
     let startX, startY, startWidth, startHeight, startLeft, startTop;
@@ -17965,6 +18504,14 @@ function initBatchPanelResize(panel) {
             isResizing = true;
             startX = e.clientX;
             startY = e.clientY;
+
+            // 关键：在调整大小开始时，刷新 maxWidth 和 maxHeight 为当前视口可用大小，防止旧的行内 maxWidth 限制横向拓宽
+            const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1920;
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 1080;
+            const margin = 16;
+            const maxAvailableWidth = Math.max(160, viewportWidth - margin * 2);
+            panel.style.maxWidth = `${maxAvailableWidth}px`;
+            panel.style.maxHeight = `${Math.floor(viewportHeight * 0.85)}px`;
 
             const rect = panel.getBoundingClientRect();
             startWidth = rect.width;
@@ -17988,10 +18535,20 @@ function initBatchPanelResize(panel) {
         const deltaX = e.clientX - startX;
         const deltaY = e.clientY - startY;
         const isVertical = panel.classList.contains('vertical-batch-layout');
-        const minWidth = isVertical ? 160 : 360;
-        const maxWidth = isVertical ? 480 : Math.min((window.innerWidth || 1920) * 0.95, 1400);
+        const minWidth = isVertical ? 160 : 320;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1920;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 1080;
+        const margin = 16;
+        const maxAvailableWidth = Math.max(minWidth, viewportWidth - margin * 2);
+        const maxWidth = isVertical
+            ? Math.min(Math.max(480, Math.floor(viewportWidth * 0.6)), maxAvailableWidth)
+            : Math.min(Math.max(800, Math.floor(viewportWidth * 0.98)), 2500);
         const minHeight = isVertical ? 160 : 76;
-        const maxHeight = (window.innerHeight || 1080) * 0.8;
+        const maxHeight = Math.max(minHeight, Math.floor(viewportHeight * 0.85));
+
+        // 确保 style.maxWidth 不会阻挡 newWidth
+        panel.style.maxWidth = `${maxAvailableWidth}px`;
+        panel.style.maxHeight = `${maxHeight}px`;
 
         let newWidth = startWidth;
         let newHeight = startHeight;
@@ -18001,16 +18558,34 @@ function initBatchPanelResize(panel) {
         // 根据方向调整
         if (direction.includes('e')) {
             newWidth = Math.min(maxWidth, Math.max(minWidth, startWidth + deltaX));
+            if (startLeft + newWidth > viewportWidth - margin) {
+                newWidth = Math.max(minWidth, viewportWidth - margin - startLeft);
+            }
         }
         if (direction.includes('w')) {
-            newWidth = Math.min(maxWidth, Math.max(minWidth, startWidth - deltaX));
+            let calculatedWidth = startWidth - deltaX;
+            let calculatedLeft = startLeft + (startWidth - calculatedWidth);
+            if (calculatedLeft < margin) {
+                calculatedWidth = startWidth + (startLeft - margin);
+                calculatedLeft = margin;
+            }
+            newWidth = Math.min(maxWidth, Math.max(minWidth, calculatedWidth));
             newLeft = startLeft + (startWidth - newWidth);
         }
         if (direction.includes('s')) {
             newHeight = Math.min(maxHeight, Math.max(minHeight, startHeight + deltaY));
+            if (startTop + newHeight > viewportHeight - margin) {
+                newHeight = Math.max(minHeight, viewportHeight - margin - startTop);
+            }
         }
         if (direction.includes('n')) {
-            newHeight = Math.min(maxHeight, Math.max(minHeight, startHeight - deltaY));
+            let calculatedHeight = startHeight - deltaY;
+            let calculatedTop = startTop + (startHeight - calculatedHeight);
+            if (calculatedTop < margin) {
+                calculatedHeight = startHeight + (startTop - margin);
+                calculatedTop = margin;
+            }
+            newHeight = Math.min(maxHeight, Math.max(minHeight, calculatedHeight));
             newTop = startTop + (startHeight - newHeight);
         }
 
@@ -18068,38 +18643,77 @@ function initBatchPanelResize(panel) {
     ;
 }
 
-// 初始化窗口大小变化监听器（横向布局自适应）
+// 初始化窗口大小变化监听器（横向/纵向布局自适应与边界维护）
 function initBatchPanelWindowResize(panel) {
+    if (panel.__windowResizeBound) return;
+    panel.__windowResizeBound = true;
+
     let resizeTimer;
-    window.addEventListener('resize', () => {
-        // 使用防抖，避免频繁触发
+    const handleResize = () => {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
             const batchPanel = document.getElementById('batch-action-panel');
             if (!batchPanel) return;
 
-            // 只在横向布局时自动调整宽度
-            if (batchPanel.classList.contains('horizontal-batch-layout')) {
-                if (batchPanel.dataset.manualPosition === 'true') return;
-                const viewportWidth = window.innerWidth;
-                const maxPanelWidth = Math.min(viewportWidth * 0.95, 2000);
-                const currentWidth = parseFloat(batchPanel.style.width) || 1000;
-                if (currentWidth > maxPanelWidth) {
-                    batchPanel.style.width = `${maxPanelWidth}px`;
-                    ;
+            const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1920;
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 1080;
+            const margin = 16;
+            const isVertical = batchPanel.classList.contains('vertical-batch-layout');
+
+            // 无论横向纵向，始终同步最新的最大可用宽度/高度，防止拓宽画布后被旧的 inline maxWidth 锁死
+            const maxAvailableWidth = Math.max(160, viewportWidth - margin * 2);
+            batchPanel.style.maxWidth = `${maxAvailableWidth}px`;
+            batchPanel.style.maxHeight = `${Math.floor(viewportHeight * 0.85)}px`;
+
+            const currentWidth = parseFloat(batchPanel.style.width) || batchPanel.offsetWidth;
+            if (currentWidth > maxAvailableWidth) {
+                batchPanel.style.width = `${maxAvailableWidth}px`;
+                if (isVertical) {
+                    batchPanel.dataset.userWidthVertical = String(maxAvailableWidth);
+                } else {
+                    batchPanel.dataset.userWidthHorizontal = String(maxAvailableWidth);
                 }
-                // 不使用 translateX(-50%)，避免拖动/fit 时跳动
-                const margin = 16;
+            }
+
+            if (batchPanel.dataset.manualPosition === 'true') {
+                // 手动拖拽过位置时，若窗口缩窄，避免面板超出屏幕右侧或下侧
                 const rect = batchPanel.getBoundingClientRect();
-                const left = clampValue((viewportWidth - rect.width) / 2, margin, viewportWidth - rect.width - margin);
+                const maxLeft = Math.max(margin, viewportWidth - rect.width - margin);
+                const maxTop = Math.max(margin, viewportHeight - rect.height - margin);
+                const currentLeft = parseFloat(batchPanel.style.left);
+                const currentTop = parseFloat(batchPanel.style.top);
+                if (Number.isFinite(currentLeft) && currentLeft > maxLeft) {
+                    batchPanel.style.left = `${maxLeft}px`;
+                }
+                if (Number.isFinite(currentTop) && currentTop > maxTop) {
+                    batchPanel.style.top = `${maxTop}px`;
+                }
+                return;
+            }
+
+            // 自动定位状态下，横向布局居中
+            if (!isVertical) {
+                const rect = batchPanel.getBoundingClientRect();
+                const left = clampValue((viewportWidth - rect.width) / 2, margin, Math.max(margin, viewportWidth - rect.width - margin));
                 batchPanel.style.left = `${left}px`;
                 batchPanel.style.right = 'auto';
                 applyBatchPanelTransform(batchPanel, { baseTransform: 'none' });
             }
-        }, 200); // 防抖延迟200ms
-    });
+        }, 150);
+    };
 
-    ;
+    window.addEventListener('resize', handleResize);
+
+    // 如果支持 ResizeObserver，同时监听 canvasWorkspace 尺寸变化，确保画布拓宽时及时刷新
+    if (typeof ResizeObserver !== 'undefined') {
+        try {
+            const workspace = document.getElementById('canvasWorkspace') || document.body;
+            const ro = new ResizeObserver(() => {
+                handleResize();
+            });
+            ro.observe(workspace);
+        } catch (_) { }
+    }
 }
 
 // 切换批量面板布局（横向/纵向）
@@ -18115,6 +18729,11 @@ function toggleBatchPanelLayout() {
         localStorage.setItem(storageKey, batchPanelHorizontal ? 'horizontal' : 'vertical');
     } catch (e) {
         console.error('[批量面板] 保存布局状态失败:', e);
+    }
+
+    // 确保从横向切换到纵向时保持 flex 容器，避免内部丢失垂直滚动条
+    if (batchPanel.style.display !== 'none') {
+        batchPanel.style.display = 'flex';
     }
 
     // 恢复新布局的状态
@@ -18656,7 +19275,7 @@ function showBatchPanel() {
         ;
     } else {
         // 如果面板已存在，直接显示
-        batchPanel.style.display = 'block';
+        batchPanel.style.display = 'flex';
         const anchorInfo = getBatchPanelAnchorInfoFromSelection();
         if (anchorInfo) {
             currentBatchPanelAnchorInfo = anchorInfo;
@@ -19960,6 +20579,7 @@ if (typeof window !== 'undefined') {
     window.exitSelectMode = exitSelectMode;
     window.toggleContextMenuLayout = toggleContextMenuLayout;
     window.restoreContextMenuLayout = restoreContextMenuLayout;
+    window.batchCopyLinks = batchCopyLinks;
 
     // 页面加载时恢复布局
     if (document.readyState === 'loading') {
