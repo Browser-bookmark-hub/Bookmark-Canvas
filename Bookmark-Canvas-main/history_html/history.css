@@ -985,8 +985,21 @@ option {
 body.header-compact .history-header .header-toggle-btn.header-toggle-dragging,
 body.header-compact .history-header .header-toggle-btn.header-toggle-dragging:hover,
 body.header-compact .history-header .header-toggle-btn.header-toggle-dragging:focus-visible {
+    top: 8px;
+    width: 30px !important;
+    height: 30px !important;
+    border-radius: 7px !important;
+    border: 1px solid var(--border-color) !important;
+    background: var(--bg-secondary) !important;
     transform: scale(1.04);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+}
+
+body.header-compact.header-dock-bottom .history-header .header-toggle-btn.header-toggle-dragging,
+body.header-compact.header-dock-bottom .history-header .header-toggle-btn.header-toggle-dragging:hover,
+body.header-compact.header-dock-bottom .history-header .header-toggle-btn.header-toggle-dragging:focus-visible {
+    top: auto;
+    bottom: 8px;
 }
 
 body.header-compact .history-header {
@@ -1043,18 +1056,43 @@ body.header-compact .history-header .header-toggle-btn {
         bottom 0.2s ease;
 }
 
+body.header-compact .history-header .header-toggle-btn i {
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 14px !important;
+    height: 14px !important;
+    font-size: 13px !important;
+    line-height: 1 !important;
+    text-align: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: none;
+    transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.15s ease;
+}
+
 body.header-compact .history-header .header-toggle-btn:hover,
 body.header-compact .history-header .header-toggle-btn:focus-visible {
     top: 8px;
     width: 30px;
     height: 30px;
-    border-radius: 7px;
+    border-radius: 7px !important;
 
     border: 1px solid var(--border-color);
     background: var(--bg-secondary);
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
 
     transform: scale(1.05);
+}
+
+body.header-compact .history-header .header-toggle-btn:hover i,
+body.header-compact .history-header .header-toggle-btn:focus-visible i {
+    transform: translate(-50%, -50%) scale(1.12) !important;
+    color: var(--text-primary);
 }
 
 body.header-compact .history-header .header-toggle-btn::before {
@@ -1087,6 +1125,7 @@ body.header-compact.header-dock-bottom .history-header .header-toggle-btn:hover,
 body.header-compact.header-dock-bottom .history-header .header-toggle-btn:focus-visible {
     top: auto;
     bottom: 8px;
+    border-radius: 7px !important;
 }
 
 body.header-compact.header-dock-bottom .history-header .header-toggle-btn::before {
@@ -3895,6 +3934,177 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
     }
 }
 
+/* -------------------------------------------------------------------------
+   长按蓄力充能微动效（第一形态展开态 <-> 第三形态完全收起态 一步直达）
+   - 原地长按 120ms 后唤起纯净细线充能（380ms 顺畅充能，总计 500ms）
+   - 颜色完全对齐目录/锚点下划线 var(--accent-color, var(--text-secondary))
+   - 纯净利落无光晕无光晕晕染，自适应深色/浅色模式
+   ------------------------------------------------------------------------- */
+.sidebar-toggle-charge-ring {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0;
+    visibility: hidden;
+    overflow: visible;
+    transition: opacity 0.14s ease, visibility 0.14s ease;
+}
+
+.sidebar-toggle-charge-ring .charge-track {
+    fill: none;
+    stroke: color-mix(in srgb, var(--accent-color, var(--text-secondary)) 20%, transparent);
+    stroke-width: 1.5px;
+}
+
+.sidebar-toggle-charge-ring .charge-bar {
+    fill: none;
+    stroke: var(--accent-color, var(--text-secondary));
+    stroke-width: 1.8px;
+    stroke-linecap: round;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+    filter: none !important;
+}
+
+/* 蓄力激活态 */
+.sidebar-toggle.sidebar-toggle-charging .sidebar-toggle-charge-ring {
+    opacity: 1;
+    visibility: visible;
+}
+
+.sidebar-toggle.sidebar-toggle-charging .charge-bar {
+    animation: sidebar-toggle-charge 190ms cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
+}
+
+@keyframes sidebar-toggle-charge {
+    0% {
+        stroke-dashoffset: 100;
+    }
+    100% {
+        stroke-dashoffset: 0;
+    }
+}
+
+/* 提前松手或位移打断：快速回弹淡出 */
+.sidebar-toggle.sidebar-toggle-charge-cancelled .sidebar-toggle-charge-ring {
+    opacity: 0 !important;
+    transition: opacity 0.16s ease-out !important;
+}
+
+.sidebar-toggle.sidebar-toggle-charge-cancelled .charge-bar {
+    stroke-dashoffset: 100 !important;
+    transition: stroke-dashoffset 0.16s ease-out, opacity 0.16s ease-out !important;
+    opacity: 0 !important;
+}
+
+/* 蓄力完成纯净微回弹（彻底去除光晕与有色外发光） */
+@keyframes sidebar-toggle-charged-pulse {
+    0% {
+        transform: translate(-50%, -50%) scale(1);
+    }
+    45% {
+        transform: translate(-50%, -50%) scale(1.08);
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+@keyframes sidebar-toggle-charged-pulse-compact-left {
+    0% {
+        transform: translate(6px, -50%) scale(1);
+    }
+    45% {
+        transform: translate(6px, -50%) scale(1.08);
+    }
+    100% {
+        transform: translate(6px, -50%) scale(1);
+    }
+}
+
+@keyframes sidebar-toggle-charged-pulse-compact-right {
+    0% {
+        transform: translate(calc(-100% - 6px), -50%) scale(1);
+    }
+    45% {
+        transform: translate(calc(-100% - 6px), -50%) scale(1.08);
+    }
+    100% {
+        transform: translate(calc(-100% - 6px), -50%) scale(1);
+    }
+}
+
+.sidebar:not(.compact) .sidebar-toggle.sidebar-toggle-charged {
+    animation: sidebar-toggle-charged-pulse 0.20s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
+}
+
+.sidebar.compact:not(.position-right) .sidebar-toggle.sidebar-toggle-charged {
+    animation: sidebar-toggle-charged-pulse-compact-left 0.20s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
+}
+
+.sidebar.compact.position-right .sidebar-toggle.sidebar-toggle-charged {
+    animation: sidebar-toggle-charged-pulse-compact-right 0.20s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
+}
+
+.sidebar-toggle.sidebar-toggle-charged .charge-bar {
+    stroke: var(--accent-color, var(--text-secondary)) !important;
+    filter: none !important;
+}
+
+/* 蓄力过程中保持按钮形态稳定与图标压感反馈 */
+.sidebar:not(.mini):not(.compact) .sidebar-toggle.sidebar-toggle-charging,
+.sidebar:not(.mini):not(.compact) .sidebar-toggle.sidebar-toggle-charged {
+    width: 28px !important;
+    height: 28px !important;
+    background: var(--bg-tertiary) !important;
+    border-radius: 7px !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+    transform: translate(-50%, -50%) !important;
+}
+
+.sidebar:not(.mini):not(.compact) .sidebar-toggle.sidebar-toggle-charging .sidebar-toggle-main-icon,
+.sidebar:not(.mini):not(.compact) .sidebar-toggle.sidebar-toggle-charged .sidebar-toggle-main-icon {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: scale(0.9) !important;
+    color: var(--accent-color, var(--text-secondary)) !important;
+    transition: transform 0.38s ease, color 0.15s ease !important;
+}
+
+.sidebar.compact .sidebar-toggle.sidebar-toggle-charging .sidebar-toggle-main-icon,
+.sidebar.compact .sidebar-toggle.sidebar-toggle-charged .sidebar-toggle-main-icon {
+    transform: translate(-50%, -50%) scale(0.92) !important;
+    color: var(--accent-color, var(--text-secondary)) !important;
+    transition: transform 0.38s ease, color 0.15s ease !important;
+}
+
+.sidebar.compact:not(.position-right) .sidebar-toggle.sidebar-toggle-charging,
+.sidebar.compact:not(.position-right) .sidebar-toggle.sidebar-toggle-charged {
+    width: 30px !important;
+    height: 30px !important;
+    border-radius: 7px !important;
+    background: var(--bg-secondary) !important;
+    transform: translate(6px, -50%) !important;
+}
+
+.sidebar.compact.position-right .sidebar-toggle.sidebar-toggle-charging,
+.sidebar.compact.position-right .sidebar-toggle.sidebar-toggle-charged {
+    width: 30px !important;
+    height: 30px !important;
+    border-radius: 7px !important;
+    background: var(--bg-secondary) !important;
+    transform: translate(calc(-100% - 6px), -50%) !important;
+}
+
+/* 第二形态（mini）下隐藏长按充能环（mini已有上下独立分段按钮） */
+.sidebar.mini .sidebar-toggle .sidebar-toggle-charge-ring {
+    display: none !important;
+}
+
 .sidebar-toggle.sidebar-toggle-dragging {
     cursor: grabbing;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
@@ -3967,10 +4177,46 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 }
 
 .sidebar.compact .sidebar-toggle .sidebar-toggle-main-icon {
-    position: static !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 14px !important;
+    height: 14px !important;
+    font-size: 13px !important;
+    line-height: 1 !important;
+    text-align: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
     opacity: 1 !important;
     visibility: visible !important;
-    transform: none !important;
+    pointer-events: none;
+    z-index: 2;
+    transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.15s ease;
+}
+
+/* 视觉重心光学微调（左侧栏箭头向右 > 微移 +1px，右侧栏箭头向左 < 微移 -1px） */
+.sidebar.compact:not(.position-right) .sidebar-toggle .sidebar-toggle-main-icon {
+    left: calc(50% + 1px) !important;
+}
+
+.sidebar.compact.position-right .sidebar-toggle .sidebar-toggle-main-icon {
+    left: calc(50% - 1px) !important;
+}
+
+.sidebar.compact:not(.position-right) .sidebar-toggle:hover .sidebar-toggle-main-icon,
+.sidebar.compact:not(.position-right) .sidebar-toggle:focus-visible .sidebar-toggle-main-icon {
+    transform: translate(-50%, -50%) scale(1.12) !important;
+    color: var(--text-primary);
+}
+
+.sidebar.compact.position-right .sidebar-toggle:hover .sidebar-toggle-main-icon,
+.sidebar.compact.position-right .sidebar-toggle:focus-visible .sidebar-toggle-main-icon {
+    transform: translate(-50%, -50%) scale(1.12) !important;
+    color: var(--text-primary);
 }
 
 .sidebar.compact .sidebar-toggle .sidebar-toggle-vertical-pill {
@@ -4013,6 +4259,77 @@ body.header-dock-bottom:not(.header-compact) .btn-tooltip::before {
 .sidebar.compact.position-right .sidebar-toggle:hover,
 .sidebar.compact.position-right .sidebar-toggle:focus-visible {
     transform: translate(calc(-100% - 6px), -50%) scale(1.05);
+}
+
+/* -------------------------------------------------------------------------
+   侧边栏折叠按钮专用说明气泡（多行轻量化提示，浮现延迟适度延长至 480ms，避免滑过误触发）
+   ------------------------------------------------------------------------- */
+.sidebar-toggle-tooltip {
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%) scale(0.96);
+    background: var(--bg-primary, #ffffff);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+    border-radius: 7px;
+    padding: 7px 11px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    /* 悬停出现延迟：稍微延长至 620ms，需明确停驻停留时平滑浮现，避免划过时突兀闪现 */
+    transition: opacity 0.15s ease 620ms, transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1) 620ms, visibility 0.15s ease 620ms;
+}
+
+.sidebar-toggle-tooltip-line {
+    display: block;
+    white-space: nowrap;
+}
+
+.sidebar-toggle-tooltip-line:nth-child(1) {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.sidebar-toggle-tooltip-line:nth-child(2),
+.sidebar-toggle-tooltip-line:nth-child(3) {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+/* 侧边栏位于右侧时，提示气泡显示在按钮左侧 */
+.sidebar.position-right .sidebar-toggle-tooltip {
+    left: auto;
+    right: calc(100% + 10px);
+}
+
+/* 鼠标悬停显示（仅在第一形态和第三形态有效，排除 mini 形态） */
+.sidebar:not(.mini) .sidebar-toggle:hover .sidebar-toggle-tooltip,
+.sidebar:not(.mini) .sidebar-toggle:focus-visible .sidebar-toggle-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(-50%) scale(1);
+}
+
+/* 鼠标离开时立刻消失，不留延迟 */
+.sidebar-toggle:not(:hover):not(:focus-visible) .sidebar-toggle-tooltip {
+    transition: opacity 0.08s ease 0s, transform 0.08s ease 0s, visibility 0.08s ease 0s;
+}
+
+/* 拖拽中、蓄力中或已激活时，立刻隐藏说明气泡 */
+.sidebar-toggle.sidebar-toggle-dragging .sidebar-toggle-tooltip,
+.sidebar-toggle.sidebar-toggle-charging .sidebar-toggle-tooltip,
+.sidebar-toggle.sidebar-toggle-charged .sidebar-toggle-tooltip,
+.sidebar.mini .sidebar-toggle-tooltip {
+    display: none !important;
 }
 
 .sidebar-resize-handle {

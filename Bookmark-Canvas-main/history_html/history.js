@@ -5564,20 +5564,24 @@ function updateLanguageDependentUI() {
     const sidebarToggle = document.getElementById('sidebarToggle');
     if (sidebarToggle) {
         const state = sidebarToggle.dataset.collapseState || 'expanded';
-        let label;
+        const tooltipEl = document.getElementById('sidebarToggleTooltip');
+        let lines;
         if (state === 'expanded') {
-            label = isEn ? 'Switch to icon-only view' : '切换为极窄图标视图';
+            lines = isEn
+                ? ['Click: Switch to icon-only view', 'Hold: Collapse sidebar fully', 'Hold & drag: Adjust button or sidebar position']
+                : ['单击：切换为极窄图标视图', '按住：完全收起菜单栏', '按住拖动：调整按钮位置或侧栏位置'];
         } else if (state === 'mini') {
-            label = isEn ? 'Sidebar controls' : '侧边栏切换';
+            lines = [];
         } else {
-            label = isEn ? 'Expand sidebar' : '展开菜单栏';
+            lines = isEn
+                ? ['Click: Expand to icon-only view', 'Hold: Expand sidebar fully', 'Hold & drag: Adjust button or sidebar position']
+                : ['单击：展开为极窄图标栏', '按住：直接完全展开', '按住拖动：调整按钮位置或侧栏位置'];
         }
-        if (state === 'mini') {
-            sidebarToggle.removeAttribute('title');
-        } else {
-            sidebarToggle.title = label;
+        if (tooltipEl) {
+            tooltipEl.innerHTML = lines.map(line => `<span class="sidebar-toggle-tooltip-line">${line}</span>`).join('');
         }
-        sidebarToggle.setAttribute('aria-label', label);
+        sidebarToggle.removeAttribute('title');
+        sidebarToggle.setAttribute('aria-label', lines.join(', '));
 
         const pillExpand = sidebarToggle.querySelector('.pill-expand');
         const pillCollapse = sidebarToggle.querySelector('.pill-collapse');
@@ -10761,6 +10765,9 @@ function initSidebarToggle() {
     const TOGGLE_RATIO_MIN = 0.08;
     const TOGGLE_RATIO_MAX = 0.92;
     const SIDEBAR_SIDE_SWITCH_ANIMATION_MS = 220;
+    const TOGGLE_HOLD_CHARGE_BLIND_DELAY_MS = 60;
+    const TOGGLE_HOLD_CHARGE_DURATION_MS = 190;
+    const TOGGLE_HOLD_CHARGE_DEADZONE_PX = 8;
     const persistEnabled = true;
     const sidebarContainer = sidebar.closest('.main-container');
     const contentArea = sidebarContainer
@@ -10778,6 +10785,10 @@ function initSidebarToggle() {
     let toggleHintHoldTimer = null;
     let toggleHoldVisualActive = false;
     let toggleDragGuideDirection = null;
+    let holdChargeSession = null;
+    let holdChargeBlindTimer = null;
+    let holdChargeCompleteTimer = null;
+    let toggleChargeRing = null;
     let autoResizeDebounceTimer = null;
     let sidebarCollapseMode = SIDEBAR_COLLAPSE_MODE_AUTO;
     let autoCollapseWidth = AUTO_COLLAPSE_WIDTH_DEFAULT;
@@ -11096,9 +11107,130 @@ function initSidebarToggle() {
         toggleHintHoldTimer = window.setTimeout(() => {
             toggleHintHoldTimer = null;
             if (!toggleDragSession) return;
+            if (holdChargeSession && holdChargeSession.charging) return;
             toggleBtn.classList.add('sidebar-toggle-show-hints');
             setToggleHoldVisualActive(true);
         }, TOGGLE_HINT_HOLD_DELAY_MS);
+    }
+
+    function ensureToggleChargeRing() {
+        if (!toggleChargeRing || !toggleChargeRing.isConnected) {
+            toggleChargeRing = toggleBtn.querySelector('.sidebar-toggle-charge-ring');
+            if (!toggleChargeRing) {
+                const svgNS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(svgNS, 'svg');
+                svg.setAttribute('class', 'sidebar-toggle-charge-ring');
+                svg.setAttribute('viewBox', '0 0 28 28');
+                svg.setAttribute('aria-hidden', 'true');
+
+                const track = document.createElementNS(svgNS, 'rect');
+                track.setAttribute('class', 'charge-track');
+                track.setAttribute('x', '1.5');
+                track.setAttribute('y', '1.5');
+                track.setAttribute('width', '25');
+                track.setAttribute('height', '25');
+                track.setAttribute('rx', '6');
+                track.setAttribute('ry', '6');
+                track.setAttribute('pathLength', '100');
+
+                const bar = document.createElementNS(svgNS, 'rect');
+                bar.setAttribute('class', 'charge-bar');
+                bar.setAttribute('x', '1.5');
+                bar.setAttribute('y', '1.5');
+                bar.setAttribute('width', '25');
+                bar.setAttribute('height', '25');
+                bar.setAttribute('rx', '6');
+                bar.setAttribute('ry', '6');
+                bar.setAttribute('pathLength', '100');
+
+                svg.appendChild(track);
+                svg.appendChild(bar);
+                toggleBtn.appendChild(svg);
+                toggleChargeRing = svg;
+            }
+        }
+        return toggleChargeRing;
+    }
+
+    function clearHoldChargeTimers() {
+        if (holdChargeBlindTimer != null) {
+            window.clearTimeout(holdChargeBlindTimer);
+            holdChargeBlindTimer = null;
+        }
+        if (holdChargeCompleteTimer != null) {
+            window.clearTimeout(holdChargeCompleteTimer);
+            holdChargeCompleteTimer = null;
+        }
+    }
+
+    function cancelHoldCharge(options = {}) {
+        clearHoldChargeTimers();
+        if (!holdChargeSession) return;
+        const wasCharging = holdChargeSession.charging;
+        holdChargeSession = null;
+        toggleBtn.classList.remove('sidebar-toggle-charging');
+        if (wasCharging && options && options.animateCancel) {
+            toggleBtn.classList.add('sidebar-toggle-charge-cancelled');
+            window.setTimeout(() => {
+                toggleBtn.classList.remove('sidebar-toggle-charge-cancelled');
+            }, 180);
+        } else {
+            toggleBtn.classList.remove('sidebar-toggle-charge-cancelled');
+        }
+    }
+
+    function startHoldCharge(event) {
+        cancelHoldCharge();
+        // 仅在 expanded 态（长按直接完全收起 compact）或 compact 态（长按直接完全展开 expanded）启用
+        if (currentState !== 'expanded' && currentState !== 'compact') {
+            return;
+        }
+        ensureToggleChargeRing();
+
+        const session = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            charging: false,
+            fromState: currentState
+        };
+        holdChargeSession = session;
+
+        holdChargeBlindTimer = window.setTimeout(() => {
+            holdChargeBlindTimer = null;
+            if (!holdChargeSession || holdChargeSession !== session) return;
+            session.charging = true;
+            toggleBtn.classList.remove('sidebar-toggle-charge-cancelled');
+            toggleBtn.classList.add('sidebar-toggle-charging');
+
+            holdChargeCompleteTimer = window.setTimeout(() => {
+                holdChargeCompleteTimer = null;
+                if (!holdChargeSession || holdChargeSession !== session) return;
+                completeHoldCharge(session);
+            }, TOGGLE_HOLD_CHARGE_DURATION_MS);
+        }, TOGGLE_HOLD_CHARGE_BLIND_DELAY_MS);
+    }
+
+    function completeHoldCharge(session) {
+        const fromState = session.fromState;
+        holdChargeSession = null;
+        clearHoldChargeTimers();
+        toggleBtn.classList.remove('sidebar-toggle-charging');
+        toggleBtn.classList.add('sidebar-toggle-charged');
+
+        // 屏蔽后续 click 事件与拖拽位置保存
+        suppressToggleClick = true;
+        clearToggleDragSession();
+
+        const targetState = fromState === 'expanded' ? 'compact' : 'expanded';
+        currentState = setSidebarState(targetState, { manual: true });
+
+        window.setTimeout(() => {
+            toggleBtn.classList.remove('sidebar-toggle-charged');
+            window.setTimeout(() => {
+                suppressToggleClick = false;
+            }, 40);
+        }, 220);
     }
 
     // 根据当前实际 DOM 宽度更新侧边栏宽度 CSS 变量
@@ -11312,21 +11444,25 @@ function initSidebarToggle() {
 
     function updateToggleLabel(state) {
         const isEn = currentLang === 'en';
-        let circleTitle;
+        const tooltipEl = document.getElementById('sidebarToggleTooltip');
+        let lines;
         if (state === 'expanded') {
-            circleTitle = isEn ? 'Switch to icon-only view' : '切换为极窄图标视图';
+            lines = isEn
+                ? ['Click: Switch to icon-only view', 'Hold: Collapse sidebar fully', 'Hold & drag: Adjust button or sidebar position']
+                : ['单击：切换为极窄图标视图', '按住：完全收起菜单栏', '按住拖动：调整按钮位置或侧栏位置'];
         } else if (state === 'mini') {
-            circleTitle = isEn ? 'Sidebar controls' : '侧边栏切换';
+            lines = [];
         } else {
-            circleTitle = isEn ? 'Expand to icon-only view' : '展开为极窄图标栏';
+            lines = isEn
+                ? ['Click: Expand to icon-only view', 'Hold: Expand sidebar fully', 'Hold & drag: Adjust button or sidebar position']
+                : ['单击：展开为极窄图标栏', '按住：直接完全展开', '按住拖动：调整按钮位置或侧栏位置'];
         }
 
-        if (state === 'mini') {
-            toggleBtn.removeAttribute('title');
-        } else {
-            toggleBtn.setAttribute('title', circleTitle);
+        if (tooltipEl) {
+            tooltipEl.innerHTML = lines.map(line => `<span class="sidebar-toggle-tooltip-line">${line}</span>`).join('');
         }
-        toggleBtn.setAttribute('aria-label', circleTitle);
+        toggleBtn.removeAttribute('title');
+        toggleBtn.setAttribute('aria-label', lines.join(', '));
         toggleBtn.setAttribute('aria-expanded', state === 'expanded' ? 'true' : 'false');
         toggleBtn.dataset.collapseState = state;
         updateToggleIcon(state);
@@ -11629,6 +11765,7 @@ function initSidebarToggle() {
 
     function clearToggleDragSession() {
         clearToggleHintHoldTimer();
+        cancelHoldCharge();
         setToggleDragGuideDirection(null);
 
         if (!toggleDragSession) {
@@ -11652,6 +11789,8 @@ function initSidebarToggle() {
 
     toggleBtn.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
+
+        startHoldCharge(event);
 
         toggleDragSession = {
             pointerId: event.pointerId,
@@ -11677,6 +11816,12 @@ function initSidebarToggle() {
         const dx = event.clientX - toggleDragSession.startX;
         const dy = event.clientY - toggleDragSession.startY;
         const dragDistance = Math.hypot(dx, dy);
+
+        // 防抖判定：如果位移超过死区（8px），判定用户真实意图为拖拽或手势，立即取消长按蓄力
+        if (holdChargeSession && dragDistance >= TOGGLE_HOLD_CHARGE_DEADZONE_PX) {
+            cancelHoldCharge({ animateCancel: true });
+        }
+
         if (!toggleDragSession.moved && dragDistance >= TOGGLE_DRAG_ACTIVATE_THRESHOLD) {
             toggleDragSession.moved = true;
             clearToggleHintHoldTimer();
@@ -11692,6 +11837,7 @@ function initSidebarToggle() {
     });
 
     function finishToggleDrag(event, canceled) {
+        cancelHoldCharge();
         if (!toggleDragSession || event.pointerId !== toggleDragSession.pointerId) return;
 
         const dx = event.clientX - toggleDragSession.startX;
