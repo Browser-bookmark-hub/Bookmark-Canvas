@@ -96,20 +96,29 @@ https://raw.githubusercontent.com/Browser-bookmark-hub/Bookmark-Canvas/main/Book
 
 #### 近期路线
 
-- [ ] **默认约束文件共建完善**：完善随导出和推送数据包附带的 `AGENTS.md` / `CLAUDE.md` 风格约束，让不同 AI 客户端理解画布结构、数据协议与编辑边界。模板入口见 [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)。
+- [x] **默认约束文件共建完善**：完善随导出和推送数据包附带的 `AGENTS.md` / `CLAUDE.md` 风格约束，让不同 AI 客户端理解画布结构、数据协议与编辑边界。模板入口见 [AGENTS_template](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/tree/main/Bookmark-Canvas-main/history_html/transfer_AI_sync/AGENTS_template)。
+  - `2026-10-21` (`0b50ef7`)：更新 Bookmark Research 扩展说明及 AI 交互模板规范，引入时空上下文与插件协同
+  - `2026-10-25` (`0afb8ff`)：精简约束规则与层级重构，深度落地到导出包与公共模板
 - [ ] **生成、分析与生态共建**：以书签画布为主，优先创建服务于本项目的独立 Skill，分别处理生成与分析；两者暂不合并。
-  - **生成 Skill**：生成结果集中在书签画布的数据模型中，支持单个 JSON，或包含 `.canvas` 的单个数据包。
-  - **分析 Skill**：优先分析书签画布本项目与范围明确的画布数据；索引建立、RAG 与 Deep Research（外部或内部）均待实践后再扩展。
+  - ~~**生成 Skill**：生成结果集中在书签画布的数据模型中，支持单个 JSON，或包含 `.canvas` 的单个数据包。~~（已由规范化模板 `AGENTS_template` 替代：模板文件已确立格式协议、时空上下文、落点路由与 ID 生成等完整规范，直接指导 Agent 编辑与生成，无需另做独立的生成端 Skill）
+  - [x] **分析 Skill 与配套插件**：已作为独立插件仓库落地为 [Bookmark Research](https://github.com/Browser-bookmark-hub/Bookmark-Research)（支持 Codex、Claude Code、DeepSeek Harness (dsh)），提供本地只读索引、搜索与跨栏目调研（Skill + 本地 MCP + CLI），不修改画布数据。
   - **综合 Skill**：开放基础格式与 Skill 方向，并邀请生态项目 [书签备份（Bookmark Backup）](https://github.com/Browser-bookmark-hub/Bookmark-Backup) 与 [书签记录与推荐（Bookmark Record and Recommend）](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend) 参与；生成结果仍以书签画布为主要承载。
   - **Agent Plugin**：后续优先考虑采用 [Agent Plugin specification](https://agent-plugins.org/specification)，用于封装并集成多个 Skill 与 MCP 服务。具体可参考 [Claude Code Plugin 文档](https://code.claude.com/docs/en/plugins) 与 Anthropic 的[官方 Plugin 目录](https://github.com/anthropics/claude-code/tree/main/plugins)。
   - **R5 生态参考**：[R5 AI 特殊临时栏目示例](#ref-r5)提供了 AI 生成书签建议或书签树时可复用的参考形状。其他插件或工具向书签画布贡献生成、推荐或处理结果时也可参考；书签备份与书签记录与推荐是当前生态中的参考方向。
   - **其他能力探索（待完善）**：详见 [`../路线图前瞻-数据处理CLI-Skill-客户端-AI化.md`](../%E8%B7%AF%E7%BA%BF%E5%9B%BE%E5%89%8D%E7%9E%BB-%E6%95%B0%E6%8D%AE%E5%A4%84%E7%90%86CLI-Skill-%E5%AE%A2%E6%88%B7%E7%AB%AF-AI%E5%8C%96.md)。
-- [ ] ~~**标签与备注管理探索**：目前搜索面板已经可以直接浏览和查看标签、备注。独立管理页暂不作为确定功能；它需要先解决批量管理和导出的问题，而不是重复现有查看器。~~
+- [x] ~~**标签与备注管理探索**~~ **搜索多维表格视图（已落地）**：不再单独开发孤立的管理页，而是直接在搜索面板落地多维表格视图，集中解决标签、备注与书签的浏览、排序与批量查看需求。
+  - `2026-09-21` (`9c4c983`)：搜索模式上线多维表格视图（集成 Tabulator），支持对书签、标签、备注及元数据进行多维表格化浏览、列宽调整与排序
+  - `2026-09-29` (`def8002`)：优化表格视图表头拖动与排版交互
 
 #### 长期路线
 
-- [ ] **设置持久化与后端上云调研**：锚点、外观、永久栏目及副本、临时栏目文件夹折叠状态、垂直滚动等设置，与画布数据包目前存在不同的持久化边界。完整导入导出或云端支持涉及复杂状态与恢复语义，暂不建议贸然承诺。当前重点仍在数据处理；即使未来考虑客户端或部署方案，上云也不是近期重点。相关前瞻见 [`../路线图前瞻-数据处理CLI-Skill-客户端-AI化.md`](../%E8%B7%AF%E7%BA%BF%E5%9B%BE%E5%89%8D%E7%9E%BB-%E6%95%B0%E6%8D%AE%E5%A4%84%E7%90%86CLI-Skill-%E5%AE%A2%E6%88%B7%E7%AB%AF-AI%E5%8C%96.md)。
-- [ ] **性能持续跟进**：持续让实现尽可能吃满浏览器可用的 CPU / GPU 与渲染能力，并跟进 Chrome、硬件与相关 API 的变化。当前低细节、视野外降级、懒加载、视野内外虚拟化等策略仍是现实的必要妥协；未来不应把今天的性能上限当成固定结论。
+- [x] 🔄 **设置持久化与后端上云调研（半✅ 阶段性进展）**：锚点、外观、永久栏目及副本、临时栏目文件夹折叠状态、垂直滚动等设置，与画布数据包目前存在不同的持久化边界。完整导入导出或云端支持涉及复杂状态与恢复语义，暂不建议贸然承诺。当前重点仍在数据处理；即使未来考虑客户端或部署方案，上云也不是近期重点。相关前瞻见 [`../路线图前瞻-数据处理CLI-Skill-客户端-AI化.md`](../%E8%B7%AF%E7%BA%BF%E5%9B%BE%E5%89%8D%E7%9E%BB-%E6%95%B0%E6%8D%AE%E5%A4%84%E7%90%86CLI-Skill-%E5%AE%A2%E6%88%B7%E7%AB%AF-AI%E5%8C%96.md)。
+  - `2026-10-22` (`a2a0f2a`)：侧边栏目录与锚点槽位支持一键复制锚点镜头及可视地块矩形（`visibleRange`）为标准 JSON (`type: "bookmark-canvas-anchor"`)，作为临时提示词配合插件使用，定向圈选在屏卡片与拓扑（半✅，目前仅完成复制为临时提示词配合插件使用，全量状态持久化与云同步仍在调研中）
+- [x] 🔄 **性能持续跟进（v1.0.4 之后持续优化 / 阶段性进展）**：持续让实现尽可能吃满浏览器可用的 CPU / GPU 与渲染能力，并跟进 Chrome、硬件与相关 API 的变化。当前低细节、视野外降级、懒加载、视野内外虚拟化等策略仍是现实的必要妥协；未来不应把今天的性能上限当成固定结论。
+  - `2026-09-16` ~ `2026-09-17` (`c723346`, `21c622f`)：优化视野外懒加载与缩放关键帧性能，按视口动态降级与虚拟化渲染
+  - `2026-09-24` ~ `2026-09-28` (`4eea17e`, `0d05963`)：新增侧边栏/目录栏大树懒加载，防止超大书签树一次性挂载阻塞主线程
+  - `2026-09-28` (`7b90fa9`, `fcb05a6`)：彻底拔除行级 ResizeObserver、锁定滚动条槽位以消除容器强制回流（Reflow/Layout thrashing）
+  - `2026-09-29` ~ `2026-10-02` (`5629068`, `52f9056`)：优化卡片滚动条 UI 性能、锁定平滑滚动阻尼体验
 - [ ] **语言增加与调试**：当前界面主要围绕简体中文与英文实现；繁体中文、法语、俄语、西班牙语、阿拉伯语、日语、韩语等语言需要补齐文案并逐页调试布局；README 翻译文档可以继续放在 [`./`](./)。详见 [`../限制与妥协.md`](../%E9%99%90%E5%88%B6%E4%B8%8E%E5%A6%A5%E5%8D%8F.md)。项目大量界面文案仍是硬编码，并非完整 i18n 系统：要么重构语言系统，要么通过索引和检索现有中英文文案逐项补齐。
 - [ ] **限制、妥协与外部变化持续跟踪**：持续记录浏览器平台边界与主动的范围取舍，例如<ins>不把书签画布做成附件管理器、文件管理器或第二个 Obsidian</ins>；同时跟进 Chrome / Edge 行为、浏览器 API 变化与 bug 修复，以及 GitHub API、哈希等外部约束。见 [`../限制与妥协.md`](../%E9%99%90%E5%88%B6%E4%B8%8E%E5%A6%A5%E5%8D%8F.md) 与 [`../后续跟踪-浏览器根模型与GitHub哈希.md`](../%E5%90%8E%E7%BB%AD%E8%B7%9F%E8%B8%AA-%E6%B5%8F%E8%A7%88%E5%99%A8%E6%A0%B9%E6%A8%A1%E5%9E%8B%E4%B8%8EGitHub%E5%93%88%E5%B8%8C.md)。
 
