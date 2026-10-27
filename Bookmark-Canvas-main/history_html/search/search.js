@@ -2746,13 +2746,17 @@ function handleSearchKeydown(e) {
                                 if (currentGrouping === 'root') {
                                     nextGrouping = 'host';
                                 } else {
-                                    if (hasBookmark) {
-                                        nextType = 'bookmark';
-                                    } else if (hasFolder) {
-                                        nextType = 'folder';
-                                    } else {
-                                        nextGrouping = 'root';
-                                    }
+                                    nextType = null; // 回到全部
+                                    nextGrouping = 'root';
+                                }
+                            } else if (currentType === null) {
+                                if (hasBookmark) {
+                                    nextType = 'bookmark';
+                                } else if (hasFolder) {
+                                    nextType = 'folder';
+                                } else {
+                                    nextType = 'domain';
+                                    nextGrouping = 'root';
                                 }
                             } else if (currentType === 'bookmark') {
                                 if (hasFolder) {
@@ -2765,8 +2769,7 @@ function handleSearchKeydown(e) {
                                 nextType = 'domain';
                                 nextGrouping = 'root';
                             } else {
-                                nextType = 'domain';
-                                nextGrouping = 'root';
+                                nextType = null;
                             }
 
                             searchUiState.bookmarkTypeFilter = nextType;
@@ -2786,7 +2789,7 @@ function handleSearchKeydown(e) {
                             }
                             return;
                         } else {
-                            const availableTypes = [];
+                            const availableTypes = [null];
                             if (bookmarkCount > 0) availableTypes.push('bookmark');
                             if (folderCount > 0) availableTypes.push('folder');
 
@@ -3694,8 +3697,9 @@ function handleSearchResultsPanelClick(e) {
         }
 
         // Update filter and re-render (do NOT close panel)
-        searchUiState.bookmarkTypeFilter = (type === 'all' ? null : type);
-        if (type === 'domain') {
+        const nextFilter = (type === 'all' || searchUiState.bookmarkTypeFilter === type ? null : type);
+        searchUiState.bookmarkTypeFilter = nextFilter;
+        if (nextFilter === 'domain') {
             searchUiState.domainGrouping = 'root';
             searchUiState.focusedHost = null;
             searchUiState.domainRootContext = null;
@@ -9395,6 +9399,8 @@ async function setSearchMode(modeKey, options = {}) {
     }
     searchUiState.activeMode = modeKey;
     searchUiState.showFullscreenDescriptionOthers = false;
+    searchUiState.bookmarkTypeFilter = null;
+    searchUiState.structureTypeFilter = null;
     searchUiState.descriptionTypeFilter = null;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
 
@@ -14008,6 +14014,13 @@ function compareCanvasBookmarkSearchItems(leftItem, rightItem, scope = null) {
     const prioDelta = getBookmarkLocationCanonicalPriority(left) - getBookmarkLocationCanonicalPriority(right);
     if (prioDelta !== 0) return prioDelta;
 
+    // 文件夹偏向微调：同分时文件夹优先于网页书签（文件夹本身自带用户的分类组织心智）
+    const leftIsFolder = !!(left.nodeType === 'folder' || left.isFolder === true || (left.rawItem && left.rawItem.nodeType === 'folder'));
+    const rightIsFolder = !!(right.nodeType === 'folder' || right.isFolder === true || (right.rawItem && right.rawItem.nodeType === 'folder'));
+    if (leftIsFolder !== rightIsFolder) {
+        return leftIsFolder ? -1 : 1;
+    }
+
     // 时间辅助破局：同分同优先级时，创建时间越新排在越前面
     const dateLeft = Number(left.dateAdded) || 0;
     const dateRight = Number(right.dateAdded) || 0;
@@ -16872,6 +16885,7 @@ function searchCanvasAndRender(query, options = {}) {
             exitCanvasSearchSelectionMode({ silent: true });
         }
         if (triggerSource === 'input') {
+            searchUiState.bookmarkTypeFilter = null;
             searchUiState.structureTypeFilter = null;
             searchUiState.descriptionTypeFilter = null;
             searchUiState.focusedHost = null;
@@ -22994,6 +23008,23 @@ function getCanvasSearchNodeDisplayName(nodeId, isZh = true) {
     return String(nodeId);
 }
 
+/**
+ * 格式化搜索分类条目数量：
+ * 超过 1000 时转换为紧凑的 k 格式（如 1250 -> 1.3k, 3000 -> 3k, 10500 -> 11k），
+ * 避免在工具栏中挤占过大横向空间。
+ * @param {number|string} count
+ * @returns {string}
+ */
+function formatCanvasSearchTypeCount(count) {
+    const num = Number(count) || 0;
+    if (num < 1000) return String(num);
+    if (num >= 10000) {
+        return Math.round(num / 1000) + 'k';
+    }
+    const k = (num / 1000).toFixed(1);
+    return k.endsWith('.0') ? k.slice(0, -2) + 'k' : k + 'k';
+}
+
 function renderCanvasSearchPanelViewToggleGroupHtml(compact = false, isZh = true) {
     const currentViewMode = (searchUiState && searchUiState.viewMode) === 'grid' ? 'grid' : 'table';
     const isTableActive = currentViewMode === 'table';
@@ -23121,12 +23152,9 @@ function renderCanvasSearchResults(results, options = {}) {
         if (effectiveFilter === 'bookmark' && bookmarkCount === 0) effectiveFilter = null;
         if (effectiveFilter === 'folder' && folderCount === 0) effectiveFilter = null;
         if (effectiveFilter === 'domain' && domainCount === 0) effectiveFilter = null;
+        if (effectiveFilter === 'all') effectiveFilter = null;
         if (!effectiveFilter) {
-            if (bookmarkCount > 0) {
-                effectiveFilter = 'bookmark';
-            } else if (folderCount > 0) {
-                effectiveFilter = 'folder';
-            } else if (domainCount > 0) {
+            if (bookmarkCount === 0 && folderCount === 0 && domainCount > 0) {
                 effectiveFilter = 'domain';
             } else {
                 effectiveFilter = null;
@@ -23141,6 +23169,9 @@ function renderCanvasSearchResults(results, options = {}) {
             displayResults = sourceResults.filter(r => !(r && r.nodeType === 'bookmark'));
         } else if (effectiveFilter === 'domain') {
             displayResults = domainResults;
+        } else {
+            // 全部模式：书签与文件夹混合展示
+            displayResults = sourceResults;
         }
 
         const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(options.query || searchUiState.query);
@@ -23964,16 +23995,36 @@ function renderCanvasSearchResults(results, options = {}) {
         `;
     };
 
+    /**
+     * 格式化搜索类型按钮的计数值（超过 1000 显示为紧凑形式如 1.2k，避免大数占用过多横向宽度）
+     * @param {number|string} count
+     * @returns {string}
+     */
+    const formatCanvasSearchTypeCount = (count) => {
+        const num = Number(count) || 0;
+        if (num >= 10000) {
+            return Math.floor(num / 1000) + 'k';
+        }
+        if (num >= 1000) {
+            const val = (num / 1000).toFixed(1);
+            return val.endsWith('.0') ? val.slice(0, -2) + 'k' : val + 'k';
+        }
+        return String(num);
+    };
+
     // Canvas Bookmark Mode: render a top toggle row (counts + click to switch)
     if (isBookmarkMode && bookmarkModeCounts) {
         const { bookmarkCount, folderCount, domainCount } = bookmarkModeCounts;
+        const totalCount = bookmarkCount + folderCount;
         const active = searchUiState.bookmarkTypeFilter;
+        const isAllActive = !active || active === 'all';
 
+        const showAllBtn = totalCount > 0 || sourceResults.length === 0;
         const showBookmarkBtn = bookmarkCount > 0 || sourceResults.length === 0;
         const showFolderBtn = folderCount > 0 || sourceResults.length === 0;
         const showDomainBtn = domainCount > 0 || sourceResults.length === 0;
 
-        if (showBookmarkBtn || showFolderBtn || showDomainBtn || isBrowseSecondary || sourceResults.length === 0) {
+        if (showAllBtn || showBookmarkBtn || showFolderBtn || showDomainBtn || isBrowseSecondary || sourceResults.length === 0) {
             const isZh = currentLang === 'zh_CN';
             if (isBrowseSecondary) {
                 html += renderBrowseDetailHeaderHtml();
@@ -23984,16 +24035,26 @@ function renderCanvasSearchResults(results, options = {}) {
                 const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
                 const text = isActive ? color : 'var(--text-secondary)';
                 const gapPx = compactBookmarkToolbar ? 5 : 6;
-                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+                const heightPx = compactBookmarkToolbar ? 24 : 28;
+                const paddingValue = compactBookmarkToolbar ? '0 8px' : '0 10px';
                 const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
                 const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+                const allLabelFontSize = compactBookmarkToolbar ? '10px' : '10.5px';
+                const iconHtml = icon ? `<i class="fas ${icon}" style="color:${color};"></i>` : '';
+                const leadHtml = (type === 'all')
+                    ? `<span class="canvas-type-btn-all-label" style="font-weight:600; font-size:${allLabelFontSize}; line-height:1; letter-spacing:-0.2px;">${escapeHtml(label)}</span>`
+                    : iconHtml;
                 const fullTitle = `${label} (${count})`;
-                return `<button class="canvas-bookmark-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-type-btn-compact' : ''}" data-type="${type}" data-tooltip="${escapeHtml(fullTitle)}" aria-label="${escapeHtml(fullTitle)}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
-                        <i class="fas ${icon}" style="color:${color};"></i>
-                        <span>${count}</span>
+                const compactCount = formatCanvasSearchTypeCount(count);
+                return `<button class="canvas-bookmark-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-type-btn-compact' : ''}" data-type="${type}" data-tooltip="${escapeHtml(fullTitle)}" aria-label="${escapeHtml(fullTitle)}" style="display:inline-flex; align-items:center; justify-content:center; height:${heightPx}px; box-sizing:border-box; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer; white-space:nowrap; flex-shrink:0;">
+                        ${leadHtml}
+                        <span class="canvas-bookmark-type-count">${compactCount}</span>
                     </button>`;
             };
 
+            const allBtn = showAllBtn
+                ? makeBtn({ type: 'all', icon: '', color: '#3b82f6', count: totalCount, label: isZh ? '全部' : 'All', isActiveOverride: isAllActive })
+                : '';
             const bookmarkBtn = showBookmarkBtn
                 ? makeBtn({ type: 'bookmark', icon: 'fa-bookmark', color: '#f59e0b', count: bookmarkCount, label: isZh ? '书签' : (bookmarkCount > 1 ? 'Bookmarks' : 'Bookmark') })
                 : '';
@@ -24048,8 +24109,9 @@ function renderCanvasSearchResults(results, options = {}) {
             const toolbarPadding = compactBookmarkToolbar ? '6px 8px 6px 8px' : '8px 12px';
             const controlGap = compactBookmarkToolbar ? 6 : 8;
 
-            html += `<div class="canvas-bookmark-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:${justifyStyle}; gap:${toolbarGap}px; padding:${toolbarPadding}; width:100%; box-sizing:border-box;">
-                <div style="display:flex; align-items:center; gap:${controlGap}px;">${bookmarkBtn}${folderBtn}${domainControls}</div>
+            const isDomainActive = active === 'domain';
+            html += `<div class="canvas-bookmark-type-toggle${isDomainActive ? ' is-domain-active' : ''}${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact' : ''}" data-active-filter="${escapeHtml(active || 'all')}" style="display:flex; align-items:center; justify-content:${justifyStyle}; gap:${toolbarGap}px; padding:${toolbarPadding}; width:100%; box-sizing:border-box;">
+                <div class="canvas-bookmark-type-btn-group" style="display:flex; align-items:center; gap:${controlGap}px;">${allBtn}${bookmarkBtn}${folderBtn}${domainControls}</div>
                 ${rightActionsHtml}
             </div>`;
         }
@@ -24059,30 +24121,42 @@ function renderCanvasSearchResults(results, options = {}) {
         const cardCount = structureModeCounts.cardCount;
         const groupCount = structureModeCounts.groupCount;
         const anchorCount = structureModeCounts.anchorCount;
+        const totalCount = cardCount + groupCount + anchorCount;
         const active = searchUiState.structureTypeFilter;
+        const isAllActive = !active || active === 'all';
+        const showAllBtn = totalCount > 0 || sourceResults.length === 0;
         const showCardBtn = cardCount > 0 || sourceResults.length === 0;
         const showGroupBtn = groupCount > 0 || sourceResults.length === 0;
         const showAnchorBtn = anchorCount > 0 || sourceResults.length === 0;
 
-        if (showCardBtn || showGroupBtn || showAnchorBtn || sourceResults.length === 0) {
+        if (showAllBtn || showCardBtn || showGroupBtn || showAnchorBtn || sourceResults.length === 0) {
             const isZh = currentLang === 'zh_CN';
-            const makeStructureBtn = ({ type, icon, color, label, count }) => {
-                const isActive = active === type;
+            const makeStructureBtn = ({ type, icon, color, label, count, isActiveOverride = null }) => {
+                const isActive = (typeof isActiveOverride === 'boolean') ? isActiveOverride : (active === type);
                 const bg = isActive ? `${color}22` : 'transparent';
                 const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
                 const text = isActive ? color : 'var(--text-secondary)';
                 const gapPx = compactBookmarkToolbar ? 5 : 6;
-                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+                const heightPx = compactBookmarkToolbar ? 24 : 28;
+                const paddingValue = compactBookmarkToolbar ? '0 8px' : '0 10px';
                 const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
                 const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+                const allLabelFontSize = compactBookmarkToolbar ? '10px' : '10.5px';
                 const iconHtml = icon ? `<i class="fas ${icon}" style="color:${color};"></i>` : '';
+                const leadHtml = (type === 'all')
+                    ? `<span class="canvas-type-btn-all-label" style="font-weight:600; font-size:${allLabelFontSize}; line-height:1; letter-spacing:-0.2px;">${escapeHtml(label)}</span>`
+                    : iconHtml;
                 const fullTitle = `${label} (${count})`;
-                return `<button class="canvas-structure-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" data-tooltip="${escapeHtml(fullTitle)}" aria-label="${escapeHtml(fullTitle)}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
-                        ${iconHtml}
-                        <span class="canvas-structure-type-count">${count}</span>
+                const compactCount = formatCanvasSearchTypeCount(count);
+                return `<button class="canvas-structure-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-structure-type-btn-compact' : ''}" data-type="${type}" data-tooltip="${escapeHtml(fullTitle)}" aria-label="${escapeHtml(fullTitle)}" style="display:inline-flex; align-items:center; justify-content:center; height:${heightPx}px; box-sizing:border-box; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer; white-space:nowrap; flex-shrink:0;">
+                        ${leadHtml}
+                        <span class="canvas-structure-type-count">${compactCount}</span>
                     </button>`;
             };
 
+            const allBtn = showAllBtn
+                ? makeStructureBtn({ type: 'all', icon: '', color: '#3b82f6', label: isZh ? '全部' : 'All', count: totalCount, isActiveOverride: isAllActive })
+                : '';
             const cardBtn = showCardBtn
                 ? makeStructureBtn({ type: 'card', icon: 'fa-layer-group', color: '#f97316', label: isZh ? '卡片' : (cardCount > 1 ? 'Cards' : 'Card'), count: cardCount })
                 : '';
@@ -24099,7 +24173,7 @@ function renderCanvasSearchResults(results, options = {}) {
             const viewGroupHtml = renderCanvasSearchPanelViewToggleGroupHtml(compactBookmarkToolbar, isZh);
 
             html += `<div class="canvas-bookmark-type-toggle canvas-structure-type-toggle${compactBookmarkToolbar ? ' canvas-bookmark-type-toggle-compact canvas-structure-type-toggle-compact' : ''}" style="display:flex; align-items:center; justify-content:space-between; gap:${toolbarGap}px; padding:${toolbarPadding}; width:100%; box-sizing:border-box;">
-                <div style="display:flex; align-items:center; gap:${controlGap}px;">${cardBtn}${groupBtn}${anchorBtn}</div>
+                <div class="canvas-structure-type-btn-group" style="display:flex; align-items:center; gap:${controlGap}px;">${allBtn}${cardBtn}${groupBtn}${anchorBtn}</div>
                 <div class="canvas-bookmark-toolbar-actions" style="display:flex; align-items:center; gap:6px; margin-left:auto;">
                     ${viewGroupHtml}
                 </div>
@@ -24116,31 +24190,43 @@ function renderCanvasSearchResults(results, options = {}) {
         const sectionCount = descriptionModeCounts.sectionCount;
         const cardCount = descriptionModeCounts.cardCount;
         const edgeCount = descriptionModeCounts.edgeCount;
+        const totalCount = sectionCount + cardCount + edgeCount;
         const active = searchUiState.descriptionTypeFilter;
+        const isAllActive = !active || active === 'all';
 
+        const showAllBtn = totalCount > 0 || sourceResults.length === 0;
         const showSectionBtn = sectionCount > 0 || sourceResults.length === 0;
         const showCardBtn = cardCount > 0 || sourceResults.length === 0;
         const showEdgeBtn = edgeCount > 0 || sourceResults.length === 0;
 
-        if (showSectionBtn || showCardBtn || showEdgeBtn || (fullscreenScope && othersCount > 0 && !showingOthers) || sourceResults.length === 0) {
+        if (showAllBtn || showSectionBtn || showCardBtn || showEdgeBtn || (fullscreenScope && othersCount > 0 && !showingOthers) || sourceResults.length === 0) {
             const isZh = currentLang === 'zh_CN';
-            const makeDescriptionBtn = ({ type, icon, color, label, count }) => {
-                const isActive = active === type;
+            const makeDescriptionBtn = ({ type, icon, color, label, count, isActiveOverride = null }) => {
+                const isActive = (typeof isActiveOverride === 'boolean') ? isActiveOverride : (active === type);
                 const bg = isActive ? `${color}22` : 'transparent';
                 const border = isActive ? `${color}55` : 'rgba(128, 128, 128, 0.28)';
                 const text = isActive ? color : 'var(--text-secondary)';
                 const gapPx = compactBookmarkToolbar ? 5 : 6;
-                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+                const heightPx = compactBookmarkToolbar ? 24 : 28;
+                const paddingValue = compactBookmarkToolbar ? '0 8px' : '0 10px';
                 const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
                 const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
+                const allLabelFontSize = compactBookmarkToolbar ? '10px' : '10.5px';
                 const iconHtml = icon ? `<i class="fas ${icon}" style="color:${color};"></i>` : '';
+                const leadHtml = (type === 'all')
+                    ? `<span class="canvas-type-btn-all-label" style="font-weight:600; font-size:${allLabelFontSize}; line-height:1; letter-spacing:-0.2px;">${escapeHtml(label)}</span>`
+                    : iconHtml;
                 const fullTitle = `${label} (${count})`;
-                return `<button class="canvas-description-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-description-type-btn-compact' : ''}" data-type="${type}" data-tooltip="${escapeHtml(fullTitle)}" aria-label="${escapeHtml(fullTitle)}" style="display:inline-flex; align-items:center; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer;">
-                        ${iconHtml}
-                        <span class="canvas-description-type-count">${count}</span>
+                const compactCount = formatCanvasSearchTypeCount(count);
+                return `<button class="canvas-description-type-btn${isActive ? ' active' : ''}${compactBookmarkToolbar ? ' canvas-description-type-btn-compact' : ''}" data-type="${type}" data-tooltip="${escapeHtml(fullTitle)}" aria-label="${escapeHtml(fullTitle)}" style="display:inline-flex; align-items:center; justify-content:center; height:${heightPx}px; box-sizing:border-box; gap:${gapPx}px; padding:${paddingValue}; border-radius:${radiusValue}; border:1px solid ${border}; background:${bg}; color:${text}; font-size:${fontSizeValue}; font-weight:600; cursor:pointer; white-space:nowrap; flex-shrink:0;">
+                        ${leadHtml}
+                        <span class="canvas-description-type-count">${compactCount}</span>
                     </button>`;
             };
 
+            const allBtn = showAllBtn
+                ? makeDescriptionBtn({ type: 'all', icon: '', color: '#3b82f6', label: isZh ? '全部' : 'All', count: totalCount, isActiveOverride: isAllActive })
+                : '';
             const sectionBtn = showSectionBtn
                 ? makeDescriptionBtn({ type: 'section', icon: 'fa-columns', color: '#059669', label: isZh ? '栏目' : (sectionCount > 1 ? 'Sections' : 'Section'), count: sectionCount })
                 : '';
@@ -24154,14 +24240,16 @@ function renderCanvasSearchResults(results, options = {}) {
             let leftControls = '';
             if (fullscreenScope && othersCount > 0 && !showingOthers) {
                 const otherBtnLabel = isZh ? '其他' : 'Other';
-                const paddingValue = compactBookmarkToolbar ? '5px 8px' : '6px 10px';
+                const heightPx = compactBookmarkToolbar ? 24 : 28;
+                const paddingValue = compactBookmarkToolbar ? '0 8px' : '0 10px';
+                const radiusValue = compactBookmarkToolbar ? '7px' : '8px';
                 const fontSizeValue = compactBookmarkToolbar ? '11px' : '12px';
-                leftControls = `<button class="canvas-description-others-btn" type="button" style="border:1px solid var(--border-color); background:var(--bg-secondary); padding:${paddingValue}; border-radius:8px; font-size:${fontSizeValue}; color:var(--text-secondary); cursor:pointer; font-weight:600; white-space:nowrap;">
+                leftControls = `<button class="canvas-description-others-btn${compactBookmarkToolbar ? ' canvas-description-others-btn-compact' : ''}" type="button" style="display:inline-flex; align-items:center; justify-content:center; height:${heightPx}px; box-sizing:border-box; border:1px solid var(--border-color); background:var(--bg-secondary); padding:${paddingValue}; border-radius:${radiusValue}; font-size:${fontSizeValue}; color:var(--text-secondary); cursor:pointer; font-weight:600; white-space:nowrap;">
                     ${escapeHtml(otherBtnLabel)} (${othersCount})
                 </button>`;
             } else {
                 const controlGap = compactBookmarkToolbar ? 6 : 8;
-                leftControls = `<div style="display:flex; align-items:center; gap:${controlGap}px;">${sectionBtn}${cardBtn}${edgeBtn}</div>`;
+                leftControls = `<div class="canvas-description-type-btn-group" style="display:flex; align-items:center; gap:${controlGap}px;">${allBtn}${sectionBtn}${cardBtn}${edgeBtn}</div>`;
             }
 
             const toolbarGap = compactBookmarkToolbar ? 6 : 8;

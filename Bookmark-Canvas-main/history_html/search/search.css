@@ -565,16 +565,26 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     gap: 2px;
     flex-shrink: 0;
     box-sizing: border-box;
+    height: 28px !important;
 }
 
 .canvas-bookmark-view-group .canvas-bookmark-view-toggle-btn {
     border: none;
     border-radius: 6px;
-    width: 26px;
-    height: 26px;
-    min-width: 26px;
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    box-sizing: border-box;
     background: transparent;
     color: var(--text-secondary);
+}
+
+.canvas-bookmark-view-group .canvas-bookmark-view-toggle-btn i {
+    font-size: 11.5px;
+}
+
+.canvas-bookmark-view-group:hover {
+    border-color: rgba(128, 128, 128, 0.35);
 }
 
 .canvas-bookmark-view-group .canvas-bookmark-view-toggle-btn:hover {
@@ -588,17 +598,25 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
-.canvas-bookmark-view-group-compact {
+.canvas-bookmark-view-group-compact,
+.search-results-panel.is-single-column .canvas-bookmark-view-group {
+    height: 24px !important;
     border-radius: 6px;
-    padding: 1px;
+    padding: 2px;
     gap: 1px;
 }
 
-.canvas-bookmark-view-group-compact .canvas-bookmark-view-toggle-btn {
-    width: 22px;
-    height: 22px;
-    min-width: 22px;
+.canvas-bookmark-view-group-compact .canvas-bookmark-view-toggle-btn,
+.search-results-panel.is-single-column .canvas-bookmark-view-group .canvas-bookmark-view-toggle-btn {
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
     border-radius: 4px;
+}
+
+.canvas-bookmark-view-group-compact .canvas-bookmark-view-toggle-btn i,
+.search-results-panel.is-single-column .canvas-bookmark-view-group .canvas-bookmark-view-toggle-btn i {
+    font-size: 9.5px;
 }
 
 [data-theme="dark"] .canvas-bookmark-view-group {
@@ -1798,13 +1816,50 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 
 .canvas-bookmark-type-btn,
 .canvas-structure-type-btn,
-.canvas-description-type-btn {
+.canvas-description-type-btn,
+.canvas-description-others-btn {
+    height: 28px !important;
+    line-height: 1 !important;
+    box-sizing: border-box !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
     transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.canvas-bookmark-type-btn-compact,
+.canvas-structure-type-btn-compact,
+.canvas-description-type-btn-compact,
+.canvas-description-others-btn-compact {
+    height: 24px !important;
+}
+
+.canvas-type-btn-all-label {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.2px;
+    white-space: nowrap !important;
+}
+
+.canvas-bookmark-type-btn-compact .canvas-type-btn-all-label,
+.canvas-structure-type-btn-compact .canvas-type-btn-all-label,
+.canvas-description-type-btn-compact .canvas-type-btn-all-label {
+    font-size: 10px;
 }
 
 .canvas-bookmark-type-btn:hover {
     border-color: rgba(128, 128, 128, 0.45) !important;
     background: rgba(128, 128, 128, 0.08) !important;
+}
+
+.canvas-bookmark-type-btn[data-type="all"]:not(.active):hover {
+    border-color: rgba(59, 130, 246, 0.45) !important;
+    background: rgba(59, 130, 246, 0.1) !important;
+    color: #3b82f6 !important;
 }
 
 .canvas-bookmark-type-btn[data-type="bookmark"]:not(.active):hover {
@@ -1823,6 +1878,11 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     border-color: rgba(14, 165, 233, 0.45) !important;
     background: rgba(14, 165, 233, 0.1) !important;
     color: #0ea5e9 !important;
+}
+
+.canvas-bookmark-type-btn[data-type="all"].active:hover {
+    border-color: rgba(59, 130, 246, 0.65) !important;
+    background: rgba(59, 130, 246, 0.22) !important;
 }
 
 .canvas-bookmark-type-btn[data-type="bookmark"].active:hover {
@@ -1845,6 +1905,12 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     background: rgba(128, 128, 128, 0.08) !important;
 }
 
+.canvas-structure-type-btn[data-type="all"]:not(.active):hover {
+    border-color: rgba(59, 130, 246, 0.45) !important;
+    background: rgba(59, 130, 246, 0.1) !important;
+    color: #3b82f6 !important;
+}
+
 .canvas-structure-type-btn[data-type="card"]:not(.active):hover {
     border-color: rgba(249, 115, 22, 0.45) !important;
     background: rgba(249, 115, 22, 0.1) !important;
@@ -1857,6 +1923,17 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     color: #7c3aed !important;
 }
 
+.canvas-structure-type-btn[data-type="anchor"]:not(.active):hover {
+    border-color: rgba(37, 99, 235, 0.45) !important;
+    background: rgba(37, 99, 235, 0.1) !important;
+    color: #2563eb !important;
+}
+
+.canvas-structure-type-btn[data-type="all"].active:hover {
+    border-color: rgba(59, 130, 246, 0.65) !important;
+    background: rgba(59, 130, 246, 0.22) !important;
+}
+
 .canvas-structure-type-btn[data-type="card"].active:hover {
     border-color: rgba(249, 115, 22, 0.65) !important;
     background: rgba(249, 115, 22, 0.22) !important;
@@ -1865,6 +1942,11 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
 .canvas-structure-type-btn[data-type="group"].active:hover {
     border-color: rgba(124, 58, 237, 0.65) !important;
     background: rgba(124, 58, 237, 0.22) !important;
+}
+
+.canvas-structure-type-btn[data-type="anchor"].active:hover {
+    border-color: rgba(37, 99, 235, 0.65) !important;
+    background: rgba(37, 99, 235, 0.22) !important;
 }
 
 .canvas-description-type-btn:hover {
@@ -1949,9 +2031,28 @@ body.header-dock-bottom .search-results-panel.view-table .search-panel-resize-ha
     align-items: center !important;
     gap: 6px !important;
     margin-left: auto !important;
+    flex-shrink: 0 !important;
 }
 
-/* 窄宽度/侧边栏模式自适应：隐藏结构模式文字标签与勾选导出文字，只保留图标与数量，依靠 hover 气泡识别，防止挤压右侧视图切换按钮 */
+.canvas-bookmark-type-btn-group,
+.canvas-structure-type-btn-group,
+.canvas-description-type-btn-group {
+    display: flex !important;
+    align-items: center !important;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+    flex: 1 1 auto !important;
+}
+
+.canvas-bookmark-type-btn-group::-webkit-scrollbar,
+.canvas-structure-type-btn-group::-webkit-scrollbar,
+.canvas-description-type-btn-group::-webkit-scrollbar {
+    display: none !important;
+}
+
+/* 窄宽度/单列模式自适应：适度收紧内边距与间距，锁死右侧操作区防挤压，拉宽时 ResizeObserver 自动移除 .is-single-column 瞬间还原宽屏 */
 html.side-panel-mode .canvas-structure-type-btn .canvas-structure-type-text,
 .canvas-structure-type-toggle-compact .canvas-structure-type-btn .canvas-structure-type-text,
 .search-results-panel.is-single-column .canvas-structure-type-btn .canvas-structure-type-text,
@@ -1960,12 +2061,99 @@ html.side-panel-mode .canvas-bookmark-selection-confirm-btn .canvas-selection-co
     display: none !important;
 }
 
+/* 方案 A：当处于窄宽度（侧边栏、单列或容器宽<=520px）且激活「域名」展开主/子域名切换时，未激活分类项收起数字，为分段切换腾出足够横向空间 */
+html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookmark-type-btn:not(.active) .canvas-bookmark-type-count,
+.canvas-bookmark-type-toggle-compact.is-domain-active .canvas-bookmark-type-btn:not(.active) .canvas-bookmark-type-count,
+.search-results-panel.is-single-column .canvas-bookmark-type-toggle.is-domain-active .canvas-bookmark-type-btn:not(.active) .canvas-bookmark-type-count {
+    display: none !important;
+}
+
+@container search-panel (max-width: 520px) {
+    .canvas-bookmark-type-toggle.is-domain-active .canvas-bookmark-type-btn:not(.active) .canvas-bookmark-type-count {
+        display: none !important;
+    }
+}
+
+.search-results-panel.is-single-column .canvas-bookmark-type-toggle,
+.search-results-panel.is-single-column .canvas-structure-type-toggle,
+.search-results-panel.is-single-column .canvas-description-type-toggle {
+    padding: 6px 8px !important;
+    gap: 4px !important;
+}
+
+.search-results-panel.is-single-column .canvas-bookmark-type-btn,
+.search-results-panel.is-single-column .canvas-structure-type-btn,
+.search-results-panel.is-single-column .canvas-description-type-btn,
+.search-results-panel.is-single-column .canvas-description-others-btn {
+    height: 24px !important;
+    padding: 0 6px !important;
+    gap: 4px !important;
+    border-radius: 6px !important;
+    font-size: 11px !important;
+}
+
+.search-results-panel.is-single-column .canvas-bookmark-to-temp-btn,
+.search-results-panel.is-single-column .canvas-bookmark-selection-confirm-btn {
+    height: 24px !important;
+}
+
+.search-results-panel.is-single-column .canvas-bookmark-type-btn-group,
+.search-results-panel.is-single-column .canvas-structure-type-btn-group,
+.search-results-panel.is-single-column .canvas-description-type-btn-group {
+    gap: 4px !important;
+    min-width: 0 !important;
+}
+
+.search-results-panel.is-single-column .canvas-bookmark-domain-granularity-btn {
+    padding: 3px 6px !important;
+    font-size: 10px !important;
+}
+
+.search-results-panel.is-single-column .canvas-bookmark-toolbar-actions {
+    gap: 4px !important;
+    flex-shrink: 0 !important;
+}
+
 @container search-panel (max-width: 520px) {
     .canvas-structure-type-btn .canvas-structure-type-text {
         display: none !important;
     }
     .canvas-bookmark-selection-confirm-btn .canvas-selection-confirm-text {
         display: none !important;
+    }
+    .canvas-bookmark-type-toggle,
+    .canvas-structure-type-toggle,
+    .canvas-description-type-toggle {
+        padding: 6px 8px !important;
+        gap: 4px !important;
+    }
+    .canvas-bookmark-type-btn,
+    .canvas-structure-type-btn,
+    .canvas-description-type-btn,
+    .canvas-description-others-btn {
+        height: 24px !important;
+        padding: 0 6px !important;
+        gap: 4px !important;
+        border-radius: 6px !important;
+        font-size: 11px !important;
+    }
+    .canvas-bookmark-to-temp-btn,
+    .canvas-bookmark-selection-confirm-btn {
+        height: 24px !important;
+    }
+    .canvas-bookmark-type-btn-group,
+    .canvas-structure-type-btn-group,
+    .canvas-description-type-btn-group {
+        gap: 4px !important;
+        min-width: 0 !important;
+    }
+    .canvas-bookmark-domain-granularity-btn {
+        padding: 3px 6px !important;
+        font-size: 10px !important;
+    }
+    .canvas-bookmark-toolbar-actions {
+        gap: 4px !important;
+        flex-shrink: 0 !important;
     }
 }
 
@@ -7536,6 +7724,7 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    flex-shrink: 0 !important;
 }
 
 .canvas-bookmark-domain-granularity-toggle {
@@ -7543,26 +7732,46 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     align-items: center;
     background: var(--bg-secondary, rgba(128, 128, 128, 0.1));
     border: 1px solid var(--border-color, rgba(128, 128, 128, 0.25));
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 2px;
     gap: 2px;
+    height: 28px !important;
+    box-sizing: border-box !important;
+    flex-shrink: 0 !important;
 }
 
 .canvas-bookmark-domain-granularity-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 2px 8px;
+    padding: 0 8px;
+    height: 22px !important;
+    box-sizing: border-box !important;
     font-size: 11px;
     font-weight: 500;
-    border-radius: 4px;
+    border-radius: 6px;
     border: none;
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.15s ease;
     white-space: nowrap;
-    line-height: 1.3;
+    line-height: 1;
+}
+
+.canvas-bookmark-domain-granularity-toggle-compact,
+.search-results-panel.is-single-column .canvas-bookmark-domain-granularity-toggle {
+    height: 24px !important;
+    border-radius: 6px;
+    padding: 2px;
+}
+
+.canvas-bookmark-domain-granularity-toggle-compact .canvas-bookmark-domain-granularity-btn,
+.search-results-panel.is-single-column .canvas-bookmark-domain-granularity-btn {
+    height: 18px !important;
+    padding: 0 6px !important;
+    font-size: 10px !important;
+    border-radius: 4px;
 }
 
 .canvas-bookmark-domain-granularity-btn:hover {
