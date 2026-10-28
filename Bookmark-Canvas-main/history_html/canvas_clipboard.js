@@ -3,15 +3,19 @@
 
     const STORAGE_KEY = 'bcs:clipboard-history';
     const LIMIT_STORAGE_KEY = 'bcs:clipboard-limit';
+    const TTL_STORAGE_KEY = 'bcs:clipboard-ttl';
     const MIN_LIMIT = 1;
     const MAX_LIMIT = 50;
     const DEFAULT_LIMIT = 7;
+    const MIN_TTL_MINUTES = 1;
+    const MAX_TTL_MINUTES = 240;
+    const DEFAULT_TTL_MINUTES = 15;
     const clone = (value) => {
         try { return JSON.parse(JSON.stringify(value)); } catch (_) { return value; }
     };
     const isEn = () => String(global.currentLang || 'zh_CN').toLowerCase().startsWith('en');
     const text = (zh, en) => isEn() ? en : zh;
-    let state = { version: 1, limit: DEFAULT_LIMIT, activeEntryId: null, entries: [] };
+    let state = { version: 1, limit: DEFAULT_LIMIT, ttl: DEFAULT_TTL_MINUTES, activeEntryId: null, entries: [] };
     let initialized = false;
     let writeChain = Promise.resolve();
     let selectedIds = new Set();
@@ -51,16 +55,59 @@
         try { area.set({ [LIMIT_STORAGE_KEY]: val }); } catch (_) {}
     }
 
+    function readPersistentTtl() {
+        const area = getPersistentArea();
+        if (!area) {
+            try { return Number.parseInt(localStorage.getItem(TTL_STORAGE_KEY), 10) || null; } catch (_) { return null; }
+        }
+        return new Promise((resolve) => {
+            try {
+                area.get([TTL_STORAGE_KEY], (items) => {
+                    const val = items && items[TTL_STORAGE_KEY];
+                    resolve(Number.parseInt(val, 10) || null);
+                });
+            } catch (_) { resolve(null); }
+        });
+    }
+
+    function savePersistentTtl(val) {
+        const area = getPersistentArea();
+        if (!area) {
+            try { localStorage.setItem(TTL_STORAGE_KEY, String(val)); } catch (_) {}
+            return;
+        }
+        try { area.set({ [TTL_STORAGE_KEY]: val }); } catch (_) {}
+    }
+
+    function isEntryActiveExpired(entry, ttlMinutes = state.ttl) {
+        if (!entry) return true;
+        const ts = entry.updatedAt || entry.createdAt || 0;
+        const ttlMs = (Number(ttlMinutes) || DEFAULT_TTL_MINUTES) * 60 * 1000;
+        return ts > 0 && (Date.now() - ts) > ttlMs;
+    }
+
     function normalize(raw) {
         const input = raw && typeof raw === 'object' ? raw : {};
         const limit = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Number.parseInt(input.limit, 10) || DEFAULT_LIMIT));
+        const ttl = Math.min(MAX_TTL_MINUTES, Math.max(MIN_TTL_MINUTES, Number.parseInt(input.ttl, 10) || DEFAULT_TTL_MINUTES));
         const entries = Array.isArray(input.entries) ? input.entries.filter(Boolean).slice(0, limit) : [];
-        const activeEntryId = entries.some((entry) => entry.id === input.activeEntryId) ? input.activeEntryId : null;
-        return { version: 1, limit, activeEntryId, entries };
+        let activeEntryId = entries.some((entry) => entry.id === input.activeEntryId) ? input.activeEntryId : null;
+        if (activeEntryId) {
+            const activeEntry = entries.find((e) => e && e.id === activeEntryId);
+            if (!activeEntry || isEntryActiveExpired(activeEntry, ttl)) {
+                activeEntryId = null;
+            }
+        }
+        return { version: 1, limit, ttl, activeEntryId, entries };
     }
 
     function getActiveEntry() {
-        return state.entries.find((entry) => entry && entry.id === state.activeEntryId) || null;
+        const entry = state.entries.find((entry) => entry && entry.id === state.activeEntryId) || null;
+        if (entry && isEntryActiveExpired(entry)) {
+            state.activeEntryId = null;
+            return null;
+        }
+        return entry;
     }
 
     function notify() {
@@ -87,6 +134,7 @@
         const snapshot = {
             version: 1,
             limit: state.limit,
+            ttl: state.ttl,
             activeEntryId: null,
             entries: clone(state.entries)
         };
@@ -134,16 +182,23 @@
 
     async function init() {
         if (initialized) return state;
-        const [raw, persistentLimit, remote] = await Promise.all([
+        const [raw, persistentLimit, persistentTtl, remote] = await Promise.all([
             readStorage(),
             readPersistentLimit(),
+            readPersistentTtl(),
             sendRuntimeMessage({ action: 'canvasClipboardMutate', operation: 'get-state' })
         ]);
         const merged = raw && typeof raw === 'object' ? raw : {};
         if (merged.limit == null && persistentLimit) merged.limit = persistentLimit;
+        if (merged.ttl == null && persistentTtl) merged.ttl = persistentTtl;
         state = normalize(merged);
         if (remote && remote.success && remote.state && remote.state.activeEntryId) {
-            state.activeEntryId = remote.state.activeEntryId;
+            const activeEntry = state.entries.find((e) => e && e.id === remote.state.activeEntryId);
+            if (activeEntry && !isEntryActiveExpired(activeEntry, state.ttl)) {
+                state.activeEntryId = remote.state.activeEntryId;
+            } else {
+                state.activeEntryId = null;
+            }
         } else {
             state.activeEntryId = null;
         }
@@ -241,10 +296,14 @@
     function getActivePayload() {
         const entry = getActiveEntry();
         if (!entry || !entry.currentOperation) return null;
-        if (entry.kind === 'text') return { action: 'copy', source: 'text', text: entry.data && entry.data.text, entryId: entry.id };
+        const ts = entry.updatedAt || entry.createdAt || Date.now();
+        const ttlMs = (Number(state.ttl) || DEFAULT_TTL_MINUTES) * 60 * 1000;
+        if (entry.kind === 'text') return { action: 'copy', source: 'text', text: entry.data && entry.data.text, entryId: entry.id, timestamp: ts, activeTtlMs: ttlMs };
         const payload = clone(entry.data || {});
         payload.action = entry.currentOperation;
         payload.entryId = entry.id;
+        payload.timestamp = ts;
+        payload.activeTtlMs = ttlMs;
         return payload;
     }
 
@@ -379,20 +438,27 @@
         notify();
     }
 
-    async function setLimit(value) {
+    async function saveSettings(limitValue, ttlValue) {
         await init();
-        const nextLimit = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Number.parseInt(value, 10) || DEFAULT_LIMIT));
+        const nextLimit = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Number.parseInt(limitValue, 10) || DEFAULT_LIMIT));
+        const nextTtl = Math.min(MAX_TTL_MINUTES, Math.max(MIN_TTL_MINUTES, Number.parseInt(ttlValue, 10) || DEFAULT_TTL_MINUTES));
         savePersistentLimit(nextLimit);
-        const remote = await mutateInBackground('set-limit', { limit: nextLimit });
+        savePersistentTtl(nextTtl);
+        const remote = await mutateInBackground('save-settings', { limit: nextLimit, ttl: nextTtl });
         if (remote) {
             notify();
             return;
         }
         state.limit = nextLimit;
+        state.ttl = nextTtl;
         state.entries = state.entries.slice(0, state.limit);
-        if (!state.entries.some((entry) => entry.id === state.activeEntryId)) state.activeEntryId = null;
+        if (!state.entries.some((entry) => entry && entry.id === state.activeEntryId)) state.activeEntryId = null;
         await persist();
         notify();
+    }
+
+    async function setLimit(value) {
+        return saveSettings(value, state.ttl);
     }
 
     function getEntryPresentation(entry) {
@@ -498,11 +564,13 @@
         setText('canvasClipboardModalTitle', text('剪贴板', 'Clipboard'));
         setText('canvasClipboardLimitLabel', text('最多保存', 'Keep up to'));
         setText('canvasClipboardLimitUnit', text('条', 'items'));
+        setText('canvasClipboardTtlLabel', text('待粘贴保留', 'Active paste'));
+        setText('canvasClipboardTtlUnit', text('分钟', 'mins'));
         setText('canvasClipboardSaveSettingsBtn', text('保存', 'Save'));
         setText('canvasClipboardCancelBtn', text('取消', 'Cancel'));
         setText('canvasClipboardSettingsTipText', text(
-            '剪贴板记录保存在本地；全部画布与侧边栏关闭后，右键待粘贴状态自动清空，可在剪贴板中重新选取应用。',
-            'Clipboard history is saved locally. Active paste states clear automatically after all canvas tabs and sidebars are closed, and can be reapplied from the clipboard panel.'
+            '剪贴板记录保存在本地；活跃待粘贴状态在复制后保留设定时长（全部画布与侧边栏关闭、或电脑休眠后自动清空，防误触），可在剪贴板中随时重新选取应用。',
+            'Clipboard history is saved locally. Active paste states remain valid for the configured duration (and auto-clear when all canvases/sidebars close or system sleeps to prevent accidental pastes), and can be reapplied anytime from the clipboard panel.'
         ));
         setLabel('canvasClipboardSettingsBtn', text('剪贴板设置', 'Clipboard settings'));
         setLabel('canvasClipboardClearBtn', text('清空剪贴板', 'Clear clipboard'));
@@ -602,6 +670,20 @@
         selectedIds.add(id);
     }
 
+    function repositionModal(modalEl) {
+        window.requestAnimationFrame(() => {
+            const target = modalEl || document.getElementById('canvasClipboardModal');
+            if (!target || target.style.display === 'none') return;
+            const repositionFn = window.positionManageModalUnderSettingsBtn ||
+                (typeof positionManageModalUnderSettingsBtn === 'function' ? positionManageModalUnderSettingsBtn : null);
+            if (typeof repositionFn === 'function') {
+                repositionFn(target);
+            } else if (typeof window.repositionSettingsAnchoredModals === 'function') {
+                window.repositionSettingsAnchoredModals();
+            }
+        });
+    }
+
     function bindUi() {
         const modal = document.getElementById('canvasClipboardModal');
         if (!modal || modal.dataset.clipboardBound === 'true') return;
@@ -610,8 +692,23 @@
         document.getElementById('canvasClipboardApplyBtn')?.addEventListener('click', async () => { await activateSelected(); });
         document.getElementById('canvasClipboardCancelBtn')?.addEventListener('click', () => { selectedIds.clear(); render(); });
         document.getElementById('canvasClipboardClearBtn')?.addEventListener('click', async () => { if (confirm(text('清空全部剪贴板记录？', 'Clear all clipboard records?'))) await clear(); });
-        document.getElementById('canvasClipboardSettingsBtn')?.addEventListener('click', () => { const settings = document.getElementById('canvasClipboardSettings'); const input = document.getElementById('canvasClipboardLimitInput'); if (settings) settings.hidden = !settings.hidden; if (input) input.value = state.limit; });
-        document.getElementById('canvasClipboardSaveSettingsBtn')?.addEventListener('click', async () => { const input = document.getElementById('canvasClipboardLimitInput'); await setLimit(input && input.value); const settings = document.getElementById('canvasClipboardSettings'); if (settings) settings.hidden = true; });
+        document.getElementById('canvasClipboardSettingsBtn')?.addEventListener('click', () => {
+            const settings = document.getElementById('canvasClipboardSettings');
+            const inputLimit = document.getElementById('canvasClipboardLimitInput');
+            const inputTtl = document.getElementById('canvasClipboardTtlInput');
+            if (settings) settings.hidden = !settings.hidden;
+            if (inputLimit) inputLimit.value = state.limit;
+            if (inputTtl) inputTtl.value = state.ttl || DEFAULT_TTL_MINUTES;
+            repositionModal(modal);
+        });
+        document.getElementById('canvasClipboardSaveSettingsBtn')?.addEventListener('click', async () => {
+            const inputLimit = document.getElementById('canvasClipboardLimitInput');
+            const inputTtl = document.getElementById('canvasClipboardTtlInput');
+            await saveSettings(inputLimit && inputLimit.value, inputTtl && inputTtl.value);
+            const settings = document.getElementById('canvasClipboardSettings');
+            if (settings) settings.hidden = true;
+            repositionModal(modal);
+        });
         modal.addEventListener('change', (event) => {
             const input = event.target;
             if (!input || !input.matches('[data-clipboard-check]')) return;
@@ -649,8 +746,6 @@
             const clickedInsideModal = path.length ? path.includes(modal) : modal.contains(event.target);
             if (modal.style.display !== 'block' || clickedInsideModal) return;
             const isTrigger = event.target && event.target.closest && (
-                event.target.closest('#settingsToggle') ||
-                event.target.closest('#titleSettingsToggleBtn') ||
                 event.target.closest('.settings-menu-item[data-action="open-canvas-clipboard"]')
             );
             if (!isTrigger) {
@@ -709,21 +804,22 @@
 
     global.CanvasClipboard = {
         init, addStructured, addText, getActivePayload, consumeActiveCut, claimActiveStructuredForPaste, finishClaimedCut,
-        cancelActiveCut, activateSelected, deactivateActive, removeEntry, clear, setLimit,
+        cancelActiveCut, activateSelected, deactivateActive, removeEntry, clear, setLimit, saveSettings,
         open() {
             const modal = document.getElementById('canvasClipboardModal');
             if (!modal) return;
+            try { document.getElementById('canvasHelpModal').style.display = 'none'; } catch (_) { }
+            try { document.getElementById('canvasShortcutsModal').style.display = 'none'; } catch (_) { }
+            try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
+            try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+            try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
             refreshStaticText();
             modal.style.display = 'block';
             modal.style.zIndex = '20000';
             render();
             // Reuse the shortcut modal's settings-anchor positioning so the
             // panel follows a top- or bottom-docked title bar.
-            window.requestAnimationFrame(() => {
-                if (typeof positionManageModalUnderSettingsBtn === 'function') {
-                    positionManageModalUnderSettingsBtn(modal);
-                }
-            });
+            repositionModal(modal);
         },
         getState: () => clone(state),
         refreshLanguage() {

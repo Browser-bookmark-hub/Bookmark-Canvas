@@ -9309,28 +9309,47 @@ function setupCanvasManageModal() {
     const openManageModal = (options = {}) => {
         if (!manageModal) return;
         const { anchorToSettings = false } = options;
+        const targetAnchor = anchorToSettings ? 'settings' : 'zoom-indicator';
+        const currentAnchor = manageModal.dataset.anchoredTo;
 
         stopShortcutRecording(null);
         if (otherManageModal) otherManageModal.style.display = 'none';
         if (helpModal) helpModal.style.display = 'none';
         if (shortcutsModal) shortcutsModal.style.display = 'none';
         try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
+        try { document.getElementById('canvasClipboardModal').style.display = 'none'; } catch (_) { }
         const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
         if (pop) pop.remove();
 
         const isVisible = manageModal.style.display === 'block';
         if (isVisible) {
-            manageModal.style.display = 'none';
+            // 同一位置重复点击：执行关闭（Toggle）
+            if (currentAnchor === targetAnchor) {
+                manageModal.style.display = 'none';
+                manageModal.dataset.anchoredTo = '';
+                return;
+            }
+            // 另一位置点击：互斥单次生效，直接切至当前位置并重新定位，无需按两次
+            resetSettingsAnchoredModalSizing(manageModal);
+            manageModal.dataset.anchoredTo = targetAnchor;
+            if (anchorToSettings) {
+                window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(manageModal));
+            } else {
+                window.requestAnimationFrame(() => positionModalNearZoomIndicator(manageModal));
+            }
+            updateShortcutDisplays();
+            if (typeof updateShortcutsDisplay === 'function') {
+                updateShortcutsDisplay();
+            }
             return;
         }
 
         manageModal.style.display = 'block';
         manageModal.style.zIndex = '20000';
+        manageModal.dataset.anchoredTo = targetAnchor;
         if (anchorToSettings) {
-            manageModal.dataset.anchoredTo = 'settings';
             window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(manageModal));
         } else {
-            manageModal.dataset.anchoredTo = 'zoom-indicator';
             window.requestAnimationFrame(() => positionModalNearZoomIndicator(manageModal));
         }
 
@@ -9365,29 +9384,43 @@ function setupCanvasManageModal() {
     const openOtherManageModal = (options = {}) => {
         if (!otherManageModal) return;
         const { anchorToSettings = false } = options;
+        const targetAnchor = anchorToSettings ? 'settings' : 'zoom-indicator';
+        const currentAnchor = otherManageModal.dataset.anchoredTo;
 
         stopShortcutRecording(null);
         manageModal.style.display = 'none';
         if (helpModal) helpModal.style.display = 'none';
         if (shortcutsModal) shortcutsModal.style.display = 'none';
         try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
+        try { document.getElementById('canvasClipboardModal').style.display = 'none'; } catch (_) { }
         const pop = document.getElementById(CANVAS_SIDE_PANEL_POPOVER_ID);
         if (pop) pop.remove();
 
         const isVisible = otherManageModal.style.display === 'block';
         if (isVisible) {
-            otherManageModal.style.display = 'none';
-            otherManageModal.dataset.anchoredTo = '';
+            // 同一位置重复点击：执行关闭（Toggle）
+            if (currentAnchor === targetAnchor) {
+                otherManageModal.style.display = 'none';
+                otherManageModal.dataset.anchoredTo = '';
+                return;
+            }
+            // 另一位置点击：互斥单次生效，直接切至当前位置并重新定位，无需按两次
+            resetSettingsAnchoredModalSizing(otherManageModal);
+            otherManageModal.dataset.anchoredTo = targetAnchor;
+            if (anchorToSettings) {
+                window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(otherManageModal));
+            } else {
+                window.requestAnimationFrame(() => positionModalNearZoomIndicator(otherManageModal));
+            }
             return;
         }
 
         otherManageModal.style.display = 'block';
         otherManageModal.style.zIndex = '20000';
+        otherManageModal.dataset.anchoredTo = targetAnchor;
         if (anchorToSettings) {
-            otherManageModal.dataset.anchoredTo = 'settings';
             window.requestAnimationFrame(() => positionManageModalUnderSettingsBtn(otherManageModal));
         } else {
-            otherManageModal.dataset.anchoredTo = 'zoom-indicator';
             window.requestAnimationFrame(() => positionModalNearZoomIndicator(otherManageModal));
         }
     };
@@ -9452,9 +9485,7 @@ function setupCanvasManageModal() {
         const openSourceModal = document.getElementById('canvasOpenSourceModal');
         if (openSourceModal && openSourceModal.style.display === 'block') {
             const isClickInside = openSourceModal.contains(e.target);
-            const isClickTrigger = e.target.closest('#settingsToggle') ||
-                                   e.target.closest('#titleSettingsToggleBtn') ||
-                                   e.target.closest('.settings-menu-item[data-action="open-opensource"]');
+            const isClickTrigger = e.target.closest('.settings-menu-item[data-action="open-opensource"]');
             if (!isClickInside && !isClickTrigger) {
                 closeCanvasOpenSourceModal();
             }
@@ -9486,6 +9517,7 @@ const positionManageModalUnderSettingsBtn = (modalEl) => {
         modalEl.style.position = '';
         modalEl.style.left = '';
         modalEl.style.top = '';
+        modalEl.style.bottom = '';
         resetSettingsAnchoredModalSizing(modalEl);
         return;
     }
@@ -9496,10 +9528,15 @@ const positionManageModalUnderSettingsBtn = (modalEl) => {
     const anchorRect = anchorBtn.getBoundingClientRect();
     const gap = 8;
     const viewportPadding = 8;
+    const isBottomDock = !!(
+        (document.body && document.body.classList.contains('header-dock-bottom')) ||
+        (document.documentElement && document.documentElement.classList.contains('layout-preload-header-dock-bottom'))
+    );
     const spaceBelow = window.innerHeight - anchorRect.bottom - viewportPadding;
     const spaceAbove = anchorRect.top - viewportPadding;
     let modalRect = modalEl.getBoundingClientRect();
-    const placeAbove = spaceBelow < modalRect.height && spaceAbove > spaceBelow;
+    const anchorInBottomHalf = (anchorRect.top + (anchorRect.height / 2)) > (window.innerHeight / 2);
+    const placeAbove = isBottomDock || anchorInBottomHalf || (spaceBelow < modalRect.height && spaceAbove > spaceBelow);
     const availableHeight = Math.max(0, (placeAbove ? spaceAbove : spaceBelow) - gap);
 
     // Keep tall secondary panels on the anchored side of the title bar and
@@ -9518,17 +9555,22 @@ const positionManageModalUnderSettingsBtn = (modalEl) => {
     let left = targetCenterX - (modalRect.width / 2);
     left = Math.min(Math.max(left, minLeft), maxLeft);
 
-    let top = anchorRect.bottom + gap;
-    if (placeAbove) {
-        top = anchorRect.top - modalRect.height - gap;
-    }
-    const minTop = viewportPadding;
-    const maxTop = Math.max(minTop, window.innerHeight - modalRect.height - viewportPadding);
-    top = Math.min(Math.max(top, minTop), maxTop);
-
     modalEl.style.position = 'fixed';
     modalEl.style.left = `${Math.round(left)}px`;
-    modalEl.style.top = `${Math.round(top)}px`;
+    if (placeAbove) {
+        const bottom = Math.max(viewportPadding, window.innerHeight - anchorRect.top + gap);
+        modalEl.style.bottom = `${Math.round(bottom)}px`;
+        modalEl.style.top = 'auto';
+        modalEl.dataset.placement = 'above';
+    } else {
+        let top = anchorRect.bottom + gap;
+        const minTop = viewportPadding;
+        const maxTop = Math.max(minTop, window.innerHeight - modalRect.height - viewportPadding);
+        top = Math.min(Math.max(top, minTop), maxTop);
+        modalEl.style.top = `${Math.round(top)}px`;
+        modalEl.style.bottom = 'auto';
+        modalEl.dataset.placement = 'below';
+    }
     modalEl.style.zIndex = '20000';
 };
 
@@ -9541,6 +9583,7 @@ const positionModalNearZoomIndicator = (modalEl) => {
         modalEl.style.position = '';
         modalEl.style.left = '';
         modalEl.style.top = '';
+        modalEl.style.bottom = '';
         resetSettingsAnchoredModalSizing(modalEl);
         return;
     }
@@ -9581,6 +9624,8 @@ const positionModalNearZoomIndicator = (modalEl) => {
     modalEl.style.position = 'fixed';
     modalEl.style.left = `${Math.round(left)}px`;
     modalEl.style.top = `${Math.round(top)}px`;
+    modalEl.style.bottom = '';
+    modalEl.dataset.placement = placeAbove ? 'above' : 'below';
     modalEl.style.zIndex = '20000';
     modalEl.dataset.anchoredTo = 'zoom-indicator';
 };
@@ -9588,6 +9633,8 @@ const positionModalNearZoomIndicator = (modalEl) => {
 function resetSettingsAnchoredModalSizing(modalEl) {
     if (!modalEl) return;
     modalEl.style.maxHeight = '';
+    modalEl.style.top = '';
+    modalEl.style.bottom = '';
     const modalBody = modalEl.querySelector('.canvas-manage-modal-body, .canvas-help-modal-body');
     if (modalBody) modalBody.style.maxHeight = '';
 }
@@ -9616,12 +9663,20 @@ function repositionSettingsAnchoredModals() {
         positionModalNearZoomIndicator(helpModal);
     }
 }
+window.positionManageModalUnderSettingsBtn = positionManageModalUnderSettingsBtn;
+window.positionModalNearZoomIndicator = positionModalNearZoomIndicator;
 window.repositionSettingsAnchoredModals = repositionSettingsAnchoredModals;
 
 window.addEventListener('resize', () => {
     if (settingsAnchoredModalResizeFrame !== null) return;
     settingsAnchoredModalResizeFrame = window.requestAnimationFrame(() => {
         settingsAnchoredModalResizeFrame = null;
+        repositionSettingsAnchoredModals();
+    });
+});
+
+window.addEventListener('header-dock-side-changed', () => {
+    window.requestAnimationFrame(() => {
         repositionSettingsAnchoredModals();
     });
 });
@@ -34681,6 +34736,7 @@ function openCanvasShortcutsModal(options = {}) {
     try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
     try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
     try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasClipboardModal').style.display = 'none'; } catch (_) { }
 
     modal.style.position = '';
     modal.style.left = '';
@@ -34734,6 +34790,7 @@ function openCanvasOpenSourceModal() {
     try { document.getElementById('canvasShortcutsModal').style.display = 'none'; } catch (_) { }
     try { document.getElementById('canvasManageModal').style.display = 'none'; } catch (_) { }
     try { document.getElementById('canvasOtherManageModal').style.display = 'none'; } catch (_) { }
+    try { document.getElementById('canvasClipboardModal').style.display = 'none'; } catch (_) { }
 
     modal.style.display = 'block';
     modal.style.zIndex = '20000';
@@ -45986,6 +46043,7 @@ window.getTempItemNote = getTempItemNote;
 window.getTempItemNoteMeta = getTempItemNoteMeta;
 window.setTempItemNote = setTempItemNote;
 window.openCanvasShortcutsModal = openCanvasShortcutsModal;
+window.closeCanvasOpenSourceModal = closeCanvasOpenSourceModal;
 
 window.CanvasModule = {
     init: initCanvasView,
@@ -45993,6 +46051,7 @@ window.CanvasModule = {
     openShortcuts: openCanvasShortcutsModal,
     openHelp: openCanvasHelpModal,
     openOpenSource: openCanvasOpenSourceModal,
+    closeOpenSource: closeCanvasOpenSourceModal,
     enhance: enhanceBookmarkTreeForCanvas, // 增强书签树的Canvas功能
     clear: clearAllExceptPermanent,
     updateFullscreenButton: updateFullscreenButtonState,

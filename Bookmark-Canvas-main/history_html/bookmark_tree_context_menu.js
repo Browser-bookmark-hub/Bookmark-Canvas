@@ -65,11 +65,14 @@ function parseTempItemIdCreationDate(id) {
 
 function setBookmarkClipboardState(nextClipboard, options = {}) {
     bookmarkClipboard = nextClipboard || null;
+    if (bookmarkClipboard && !bookmarkClipboard.timestamp) {
+        bookmarkClipboard.timestamp = Date.now();
+    }
     clipboardOperation = bookmarkClipboard ? bookmarkClipboard.action : null;
     if (options.persist !== false && bookmarkClipboard && window.CanvasClipboard && typeof window.CanvasClipboard.addStructured === 'function') {
         window.CanvasClipboard.addStructured(bookmarkClipboard).catch(() => {});
     }
-    if (bookmarkClipboard) showPasteButton();
+    if (hasClipboard()) showPasteButton();
     else hidePasteButton();
 }
 
@@ -92,23 +95,36 @@ async function restoreBookmarkClipboardCutClaim(clipboard) {
 }
 
 async function getLatestBookmarkClipboardForPaste() {
+    if (!hasClipboard()) return null;
     if (window.CanvasClipboard && typeof window.CanvasClipboard.claimActiveStructuredForPaste === 'function') {
         return window.CanvasClipboard.claimActiveStructuredForPaste();
     }
     return bookmarkClipboard;
 }
 
+let bookmarkClipboardActiveTtlMs = 15 * 60 * 1000; // 活跃待粘贴保质期（默认15分钟，支持用户设置）
+
 window.addEventListener('canvas-clipboard-changed', (event) => {
-    const activePayload = event && event.detail ? event.detail.activePayload : null;
+    const detail = event && event.detail;
+    if (detail && detail.state && detail.state.ttl) {
+        bookmarkClipboardActiveTtlMs = Math.max(1, Number(detail.state.ttl)) * 60 * 1000;
+    }
+    const activePayload = detail ? detail.activePayload : null;
     bookmarkClipboard = activePayload && activePayload.source !== 'text' ? activePayload : null;
+    if (bookmarkClipboard && !bookmarkClipboard.timestamp) {
+        bookmarkClipboard.timestamp = Date.now();
+    }
+    if (bookmarkClipboard && !bookmarkClipboard.activeTtlMs) {
+        bookmarkClipboard.activeTtlMs = (activePayload && activePayload.activeTtlMs) || bookmarkClipboardActiveTtlMs;
+    }
     clipboardOperation = bookmarkClipboard ? bookmarkClipboard.action : null;
     try {
         syncDismissedCutMarkIdentity();
         unmarkCutNode();
-        if (bookmarkClipboard && bookmarkClipboard.action === 'cut' && Array.isArray(bookmarkClipboard.nodeIds)) {
+        if (hasClipboard() && bookmarkClipboard.action === 'cut' && Array.isArray(bookmarkClipboard.nodeIds)) {
             bookmarkClipboard.nodeIds.forEach((id) => markCutNode(id));
         }
-        if (bookmarkClipboard) showPasteButton(); else hidePasteButton();
+        if (hasClipboard()) showPasteButton(); else hidePasteButton();
     } catch (_) {}
 });
 
@@ -6817,9 +6833,21 @@ function hidePasteButton() {
     }
 }
 
-// 检查是否有剪贴板内容
+// 检查是否有剪贴板内容（支持用户自定义时效衰减，防误触与休眠幽灵态）
 function hasClipboard() {
-    return bookmarkClipboard !== null;
+    if (!bookmarkClipboard) return false;
+    const ts = Number(bookmarkClipboard.timestamp || bookmarkClipboard.copiedAt || 0);
+    const ttlMs = Number(bookmarkClipboard.activeTtlMs) || bookmarkClipboardActiveTtlMs || (15 * 60 * 1000);
+    if (ts > 0 && (Date.now() - ts) > ttlMs) {
+        bookmarkClipboard = null;
+        clipboardOperation = null;
+        try {
+            unmarkCutNode();
+            hidePasteButton();
+        } catch (_) {}
+        return false;
+    }
+    return true;
 }
 
 function getTempManager() {
@@ -17841,7 +17869,7 @@ async function resolveKeyboardPermanentRootId() {
 }
 
 async function pasteClipboardAtKeyboardCanvasPointer(context) {
-    if (!bookmarkClipboard || !context) return false;
+    if (!hasClipboard() || !context) return false;
     if (context.kind === 'node') {
         if (context.treeType === 'temporary') {
             await pasteIntoTemp({ sectionId: context.sectionId, nodeId: context.nodeId, isFolder: context.isFolder }, false);
@@ -17945,7 +17973,7 @@ function initKeyboardShortcuts() {
             // A text clipboard keeps its native paste behavior; only structured
             // bookmark/folder clipboard content is pasted through the canvas.
             const pointerContext = getKeyboardCanvasPointerContext();
-            if (!bookmarkClipboard || !pointerContext) return;
+            if (!hasClipboard() || !pointerContext) return;
             e.preventDefault();
             pasteClipboardAtKeyboardCanvasPointer(pointerContext).catch((error) => {
                 console.warn('[快捷键] 粘贴失败:', error);

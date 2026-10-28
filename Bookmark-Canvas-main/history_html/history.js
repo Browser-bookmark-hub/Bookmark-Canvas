@@ -5786,6 +5786,8 @@ function setupSidePanelSettingsMenu() {
         closeViewSyncPanel();
         closeFloatingToolsPanel();
         closeThemeChoicePanel();
+        try { document.getElementById('canvasClipboardModal').style.display = 'none'; } catch (_) { }
+        try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
     };
 
     toggle.addEventListener('click', (e) => {
@@ -7435,6 +7437,8 @@ function setupTitleSideTools() {
                 if (floatingToolsToggle) {
                     floatingToolsToggle.setAttribute('aria-expanded', 'false');
                 }
+                try { document.getElementById('canvasClipboardModal').style.display = 'none'; } catch (_) { }
+                try { document.getElementById('canvasOpenSourceModal').style.display = 'none'; } catch (_) { }
             } else {
                 collapseCanvasViewSyncPanel();
                 settingsMenu.setAttribute('hidden', '');

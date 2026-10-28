@@ -785,13 +785,21 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
 .canvas-clipboard-settings-row {
     display: flex;
     align-items: center;
-    gap: 7px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+}
+
+.canvas-clipboard-settings-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
 }
 
 .canvas-clipboard-settings input {
-    width: 54px;
+    width: 44px;
     min-height: 27px;
-    padding: 2px 6px;
+    padding: 2px 4px;
     text-align: center;
     appearance: textfield;
     -moz-appearance: textfield;
@@ -806,7 +814,18 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
 .canvas-clipboard-settings button {
     margin-left: auto;
     min-height: 27px;
-    padding: 2px 9px;
+    padding: 2px 10px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.canvas-clipboard-settings button:hover {
+    background: var(--bg-tertiary);
 }
 
 .canvas-clipboard-settings-tip {

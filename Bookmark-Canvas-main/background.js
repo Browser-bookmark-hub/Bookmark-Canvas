@@ -48,9 +48,13 @@ let foregroundActivePortListenerRegistered = false;
 
 const CANVAS_CLIPBOARD_STORAGE_KEY = 'bcs:clipboard-history';
 const CANVAS_CLIPBOARD_LIMIT_STORAGE_KEY = 'bcs:clipboard-limit';
+const CANVAS_CLIPBOARD_TTL_STORAGE_KEY = 'bcs:clipboard-ttl';
 const CANVAS_CLIPBOARD_MIN_LIMIT = 1;
 const CANVAS_CLIPBOARD_MAX_LIMIT = 50;
 const CANVAS_CLIPBOARD_DEFAULT_LIMIT = 7;
+const CANVAS_CLIPBOARD_MIN_TTL_MINUTES = 1;
+const CANVAS_CLIPBOARD_MAX_TTL_MINUTES = 240;
+const CANVAS_CLIPBOARD_DEFAULT_TTL_MINUTES = 15;
 let canvasClipboardOperation = Promise.resolve();
 let canvasClipboardActiveEntryId = null;
 let canvasClipboardResetTimer = null;
@@ -76,11 +80,15 @@ function normalizeCanvasClipboardState(raw) {
     CANVAS_CLIPBOARD_MAX_LIMIT,
     Math.max(CANVAS_CLIPBOARD_MIN_LIMIT, Number.parseInt(input.limit, 10) || CANVAS_CLIPBOARD_DEFAULT_LIMIT)
   );
+  const ttl = Math.min(
+    CANVAS_CLIPBOARD_MAX_TTL_MINUTES,
+    Math.max(CANVAS_CLIPBOARD_MIN_TTL_MINUTES, Number.parseInt(input.ttl, 10) || CANVAS_CLIPBOARD_DEFAULT_TTL_MINUTES)
+  );
   const entries = Array.isArray(input.entries) ? input.entries.filter(Boolean).slice(0, limit) : [];
   const activeEntryId = entries.some((entry) => entry && entry.id === input.activeEntryId)
     ? input.activeEntryId
     : null;
-  return { version: 1, limit, activeEntryId, entries };
+  return { version: 1, limit, ttl, activeEntryId, entries };
 }
 
 function runCanvasClipboardOperation(task) {
@@ -107,6 +115,14 @@ async function getCanvasClipboardLimit() {
     : CANVAS_CLIPBOARD_DEFAULT_LIMIT;
 }
 
+async function getCanvasClipboardTtl() {
+  const local = await storageLocalGet([CANVAS_CLIPBOARD_TTL_STORAGE_KEY]);
+  const ttl = Number.parseInt(local[CANVAS_CLIPBOARD_TTL_STORAGE_KEY], 10);
+  return (Number.isFinite(ttl) && ttl >= CANVAS_CLIPBOARD_MIN_TTL_MINUTES && ttl <= CANVAS_CLIPBOARD_MAX_TTL_MINUTES)
+    ? ttl
+    : CANVAS_CLIPBOARD_DEFAULT_TTL_MINUTES;
+}
+
 function broadcastCanvasClipboardState(state, activePayload) {
   try {
     if (browserAPI?.runtime?.sendMessage) {
@@ -121,22 +137,45 @@ function broadcastCanvasClipboardState(state, activePayload) {
   } catch (_) {}
 }
 
+function isCanvasClipboardEntryActiveExpired(entry, ttlMinutes = CANVAS_CLIPBOARD_DEFAULT_TTL_MINUTES) {
+  if (!entry) return true;
+  const ts = entry.updatedAt || entry.createdAt || 0;
+  const ttlMs = (Number(ttlMinutes) || CANVAS_CLIPBOARD_DEFAULT_TTL_MINUTES) * 60 * 1000;
+  return ts > 0 && (Date.now() - ts) > ttlMs;
+}
+
 async function updateCanvasClipboardState(mutator) {
   return runCanvasClipboardOperation(async () => {
-    const [localItems, persistentLimit] = await Promise.all([
+    const [localItems, persistentLimit, persistentTtl] = await Promise.all([
       storageLocalGet([CANVAS_CLIPBOARD_STORAGE_KEY]),
-      getCanvasClipboardLimit()
+      getCanvasClipboardLimit(),
+      getCanvasClipboardTtl()
     ]);
     const raw = localItems[CANVAS_CLIPBOARD_STORAGE_KEY] || {};
     if (raw.limit == null) raw.limit = persistentLimit;
+    if (raw.ttl == null) raw.ttl = persistentTtl;
     const state = normalizeCanvasClipboardState(raw);
     state.activeEntryId = canvasClipboardActiveEntryId;
+    if (state.activeEntryId) {
+      const activeEntry = state.entries.find((item) => item && item.id === state.activeEntryId);
+      if (!activeEntry || isCanvasClipboardEntryActiveExpired(activeEntry, state.ttl)) {
+        state.activeEntryId = null;
+        canvasClipboardActiveEntryId = null;
+      }
+    }
     const result = await mutator(state);
     const normalized = normalizeCanvasClipboardState(state);
+    if (normalized.activeEntryId) {
+      const activeEntry = normalized.entries.find((item) => item && item.id === normalized.activeEntryId);
+      if (!activeEntry || isCanvasClipboardEntryActiveExpired(activeEntry, normalized.ttl)) {
+        normalized.activeEntryId = null;
+      }
+    }
     canvasClipboardActiveEntryId = normalized.activeEntryId;
     const diskSnapshot = {
       version: 1,
       limit: normalized.limit,
+      ttl: normalized.ttl,
       activeEntryId: null,
       entries: normalized.entries
     };
@@ -150,12 +189,20 @@ async function updateCanvasClipboardState(mutator) {
 function buildCanvasClipboardActivePayload(state) {
   const entry = state.entries.find((item) => item && item.id === state.activeEntryId);
   if (!entry || !entry.currentOperation) return null;
+  if (isCanvasClipboardEntryActiveExpired(entry, state.ttl)) {
+    state.activeEntryId = null;
+    return null;
+  }
+  const ts = entry.updatedAt || entry.createdAt || Date.now();
+  const ttlMs = (Number(state.ttl) || CANVAS_CLIPBOARD_DEFAULT_TTL_MINUTES) * 60 * 1000;
   if (entry.kind === 'text') {
-    return { action: 'copy', source: 'text', text: entry.data && entry.data.text, entryId: entry.id };
+    return { action: 'copy', source: 'text', text: entry.data && entry.data.text, entryId: entry.id, timestamp: ts, activeTtlMs: ttlMs };
   }
   const payload = cloneCanvasClipboardValue(entry.data || {});
   payload.action = entry.currentOperation;
   payload.entryId = entry.id;
+  payload.timestamp = ts;
+  payload.activeTtlMs = ttlMs;
   return payload;
 }
 
@@ -217,15 +264,23 @@ async function handleCanvasClipboardMutation(message) {
       return { activePayload: null };
     }
 
-    if (operation === 'set-limit') {
+    if (operation === 'set-limit' || operation === 'save-settings') {
       const nextLimit = Math.min(
         CANVAS_CLIPBOARD_MAX_LIMIT,
         Math.max(CANVAS_CLIPBOARD_MIN_LIMIT, Number.parseInt(message.limit, 10) || CANVAS_CLIPBOARD_DEFAULT_LIMIT)
       );
+      const nextTtl = Math.min(
+        CANVAS_CLIPBOARD_MAX_TTL_MINUTES,
+        Math.max(CANVAS_CLIPBOARD_MIN_TTL_MINUTES, Number.parseInt(message.ttl, 10) || state.ttl || CANVAS_CLIPBOARD_DEFAULT_TTL_MINUTES)
+      );
       state.limit = nextLimit;
+      state.ttl = nextTtl;
       state.entries = state.entries.slice(0, state.limit);
       if (!state.entries.some((entry) => entry && entry.id === state.activeEntryId)) state.activeEntryId = null;
-      storageLocalSet({ [CANVAS_CLIPBOARD_LIMIT_STORAGE_KEY]: nextLimit }).catch?.(() => {});
+      storageLocalSet({
+        [CANVAS_CLIPBOARD_LIMIT_STORAGE_KEY]: nextLimit,
+        [CANVAS_CLIPBOARD_TTL_STORAGE_KEY]: nextTtl
+      }).catch?.(() => {});
       return { activePayload: buildCanvasClipboardActivePayload(state) };
     }
 
