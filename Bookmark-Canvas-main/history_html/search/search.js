@@ -4243,6 +4243,9 @@ function showSearchTitleTooltip(targetEl, text, options = {}) {
     if (top < 8) {
         top = rect.bottom + 6;
     }
+    if (top + tooltipHeight > window.innerHeight - 8) {
+        top = Math.max(8, window.innerHeight - tooltipHeight - 8);
+    }
 
     tooltip.style.left = `${Math.round(left)}px`;
     tooltip.style.top = `${Math.round(top)}px`;
@@ -7772,8 +7775,19 @@ function handleSearchResultsPanelMouseOver(e) {
 
     // 1. 悬停 0.7s (700ms) 独立浮层逻辑：每个包含「...」的候选条目均独立等待 700ms，绝不连续触发
     let targetWithEllipsis = e && e.target ? e.target.closest('[data-has-ellipsis="true"]') : null;
+
+    // 若找到的 targetWithEllipsis 是表格标题单元格，实时校验其是否仍然处于截断状态（防止列宽改变后误显示气泡）
+    if (targetWithEllipsis && targetWithEllipsis.classList && targetWithEllipsis.classList.contains('canvas-table-cell-title')) {
+        const titleTextEl = targetWithEllipsis.querySelector('.canvas-table-title-text') || targetWithEllipsis;
+        const isTruncated = (titleTextEl && titleTextEl.scrollWidth > titleTextEl.clientWidth + 1) || (titleTextEl && titleTextEl.textContent.includes('...'));
+        if (!isTruncated) {
+            targetWithEllipsis.removeAttribute('data-has-ellipsis');
+            targetWithEllipsis = null;
+        }
+    }
+
     if (!targetWithEllipsis && e && e.target) {
-        // 若标题未被视窗算法截断，但因搜索面板宽度收窄触发了 CSS 文本省略截断，仅在悬停该项时按需检测一次
+        // A. 网格视图或常规卡片候选条目
         const item = e.target.closest('.search-result-item, .canvas-bookmark-group-child-item');
         if (item) {
             const titleEl = item.querySelector('.search-result-bookmark-title-text, .search-result-domain-title-text, .canvas-bookmark-group-child-title, .search-result-title, .canvas-grid-card-title');
@@ -7783,6 +7797,40 @@ function handleSearchResultsPanelMouseOver(e) {
                     item.setAttribute('data-has-ellipsis', 'true');
                     item.setAttribute('data-full-title', rawTitle);
                     targetWithEllipsis = item;
+                }
+            }
+        }
+
+        // B. 表格视图单元格标题（书签模式、域名模式、卡片/结构模式等）
+        if (!targetWithEllipsis) {
+            const tableTitleCell = e.target.closest('.canvas-table-cell-title, .tabulator-cell[tabulator-field="title"], .tabulator-cell[tabulator-field="domain"]');
+            if (tableTitleCell) {
+                const titleContainer = tableTitleCell.classList.contains('canvas-table-cell-title')
+                    ? tableTitleCell
+                    : tableTitleCell.querySelector('.canvas-table-cell-title');
+                if (titleContainer) {
+                    const titleTextEl = titleContainer.querySelector('.canvas-table-title-text') || titleContainer;
+                    let rawTitle = titleContainer.getAttribute('data-raw-title') || titleContainer.getAttribute('data-full-title') || '';
+                    if (!rawTitle) {
+                        const tabRow = titleContainer.closest('.tabulator-row');
+                        if (tabRow && typeof canvasSearchTabulatorInstance !== 'undefined' && canvasSearchTabulatorInstance) {
+                            try {
+                                const r = canvasSearchTabulatorInstance.getRow(tabRow);
+                                const d = r && typeof r.getData === 'function' ? r.getData() : null;
+                                if (d) rawTitle = d.title || d.domain || '';
+                            } catch (_) { }
+                        }
+                    }
+                    if (!rawTitle && titleTextEl) {
+                        rawTitle = titleTextEl.textContent.trim();
+                    }
+                    const hasCssEllipsis = titleTextEl && (titleTextEl.scrollWidth > titleTextEl.clientWidth + 1);
+                    const hasExplicitEllipsis = titleContainer.getAttribute('data-has-ellipsis') === 'true' || (titleTextEl && titleTextEl.textContent.includes('...'));
+                    if (rawTitle && (hasCssEllipsis || hasExplicitEllipsis)) {
+                        titleContainer.setAttribute('data-has-ellipsis', 'true');
+                        titleContainer.setAttribute('data-full-title', rawTitle);
+                        targetWithEllipsis = titleContainer;
+                    }
                 }
             }
         }
@@ -7857,7 +7905,8 @@ function handleSearchOutsideClick(e) {
     if (e.target && e.target.closest && e.target.closest(
         '#searchGridDetailsBubble, #searchGridGroupPopover, ' +
         '.canvas-grid-details-bubble, .canvas-grid-group-popover, ' +
-        '.canvas-temp-section-bubble, .search-result-title-tooltip'
+        '.canvas-temp-section-bubble, .search-result-title-tooltip, ' +
+        '#searchHistoryHelpPopover, .search-hint-help-popover, .perf-help-popover'
     )) {
         return;
     }
@@ -9919,6 +9968,11 @@ function bindSearchHintHelpButton(helpBtn, helpHtml, customId = 'searchHintPopov
         } else if (pop.parentElement !== targetParent) {
             targetParent.appendChild(pop);
         }
+        if (!pop._guardBound) {
+            pop._guardBound = true;
+            pop.addEventListener('mousedown', (e) => e.stopPropagation());
+            pop.addEventListener('click', (e) => e.stopPropagation());
+        }
         return pop;
     };
 
@@ -10133,6 +10187,9 @@ function bindSearchHistoryEvents(container, activeMode, onUpdate) {
                 };
                 limitInput.addEventListener('mousedown', (ev) => ev.stopPropagation());
                 limitInput.addEventListener('click', (ev) => ev.stopPropagation());
+                limitInput.addEventListener('focus', () => {
+                    try { limitInput.select(); } catch (_) { }
+                });
                 limitInput.addEventListener('change', saveLimit);
                 limitInput.addEventListener('blur', saveLimit);
                 limitInput.addEventListener('keydown', (ev) => {
@@ -17304,6 +17361,7 @@ function searchCanvasAndRender(query, options = {}) {
     renderCanvasSearchResults(finalResults, renderOptions);
 }
 
+const SEARCH_HISTORY_LIMIT_DEFAULT = 10;
 
 function normalizeSearchHistoryMode(mode) {
     const raw = String(mode || (searchUiState && searchUiState.activeMode) || 'bookmark').trim().toLowerCase();
@@ -17348,13 +17406,13 @@ function getSearchHistoryLimit(mode) {
         const globalVal = parseInt(localStorage.getItem('canvasSearchHistoryLimit'), 10);
         if (Number.isFinite(globalVal) && globalVal > 0) return globalVal;
     } catch (_) { }
-    return 7;
+    return SEARCH_HISTORY_LIMIT_DEFAULT;
 }
 
 function setSearchHistoryLimit(newLimit, mode) {
     const m = normalizeSearchHistoryMode(mode);
     try {
-        const limit = Math.max(1, parseInt(newLimit, 10) || 7);
+        const limit = Math.max(1, parseInt(newLimit, 10) || SEARCH_HISTORY_LIMIT_DEFAULT);
         localStorage.setItem(getSearchHistoryLimitKey(m), String(limit));
         localStorage.setItem('canvasSearchHistoryLimit', String(limit));
         const currentList = getSearchHistoryList(m);
@@ -17451,6 +17509,7 @@ try {
     window.setSearchHistoryLimit = setSearchHistoryLimit;
     window.getSearchHistoryLimit = getSearchHistoryLimit;
     window.normalizeSearchHistoryMode = normalizeSearchHistoryMode;
+    window.SEARCH_HISTORY_LIMIT_DEFAULT = SEARCH_HISTORY_LIMIT_DEFAULT;
 } catch (_) { }
 
 function shouldShowEmptyQuerySuggestions() {
@@ -21174,9 +21233,9 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                         const highlighted = (typeof highlightSearchKeywords === 'function' && query)
                             ? highlightSearchKeywords(d.domain, query)
                             : escapeHtml(d.domain);
-                        return `<div class="canvas-table-cell-title" title="${escapeHtml(d.domain)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden;">
+                        return `<div class="canvas-table-cell-title" data-raw-title="${escapeHtml(d.domain)}" data-full-title="${escapeHtml(d.domain)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden;">
                             ${iconHtml}
-                            <span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; font-weight:600; color:var(--text-primary);">${highlighted}</span>
+                            <span class="canvas-table-title-text" data-raw-title="${escapeHtml(d.domain)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; font-weight:600; color:var(--text-primary);">${highlighted}</span>
                         </div>`;
                     }
                 },
@@ -21388,9 +21447,9 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                         const highlighted = (typeof highlightSearchKeywords === 'function' && query)
                             ? highlightSearchKeywords(d.domain, query)
                             : escapeHtml(d.domain);
-                        return `<div class="canvas-table-cell-title" title="${escapeHtml(d.domain)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden;">
+                        return `<div class="canvas-table-cell-title" data-raw-title="${escapeHtml(d.domain)}" data-full-title="${escapeHtml(d.domain)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden;">
                             ${iconHtml}
-                            <span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; font-weight:600; color:var(--text-primary);">${highlighted}</span>
+                            <span class="canvas-table-title-text" data-raw-title="${escapeHtml(d.domain)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; font-weight:600; color:var(--text-primary);">${highlighted}</span>
                         </div>`;
                     }
                 },
@@ -21576,6 +21635,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     if (!d || !d.rawItem) return;
                     e._canvasHandled = true;
                     try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
+                    if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
                     await navigateToCanvasStructureOrDescriptionTarget(d.rawItem);
                 },
                 formatter: (cell) => {
@@ -21629,11 +21689,11 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                         </span>`;
                         fullTooltip = displayTitle;
                     }
-                    return `<div class="canvas-table-cell-title" title="${escapeHtml(fullTooltip)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden; cursor:pointer;">
+                    return `<div class="canvas-table-cell-title" data-raw-title="${escapeHtml(fullTooltip)}" data-full-title="${escapeHtml(fullTooltip)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden; cursor:pointer;">
                         ${locChipHtml}
                         ${anchorPrefixHtml}
                         ${groupPrefixHtml}
-                        <span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; font-weight:600; cursor:pointer;">${titleHtml}</span>
+                        <span class="canvas-table-title-text" data-raw-title="${escapeHtml(displayTitle)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; font-weight:600; cursor:pointer;">${titleHtml}</span>
                     </div>`;
                 }
             }
@@ -21742,6 +21802,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     if (!d || !d.rawItem) return;
                     e._canvasHandled = true;
                     try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
+                    if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
                     await navigateToCanvasStructureOrDescriptionTarget(d.rawItem);
                 },
                 formatter: (cell) => {
@@ -21754,10 +21815,10 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     const isCardGroup = isCanvasCardGroupSearchResult(d.rawItem || d);
                     const groupColor = (d.rawItem && d.rawItem.color) || d.color || '#7c3aed';
                     const groupPrefixHtml = isCardGroup ? `<span class="canvas-grid-type-prefix canvas-cardgroup-title-prefix" style="display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; margin-right:1px;" title="${escapeHtml(isZh ? '卡片组' : 'Card Group')}"><i class="fas fa-object-group" style="color:${groupColor}; font-size:12.5px;"></i></span>` : '';
-                    return `<div class="canvas-table-cell-title" title="${escapeHtml(d.title)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden; cursor:pointer;">
+                    return `<div class="canvas-table-cell-title" data-raw-title="${escapeHtml(d.title)}" data-full-title="${escapeHtml(d.title)}" style="display:flex; align-items:center; gap:6px; width:100%; min-width:0; overflow:hidden; cursor:pointer;">
                         ${locChipHtml}
                         ${groupPrefixHtml}
-                        <span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; font-weight:600; cursor:pointer;">${titleHtml}</span>
+                        <span class="canvas-table-title-text" data-raw-title="${escapeHtml(d.title)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; font-weight:600; cursor:pointer;">${titleHtml}</span>
                     </div>`;
                 }
             }
@@ -21828,6 +21889,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 if (!d) return;
                 e._canvasHandled = true;
                 try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
+                if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
                 await navigateToCanvasTableBookmarkTarget(d);
             },
             formatter: (cell) => {
@@ -21837,7 +21899,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                 const titleHtml = (typeof highlightSearchKeywords === 'function' && query)
                     ? highlightSearchKeywords(d.title, query)
                     : (d.titleHtml || escapeHtml(d.title));
-                return `<div class="canvas-table-cell-title" title="${escapeHtml(d.title)}" style="display:flex; align-items:center; width:100%; min-width:0; overflow:hidden; cursor:pointer;">${iconHtml}<span class="canvas-table-title-text" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; cursor:pointer;">${titleHtml}</span></div>`;
+                return `<div class="canvas-table-cell-title" data-raw-title="${escapeHtml(d.title)}" data-full-title="${escapeHtml(d.title)}" style="display:flex; align-items:center; width:100%; min-width:0; overflow:hidden; cursor:pointer;">${iconHtml}<span class="canvas-table-title-text" data-raw-title="${escapeHtml(d.title)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; cursor:pointer;">${titleHtml}</span></div>`;
             }
         },
         {
@@ -22393,6 +22455,7 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
  */
 async function handleCanvasTabulatorRowClick(e, row) {
     if (!e || e._canvasHandled) return;
+    if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
     if (typeof isCanvasSearchSelectionModeActive === 'function' && isCanvasSearchSelectionModeActive()) {
         e._canvasHandled = true;
         try { e.preventDefault(); e.stopPropagation(); } catch (_) { }
@@ -22688,6 +22751,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
         bindCanvasTabulatorColumnMoveEnhancements(canvasSearchTabulatorInstance, containerEl, activeMode);
 
         canvasSearchTabulatorInstance.on("columnResized", (column) => {
+            if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
             if (!column) return;
             const field = column.getField();
             const width = column.getWidth();
@@ -22763,6 +22827,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
         });
 
         canvasSearchTabulatorInstance.on("scrollVertical", () => {
+            if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
             syncCanvasTabulatorRightScrollbar();
             if (typeof isGridDetailsBubbleVisible === 'function' && isGridDetailsBubbleVisible()) {
                 hideGridDetailsBubble();
@@ -22772,6 +22837,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             if (typeof hideSubdomainListPopover === 'function') hideSubdomainListPopover();
         });
         canvasSearchTabulatorInstance.on("scrollHorizontal", () => {
+            if (typeof hideSearchTitleTooltip === 'function') hideSearchTitleTooltip();
             syncCanvasTabulatorTopScrollbar();
             if (typeof isGridDetailsBubbleVisible === 'function' && isGridDetailsBubbleVisible()) {
                 hideGridDetailsBubble();

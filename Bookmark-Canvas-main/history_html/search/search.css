@@ -2482,6 +2482,8 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     font-size: 12px;
     line-height: 1.45;
     white-space: normal;
+    user-select: text !important;
+    -webkit-user-select: text !important;
 }
 
 /* ==================== 空结果提示 ==================== */
@@ -7509,6 +7511,8 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     gap: 6px !important;
     font-size: 11px !important;
     line-height: 1.4 !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
 }
 
 .search-history-help-row.search-history-help-limit-row {
@@ -7522,6 +7526,8 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     white-space: nowrap !important;
     display: inline-flex !important;
     align-items: baseline !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
 }
 
 .search-history-help-row .search-hint-help-value {
@@ -7530,6 +7536,8 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     color: var(--text-secondary) !important;
     display: inline-flex !important;
     align-items: baseline !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
 }
 
 .search-history-help-limit-row .search-hint-help-label,
@@ -7539,6 +7547,8 @@ body.header-dock-bottom .search-history-section .search-history-empty {
 
 .search-container input.search-history-limit-input,
 .search-history-limit-input {
+    user-select: text !important;
+    -webkit-user-select: text !important;
     width: 44px !important;
     min-width: 44px !important;
     max-width: 44px !important;
