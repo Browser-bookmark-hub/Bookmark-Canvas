@@ -211,9 +211,14 @@
     const params = new URLSearchParams(window.location.search || '');
     const sidePanelFlag = params.get('sidepanel') || params.get('side_panel') || params.get('panel');
     const isSidePanelMode = sidePanelFlag === '1' || sidePanelFlag === 'true';
-    const canvasViewPartitionKey = isSidePanelMode ? 'sidepanel' : 'page';
+    const isEphemeralFullscreenMode = params.get('mode') === 'ephemeral_fullscreen' || params.get('ephemeral') === '1';
+    const canvasViewPartitionKey = isEphemeralFullscreenMode ? 'ephemeral' : (isSidePanelMode ? 'sidepanel' : 'page');
     if (isSidePanelMode) {
       root.classList.add('side-panel-mode');
+    }
+    if (isEphemeralFullscreenMode) {
+      root.classList.add('ephemeral-fullscreen-mode');
+      root.classList.add('canvas-page-fullscreen-active');
     }
 
     const headerLayoutKeys = isSidePanelMode
@@ -271,6 +276,17 @@
     const hasPendingNodeMaximizedState = (() => {
       if (initialView !== 'canvas') return false;
       try {
+        if (isEphemeralFullscreenMode) {
+          const sessionToken = params.get('session');
+          if (sessionToken) {
+            const rawSession = readStorage('canvas:ephemeral_fullscreen:' + sessionToken);
+            if (rawSession) {
+              const parsed = JSON.parse(rawSession);
+              if (parsed && parsed.activeMaximizedDescriptor) return true;
+            }
+          }
+          return false;
+        }
         const raw = readCanvasPartitionedViewState(
           CANVAS_FULLSCREEN_VIEW_STATE_KIND,
           CANVAS_NODE_MAXIMIZED_STORAGE_KEY,

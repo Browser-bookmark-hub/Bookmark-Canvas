@@ -6334,6 +6334,31 @@ body.header-dock-bottom .app-toast.pos-top-right {
     }
 }
 
+/* 底部居中进入/离开动画 */
+@keyframes toastSlideInBottom {
+    from {
+        transform: translate(-50%, 16px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translate(-50%, 0);
+        opacity: 1;
+    }
+}
+
+@keyframes toastSlideOutBottom {
+    from {
+        transform: translate(-50%, 0);
+        opacity: 1;
+    }
+
+    to {
+        transform: translate(-50%, 16px);
+        opacity: 0;
+    }
+}
+
 /* 左侧进入/离开动画 */
 @keyframes toastSlideInLeft {
     from {
@@ -6395,5 +6420,108 @@ body.header-dock-bottom .app-toast.pos-top-right {
 
     100% {
         transform: scale(1);
+    }
+}
+
+/* ==================== 全屏模式操作引导 Toast ==================== */
+.canvas-fullscreen-guide-toast {
+    position: fixed !important;
+    bottom: 28px !important;
+    top: auto !important;
+    left: 50% !important;
+    transform: translate(-50%, 0);
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 7px 14px !important;
+    border-radius: 8px !important;
+    font-size: 12.5px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    color: #ffffff !important;
+    background: #1e1e20 !important;
+    border: 1.5px solid #3b82f6 !important;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45) !important;
+    z-index: 2147483647 !important;
+    pointer-events: auto !important;
+    max-width: min(600px, calc(100vw - 32px)) !important;
+    box-sizing: border-box !important;
+    will-change: transform, opacity;
+    animation: toastSlideInBottom 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    user-select: none !important;
+}
+
+body.header-dock-bottom:not(.header-compact) .canvas-fullscreen-guide-toast {
+    bottom: calc(var(--header-height, 54px) + 20px) !important;
+}
+
+.canvas-fullscreen-guide-toast.toast-slide-out {
+    animation: toastSlideOutBottom 0.18s cubic-bezier(0.4, 0, 1, 1) forwards !important;
+}
+
+.canvas-fullscreen-guide-toast .guide-toast-icon {
+    font-size: 13.5px;
+    color: #60a5fa;
+    flex-shrink: 0;
+}
+
+.canvas-fullscreen-guide-toast .guide-toast-text {
+    color: #f1f5f9;
+    white-space: nowrap;
+}
+
+.canvas-fullscreen-guide-toast .guide-toast-dismiss-btn {
+    appearance: none;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #94a3b8;
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    margin-left: 4px;
+    outline: none;
+    transition: all 0.15s ease;
+}
+
+.canvas-fullscreen-guide-toast .guide-toast-dismiss-btn:hover {
+    background: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+.canvas-fullscreen-guide-toast .guide-toast-close-btn {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    padding: 2px 4px;
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    outline: none;
+    transition: color 0.15s ease;
+    flex-shrink: 0;
+}
+
+.canvas-fullscreen-guide-toast .guide-toast-close-btn:hover {
+    color: #ffffff;
+}
+
+@media (max-width: 600px) {
+    .canvas-fullscreen-guide-toast {
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 12px;
+    }
+    .canvas-fullscreen-guide-toast .guide-toast-text {
+        white-space: normal;
+        line-height: 1.3;
     }
 }

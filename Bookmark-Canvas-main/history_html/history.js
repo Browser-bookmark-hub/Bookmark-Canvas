@@ -84,15 +84,31 @@ const isSidePanelMode = (() => {
     }
 })();
 
+const isEphemeralFullscreenMode = (() => {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('mode') === 'ephemeral_fullscreen' || params.get('ephemeral') === '1';
+    } catch (_) {
+        return false;
+    }
+})();
+
 if (isSidePanelMode) {
     const sidePanelFixedView = isViewAllowed('canvas') ? 'canvas' : DEFAULT_VIEW;
     currentView = sidePanelFixedView;
+} else if (isEphemeralFullscreenMode) {
+    currentView = 'canvas';
 }
 
 window.__SIDE_PANEL_MODE__ = isSidePanelMode;
+window.__EPHEMERAL_FULLSCREEN_MODE__ = isEphemeralFullscreenMode;
 try {
     if (isSidePanelMode && document && document.documentElement) {
         document.documentElement.classList.add('side-panel-mode');
+    }
+    if (isEphemeralFullscreenMode && document && document.documentElement) {
+        document.documentElement.classList.add('ephemeral-fullscreen-mode');
+        document.documentElement.classList.add('canvas-page-fullscreen-active');
     }
 } catch (_) { }
 
@@ -5254,7 +5270,11 @@ function applyLanguage() {
         }
         const container = document.querySelector('.canvas-main-container');
         const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-        const isFullscreen = !!(fullscreenElement && (fullscreenElement === container || fullscreenElement === document.documentElement || fullscreenElement === document.body)) || (window.CanvasModule && window.CanvasModule.CanvasState && window.CanvasModule.CanvasState.isFullscreen === true);
+        const isFullscreen = !isSidePanelMode && (
+            !!(fullscreenElement && (fullscreenElement === container || fullscreenElement === document.documentElement || fullscreenElement === document.body))
+            || (window.CanvasModule && window.CanvasModule.CanvasState && window.CanvasModule.CanvasState.isFullscreen === true)
+            || isEphemeralFullscreenMode
+        );
         const key = isFullscreen ? 'canvasFullscreenExit' : 'canvasFullscreenEnter';
         const text = i18n[key] && i18n[key][currentLang] ? i18n[key][currentLang] : (key === 'canvasFullscreenExit' ? (currentLang === 'en' ? 'Exit' : '退出') : (currentLang === 'en' ? 'Fullscreen' : '全屏'));
         fullscreenBtn.textContent = text;
@@ -6308,7 +6328,7 @@ function applySidePanelFullscreenStatePayload(rawPayload, options = {}) {
 }
 
 async function publishCanvasPageFullscreenState(isFullscreenOverride = null) {
-    if (isSidePanelMode) return;
+    if (isSidePanelMode || isEphemeralFullscreenMode) return;
     if (!browserAPI?.storage?.local?.set) return;
 
     const tabId = await getCurrentHistoryPageTabId();
@@ -6349,6 +6369,7 @@ async function refreshSidePanelFullscreenStateFromCanvasPage() {
 
 try {
     window.__canvasSidePanelGetFullscreenState = getSidePanelMirroredCanvasFullscreen;
+    window.__canvasSidePanelSetMirroredFullscreen = setSidePanelMirroredCanvasFullscreen;
     window.__canvasSidePanelPublishFullscreenStateFromModule = (isFullscreen) => {
         publishCanvasPageFullscreenState(isFullscreen).catch(() => { });
     };
@@ -6438,9 +6459,9 @@ function setupCanvasFullscreenBridgeStorageListener() {
         } catch (_) { }
     }
 
-    if (!isSidePanelMode) {
+    if (!isSidePanelMode && !isEphemeralFullscreenMode) {
         publishCanvasPageFullscreenState().catch(() => { });
-    } else {
+    } else if (isSidePanelMode) {
         refreshSidePanelFullscreenStateFromCanvasPage().catch(() => { });
     }
 }
