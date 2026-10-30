@@ -1052,6 +1052,60 @@
     --temp-action-shadow: var(--temp-action-danger-shadow, rgba(239, 68, 68, 0.3));
 }
 
+/* 临时卡片关闭删除 - 原位胶囊确认交互（学习书签树 hover actions 模式） */
+.temp-node-delete-capsule {
+    display: inline-flex;
+    align-items: center;
+    position: relative;
+}
+
+.temp-node-delete-confirm-group {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    animation: tempDeleteCapsuleFadeIn 0.16s ease-out;
+}
+
+@keyframes tempDeleteCapsuleFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.temp-node-delete-capsule.confirming-delete .temp-node-close {
+    display: none !important;
+}
+
+.temp-node-delete-capsule.confirming-delete .temp-node-delete-confirm-group {
+    display: inline-flex !important;
+}
+
+.temp-node-delete-confirm-btn {
+    --temp-action-bg: var(--temp-action-danger-bg, rgba(239, 68, 68, 0.85));
+    --temp-action-hover-bg: var(--temp-action-danger-hover-bg, rgba(239, 68, 68, 0.95));
+    --temp-action-border: var(--temp-action-danger-border, rgba(239, 68, 68, 0.6));
+    --temp-action-icon: var(--temp-action-danger-icon, #ffffff);
+    --temp-action-hover-icon: var(--temp-action-danger-hover-icon, #ffffff);
+    color: var(--temp-action-icon, #ffffff);
+}
+
+.temp-node-delete-confirm-btn:hover {
+    background: #dc2626 !important;
+    border-color: #b91c1c !important;
+    color: #ffffff !important;
+}
+
+.temp-node-delete-cancel-btn {
+    background: var(--temp-action-bg, rgba(255, 255, 255, 0.2));
+    border: 1px solid var(--temp-action-border, rgba(255, 255, 255, 0.4));
+    color: var(--temp-action-icon, #ffffff);
+}
+
 .temp-node-color-input {
     position: absolute;
     width: 0;
@@ -3371,16 +3425,46 @@ body.canvas-node-maximized-active .canvas-edge-label {
     color: var(--text-secondary);
 }
 
-/* 删除全部内容按钮 - 危险操作样式 */
-.md-node-toolbar-btn.md-delete-danger-btn {
-    color: #cf222e;
-    border-color: rgba(207, 34, 46, 0.35);
+/* 卡片组与空白栏目悬浮工具栏删除按钮：常态图标红色，悬浮时方框边框与图标均呈红色 */
+.md-node-toolbar-btn.md-delete-danger-btn,
+.md-node-toolbar-btn.card-group-toolbar-btn-danger,
+.md-node-toolbar-btn[data-action="md-delete"],
+.md-node-toolbar-btn[data-action="card-group-delete"] {
+    color: #d32f2f;
+    border-color: var(--border-color);
 }
 
-.md-node-toolbar-btn.md-delete-danger-btn:hover {
-    background: rgba(207, 34, 46, 0.12);
-    border-color: rgba(207, 34, 46, 0.55);
-    color: #a40e26;
+.md-node-toolbar-btn.md-delete-danger-btn i,
+.md-node-toolbar-btn.md-delete-danger-btn svg,
+.md-node-toolbar-btn.card-group-toolbar-btn-danger i,
+.md-node-toolbar-btn.card-group-toolbar-btn-danger svg,
+.md-node-toolbar-btn[data-action="md-delete"] i,
+.md-node-toolbar-btn[data-action="md-delete"] svg,
+.md-node-toolbar-btn[data-action="card-group-delete"] i,
+.md-node-toolbar-btn[data-action="card-group-delete"] svg {
+    color: #d32f2f;
+    fill: #d32f2f;
+}
+
+.md-node-toolbar-btn.md-delete-danger-btn:hover,
+.md-node-toolbar-btn.card-group-toolbar-btn-danger:hover,
+.md-node-toolbar-btn[data-action="md-delete"]:hover,
+.md-node-toolbar-btn[data-action="card-group-delete"]:hover {
+    background: rgba(211, 47, 47, 0.08);
+    border-color: #d32f2f;
+    color: #d32f2f;
+}
+
+.md-node-toolbar-btn.md-delete-danger-btn:hover i,
+.md-node-toolbar-btn.md-delete-danger-btn:hover svg,
+.md-node-toolbar-btn.card-group-toolbar-btn-danger:hover i,
+.md-node-toolbar-btn.card-group-toolbar-btn-danger:hover svg,
+.md-node-toolbar-btn[data-action="md-delete"]:hover i,
+.md-node-toolbar-btn[data-action="md-delete"]:hover svg,
+.md-node-toolbar-btn[data-action="card-group-delete"]:hover i,
+.md-node-toolbar-btn[data-action="card-group-delete"]:hover svg {
+    color: #d32f2f;
+    fill: #d32f2f;
 }
 
 /* 格式工具栏弹层样式（单行布局） */
@@ -3809,6 +3893,47 @@ body.canvas-node-maximized-active .canvas-edge-label {
 
 [data-theme="dark"] .md-node-toolbar-btn.pinned i {
     opacity: 1 !important;
+}
+
+[data-theme="dark"] .md-node-toolbar-btn.md-delete-danger-btn,
+[data-theme="dark"] .md-node-toolbar-btn.card-group-toolbar-btn-danger,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="md-delete"],
+[data-theme="dark"] .md-node-toolbar-btn[data-action="card-group-delete"] {
+    color: #ef5350;
+    border-color: rgba(99, 110, 123, 0.45);
+}
+
+[data-theme="dark"] .md-node-toolbar-btn.md-delete-danger-btn i,
+[data-theme="dark"] .md-node-toolbar-btn.md-delete-danger-btn svg,
+[data-theme="dark"] .md-node-toolbar-btn.card-group-toolbar-btn-danger i,
+[data-theme="dark"] .md-node-toolbar-btn.card-group-toolbar-btn-danger svg,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="md-delete"] i,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="md-delete"] svg,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="card-group-delete"] i,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="card-group-delete"] svg {
+    color: #ef5350;
+    fill: #ef5350;
+}
+
+[data-theme="dark"] .md-node-toolbar-btn.md-delete-danger-btn:hover,
+[data-theme="dark"] .md-node-toolbar-btn.card-group-toolbar-btn-danger:hover,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="md-delete"]:hover,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="card-group-delete"]:hover {
+    background: rgba(239, 83, 80, 0.14);
+    border-color: #ef5350;
+    color: #ef5350;
+}
+
+[data-theme="dark"] .md-node-toolbar-btn.md-delete-danger-btn:hover i,
+[data-theme="dark"] .md-node-toolbar-btn.md-delete-danger-btn:hover svg,
+[data-theme="dark"] .md-node-toolbar-btn.card-group-toolbar-btn-danger:hover i,
+[data-theme="dark"] .md-node-toolbar-btn.card-group-toolbar-btn-danger:hover svg,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="md-delete"]:hover i,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="md-delete"]:hover svg,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="card-group-delete"]:hover i,
+[data-theme="dark"] .md-node-toolbar-btn[data-action="card-group-delete"]:hover svg {
+    color: #ef5350;
+    fill: #ef5350;
 }
 
 /* 删除 tooltip 样式 - 无延迟，快速显示 */
@@ -5955,7 +6080,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
     z-index: 9999999;
     pointer-events: none !important;
-    max-width: min(420px, calc(100vw - 24px));
+    max-width: min(460px, calc(100vw - 24px));
     box-sizing: border-box;
     will-change: transform, opacity;
     animation: toastSlideInTop 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -6146,12 +6271,10 @@ body.header-dock-bottom .app-toast.pos-top-right {
 .toast-message {
     min-width: 0;
     word-break: break-word;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1;
-    display: inline-flex;
-    align-items: center;
+    white-space: normal;
+    line-height: 1.35;
+    display: inline-block;
+    text-align: left;
 }
 
 .toast-message.multiline {

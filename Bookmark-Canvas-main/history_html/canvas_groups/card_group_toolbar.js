@@ -54,8 +54,9 @@ function __cardGroupToolbarBuild(node, opts) {
         pin: isEn ? 'Pin' : '置顶',
         unpin: isEn ? 'Unpin' : '取消置顶',
         export: isEn ? 'Export' : '导出',
+        delete: isEn ? 'Delete options' : '删除选项',
         deleteFrame: isEn ? 'Delete Frame Only' : '仅删除框体',
-        deleteAll: isEn ? 'Delete Frame and Members' : '删除框体与成员'
+        deleteAll: isEn ? 'Delete Frame and Members' : '删除全部内容'
     };
 
     const toolbar = document.createElement('div');
@@ -82,13 +83,7 @@ function __cardGroupToolbarBuild(node, opts) {
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-locate" data-tooltip="${t.locate}"><i class="fas fa-search-plus"></i></button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn${groupPinClass}" data-action="card-group-pin" data-tooltip="${pinTitle}">${pinIcon}</button>
         <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-export" data-tooltip="${t.export}" title="${t.export}"><i class="fas fa-file-export"></i></button>
-        <button class="md-node-toolbar-btn card-group-toolbar-btn" data-action="card-group-delete-frame" data-tooltip="${t.deleteFrame}">
-            <span class="icon-frame-delete">
-                <i class="far fa-square"></i>
-                <i class="fas fa-trash-alt"></i>
-            </span>
-        </button>
-        <button class="md-node-toolbar-btn md-delete-danger-btn card-group-toolbar-btn card-group-toolbar-btn-danger" data-action="card-group-delete-all" data-tooltip="${t.deleteAll}"><i class="far fa-trash-alt"></i></button>
+        <button class="md-node-toolbar-btn md-delete-danger-btn card-group-toolbar-btn card-group-toolbar-btn-danger" data-action="card-group-delete" data-tooltip="${t.delete}"><i class="far fa-trash-alt"></i></button>
     `;
 
     return { toolbar, labels: t };
@@ -207,11 +202,48 @@ function __cardGroupSetColor(node, preset, hex) {
     __saveCardGroupToolbarCanvasManifest();
 }
 
+function __cardGroupBuildDeletePopover(node) {
+    const lang = (typeof currentLang !== 'undefined') ? currentLang : 'zh';
+    const isEn = String(lang).toLowerCase().startsWith('en');
+    const deleteFrameTitle = isEn ? 'Delete Frame Only' : '仅删除框体';
+    const deleteFrameHint = isEn ? '(Keep Cards)' : '(保留卡片)';
+    const deleteAllTitle = isEn ? 'Delete All Content' : '删除全部内容';
+    const deleteAllHint = isEn ? '(Delete Cards)' : '(彻底删除)';
+
+    const pop = document.createElement('div');
+    pop.className = 'md-delete-options-popover card-group-delete-popover';
+
+    pop.innerHTML = `
+        <button class="md-delete-option card-group-delete-option" data-card-group-delete-action="frame" title="${deleteFrameTitle} ${deleteFrameHint}">
+            <span class="icon-frame-delete">
+                <i class="far fa-square"></i>
+                <i class="fas fa-trash-alt"></i>
+            </span>
+            <span>${deleteFrameTitle} <small style="opacity: 0.65; font-size: 11px;">${deleteFrameHint}</small></span>
+        </button>
+        <button class="md-delete-option md-delete-option-danger card-group-delete-option" data-card-group-delete-action="all" title="${deleteAllTitle} ${deleteAllHint}">
+            <i class="fas fa-trash-alt"></i>
+            <span>${deleteAllTitle} <small style="opacity: 0.65; font-size: 11px;">${deleteAllHint}</small></span>
+        </button>
+    `;
+
+    return pop;
+}
+
 function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
     let colorPop = null;
+    let deletePop = null;
     const closeColorPop = () => {
         if (colorPop) {
             colorPop.classList.remove('open');
+            if (typeof updateCanvasPopoverState === 'function') {
+                try { updateCanvasPopoverState(false); } catch (_) { }
+            }
+        }
+    };
+    const closeDeletePop = () => {
+        if (deletePop) {
+            deletePop.classList.remove('open');
             if (typeof updateCanvasPopoverState === 'function') {
                 try { updateCanvasPopoverState(false); } catch (_) { }
             }
@@ -227,12 +259,14 @@ function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
 
         if (action === 'card-group-rename') {
             closeColorPop();
+            closeDeletePop();
             try {
                 if (window.__BCSCardGroup && typeof window.__BCSCardGroup.startRename === 'function') {
                     window.__BCSCardGroup.startRename(node.id);
                 }
             } catch (_) { }
         } else if (action === 'card-group-color') {
+            closeDeletePop();
             if (!colorPop) {
                 colorPop = __cardGroupBuildColorPopover(node);
                 toolbar.appendChild(colorPop);
@@ -267,6 +301,7 @@ function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
             }
         } else if (action === 'card-group-search') {
             closeColorPop();
+            closeDeletePop();
             try {
                 if (window.__BCSCardGroup && typeof window.__BCSCardGroup.collectCardGroupChildElementsRecursive === 'function') {
                     const members = window.__BCSCardGroup.collectCardGroupChildElementsRecursive(node);
@@ -287,9 +322,13 @@ function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
             }
             try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
         } else if (action === 'card-group-locate') {
+            closeColorPop();
+            closeDeletePop();
             try { if (typeof locateAndZoomToMdNode === 'function') locateAndZoomToMdNode(node.id, 'fit'); } catch (_) { }
             try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
         } else if (action === 'card-group-pin') {
+            closeColorPop();
+            closeDeletePop();
             try {
                 if (typeof window.showCanvasPinPopover === 'function') {
                     window.showCanvasPinPopover(btn, {
@@ -303,6 +342,7 @@ function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
             } catch (_) { }
         } else if (action === 'card-group-export') {
             closeColorPop();
+            closeDeletePop();
             try {
                 if (typeof window !== 'undefined' && typeof window.exportCanvasCardGroupPackage === 'function') {
                     window.exportCanvasCardGroupPackage(node).catch((error) => {
@@ -314,16 +354,53 @@ function __cardGroupBindToolbarActions(element, toolbar, node, labels) {
                 console.error('[CardGroup] export failed:', error);
             }
             try { if (typeof clearMdSelection === 'function') clearMdSelection(); } catch (_) { }
-        } else if (action === 'card-group-delete-frame') {
-            try {
-                if (typeof removeMdNode === 'function') removeMdNode(node.id, false);
-                if (typeof clearMdSelection === 'function') clearMdSelection();
-            } catch (_) { }
-        } else if (action === 'card-group-delete-all') {
-            try {
-                if (typeof removeMdNode === 'function') removeMdNode(node.id, true);
-                if (typeof clearMdSelection === 'function') clearMdSelection();
-            } catch (_) { }
+        } else if (action === 'card-group-delete') {
+            closeColorPop();
+            if (!deletePop) {
+                deletePop = __cardGroupBuildDeletePopover(node);
+                toolbar.appendChild(deletePop);
+                deletePop.addEventListener('click', (ev) => {
+                    const optBtn = ev.target && ev.target.closest ? ev.target.closest('[data-card-group-delete-action]') : null;
+                    if (!optBtn) return;
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const deleteKind = optBtn.getAttribute('data-card-group-delete-action');
+                    closeDeletePop();
+                    if (deleteKind === 'frame') {
+                        try {
+                            if (typeof removeMdNode === 'function') removeMdNode(node.id, false);
+                            if (typeof clearMdSelection === 'function') clearMdSelection();
+                        } catch (_) { }
+                    } else if (deleteKind === 'all') {
+                        try {
+                            if (typeof removeMdNode === 'function') removeMdNode(node.id, true);
+                            if (typeof clearMdSelection === 'function') clearMdSelection();
+                        } catch (_) { }
+                    }
+                });
+            }
+            const isOpen = deletePop.classList.contains('open');
+            if (isOpen) {
+                closeDeletePop();
+            } else {
+                deletePop.classList.add('open');
+                const tRect = toolbar.getBoundingClientRect();
+                if (tRect.top < 85) {
+                    deletePop.classList.add('popover-flipped');
+                } else {
+                    deletePop.classList.remove('popover-flipped');
+                }
+                if (typeof updateCanvasPopoverState === 'function') {
+                    try { updateCanvasPopoverState(true); } catch (_) { }
+                }
+                const onDoc = (ev) => {
+                    if (!toolbar.contains(ev.target)) {
+                        closeDeletePop();
+                        document.removeEventListener('mousedown', onDoc, true);
+                    }
+                };
+                document.addEventListener('mousedown', onDoc, true);
+            }
         }
     });
 }
@@ -575,7 +652,12 @@ function showCardGroupContextMenu(event, node) {
         { action: 'card-group-context-locate', label: labels.locate, icon: 'crosshairs' },
         { action: 'card-group-context-pin', label: labels.pin, icon: 'thumbtack' },
         { action: 'card-group-context-export', label: labels.export, icon: 'file-export' },
-        { action: 'card-group-context-delete', label: labels.deleteFrame, icon: 'trash-alt', group: 'delete' },
+        {
+            action: 'card-group-context-delete',
+            label: labels.deleteFrame,
+            customIconHtml: '<span class="icon-frame-delete"><i class="far fa-square"></i><i class="fas fa-trash-alt"></i></span>',
+            group: 'delete'
+        },
         { action: 'card-group-context-delete-all', label: labels.deleteAll, icon: 'trash-alt', group: 'delete' }
     ];
     menu.classList.remove('horizontal-layout', 'density-xs', 'density-md', 'density-lg', 'lang-zh', 'lang-en');
@@ -587,14 +669,14 @@ function showCardGroupContextMenu(event, node) {
     menu.innerHTML = [
         normalItems.map(item => `
             <div class="context-menu-item ${item.className || ''}" data-action="${item.action}">
-                <i class="fas fa-${item.icon}"></i>
+                ${item.customIconHtml || `<i class="fas fa-${item.icon}"></i>`}
                 <span class="context-menu-item-label"><span>${item.label}</span></span>
             </div>
         `).join(''),
         `<div class="card-group-context-delete-box">
             ${deleteItems.map(item => `
                 <div class="context-menu-item card-group-context-delete-item" data-action="${item.action}">
-                    <i class="fas fa-${item.icon}"></i>
+                    ${item.customIconHtml || `<i class="fas fa-${item.icon}"></i>`}
                     <span class="context-menu-item-label"><span>${item.label}</span></span>
                 </div>
             `).join('')}

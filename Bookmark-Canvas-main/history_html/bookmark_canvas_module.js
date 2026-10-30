@@ -3951,8 +3951,8 @@ function applyPermanentSectionColorVars(color) {
     __setCssVar('--permanent-action-danger-bg', dangerPalette.base);
     __setCssVar('--permanent-action-danger-hover-bg', dangerPalette.hover);
     __setCssVar('--permanent-action-danger-border', dangerPalette.border);
-    __setCssVar('--permanent-action-danger-icon', dangerPalette.icon);
-    __setCssVar('--permanent-action-danger-hover-icon', dangerPalette.hoverIcon);
+    __setCssVar('--permanent-action-danger-icon', actionIconColor);
+    __setCssVar('--permanent-action-danger-hover-icon', actionIconColor);
     __setCssVar('--permanent-action-danger-shadow', dangerPalette.shadow);
 }
 
@@ -5027,7 +5027,7 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
             isTemp = true;
         }
     }
-    const isMultiline = safeMessage.includes('\n') || safeMessage.length > 60;
+    const isMultiline = safeMessage.includes('\n') || safeMessage.length > 36 || (/[^\x00-\xff]/.test(safeMessage) && safeMessage.length > 22);
 
     const targetParent = (typeof getOverlayContainer === 'function')
         ? getOverlayContainer()
@@ -5141,7 +5141,7 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
             if (isClosing) return handle;
             const isWarnOrError = newType === 'warning' || newType === 'error';
             messageEl.textContent = String(newMsg ?? '');
-            const newMultiline = messageEl.textContent.includes('\n') || messageEl.textContent.length > 60;
+            const newMultiline = messageEl.textContent.includes('\n') || messageEl.textContent.length > 36 || (/[^\x00-\xff]/.test(messageEl.textContent) && messageEl.textContent.length > 22);
             messageEl.classList.toggle('multiline', newMultiline);
             applyType(newType);
             applyIcon(newType, newIcon, newSpin);
@@ -12596,6 +12596,7 @@ function removePermanentSectionCopy(sectionEl) {
         const copies = __readPermanentSectionCopies();
         const next = copies.filter(c => c && c.id !== copyId);
         __writePermanentSectionCopies(next);
+        try { __trackCardDeleteForBatchTip(); } catch (_) { }
 
     }
 
@@ -19107,6 +19108,7 @@ function removeMdNode(id, deleteChildren = false, options = {}) {
             }, { immediate });
         }
         else saveCanvasManifestOnly({ immediate });
+        try { __trackCardDeleteForBatchTip(); } catch (_) { }
     }
     try { __scheduleCardGroupMembershipRefreshForNodeIds(id, { forceAll: true }); } catch (_) { }
     try { if (window.__BCSCardGroup?.updateHierarchy) window.__BCSCardGroup.updateHierarchy(); } catch (_) { }
@@ -23226,22 +23228,97 @@ function __renderTempNodeImpl(section, options = {}) {
         document.addEventListener('mousedown', onDoc, true);
     });
 
+    const isCardEn = (typeof currentLang !== 'undefined' && currentLang === 'en') ||
+                    ((typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : '') === 'en');
+
+    // 临时卡片关闭删除 - 原位胶囊确认交互（学习书签树 hover actions 模式）
+    const deleteCapsule = document.createElement('div');
+    deleteCapsule.className = 'temp-node-delete-capsule';
+
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'temp-node-action-btn temp-node-delete-btn temp-node-close';
     closeBtn.innerHTML = '<i class="fas fa-times"></i>';
-    const closeLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Remove section' : '删除临时栏目';
+    const closeLabel = isCardEn ? 'Remove section' : '删除临时栏目';
     closeBtn.title = closeLabel;
     closeBtn.setAttribute('aria-label', closeLabel);
+
+    const confirmGroup = document.createElement('div');
+    confirmGroup.className = 'temp-node-delete-confirm-group';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'temp-node-action-btn temp-node-delete-confirm-btn';
+    confirmBtn.innerHTML = '<i class="fas fa-check"></i>';
+    const confirmLabel = isCardEn ? 'Confirm delete' : '确认删除';
+    confirmBtn.title = confirmLabel;
+    confirmBtn.setAttribute('aria-label', confirmLabel);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'temp-node-action-btn temp-node-delete-cancel-btn';
+    cancelBtn.innerHTML = '<i class="fas fa-times"></i>';
+    const cancelLabel = isCardEn ? 'Cancel' : '取消';
+    cancelBtn.title = cancelLabel;
+    cancelBtn.setAttribute('aria-label', cancelLabel);
+
+    confirmGroup.appendChild(confirmBtn);
+    confirmGroup.appendChild(cancelBtn);
+
+    deleteCapsule.appendChild(closeBtn);
+    deleteCapsule.appendChild(confirmGroup);
+
+    const resetConfirmState = () => {
+        deleteCapsule.classList.remove('confirming-delete');
+        header.removeEventListener('mouseleave', onHeaderLeave);
+        document.removeEventListener('mousedown', onDocClick, true);
+        document.removeEventListener('keydown', onKeyDown, true);
+    };
+
+    const onHeaderLeave = () => {
+        resetConfirmState();
+    };
+
+    const onDocClick = (e) => {
+        if (!deleteCapsule.contains(e.target)) {
+            resetConfirmState();
+        }
+    };
+
+    const onKeyDown = (e) => {
+        if (e.key === 'Escape') {
+            resetConfirmState();
+        }
+    };
+
     closeBtn.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const remove = () => removeTempNode(section.id);
-        if (__isNodeMaximized(nodeElement)) {
-            __showFullscreenDeleteConfirmPopover(closeBtn, { onConfirm: remove });
-        } else {
-            remove();
-        }
+
+        // 清除其它卡片的删除确认状态
+        document.querySelectorAll('.temp-node-delete-capsule.confirming-delete').forEach(el => {
+            if (el !== deleteCapsule) {
+                el.classList.remove('confirming-delete');
+            }
+        });
+
+        deleteCapsule.classList.add('confirming-delete');
+        header.addEventListener('mouseleave', onHeaderLeave);
+        document.addEventListener('mousedown', onDocClick, true);
+        document.addEventListener('keydown', onKeyDown, true);
+    });
+
+    confirmBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        resetConfirmState();
+        removeTempNode(section.id);
+    });
+
+    cancelBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        resetConfirmState();
     });
 
     let tempColorInputRaf = null;
@@ -23454,7 +23531,7 @@ function __renderTempNodeImpl(section, options = {}) {
     actions.appendChild(pinBtn);
     actions.appendChild(searchScopeBtn);
     actions.appendChild(colorWrap);
-    actions.appendChild(closeBtn);
+    actions.appendChild(deleteCapsule);
     actions.appendChild(fullscreenBtn);
 
     header.appendChild(titleContainer);
@@ -24312,8 +24389,9 @@ function applyTempSectionColor(section, nodeElement, header, colorButton, colorI
         target.style.setProperty('--temp-action-bg', palettes.primary.base);
         target.style.setProperty('--temp-action-hover-bg', palettes.primary.hover);
         target.style.setProperty('--temp-action-border', palettes.primary.border);
-        target.style.setProperty('--temp-action-icon', isDarkText ? '#0f172a' : '#ffffff');
-        target.style.setProperty('--temp-action-hover-icon', isDarkText ? '#0f172a' : '#ffffff');
+        const actionIconColor = isDarkText ? '#0f172a' : '#ffffff';
+        target.style.setProperty('--temp-action-icon', actionIconColor);
+        target.style.setProperty('--temp-action-hover-icon', actionIconColor);
         target.style.setProperty('--temp-action-shadow', palettes.primary.shadow);
         target.style.setProperty('--temp-action-outline', palettes.primary.outline);
         target.style.setProperty('--temp-action-muted-bg', palettes.primary.subtle);
@@ -24321,8 +24399,8 @@ function applyTempSectionColor(section, nodeElement, header, colorButton, colorI
         target.style.setProperty('--temp-action-danger-bg', palettes.danger.base);
         target.style.setProperty('--temp-action-danger-hover-bg', palettes.danger.hover);
         target.style.setProperty('--temp-action-danger-border', palettes.danger.border);
-        target.style.setProperty('--temp-action-danger-icon', palettes.danger.icon);
-        target.style.setProperty('--temp-action-danger-hover-icon', palettes.danger.hoverIcon);
+        target.style.setProperty('--temp-action-danger-icon', actionIconColor);
+        target.style.setProperty('--temp-action-danger-hover-icon', actionIconColor);
         target.style.setProperty('--temp-action-danger-shadow', palettes.danger.shadow);
     }
 
@@ -26664,6 +26742,30 @@ function wakeSectionById(sectionId) {
 
 // 已移除废弃的 setPerformanceMode / loadPerformanceMode
 
+let __recentCardDeleteTimestamps = [];
+let __lastBatchClearTipTime = 0;
+
+function __trackCardDeleteForBatchTip() {
+    if (CanvasState && CanvasState.clickToClearMode) return;
+    const now = Date.now();
+    // 15秒滑动窗口统计
+    __recentCardDeleteTimestamps = __recentCardDeleteTimestamps.filter(t => now - t <= 15000);
+    __recentCardDeleteTimestamps.push(now);
+
+    // 15秒内连续删除达到3张卡片，且距离上次提示至少间隔10分钟
+    if (__recentCardDeleteTimestamps.length >= 3 && (now - __lastBatchClearTipTime >= 600000)) {
+        __lastBatchClearTipTime = now;
+        const lang = (typeof currentLang === 'string' && currentLang) ? currentLang : (typeof getCanvasLanguage === 'function' ? getCanvasLanguage() : '');
+        const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
+        const msg = isEn
+            ? 'Batch cleanup: Use "Click to Clear" in Settings.'
+            : '批量清理：可在【管理/设置】中使用【点击清除】';
+        if (typeof showCanvasToast === 'function') {
+            showCanvasToast(msg, { type: 'info', duration: 4000 });
+        }
+    }
+}
+
 function removeTempNode(sectionId, options = {}) {
     const skipSave = !!(options && options.skipSave);
     const immediate = options && Object.prototype.hasOwnProperty.call(options, 'immediate')
@@ -26671,6 +26773,9 @@ function removeTempNode(sectionId, options = {}) {
         : true;
     const element = document.getElementById(sectionId);
     if (element) {
+        if (typeof __isNodeMaximized === 'function' && __isNodeMaximized(element)) {
+            try { restoreCanvasNodeLayout(element); } catch (_) { }
+        }
         element.remove();
     }
 
@@ -26682,6 +26787,7 @@ function removeTempNode(sectionId, options = {}) {
         saveCanvasSectionDelta({
             deleteSectionIds: [sectionId]
         }, { immediate });
+        try { __trackCardDeleteForBatchTip(); } catch (_) { }
     }
     try { __scheduleCardGroupMembershipRefreshForNodeIds(sectionId, { forceAll: true }); } catch (_) { }
     scheduleBoundsUpdate();

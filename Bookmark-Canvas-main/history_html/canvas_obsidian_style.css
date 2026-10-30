@@ -4085,6 +4085,42 @@ body.canvas-scrollbar-dragging * {
     display: flex;
 }
 
+/* 卡片组删除选项弹层（紧凑上下间距，仅删除框体始终靠近工具窗） */
+.card-group-delete-popover {
+    top: auto;
+    bottom: calc(100% + 2px);
+    left: auto;
+    right: 0;
+    transform: none;
+    z-index: 10;
+    padding: 3px;
+    gap: 2px;
+    min-width: 135px;
+    flex-direction: column-reverse;
+}
+
+.card-group-delete-popover.popover-flipped {
+    bottom: auto;
+    top: calc(100% + 2px);
+    flex-direction: column;
+}
+
+.card-group-delete-popover .card-group-delete-option {
+    padding: 4px 8px;
+    font-size: 12px;
+    gap: 6px;
+    line-height: 1.25;
+}
+
+.card-group-delete-popover .icon-frame-delete,
+.card-group-context-delete-item .icon-frame-delete {
+    width: 16px;
+    height: 16px;
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+
 .card-group-color-divider {
     width: 1px;
     align-self: stretch;

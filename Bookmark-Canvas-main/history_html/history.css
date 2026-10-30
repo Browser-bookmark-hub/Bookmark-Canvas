@@ -7974,9 +7974,16 @@ html.side-panel-mode .bookmark-add-secondary-actions .modal-btn {
 }
 
 .bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item {
+    padding-left: 10px;
+    padding-right: 10px;
     background: transparent;
     border-color: transparent;
     color: #d32f2f;
+}
+
+.bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item i,
+.bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item .icon-frame-delete {
+    flex-shrink: 0;
 }
 
 .bookmark-context-menu[data-menu-scope="card-group-object"] .card-group-context-delete-item i {
