@@ -34385,7 +34385,6 @@ function showCanvasPinPopover(anchorBtn, descriptor = {}) {
                 <i class="fas fa-layer-group"></i>
                 <span>${canvasLabel}</span>
             </span>
-            <i class="fas fa-check canvas-pin-option-check"></i>
         </button>`;
     }
     optionsHtml += `
@@ -34394,7 +34393,6 @@ function showCanvasPinPopover(anchorBtn, descriptor = {}) {
                 <i class="fas fa-thumbtack"></i>
                 <span>${dirLabel}</span>
             </span>
-            <i class="fas fa-check canvas-pin-option-check"></i>
         </button>
     `;
 

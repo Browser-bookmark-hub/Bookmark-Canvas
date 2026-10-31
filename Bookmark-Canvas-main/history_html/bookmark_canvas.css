@@ -4270,13 +4270,14 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
     border: 1px solid rgba(27, 31, 36, 0.25);
     border-radius: 8px;
     box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
-    padding: 6px;
+    padding: 5px;
     display: none;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
     z-index: 1000;
     white-space: nowrap;
-    min-width: 140px;
+    width: max-content;
+    min-width: max-content;
     pointer-events: auto;
     user-select: none;
 }
@@ -4310,9 +4311,8 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
 .canvas-pin-option {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 7px 12px;
+    gap: 8px;
+    padding: 6px 12px;
     border: 1px solid transparent;
     border-radius: 6px;
     background: transparent;
@@ -4323,12 +4323,14 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
     text-align: left;
     width: 100%;
     box-sizing: border-box;
+    white-space: nowrap;
 }
 
 .canvas-pin-option-label {
     display: flex;
     align-items: center;
     gap: 8px;
+    white-space: nowrap;
 }
 
 .canvas-pin-option-label i {
@@ -4336,12 +4338,12 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
     width: 16px;
     text-align: center;
     color: #57606a;
+    flex-shrink: 0;
+    margin: 0;
 }
 
 .canvas-pin-option-check {
-    font-size: 12px;
-    color: transparent;
-    transition: color 0.15s ease;
+    display: none !important;
 }
 
 .canvas-pin-option:hover {
@@ -4362,10 +4364,6 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
 }
 
 .canvas-pin-option.is-active .canvas-pin-option-label i {
-    color: #0969da;
-}
-
-.canvas-pin-option.is-active .canvas-pin-option-check {
     color: #0969da;
 }
 
@@ -4395,8 +4393,7 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
     color: #58a6ff;
 }
 
-[data-theme="dark"] .canvas-pin-option.is-active .canvas-pin-option-label i,
-[data-theme="dark"] .canvas-pin-option.is-active .canvas-pin-option-check {
+[data-theme="dark"] .canvas-pin-option.is-active .canvas-pin-option-label i {
     color: #58a6ff;
 }
 
