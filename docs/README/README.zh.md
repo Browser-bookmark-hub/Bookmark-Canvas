@@ -228,6 +228,7 @@ https://raw.githubusercontent.com/Browser-bookmark-hub/Bookmark-Canvas/main/Book
 ### R4. 普通链式临时栏目示例
 顶层普通链式栏目：
 下面子书签同时展示 `tags` 与 `note`/`noteColor` 作为同一个临时 item 的并列 metadata；没有 metadata 的 item 可省略这些字段。
+临时项以显式 `type` 区分文件夹与书签；不要根据空 `url` 或 `children` 数组等占位字段推断条目类型。
 ```json
 {
   "format": "bookmark-canvas-section",

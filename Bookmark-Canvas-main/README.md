@@ -209,6 +209,7 @@ A permanent copy is a view anchor, not another bookmark tree.
 
 Top-level regular chain section:
 The child bookmark below shows `tags` and `note`/`noteColor` as sibling metadata on the same temporary item; omit these fields when an item has no metadata.
+For temporary items, the explicit `type` distinguishes folders from bookmarks; do not infer the item kind from placeholder fields such as an empty `url` or `children` array.
 ```json
 {
   "format": "bookmark-canvas-section",
