@@ -9305,11 +9305,42 @@ function initializeUI() {
 
     // 搜索
     const searchInputEl = document.getElementById('searchInput');
-    if (searchInputEl && !searchInputEl.hasAttribute('data-search-bound')) {
-        searchInputEl.addEventListener('input', handleSearch);
-        searchInputEl.addEventListener('keydown', handleSearchKeydown);
-        searchInputEl.addEventListener('focus', handleSearchInputFocus);
-        searchInputEl.setAttribute('data-search-bound', 'true');
+    if (searchInputEl) {
+        const closeSearchMenusIfOpen = () => {
+            try {
+                if (typeof toggleSearchModeMenu === 'function' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.isMenuOpen) {
+                    toggleSearchModeMenu(false);
+                }
+                if (typeof toggleSearchHelpMenu === 'function' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.isHelpOpen) {
+                    toggleSearchHelpMenu(false);
+                }
+            } catch (_) { }
+        };
+        if (!searchInputEl.hasAttribute('data-search-interaction-bound')) {
+            searchInputEl.setAttribute('data-search-interaction-bound', 'true');
+            searchInputEl.addEventListener('mousedown', closeSearchMenusIfOpen);
+            searchInputEl.addEventListener('click', closeSearchMenusIfOpen);
+            searchInputEl.addEventListener('beforeinput', closeSearchMenusIfOpen);
+            searchInputEl.addEventListener('compositionstart', closeSearchMenusIfOpen);
+        }
+
+        const inputWrapperEl = searchInputEl.closest('.search-input-wrapper');
+        if (inputWrapperEl && !inputWrapperEl.hasAttribute('data-menu-close-bound')) {
+            inputWrapperEl.setAttribute('data-menu-close-bound', 'true');
+            const handleWrapperClick = (e) => {
+                if (e.target.closest('#searchClearBtn') || e.target.closest('#searchAreaExitBtn')) return;
+                closeSearchMenusIfOpen();
+            };
+            inputWrapperEl.addEventListener('mousedown', handleWrapperClick);
+            inputWrapperEl.addEventListener('click', handleWrapperClick);
+        }
+
+        if (!searchInputEl.hasAttribute('data-search-bound')) {
+            searchInputEl.addEventListener('input', handleSearch);
+            searchInputEl.addEventListener('keydown', handleSearchKeydown);
+            searchInputEl.addEventListener('focus', handleSearchInputFocus);
+            searchInputEl.setAttribute('data-search-bound', 'true');
+        }
     }
 
     const searchResultsPanel = document.getElementById('searchResultsPanel');
@@ -16889,6 +16920,13 @@ try {
 } catch (_) { }
 
 function handleSearch(e) {
+    if (typeof toggleSearchModeMenu === 'function' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.isMenuOpen) {
+        try { toggleSearchModeMenu(false); } catch (_) { }
+    }
+    if (typeof toggleSearchHelpMenu === 'function' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.isHelpOpen) {
+        try { toggleSearchHelpMenu(false); } catch (_) { }
+    }
+
     const inputEl = e && e.target;
     const raw = (inputEl && typeof inputEl.value === 'string') ? inputEl.value : '';
     const normalizedQuery = raw.trim().toLowerCase();

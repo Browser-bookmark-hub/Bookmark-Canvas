@@ -2283,6 +2283,15 @@ function clearMainSearchInput(options = {}) {
     } catch (_) { }
 
     try {
+        if (typeof toggleSearchModeMenu === 'function') {
+            toggleSearchModeMenu(false);
+        }
+        if (typeof toggleSearchHelpMenu === 'function') {
+            toggleSearchHelpMenu(false);
+        }
+    } catch (_) { }
+
+    try {
         if (typeof updateSearchPlaceholder === 'function') {
             updateSearchPlaceholder('focused');
         }
@@ -2955,6 +2964,14 @@ async function handleSearchInputFocus(e) {
         }
         const input = e && e.target ? e.target : document.getElementById('searchInput');
         if (!input) return;
+
+        // 输入框聚焦时，自动关闭模式菜单与帮助面板
+        if (typeof toggleSearchModeMenu === 'function') {
+            try { toggleSearchModeMenu(false); } catch (_) { }
+        }
+        if (typeof toggleSearchHelpMenu === 'function') {
+            try { toggleSearchHelpMenu(false); } catch (_) { }
+        }
 
         if (typeof updateSearchPlaceholder === 'function') {
             updateSearchPlaceholder('focused');
@@ -7899,6 +7916,25 @@ function handleSearchOutsideClick(e) {
     const container = document.querySelector('.search-container');
     const panel = getSearchResultsPanel();
     if (!container || !panel) return;
+
+    // 如果模式菜单或帮助菜单打开，且点击发生在模式菜单和模式触发按钮之外（如点击输入框、搜索结果面板等），自动关闭菜单
+    const modeMenu = document.getElementById('searchModeMenu');
+    const modeTrigger = document.getElementById('searchModeTrigger');
+    const isInsideModeMenuOrTrigger = !!(
+        (modeMenu && modeMenu.contains(e.target)) ||
+        (modeTrigger && modeTrigger.contains(e.target)) ||
+        (e.target && e.target.closest && e.target.closest('#searchHistoryHelpPopover, .search-hint-help-popover, .perf-help-popover'))
+    );
+
+    if (!isInsideModeMenuOrTrigger) {
+        if (typeof toggleSearchModeMenu === 'function' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.isMenuOpen) {
+            toggleSearchModeMenu(false);
+        }
+        if (typeof toggleSearchHelpMenu === 'function' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.isHelpOpen) {
+            toggleSearchHelpMenu(false);
+        }
+    }
+
     if (container.contains(e.target) || (e.composedPath && e.composedPath().some(el => el === container || (el && el.classList && el.classList.contains('search-container'))))) return;
 
     // 点击附着在 body 上的搜索相关气泡/浮层/提示时，不作为外部点击处理，防止事件透传关闭
@@ -8506,6 +8542,39 @@ function initSearchEvents() {
     const searchInput = document.getElementById('searchInput');
     const searchResultsPanel = getSearchResultsPanel();
 
+    if (searchInput) {
+        const closeSearchMenusOnInteraction = () => {
+            try {
+                if (typeof toggleSearchModeMenu === 'function' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.isMenuOpen) {
+                    toggleSearchModeMenu(false);
+                }
+                if (typeof toggleSearchHelpMenu === 'function' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.isHelpOpen) {
+                    toggleSearchHelpMenu(false);
+                }
+            } catch (_) { }
+        };
+
+        if (!searchInput.hasAttribute('data-search-interaction-bound')) {
+            searchInput.setAttribute('data-search-interaction-bound', 'true');
+            searchInput.addEventListener('mousedown', closeSearchMenusOnInteraction);
+            searchInput.addEventListener('click', closeSearchMenusOnInteraction);
+            searchInput.addEventListener('input', closeSearchMenusOnInteraction);
+            searchInput.addEventListener('beforeinput', closeSearchMenusOnInteraction);
+            searchInput.addEventListener('compositionstart', closeSearchMenusOnInteraction);
+        }
+
+        const searchInputWrapper = searchInput.closest('.search-input-wrapper');
+        if (searchInputWrapper && !searchInputWrapper.hasAttribute('data-menu-close-bound')) {
+            searchInputWrapper.setAttribute('data-menu-close-bound', 'true');
+            const handleWrapperInteraction = (e) => {
+                if (e.target.closest('#searchClearBtn') || e.target.closest('#searchAreaExitBtn')) return;
+                closeSearchMenusOnInteraction();
+            };
+            searchInputWrapper.addEventListener('mousedown', handleWrapperInteraction);
+            searchInputWrapper.addEventListener('click', handleWrapperInteraction);
+        }
+    }
+
     // Avoid double-binding: history.js may also bind these listeners.
     // IMPORTANT: history.js binds `input` later (after async settings load). If we set
     // `data-search-bound` too early without binding `input`, search won't trigger.
@@ -8514,8 +8583,6 @@ function initSearchEvents() {
         // so the results panel can show immediately.
         searchInput.addEventListener('input', () => {
             try {
-                const q = (searchInput.value || '').trim();
-                if (!q) return;
                 toggleSearchModeMenu(false);
                 toggleSearchHelpMenu(false);
             } catch (_) { }
