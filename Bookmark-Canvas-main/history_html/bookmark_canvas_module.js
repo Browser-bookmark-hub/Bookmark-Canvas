@@ -2335,7 +2335,7 @@ const MD_NODE_MIN_HEIGHT = 140;
 
 // Canvas 外观设置（默认值）
 const CANVAS_APPEARANCE_SETTINGS_KEY = 'canvas-appearance-settings-v1';
-const CANVAS_APPEARANCE_SETTINGS_VERSION = 5;
+const CANVAS_APPEARANCE_SETTINGS_VERSION = 6;
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH = 420;
 const LEGACY_TEMP_SECTION_DEFAULT_WIDTH_V2 = 500;
 const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
@@ -2358,8 +2358,12 @@ const DEFAULT_CANVAS_APPEARANCE_SETTINGS = {
         edge: { mode: 'blank' }
     },
     fullScreenZoom: {
-        section: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section,
-        mdNode: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.md
+        permanent: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section,
+        permanentCopy: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section,
+        temp: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section,
+        specialTemp: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section,
+        mdNode: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.md,
+        section: NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section
     }
 };
 
@@ -2675,9 +2679,15 @@ function __getDefaultAppearanceFullscreenZoomSettings() {
     const preset = NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM[key] || NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other;
     const sectionFallback = NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.section;
     const mdFallback = NODE_LAYOUT_ZOOM_DEFAULT_BY_PLATFORM.other.md;
+    const defaultSection = __normalizeLayoutZoomPercent(preset.section, sectionFallback);
+    const defaultMd = __normalizeLayoutZoomPercent(preset.md, mdFallback);
     return {
-        section: __normalizeLayoutZoomPercent(preset.section, sectionFallback),
-        mdNode: __normalizeLayoutZoomPercent(preset.md, mdFallback)
+        permanent: defaultSection,
+        permanentCopy: defaultSection,
+        temp: defaultSection,
+        specialTemp: defaultSection,
+        mdNode: defaultMd,
+        section: defaultSection
     };
 }
 
@@ -2685,9 +2695,21 @@ function __normalizeAppearanceFullscreenZoom(source, fallback = null) {
     const raw = source && typeof source === 'object' ? source : {};
     const defaults = __getDefaultAppearanceFullscreenZoomSettings();
     const base = fallback && typeof fallback === 'object' ? fallback : defaults;
+    const legacySection = raw.section !== undefined ? raw.section : (base.section !== undefined ? base.section : undefined);
+
+    const permanent = __normalizeLayoutZoomPercent(raw.permanent ?? legacySection ?? base.permanent, defaults.permanent);
+    const permanentCopy = __normalizeLayoutZoomPercent(raw.permanentCopy ?? raw.permanent ?? legacySection ?? base.permanentCopy, defaults.permanentCopy);
+    const temp = __normalizeLayoutZoomPercent(raw.temp ?? legacySection ?? base.temp, defaults.temp);
+    const specialTemp = __normalizeLayoutZoomPercent(raw.specialTemp ?? raw.temp ?? legacySection ?? base.specialTemp, defaults.specialTemp);
+    const mdNode = __normalizeLayoutZoomPercent(raw.mdNode ?? base.mdNode, defaults.mdNode);
+
     return {
-        section: __normalizeLayoutZoomPercent(raw.section, __normalizeLayoutZoomPercent(base.section, defaults.section)),
-        mdNode: __normalizeLayoutZoomPercent(raw.mdNode, __normalizeLayoutZoomPercent(base.mdNode, defaults.mdNode))
+        permanent,
+        permanentCopy,
+        temp,
+        specialTemp,
+        mdNode,
+        section: permanent
     };
 }
 
@@ -44618,13 +44640,27 @@ function __getLayoutZoomPlatformKey() {
 }
 
 function __getDefaultLayoutZoomPercentByElement(element) {
-    const isMdNode = !!(element && element.classList && element.classList.contains('md-canvas-node'));
+    if (!element || !element.classList) return 100;
     const settings = getCanvasAppearanceSettings();
-    const fullScreenZoom = __normalizeAppearanceFullscreenZoom(
+    const fz = __normalizeAppearanceFullscreenZoom(
         settings && settings.fullScreenZoom,
         __getDefaultAppearanceFullscreenZoomSettings()
     );
-    return isMdNode ? fullScreenZoom.mdNode : fullScreenZoom.section;
+
+    if (element.classList.contains('md-canvas-node')) {
+        return fz.mdNode;
+    }
+    if (element.classList.contains('permanent-bookmark-section')) {
+        const isCopy = !!(element.dataset && element.dataset.permanentSectionCopyId);
+        return isCopy ? fz.permanentCopy : fz.permanent;
+    }
+    if (element.classList.contains('temp-canvas-node')) {
+        const sectionId = element.dataset && element.dataset.sectionId;
+        const section = (sectionId && typeof getTempSection === 'function') ? getTempSection(sectionId) : null;
+        const isSpecial = section ? (typeof __isSpecialTempSection === 'function' && __isSpecialTempSection(section)) : false;
+        return isSpecial ? fz.specialTemp : fz.temp;
+    }
+    return fz.permanent;
 }
 
 function __parseLayoutZoomInput(value, fallback) {
@@ -47798,7 +47834,10 @@ function __syncAppearanceColorRow(rowEl, color) {
 
 function openCanvasAppearanceSettingsModal() {
     let modal = document.getElementById('canvasAppearanceSettingsModal');
-    if (modal) modal.remove();
+    if (modal) {
+        if (typeof modal.__cleanup === 'function') modal.__cleanup();
+        modal.remove();
+    }
     createCanvasAppearanceSettingsModal();
     modal = document.getElementById('canvasAppearanceSettingsModal');
     if (!modal) return;
@@ -47828,6 +47867,18 @@ function openCanvasAppearanceSettingsModal() {
     if (specialTempH) specialTempH.value = (sizes.specialTemp || DEFAULT_CANVAS_APPEARANCE_SETTINGS.sizes.specialTemp).height;
     if (blankW) blankW.value = sizes.mdNode.width;
     if (blankH) blankH.value = sizes.mdNode.height;
+
+    const fsPerm = modal.querySelector('#appearanceFsPermanentZoom');
+    const fsPermCopy = modal.querySelector('#appearanceFsPermanentCopyZoom');
+    const fsTemp = modal.querySelector('#appearanceFsTempZoom');
+    const fsSpecialTemp = modal.querySelector('#appearanceFsSpecialTempZoom');
+    const fsBlank = modal.querySelector('#appearanceFsBlankZoom');
+
+    if (fsPerm) fsPerm.value = String(fullScreenZoom.permanent);
+    if (fsPermCopy) fsPermCopy.value = String(fullScreenZoom.permanentCopy);
+    if (fsTemp) fsTemp.value = String(fullScreenZoom.temp);
+    if (fsSpecialTemp) fsSpecialTemp.value = String(fullScreenZoom.specialTemp);
+    if (fsBlank) fsBlank.value = String(fullScreenZoom.mdNode);
 
     modal.querySelectorAll('.appearance-color-row').forEach(row => {
         const target = row.dataset.colorTarget;
@@ -47973,7 +48024,10 @@ function openCanvasAppearanceSettingsModal() {
 
 function closeCanvasAppearanceSettingsModal() {
     const modal = document.getElementById('canvasAppearanceSettingsModal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+        if (typeof modal.__cleanup === 'function') modal.__cleanup();
+        modal.style.display = 'none';
+    }
 }
 
 function saveCanvasAppearanceSettings(options = {}) {
@@ -48011,14 +48065,11 @@ function saveCanvasAppearanceSettings(options = {}) {
             }
         },
         fullScreenZoom: {
-            section: __normalizeAppearanceFullscreenZoom(
-                current.fullScreenZoom,
-                __getDefaultAppearanceFullscreenZoomSettings()
-            ).section,
-            mdNode: __normalizeAppearanceFullscreenZoom(
-                current.fullScreenZoom,
-                __getDefaultAppearanceFullscreenZoomSettings()
-            ).mdNode
+            permanent: readNumber('appearanceFsPermanentZoom', (current.fullScreenZoom || {}).permanent),
+            permanentCopy: readNumber('appearanceFsPermanentCopyZoom', (current.fullScreenZoom || {}).permanentCopy),
+            temp: readNumber('appearanceFsTempZoom', (current.fullScreenZoom || {}).temp),
+            specialTemp: readNumber('appearanceFsSpecialTempZoom', (current.fullScreenZoom || {}).specialTemp),
+            mdNode: readNumber('appearanceFsBlankZoom', (current.fullScreenZoom || {}).mdNode)
         },
         colors: {
             permanent: (modal.querySelector('#appearanceColorPermanent') || {}).value,
@@ -48054,6 +48105,50 @@ function saveCanvasAppearanceSettings(options = {}) {
     if (closeAfterSave) closeCanvasAppearanceSettingsModal();
 }
 
+const CANVAS_APPEARANCE_FOLD_STATE_KEY = 'canvas_appearance_fold_state_v2';
+
+function __getAppearanceFoldState() {
+    try {
+        const raw = localStorage.getItem(CANVAS_APPEARANCE_FOLD_STATE_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                return parsed;
+            }
+        }
+    } catch (_) { }
+    return {
+        permanent: true,
+        temp: true,
+        blank: true,
+        edge: true,
+        'card-group': true,
+        'bookmark-tree': true,
+        'canvas-global': true
+    };
+}
+
+function __saveAppearanceFoldState(state) {
+    try {
+        if (state && typeof state === 'object') {
+            localStorage.setItem(CANVAS_APPEARANCE_FOLD_STATE_KEY, JSON.stringify(state));
+        }
+    } catch (_) { }
+}
+
+function __updateAppearanceCardFoldState(modal) {
+    if (!modal) return;
+    const cards = modal.querySelectorAll('.appearance-section-card');
+    const state = {};
+    cards.forEach(card => {
+        const key = card.getAttribute('data-section-key');
+        if (key) {
+            state[key] = card.classList.contains('is-collapsed');
+        }
+    });
+    __saveAppearanceFoldState(state);
+}
+
 function createCanvasAppearanceSettingsModal() {
     const modal = document.createElement('div');
     modal.id = 'canvasAppearanceSettingsModal';
@@ -48081,447 +48176,637 @@ function createCanvasAppearanceSettingsModal() {
                 <div class="modal-header-left">
                     <h3>${isEn ? 'Appearance' : '外观设置'}</h3>
                 </div>
-                <button class="perf-modal-close" id="appearanceModalCloseBtn"><i class="fas fa-times"></i></button>
+                <div class="appearance-modal-header-actions">
+                    <button type="button" class="appearance-tool-btn appearance-fold-toggle-btn" id="appearanceToggleAllFoldBtn" title="${isEn ? 'Click to expand all' : '点击展开全部'}">
+                        <i class="fas fa-chevron-down" id="appearanceToggleAllFoldIcon"></i>
+                        <span id="appearanceToggleAllFoldText">${isEn ? 'All' : '全部'}</span>
+                    </button>
+                    <button class="perf-modal-close" id="appearanceModalCloseBtn"><i class="fas fa-times"></i></button>
+                </div>
             </div>
             <div class="modal-body">
-                <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Default Sizes' : '默认尺寸'}</div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Temp' : '临时栏目'}</div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-mode-toggle">
-                                <label class="appearance-radio">
-                                    <input type="radio" name="appearance-temp-size-mode" value="manual">
-                                    <span>${isEn ? 'Manual' : '手动输入'}</span>
-                                </label>
-                                <label class="appearance-radio">
-                                    <input type="radio" name="appearance-temp-size-mode" value="auto">
-                                    <span>${isEn ? 'Auto-fit tree' : '自适应'}</span>
-                                </label>
-                            </div>
-                            <div class="appearance-size-inputs" id="appearanceTempSizeInputs">
-                                <input type="number" id="appearanceTempWidth" min="200" max="2400" step="10">
-                                <span>×</span>
-                                <input type="number" id="appearanceTempHeight" min="150" max="3000" step="10">
-                                <span>px</span>
-                            </div>
+                <!-- 1. 永久栏目 -->
+                <div class="detail-section appearance-section-card is-collapsed" data-section-key="permanent">
+                    <div class="appearance-section-header" role="button" tabindex="0" aria-expanded="false">
+                        <div class="appearance-section-header-left">
+                            <span class="appearance-section-icon"><i class="fas fa-layer-group" style="color: #10b981;"></i></span>
+                            <span class="appearance-section-title">${isEn ? 'Permanent Column' : '永久栏目'}</span>
+                            <span class="appearance-section-badge">${isEn ? 'Colors & Card Fullscreen Zoom' : '颜色与卡片全屏缩放'}</span>
+                        </div>
+                        <div class="appearance-section-header-right">
+                            <i class="fas fa-chevron-down appearance-section-chevron"></i>
                         </div>
                     </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Temp (special)' : '特殊临时栏目'}</span>
-                            <button class="perf-help-btn" id="appearanceSpecialTempHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-mode-toggle">
-                                <label class="appearance-radio">
-                                    <input type="radio" name="appearance-special-temp-size-mode" value="manual">
-                                    <span>${isEn ? 'Manual' : '手动输入'}</span>
-                                </label>
-                                <label class="appearance-radio">
-                                    <input type="radio" name="appearance-special-temp-size-mode" value="auto">
-                                    <span>${isEn ? 'Auto-fit tree' : '自适应'}</span>
-                                </label>
-                            </div>
-                            <div class="appearance-size-inputs" id="appearanceSpecialTempSizeInputs">
-                                <input type="number" id="appearanceSpecialTempWidth" min="200" max="2400" step="10">
-                                <span>×</span>
-                                <input type="number" id="appearanceSpecialTempHeight" min="150" max="3000" step="10">
-                                <span>px</span>
+                    <div class="appearance-section-body">
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Default color' : '默认颜色'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-color-row" data-color-target="permanent">
+                                    <div class="appearance-color-chips">${chipsHtml}</div>
+                                    <span class="appearance-color-value" id="appearanceColorPermanentValue">#10b981</span>
+                                    <input type="color" id="appearanceColorPermanent" class="appearance-color-input" data-color-target="permanent">
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Blank' : '空白栏目'}</div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-size-inputs" id="appearanceBlankSizeInputs">
-                                <input type="number" id="appearanceBlankWidth" min="180" max="2000" step="10">
-                                <span>×</span>
-                                <input type="number" id="appearanceBlankHeight" min="140" max="2000" step="10">
-                                <span>px</span>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Card fullscreen zoom ratio (main)' : '卡片全屏缩放比例（主栏目）'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-size-inputs">
+                                    <button type="button" class="other-default-jump-btn" id="appearanceFsPermanentZoomReset" title="${isEn ? 'Restore default' : '还原默认值'}" aria-label="${isEn ? 'Restore default' : '还原默认值'}">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                    <input type="number" id="appearanceFsPermanentZoom" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="${NODE_LAYOUT_ZOOM_STEP}">
+                                    <span>%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Card fullscreen zoom ratio (copy)' : '卡片全屏缩放比例（副本）'}</span>
+                                <button class="perf-help-btn" id="appearanceFsPermanentCopyHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-size-inputs">
+                                    <button type="button" class="other-default-jump-btn" id="appearanceFsPermanentCopyZoomReset" title="${isEn ? 'Restore default' : '还原默认值'}" aria-label="${isEn ? 'Restore default' : '还原默认值'}">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                    <input type="number" id="appearanceFsPermanentCopyZoom" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="${NODE_LAYOUT_ZOOM_STEP}">
+                                    <span>%</span>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
-                <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Default Colors' : '默认颜色'}</div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Permanent' : '永久栏目'}</div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-color-row" data-color-target="permanent">
-                                <div class="appearance-color-chips">${chipsHtml}</div>
-                                <span class="appearance-color-value" id="appearanceColorPermanentValue">#10b981</span>
-                                <input type="color" id="appearanceColorPermanent" class="appearance-color-input" data-color-target="permanent">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Temp' : '临时栏目'}</span>
-                            <button class="perf-help-btn" id="appearanceTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-color-row" data-color-target="temp">
-                                <div class="appearance-color-chips">${chipsHtml}</div>
-                                <span class="appearance-color-value" id="appearanceColorTempValue">#2563eb</span>
-                                <input type="color" id="appearanceColorTemp" class="appearance-color-input" data-color-target="temp">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Special Temp' : '特殊临时栏目'}</div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-color-row" data-color-target="special-temp">
-                                <div class="appearance-color-chips">${chipsHtml}</div>
-                                <span class="appearance-color-value" id="appearanceColorSpecialTempValue">#e9973f</span>
-                                <input type="color" id="appearanceColorSpecialTemp" class="appearance-color-input" data-color-target="special-temp">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Blank' : '空白栏目'}</div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-color-row" data-color-target="blank">
-                                <div class="appearance-color-chips">${chipsHtml}</div>
-                                <span class="appearance-color-value" id="appearanceColorBlankValue">#888888</span>
-                                <input type="color" id="appearanceColorBlank" class="appearance-color-input" data-color-target="blank">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Card Group' : '卡片组'}</div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-color-row" data-color-target="card-group">
-                                <div class="appearance-color-chips">${chipsHtml}</div>
-                                <span class="appearance-color-value" id="appearanceColorCardGroupValue">#888888</span>
-                                <input type="color" id="appearanceColorCardGroup" class="appearance-color-input" data-color-target="card-group">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Edge' : '连接线'}</div>
-                        <div class="appearance-row-content">
-                            <div class="appearance-color-row" data-color-target="edge">
-                                <div class="appearance-color-chips">${chipsHtml}</div>
-                                <span class="appearance-color-value" id="appearanceColorEdgeValue">#999999</span>
-                                <input type="color" id="appearanceColorEdge" class="appearance-color-input" data-color-target="edge">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Default Names' : '默认名称'}</div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Temp' : '临时栏目'}</div>
-                        <div class="appearance-row-content">
-                            <select id="appearanceTempNameMode" class="appearance-name-select">
-                                <option value="timestamp">${isEn ? 'Timestamp' : '时间标记'}</option>
-                                <option value="split">${isEn ? 'Split name' : '分裂名称'}</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Edge' : '连接线'}</div>
-                        <div class="appearance-row-content">
-                            <select id="appearanceEdgeNameMode" class="appearance-name-select">
-                                <option value="timestamp">${isEn ? 'Timestamp' : '时间标记'}</option>
-                                <option value="parent">${isEn ? 'Parent name' : '父栏目名字'}</option>
-                                <option value="child">${isEn ? 'Child name' : '子栏目名字'}</option>
-                                <option value="blank">${isEn ? 'Blank' : '空白'}</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? 'Special' : '特殊'}</div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Align to grid points' : '以网格点辅助对齐'}</span>
-                            <button class="perf-help-btn" id="otherGridSnapHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherGridSnapEnabled">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row" id="otherGridSnapContinuousRow">
-                        <div class="appearance-row-label">${isEn ? 'Continuous snapping' : '持续吸附'}</div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherGridSnapContinuous">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label">${isEn ? 'Grid point spacing' : '网格点间距'}</div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-size-inputs">
-                                <button type="button" class="other-default-jump-btn" id="otherGridPointSpacingReset" title="${isEn ? 'Restore default (100px)' : '还原默认值（100px）'}" aria-label="${isEn ? 'Restore default grid point spacing' : '还原默认网格点间距'}">
-                                    <i class="fas fa-undo"></i>
-                                </button>
-                                <input type="number" id="otherGridPointSpacing" min="${CANVAS_GRID_POINT_SPACING_MIN}" max="${CANVAS_GRID_POINT_SPACING_MAX}" step="10">
-                                <span>px</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Directory locatable item color sync' : '目录栏可定位条目颜色同步'}</span>
-                            <button class="perf-help-btn" id="otherMenuLocatableColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherMenuLocatableColorSync">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Directory category color sync' : '目录栏分类标题颜色同步'}</span>
-                            <button class="perf-help-btn" id="otherMenuDefaultColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherMenuDefaultColorSync">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Directory collapse mode' : '目录栏折叠方式'}</span>
-                            <button class="perf-help-btn" id="otherSidebarCollapseModeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-mode-toggle">
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-sidebar-collapse-mode" value="manual">
-                                    <span>${isEn ? 'Manual' : '手动折叠'}</span>
-                                </label>
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-sidebar-collapse-mode" value="auto">
-                                    <span>${isEn ? 'Auto' : '自动折叠'}</span>
-                                </label>
-                            </div>
-                            <div class="appearance-size-inputs" id="otherSidebarAutoCollapseInputs">
-                                <input type="number" id="otherSidebarAutoCollapseWidth" min="320" max="2000" step="10">
-                                <span>px</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
-                    <div class="appearance-row" id="otherSearchPanelTableSizeRow">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Table view default size' : '表格视图默认长宽'}</span>
-                            <button class="perf-help-btn" id="otherSearchPanelTableSizeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-size-inputs">
-                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelTableSizeReset" title="${isEn ? 'Restore default (1080 × 520px)' : '还原默认值（1080 × 520px）'}" aria-label="${isEn ? 'Restore default table size' : '还原表格视图默认长宽'}">
-                                    <i class="fas fa-undo"></i>
-                                </button>
-                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
-                                <input type="number" id="otherSearchPanelTableWidth" min="360" max="1800" step="10" style="width: 72px;">
-                                <span style="margin-right: 6px;">px</span>
-                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
-                                <input type="number" id="otherSearchPanelTableHeight" min="200" max="1200" step="10" style="width: 72px;">
-                                <span>px</span>
-                                <input type="hidden" id="otherSearchPanelHeight">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row" id="otherSearchPanelGridSizeRow">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Grid view default size' : '网格视图默认长宽'}</span>
-                            <button class="perf-help-btn" id="otherSearchPanelGridSizeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-size-inputs">
-                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelGridSizeReset" title="${isEn ? 'Restore default (920 × 520px)' : '还原默认值（920 × 520px）'}" aria-label="${isEn ? 'Restore default grid size' : '还原网格视图默认长宽'}">
-                                    <i class="fas fa-undo"></i>
-                                </button>
-                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
-                                <input type="number" id="otherSearchPanelGridWidth" min="360" max="1800" step="10" style="width: 72px;">
-                                <span style="margin-right: 6px;">px</span>
-                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
-                                <input type="number" id="otherSearchPanelGridHeight" min="200" max="1200" step="10" style="width: 72px;">
-                                <span>px</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row" id="otherSearchPanelRootSizeRow">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? '#, * root panel default size' : '#、* 初始面板默认长宽'}</span>
-                            <button class="perf-help-btn" id="otherSearchPanelRootSizeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-size-inputs">
-                                <button type="button" class="other-default-jump-btn" id="otherSearchPanelRootSizeReset" title="${isEn ? 'Restore default (560 × 450px)' : '还原默认值（560 × 450px）'}" aria-label="${isEn ? 'Restore default root panel size' : '还原#、* 初始面板默认长宽'}">
-                                    <i class="fas fa-undo"></i>
-                                </button>
-                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
-                                <input type="number" id="otherSearchPanelRootWidth" min="554" max="1800" step="10" style="width: 72px;">
-                                <span style="margin-right: 6px;">px</span>
-                                <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
-                                <input type="number" id="otherSearchPanelRootHeight" min="200" max="1200" step="10" style="width: 72px;">
-                                <span>px</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Bookmark tree tag position' : '书签树标签位置'}</span>
-                        </div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-mode-toggle">
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-bookmark-tag-position" value="left">
-                                    <span>${isEn ? 'Left' : '左边'}</span>
-                                </label>
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-bookmark-tag-position" value="right">
-                                    <span>${isEn ? 'Right' : '右边'}</span>
-                                </label>
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-bookmark-tag-position" value="auto">
-                                    <span>${isEn ? 'Auto' : '自动切换'}</span>
-                                </label>
-                            </div>
-                            <div class="appearance-size-inputs" id="otherBookmarkTagPositionInputs">
-                                <input type="number" id="otherBookmarkTagPositionThreshold" min="100" max="2000" step="10">
-                                <span>px</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Bookmark tree note position' : '书签树笔记标识位置'}</span>
-                        </div>
-                        <div class="appearance-row-content appearance-row-content-inline">
-                            <div class="appearance-mode-toggle">
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-bookmark-note-position" value="left">
-                                    <span>${isEn ? 'Left' : '左边'}</span>
-                                </label>
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-bookmark-note-position" value="right">
-                                    <span>${isEn ? 'Right' : '右边'}</span>
-                                </label>
-                                <label class="appearance-radio">
-                                    <input type="radio" name="other-bookmark-note-position" value="auto">
-                                    <span>${isEn ? 'Auto' : '自动切换'}</span>
-                                </label>
-                            </div>
-                            <div class="appearance-size-inputs" id="otherBookmarkNotePositionInputs">
-                                <input type="number" id="otherBookmarkNotePositionThreshold" min="100" max="2000" step="10">
-                                <span>px</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Highlight bookmark tree items with notes' : '笔记高亮书签树标题与图标'}</span>
-                            <button class="perf-help-btn" id="otherBookmarkNoteHighlightHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherBookmarkNoteHighlightEnabled">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
-                            <span class="temp-color-follow-lock" id="otherTempColorFollowLock" aria-hidden="true"></span>
-                            <button class="perf-help-btn" id="otherTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherTempColorFollow">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Unlock sync to parent' : '解锁后继承父色'}</span>
-                            <button class="perf-help-btn" id="otherTempColorUnlockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherTempColorUnlockSync">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="appearance-row other-sub-row">
-                        <div class="appearance-row-label appearance-row-label-inline">
-                            <span>${isEn ? 'Auto-lock after inheriting color during split' : '分裂继承颜色后自动上锁'}</span>
-                            <button class="perf-help-btn" id="otherTempColorAutoLockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
-                                <i class="fas fa-question-circle"></i>
-                            </button>
-                        </div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherTempColorAutoLockAfterSplit">
-                                <span class="other-toggle-slider"></span>
-                            </label>
-                        </div>
-                    </div>
 
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Auto connect with edges after temp split' : '临时栏目分裂后使用「连接线」自动连接'}</div>
-                        <div class="appearance-row-content">
-                            <label class="other-toggle-switch">
-                                <input type="checkbox" id="otherAutoLinkSplit">
-                                <span class="other-toggle-slider"></span>
-                            </label>
+                <!-- 2. 临时栏目 -->
+                <div class="detail-section appearance-section-card is-collapsed" data-section-key="temp">
+                    <div class="appearance-section-header" role="button" tabindex="0" aria-expanded="false">
+                        <div class="appearance-section-header-left">
+                            <span class="appearance-section-icon"><i class="fas fa-project-diagram" style="color: #2563eb;"></i></span>
+                            <span class="appearance-section-title">${isEn ? 'Temporary Column' : '临时栏目'}</span>
+                            <span class="appearance-section-badge">${isEn ? 'Size, Color & Follow' : '尺寸、颜色与跟随'}</span>
+                        </div>
+                        <div class="appearance-section-header-right">
+                            <i class="fas fa-chevron-down appearance-section-chevron"></i>
                         </div>
                     </div>
+                    <div class="appearance-section-body">
+                        <!-- 常规临时栏目 -->
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Regular size' : '常规尺寸'}</div>
+                            <div class="appearance-row-content appearance-row-content-inline">
+                                <div class="appearance-mode-toggle">
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="appearance-temp-size-mode" value="manual">
+                                        <span>${isEn ? 'Manual' : '手动输入'}</span>
+                                    </label>
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="appearance-temp-size-mode" value="auto">
+                                        <span>${isEn ? 'Auto-fit tree' : '自适应'}</span>
+                                    </label>
+                                </div>
+                                <div class="appearance-size-inputs" id="appearanceTempSizeInputs">
+                                    <input type="number" id="appearanceTempWidth" min="200" max="2400" step="10">
+                                    <span>×</span>
+                                    <input type="number" id="appearanceTempHeight" min="150" max="3000" step="10">
+                                    <span>px</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Regular color' : '常规颜色'}</span>
+                                <button class="perf-help-btn" id="appearanceTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-color-row" data-color-target="temp">
+                                    <div class="appearance-color-chips">${chipsHtml}</div>
+                                    <span class="appearance-color-value" id="appearanceColorTempValue">#2563eb</span>
+                                    <input type="color" id="appearanceColorTemp" class="appearance-color-input" data-color-target="temp">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Regular naming' : '常规命名'}</div>
+                            <div class="appearance-row-content">
+                                <select id="appearanceTempNameMode" class="appearance-name-select">
+                                    <option value="timestamp">${isEn ? 'Timestamp' : '时间标记'}</option>
+                                    <option value="split">${isEn ? 'Split name' : '分裂名称'}</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Regular card fullscreen zoom ratio' : '常规卡片全屏缩放比例'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-size-inputs">
+                                    <button type="button" class="other-default-jump-btn" id="appearanceFsTempZoomReset" title="${isEn ? 'Restore default' : '还原默认值'}" aria-label="${isEn ? 'Restore default' : '还原默认值'}">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                    <input type="number" id="appearanceFsTempZoom" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="${NODE_LAYOUT_ZOOM_STEP}">
+                                    <span>%</span>
+                                </div>
+                            </div>
+                        </div>
 
-                    <div style="height: 1px; background: var(--border-color); margin: 12px 0; opacity: 0.5;"></div>
-                    <div class="appearance-row">
-                        <div class="appearance-row-label">${isEn ? 'Default edge direction' : '连接线默认方向'}</div>
-                        <div class="appearance-row-content">
-                            <select id="otherDefaultEdgeDirection" class="appearance-name-select">
-                                <option value="none">${isEn ? 'No direction' : '无方向'}</option>
-                                <option value="forward">${isEn ? 'Single direction' : '单向'}</option>
-                                <option value="both">${isEn ? 'Bidirectional' : '双向'}</option>
-                            </select>
+                        <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
+
+                        <!-- 特殊临时栏目 -->
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Special size' : '特殊临时栏目尺寸'}</span>
+                                <button class="perf-help-btn" id="appearanceSpecialTempHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content appearance-row-content-inline">
+                                <div class="appearance-mode-toggle">
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="appearance-special-temp-size-mode" value="manual">
+                                        <span>${isEn ? 'Manual' : '手动输入'}</span>
+                                    </label>
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="appearance-special-temp-size-mode" value="auto">
+                                        <span>${isEn ? 'Auto-fit tree' : '自适应'}</span>
+                                    </label>
+                                </div>
+                                <div class="appearance-size-inputs" id="appearanceSpecialTempSizeInputs">
+                                    <input type="number" id="appearanceSpecialTempWidth" min="200" max="2400" step="10">
+                                    <span>×</span>
+                                    <input type="number" id="appearanceSpecialTempHeight" min="150" max="3000" step="10">
+                                    <span>px</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Special color' : '特殊临时栏目颜色'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-color-row" data-color-target="special-temp">
+                                    <div class="appearance-color-chips">${chipsHtml}</div>
+                                    <span class="appearance-color-value" id="appearanceColorSpecialTempValue">#e9973f</span>
+                                    <input type="color" id="appearanceColorSpecialTemp" class="appearance-color-input" data-color-target="special-temp">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Special card fullscreen zoom ratio' : '特殊卡片全屏缩放比例'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-size-inputs">
+                                    <button type="button" class="other-default-jump-btn" id="appearanceFsSpecialTempZoomReset" title="${isEn ? 'Restore default' : '还原默认值'}" aria-label="${isEn ? 'Restore default' : '还原默认值'}">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                    <input type="number" id="appearanceFsSpecialTempZoom" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="${NODE_LAYOUT_ZOOM_STEP}">
+                                    <span>%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
+
+                        <!-- 颜色跟随与分裂行为 -->
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Temp color follow' : '临时栏目颜色跟随'}</span>
+                                <span class="temp-color-follow-lock" id="otherTempColorFollowLock" aria-hidden="true"></span>
+                                <button class="perf-help-btn" id="otherTempColorHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content">
+                                <label class="other-toggle-switch">
+                                    <input type="checkbox" id="otherTempColorFollow">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="appearance-row other-sub-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Unlock sync to parent' : '解锁后继承父色'}</span>
+                                <button class="perf-help-btn" id="otherTempColorUnlockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content">
+                                <label class="other-toggle-switch">
+                                    <input type="checkbox" id="otherTempColorUnlockSync">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="appearance-row other-sub-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Auto-lock after inheriting color during split' : '分裂继承颜色后自动上锁'}</span>
+                                <button class="perf-help-btn" id="otherTempColorAutoLockHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content">
+                                <label class="other-toggle-switch">
+                                    <input type="checkbox" id="otherTempColorAutoLockAfterSplit">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Auto connect with edges after temp split' : '临时栏目分裂后使用「连接线」自动连接'}</div>
+                            <div class="appearance-row-content">
+                                <label class="other-toggle-switch">
+                                    <input type="checkbox" id="otherAutoLinkSplit">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- 3. 空白栏目 -->
+                <div class="detail-section appearance-section-card is-collapsed" data-section-key="blank">
+                    <div class="appearance-section-header" role="button" tabindex="0" aria-expanded="false">
+                        <div class="appearance-section-header-left">
+                            <span class="appearance-section-icon"><span class="canvas-dir-icon-badge canvas-dir-icon-badge-md" style="font-size: 9px; font-weight: 700; color: #888888; border: 1px solid rgba(136, 136, 136, 0.45); background: rgba(136, 136, 136, 0.12); border-radius: 3px; padding: 0 2px; height: 14px; min-width: 17px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">md</span></span>
+                            <span class="appearance-section-title">${isEn ? 'Blank Card (Markdown)' : '空白栏目'}</span>
+                            <span class="appearance-section-badge">${isEn ? 'Size, Color & Card Fullscreen Zoom' : '尺寸、颜色与卡片全屏缩放'}</span>
+                        </div>
+                        <div class="appearance-section-header-right">
+                            <i class="fas fa-chevron-down appearance-section-chevron"></i>
+                        </div>
+                    </div>
+                    <div class="appearance-section-body">
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Default size' : '默认尺寸'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-size-inputs" id="appearanceBlankSizeInputs">
+                                    <input type="number" id="appearanceBlankWidth" min="180" max="2000" step="10">
+                                    <span>×</span>
+                                    <input type="number" id="appearanceBlankHeight" min="140" max="2000" step="10">
+                                    <span>px</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Default color' : '默认颜色'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-color-row" data-color-target="blank">
+                                    <div class="appearance-color-chips">${chipsHtml}</div>
+                                    <span class="appearance-color-value" id="appearanceColorBlankValue">#888888</span>
+                                    <input type="color" id="appearanceColorBlank" class="appearance-color-input" data-color-target="blank">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Card fullscreen zoom ratio' : '卡片全屏缩放比例'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-size-inputs">
+                                    <button type="button" class="other-default-jump-btn" id="appearanceFsBlankZoomReset" title="${isEn ? 'Restore default' : '还原默认值'}" aria-label="${isEn ? 'Restore default' : '还原默认值'}">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                    <input type="number" id="appearanceFsBlankZoom" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="${NODE_LAYOUT_ZOOM_STEP}">
+                                    <span>%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. 连接线 -->
+                <div class="detail-section appearance-section-card is-collapsed" data-section-key="edge">
+                    <div class="appearance-section-header" role="button" tabindex="0" aria-expanded="false">
+                        <div class="appearance-section-header-left">
+                            <span class="appearance-section-icon"><i class="fas fa-link" style="color: #999999;"></i></span>
+                            <span class="appearance-section-title">${isEn ? 'Edge' : '连接线'}</span>
+                            <span class="appearance-section-badge">${isEn ? 'Color, Name & Direction' : '颜色、命名与默认方向'}</span>
+                        </div>
+                        <div class="appearance-section-header-right">
+                            <i class="fas fa-chevron-down appearance-section-chevron"></i>
+                        </div>
+                    </div>
+                    <div class="appearance-section-body">
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Edge color' : '连接线颜色'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-color-row" data-color-target="edge">
+                                    <div class="appearance-color-chips">${chipsHtml}</div>
+                                    <span class="appearance-color-value" id="appearanceColorEdgeValue">#999999</span>
+                                    <input type="color" id="appearanceColorEdge" class="appearance-color-input" data-color-target="edge">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Edge naming' : '连接线命名'}</div>
+                            <div class="appearance-row-content">
+                                <select id="appearanceEdgeNameMode" class="appearance-name-select">
+                                    <option value="timestamp">${isEn ? 'Timestamp' : '时间标记'}</option>
+                                    <option value="parent">${isEn ? 'Parent name' : '父栏目名字'}</option>
+                                    <option value="child">${isEn ? 'Child name' : '子栏目名字'}</option>
+                                    <option value="blank">${isEn ? 'Blank' : '空白'}</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Default edge direction' : '连接线默认方向'}</div>
+                            <div class="appearance-row-content">
+                                <select id="otherDefaultEdgeDirection" class="appearance-name-select">
+                                    <option value="none">${isEn ? 'No direction' : '无方向'}</option>
+                                    <option value="forward">${isEn ? 'Single direction' : '单向'}</option>
+                                    <option value="both">${isEn ? 'Bidirectional' : '双向'}</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 5. 卡片组 -->
+                <div class="detail-section appearance-section-card is-collapsed" data-section-key="card-group">
+                    <div class="appearance-section-header" role="button" tabindex="0" aria-expanded="false">
+                        <div class="appearance-section-header-left">
+                            <span class="appearance-section-icon"><i class="fas fa-object-group" style="color: #888888;"></i></span>
+                            <span class="appearance-section-title">${isEn ? 'Card Group' : '卡片组'}</span>
+                            <span class="appearance-section-badge">${isEn ? 'Color' : '背景颜色'}</span>
+                        </div>
+                        <div class="appearance-section-header-right">
+                            <i class="fas fa-chevron-down appearance-section-chevron"></i>
+                        </div>
+                    </div>
+                    <div class="appearance-section-body">
+                        <div class="appearance-row">
+                            <div class="appearance-row-label">${isEn ? 'Card group color' : '卡片组颜色'}</div>
+                            <div class="appearance-row-content">
+                                <div class="appearance-color-row" data-color-target="card-group">
+                                    <div class="appearance-color-chips">${chipsHtml}</div>
+                                    <span class="appearance-color-value" id="appearanceColorCardGroupValue">#888888</span>
+                                    <input type="color" id="appearanceColorCardGroup" class="appearance-color-input" data-color-target="card-group">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. 书签树内容显示 -->
+                <div class="detail-section appearance-section-card is-collapsed" data-section-key="bookmark-tree">
+                    <div class="appearance-section-header" role="button" tabindex="0" aria-expanded="false">
+                        <div class="appearance-section-header-left">
+                            <span class="appearance-section-icon"><i class="fas fa-bookmark" style="color: #f59e0b;"></i></span>
+                            <span class="appearance-section-title">${isEn ? 'Bookmark Tree Content Display' : '书签树内容显示'}</span>
+                            <span class="appearance-section-badge">${isEn ? 'Tags & Notes' : '标签与笔记排布'}</span>
+                        </div>
+                        <div class="appearance-section-header-right">
+                            <i class="fas fa-chevron-down appearance-section-chevron"></i>
+                        </div>
+                    </div>
+                    <div class="appearance-section-body">
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Bookmark tree tag position' : '书签树标签位置'}</span>
+                            </div>
+                            <div class="appearance-row-content appearance-row-content-inline">
+                                <div class="appearance-mode-toggle">
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="other-bookmark-tag-position" value="left">
+                                        <span>${isEn ? 'Left' : '左边'}</span>
+                                    </label>
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="other-bookmark-tag-position" value="right">
+                                        <span>${isEn ? 'Right' : '右边'}</span>
+                                    </label>
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="other-bookmark-tag-position" value="auto">
+                                        <span>${isEn ? 'Auto' : '自动切换'}</span>
+                                    </label>
+                                </div>
+                                <div class="appearance-size-inputs" id="otherBookmarkTagPositionInputs">
+                                    <input type="number" id="otherBookmarkTagPositionThreshold" min="100" max="2000" step="10">
+                                    <span>px</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Bookmark tree note position' : '书签树笔记标识位置'}</span>
+                            </div>
+                            <div class="appearance-row-content appearance-row-content-inline">
+                                <div class="appearance-mode-toggle">
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="other-bookmark-note-position" value="left">
+                                        <span>${isEn ? 'Left' : '左边'}</span>
+                                    </label>
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="other-bookmark-note-position" value="right">
+                                        <span>${isEn ? 'Right' : '右边'}</span>
+                                    </label>
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="other-bookmark-note-position" value="auto">
+                                        <span>${isEn ? 'Auto' : '自动切换'}</span>
+                                    </label>
+                                </div>
+                                <div class="appearance-size-inputs" id="otherBookmarkNotePositionInputs">
+                                    <input type="number" id="otherBookmarkNotePositionThreshold" min="100" max="2000" step="10">
+                                    <span>px</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row other-sub-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Highlight bookmark tree items with notes' : '笔记高亮书签树标题与图标'}</span>
+                                <button class="perf-help-btn" id="otherBookmarkNoteHighlightHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content">
+                                <label class="other-toggle-switch">
+                                    <input type="checkbox" id="otherBookmarkNoteHighlightEnabled">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 7. 全局画布与面板 -->
+                <div class="detail-section appearance-section-card is-collapsed" data-section-key="canvas-global">
+                    <div class="appearance-section-header" role="button" tabindex="0" aria-expanded="false">
+                        <div class="appearance-section-header-left">
+                            <span class="appearance-section-icon"><i class="fas fa-sliders-h" style="color: #06b6d4;"></i></span>
+                            <span class="appearance-section-title">${isEn ? 'Global Canvas & Panels' : '全局画布与面板'}</span>
+                            <span class="appearance-section-badge">${isEn ? 'Grid & Search' : '网格、目录与搜索'}</span>
+                        </div>
+                        <div class="appearance-section-header-right">
+                            <i class="fas fa-chevron-down appearance-section-chevron"></i>
+                        </div>
+                    </div>
+                    <div class="appearance-section-body">
+                        <!-- 画布网格辅助 -->
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Align to grid points' : '以网格点辅助对齐'}</span>
+                                <button class="perf-help-btn" id="otherGridSnapHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content">
+                                <label class="other-toggle-switch">
+                                    <input type="checkbox" id="otherGridSnapEnabled">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="appearance-row other-sub-row" id="otherGridSnapContinuousRow">
+                            <div class="appearance-row-label">${isEn ? 'Continuous snapping' : '持续吸附'}</div>
+                            <div class="appearance-row-content">
+                                <label class="other-toggle-switch">
+                                    <input type="checkbox" id="otherGridSnapContinuous">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="appearance-row other-sub-row">
+                            <div class="appearance-row-label">${isEn ? 'Grid point spacing' : '网格点间距'}</div>
+                            <div class="appearance-row-content appearance-row-content-inline">
+                                <div class="appearance-size-inputs">
+                                    <button type="button" class="other-default-jump-btn" id="otherGridPointSpacingReset" title="${isEn ? 'Restore default (100px)' : '还原默认值（100px）'}" aria-label="${isEn ? 'Restore default grid point spacing' : '还原默认网格点间距'}">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                    <input type="number" id="otherGridPointSpacing" min="${CANVAS_GRID_POINT_SPACING_MIN}" max="${CANVAS_GRID_POINT_SPACING_MAX}" step="10">
+                                    <span>px</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
+
+                        <!-- 目录栏 (侧边栏) -->
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Directory locatable item color sync' : '目录栏可定位条目颜色同步'}</span>
+                                <button class="perf-help-btn" id="otherMenuLocatableColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content">
+                                <label class="other-toggle-switch">
+                                    <input type="checkbox" id="otherMenuLocatableColorSync">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Directory category color sync' : '目录栏分类标题颜色同步'}</span>
+                                <button class="perf-help-btn" id="otherMenuDefaultColorSyncHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content">
+                                <label class="other-toggle-switch">
+                                    <input type="checkbox" id="otherMenuDefaultColorSync">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="appearance-row">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Directory collapse mode' : '目录栏折叠方式'}</span>
+                                <button class="perf-help-btn" id="otherSidebarCollapseModeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content appearance-row-content-inline">
+                                <div class="appearance-mode-toggle">
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="other-sidebar-collapse-mode" value="manual">
+                                        <span>${isEn ? 'Manual' : '手动折叠'}</span>
+                                    </label>
+                                    <label class="appearance-radio">
+                                        <input type="radio" name="other-sidebar-collapse-mode" value="auto">
+                                        <span>${isEn ? 'Auto' : '自动折叠'}</span>
+                                    </label>
+                                </div>
+                                <div class="appearance-size-inputs" id="otherSidebarAutoCollapseInputs">
+                                    <input type="number" id="otherSidebarAutoCollapseWidth" min="320" max="2000" step="10">
+                                    <span>px</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="height: 1px; background: var(--border-color); opacity: 0.3; margin: 12px 0;"></div>
+
+                        <!-- 搜索面板默认尺寸 -->
+                        <div class="appearance-row" id="otherSearchPanelTableSizeRow">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Table view default size' : '表格视图默认长宽'}</span>
+                                <button class="perf-help-btn" id="otherSearchPanelTableSizeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content appearance-row-content-inline">
+                                <div class="appearance-size-inputs">
+                                    <button type="button" class="other-default-jump-btn" id="otherSearchPanelTableSizeReset" title="${isEn ? 'Restore default (1080 × 520px)' : '还原默认值（1080 × 520px）'}" aria-label="${isEn ? 'Restore default table size' : '还原表格视图默认长宽'}">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                    <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
+                                    <input type="number" id="otherSearchPanelTableWidth" min="360" max="1800" step="10" style="width: 72px;">
+                                    <span style="margin-right: 6px;">px</span>
+                                    <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
+                                    <input type="number" id="otherSearchPanelTableHeight" min="200" max="1200" step="10" style="width: 72px;">
+                                    <span>px</span>
+                                    <input type="hidden" id="otherSearchPanelHeight">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row" id="otherSearchPanelGridSizeRow">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? 'Grid view default size' : '网格视图默认长宽'}</span>
+                                <button class="perf-help-btn" id="otherSearchPanelGridSizeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content appearance-row-content-inline">
+                                <div class="appearance-size-inputs">
+                                    <button type="button" class="other-default-jump-btn" id="otherSearchPanelGridSizeReset" title="${isEn ? 'Restore default (920 × 520px)' : '还原默认值（920 × 520px）'}" aria-label="${isEn ? 'Restore default grid size' : '还原网格视图默认长宽'}">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                    <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
+                                    <input type="number" id="otherSearchPanelGridWidth" min="360" max="1800" step="10" style="width: 72px;">
+                                    <span style="margin-right: 6px;">px</span>
+                                    <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
+                                    <input type="number" id="otherSearchPanelGridHeight" min="200" max="1200" step="10" style="width: 72px;">
+                                    <span>px</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appearance-row" id="otherSearchPanelRootSizeRow">
+                            <div class="appearance-row-label appearance-row-label-inline">
+                                <span>${isEn ? '#, * root panel default size' : '#、* 初始面板默认长宽'}</span>
+                                <button class="perf-help-btn" id="otherSearchPanelRootSizeHelpBtn" title="${isEn ? 'View help' : '查看说明'}">
+                                    <i class="fas fa-question-circle"></i>
+                                </button>
+                            </div>
+                            <div class="appearance-row-content appearance-row-content-inline">
+                                <div class="appearance-size-inputs">
+                                    <button type="button" class="other-default-jump-btn" id="otherSearchPanelRootSizeReset" title="${isEn ? 'Restore default (560 × 450px)' : '还原默认值（560 × 450px）'}" aria-label="${isEn ? 'Restore default root panel size' : '还原#、* 初始面板默认长宽'}">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                    <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'W' : '宽'}</span>
+                                    <input type="number" id="otherSearchPanelRootWidth" min="554" max="1800" step="10" style="width: 72px;">
+                                    <span style="margin-right: 6px;">px</span>
+                                    <span style="font-size: 12px; opacity: 0.7; margin-right: 2px;">${isEn ? 'H' : '高'}</span>
+                                    <input type="number" id="otherSearchPanelRootHeight" min="200" max="1200" step="10" style="width: 72px;">
+                                    <span>px</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="perf-help-popover" id="appearanceFsPermanentCopyHelpPopover">
+            <div class="perf-help-popover-content">
+                ${isEn
+            ? '<b>Permanent section copy</b>: Default layout zoom for copies split from permanent sections in card fullscreen mode.'
+            : '<b>永久栏目副本</b>：通过拆分/副本生成的永久镜像栏目在卡片全屏模式下的默认排版缩放比例。'}
+            </div>
         </div>
         <div class="perf-help-popover" id="otherBookmarkNoteHighlightHelpPopover">
             <div class="perf-help-popover-content">
@@ -48679,6 +48964,9 @@ function createCanvasAppearanceSettingsModal() {
     bindClickHelpPopover(specialTempHelpBtn, specialTempHelpPopover);
     bindClickHelpPopover(otherGridSnapHelpBtn, otherGridSnapHelpPopover);
     bindClickHelpPopover(tempColorHelpBtn, tempColorHelpPopover);
+    const appearanceFsPermanentCopyHelpBtn = modal.querySelector('#appearanceFsPermanentCopyHelpBtn');
+    const appearanceFsPermanentCopyHelpPopover = modal.querySelector('#appearanceFsPermanentCopyHelpPopover');
+    bindClickHelpPopover(appearanceFsPermanentCopyHelpBtn, appearanceFsPermanentCopyHelpPopover);
 
     const scheduleOtherSave = (() => {
         let timer = null;
@@ -49166,7 +49454,12 @@ function createCanvasAppearanceSettingsModal() {
         '#appearanceSpecialTempWidth',
         '#appearanceSpecialTempHeight',
         '#appearanceBlankWidth',
-        '#appearanceBlankHeight'
+        '#appearanceBlankHeight',
+        '#appearanceFsPermanentZoom',
+        '#appearanceFsPermanentCopyZoom',
+        '#appearanceFsTempZoom',
+        '#appearanceFsSpecialTempZoom',
+        '#appearanceFsBlankZoom'
     ];
     appearanceInputs.forEach(selector => {
         const el = modal.querySelector(selector);
@@ -49174,6 +49467,112 @@ function createCanvasAppearanceSettingsModal() {
         el.addEventListener('input', scheduleAppearanceSave);
         el.addEventListener('change', scheduleAppearanceSave);
     });
+
+    const bindFsZoomReset = (btnId, inputId, key) => {
+        const btn = modal.querySelector(`#${btnId}`);
+        const input = modal.querySelector(`#${inputId}`);
+        if (!btn || !input) return;
+        btn.addEventListener('click', () => {
+            const defaults = __getDefaultAppearanceFullscreenZoomSettings();
+            input.value = String(defaults[key] || 70);
+            scheduleAppearanceSave();
+        });
+    };
+    bindFsZoomReset('appearanceFsPermanentZoomReset', 'appearanceFsPermanentZoom', 'permanent');
+    bindFsZoomReset('appearanceFsPermanentCopyZoomReset', 'appearanceFsPermanentCopyZoom', 'permanentCopy');
+    bindFsZoomReset('appearanceFsTempZoomReset', 'appearanceFsTempZoom', 'temp');
+    bindFsZoomReset('appearanceFsSpecialTempZoomReset', 'appearanceFsSpecialTempZoom', 'specialTemp');
+    bindFsZoomReset('appearanceFsBlankZoomReset', 'appearanceFsBlankZoom', 'mdNode');
+
+    // 恢复各卡片折叠状态并绑定交互（持久化存储到 localStorage）
+    const foldState = __getAppearanceFoldState();
+    const foldCards = modal.querySelectorAll('.appearance-section-card');
+    foldCards.forEach(card => {
+        const key = card.getAttribute('data-section-key');
+        const header = card.querySelector('.appearance-section-header');
+        const isCollapsed = !!(key && foldState[key] === true);
+        if (isCollapsed) {
+            card.classList.add('is-collapsed');
+            if (header) header.setAttribute('aria-expanded', 'false');
+        } else {
+            card.classList.remove('is-collapsed');
+            if (header) header.setAttribute('aria-expanded', 'true');
+        }
+
+        if (header) {
+            const toggleFold = () => {
+                const nowCollapsed = card.classList.toggle('is-collapsed');
+                header.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+                __updateAppearanceCardFoldState(modal);
+                updateToggleAllFoldBtnState();
+            };
+            header.addEventListener('click', (e) => {
+                if (e.target.closest('button, input, select, a')) return;
+                toggleFold();
+            });
+            header.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleFold();
+                }
+            });
+        }
+    });
+
+    const toggleAllBtn = modal.querySelector('#appearanceToggleAllFoldBtn');
+    const updateToggleAllFoldBtnState = () => {
+        if (!toggleAllBtn) return;
+        const anyExpanded = Array.from(foldCards).some(c => !c.classList.contains('is-collapsed'));
+        const iconEl = toggleAllBtn.querySelector('#appearanceToggleAllFoldIcon');
+        const textEl = toggleAllBtn.querySelector('#appearanceToggleAllFoldText');
+        if (iconEl) iconEl.className = anyExpanded ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+        if (textEl) textEl.textContent = isEn ? 'All' : '全部';
+        toggleAllBtn.title = isEn ? (anyExpanded ? 'Click to collapse all' : 'Click to expand all') : (anyExpanded ? '点击收起全部' : '点击展开全部');
+    };
+    updateToggleAllFoldBtnState();
+
+    if (toggleAllBtn) {
+        toggleAllBtn.addEventListener('click', () => {
+            const anyExpanded = Array.from(foldCards).some(c => !c.classList.contains('is-collapsed'));
+            if (anyExpanded) {
+                foldCards.forEach(card => {
+                    card.classList.add('is-collapsed');
+                    const h = card.querySelector('.appearance-section-header');
+                    if (h) h.setAttribute('aria-expanded', 'false');
+                });
+            } else {
+                foldCards.forEach(card => {
+                    card.classList.remove('is-collapsed');
+                    const h = card.querySelector('.appearance-section-header');
+                    if (h) h.setAttribute('aria-expanded', 'true');
+                });
+            }
+            __updateAppearanceCardFoldState(modal);
+            updateToggleAllFoldBtnState();
+        });
+    }
+
+    const onAppearanceStorageChange = (e) => {
+        if (e && e.key === CANVAS_APPEARANCE_FOLD_STATE_KEY) {
+            const newState = __getAppearanceFoldState();
+            foldCards.forEach(card => {
+                const key = card.getAttribute('data-section-key');
+                if (key && newState[key] !== undefined) {
+                    const shouldCollapse = !!newState[key];
+                    card.classList.toggle('is-collapsed', shouldCollapse);
+                    const h = card.querySelector('.appearance-section-header');
+                    if (h) h.setAttribute('aria-expanded', shouldCollapse ? 'false' : 'true');
+                }
+            });
+            updateToggleAllFoldBtnState();
+        }
+    };
+    window.addEventListener('storage', onAppearanceStorageChange);
+    const prevAppearanceCleanup = typeof modal.__cleanup === 'function' ? modal.__cleanup : null;
+    modal.__cleanup = () => {
+        try { window.removeEventListener('storage', onAppearanceStorageChange); } catch (_) { }
+        if (prevAppearanceCleanup) prevAppearanceCleanup();
+    };
 }
 
 // =================================================================================
@@ -50927,24 +51326,13 @@ function createCanvasOtherSettingsModal() {
                     </div>
                 </div>
 
-                <!-- 2.1 全屏模式默认缩放比率 -->
+                <!-- 2.1 卡片全屏缩放比例 -->
                 <div class="detail-section">
-                    <div class="detail-section-title">${isEn ? '2.1 Fullscreen Default Zoom' : '2.1 全屏模式默认缩放比率'}</div>
-                    <div class="other-settings-fields-row">
-                        <div class="other-settings-field">
-                            <div class="other-settings-field-label">${isEn ? 'Section (Permanent/Temp)' : '栏目卡片（永久/临时）'}</div>
-                            <div class="other-settings-field-control">
-                                <input type="number" id="appearanceFullScreenSectionZoom" class="other-trackpad-speed-input" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5">
-                                <span class="other-trackpad-speed-unit">%</span>
-                            </div>
-                        </div>
-                        <div class="other-settings-field">
-                            <div class="other-settings-field-label">${isEn ? 'Blank card' : '空白栏目卡片'}</div>
-                            <div class="other-settings-field-control">
-                                <input type="number" id="appearanceFullScreenMdZoom" class="other-trackpad-speed-input" min="${NODE_LAYOUT_ZOOM_MIN}" max="${NODE_LAYOUT_ZOOM_MAX}" step="5">
-                                <span class="other-trackpad-speed-unit">%</span>
-                            </div>
-                        </div>
+                    <div class="detail-section-title">${isEn ? '2.1 Card Fullscreen Zoom Ratio' : '2.1 卡片全屏缩放比例'}</div>
+                    <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; padding: 4px 0;">
+                        ${isEn
+                            ? 'Card fullscreen zoom ratios can now be configured individually in Appearance Settings.'
+                            : '卡片全屏缩放比例已移至「外观设置」中，可针对永久栏目、临时栏目、空白栏目等独立精细化配置。'}
                     </div>
                 </div>
 

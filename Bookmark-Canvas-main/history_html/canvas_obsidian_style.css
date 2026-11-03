@@ -2312,7 +2312,12 @@ body.canvas-scrollbar-dragging * {
     line-height: 1.3;
 }
 
-.appearance-settings-modal .modal-body,
+.appearance-settings-modal .modal-body {
+    padding: 12px 18px 12px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+}
+
 .shortcuts-settings-modal .modal-body {
     padding: 14px 18px 40px;
     overflow-y: auto;
@@ -2340,6 +2345,192 @@ body.canvas-scrollbar-dragging * {
 .shortcuts-settings-modal .modal-body > div[style*="height: 1px"] {
     margin: 10px 0;
     opacity: 0.25;
+}
+
+/* 外观设置弹窗：头部动作区与折叠卡片化分区 */
+.appearance-settings-modal .appearance-modal-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.appearance-settings-modal .appearance-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2px 10px 2px;
+    margin-bottom: 4px;
+}
+
+.appearance-settings-modal .appearance-toolbar-hint {
+    font-size: 11.5px;
+    color: var(--text-tertiary, #888888);
+}
+
+.appearance-settings-modal .appearance-toolbar-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.appearance-settings-modal .appearance-tool-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11.5px;
+    padding: 3px 9px;
+    border-radius: 5px;
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.04));
+    color: var(--text-secondary, #555555);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.appearance-settings-modal .appearance-tool-btn:hover {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.08));
+    color: var(--text-primary, #111111);
+    border-color: var(--border-hover, rgba(0, 0, 0, 0.25));
+}
+
+[data-theme="dark"] .appearance-settings-modal .appearance-tool-btn {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="dark"] .appearance-settings-modal .appearance-tool-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.appearance-settings-modal .appearance-section-card {
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+    background: var(--bg-primary, #ffffff);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.appearance-settings-modal .appearance-section-card:hover {
+    border-color: var(--border-hover, rgba(0, 0, 0, 0.22));
+}
+
+[data-theme="dark"] .appearance-settings-modal .appearance-section-card {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.03));
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .appearance-settings-modal .appearance-section-card:hover {
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.appearance-settings-modal .appearance-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    cursor: pointer;
+    user-select: none;
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.025));
+    transition: background 0.15s ease;
+}
+
+.appearance-settings-modal .appearance-section-header:hover {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+}
+
+[data-theme="dark"] .appearance-settings-modal .appearance-section-header {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .appearance-settings-modal .appearance-section-header:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.appearance-settings-modal .appearance-section-card:not(.is-collapsed) .appearance-section-header {
+    border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+}
+
+[data-theme="dark"] .appearance-settings-modal .appearance-section-card:not(.is-collapsed) .appearance-section-header {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.appearance-settings-modal .appearance-section-header-left {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+}
+
+.appearance-settings-modal .appearance-section-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.appearance-settings-modal .appearance-section-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-primary, #222222);
+    line-height: 1.2;
+}
+
+.appearance-settings-modal .appearance-section-badge {
+    font-size: 11px;
+    font-weight: normal;
+    color: var(--text-tertiary, #888888);
+    background: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+    padding: 2px 7px;
+    border-radius: 10px;
+    margin-left: 2px;
+    letter-spacing: 0.2px;
+}
+
+[data-theme="dark"] .appearance-settings-modal .appearance-section-badge {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.appearance-settings-modal .appearance-section-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.appearance-settings-modal .appearance-section-chevron {
+    font-size: 12px;
+    color: var(--text-tertiary, #888888);
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.appearance-settings-modal .appearance-section-card.is-collapsed .appearance-section-chevron {
+    transform: rotate(-90deg);
+}
+
+.appearance-settings-modal .appearance-section-card.is-collapsed {
+    margin-bottom: 8px;
+}
+
+.appearance-settings-modal .appearance-section-body {
+    padding: 10px 14px 14px;
+}
+
+.appearance-settings-modal .appearance-section-card.is-collapsed .appearance-section-body {
+    display: none;
+}
+
+.appearance-settings-modal .appearance-section-card:last-child {
+    margin-bottom: 0;
 }
 
 /* 快捷键弹窗专用美化（卡片流式布局） */
@@ -4318,6 +4509,44 @@ html.side-panel-mode .other-settings-modal .modal-body > div[style*="height: 1px
 html.side-panel-mode .shortcuts-settings-modal .modal-body > div[style*="height: 1px"] {
     margin: 8px 0 !important;
     opacity: 0.25 !important;
+}
+
+/* 侧边栏模式下外观设置头部动作区与折叠卡片微调 */
+html.side-panel-mode .appearance-settings-modal .appearance-modal-header-actions {
+    gap: 6px !important;
+}
+
+html.side-panel-mode .appearance-settings-modal .appearance-toolbar {
+    padding: 0 0 8px 0 !important;
+}
+
+html.side-panel-mode .appearance-settings-modal .appearance-section-card {
+    margin-bottom: 8px !important;
+    border-radius: 8px !important;
+}
+
+html.side-panel-mode .appearance-settings-modal .appearance-section-card:last-child {
+    margin-bottom: 0 !important;
+}
+
+html.side-panel-mode .appearance-settings-modal .modal-body {
+    padding: 8px 10px 10px !important;
+}
+
+html.side-panel-mode .appearance-settings-modal .appearance-section-header {
+    padding: 8px 10px !important;
+}
+
+html.side-panel-mode .appearance-settings-modal .appearance-section-title {
+    font-size: 12.5px !important;
+}
+
+html.side-panel-mode .appearance-settings-modal .appearance-section-badge {
+    display: none !important;
+}
+
+html.side-panel-mode .appearance-settings-modal .appearance-section-body {
+    padding: 8px 10px 10px !important;
 }
 
 /* 滚动与缩放设置在侧边栏模式下的精细化排版 */
