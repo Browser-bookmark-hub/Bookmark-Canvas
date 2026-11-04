@@ -3866,50 +3866,62 @@ const i18n = {
 </ul>`
     },
     canvasHelpPanelOpenSource: {
-        'zh_CN': `<h3 style="margin-top: 0;">主项目</h3>
+        'zh_CN': `<h2>开源信息</h2>
+<h3 style="margin-top: 0;">主项目</h3>
 <ul>
 <li><strong>Bookmark Canvas</strong> (书签画布):<br>
+<div style="margin: 2px 0 4px 0; color: var(--text-secondary); font-size: 12px;">基于 JSON Canvas 的空间可视化书签管理器，将浏览器原生书签、临时栏目、卡片组与连接线组织在同一张画布中。</div>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases" target="_blank" style="font-size: 11px;"><i class="fas fa-tag"></i> 更新日志</a><br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> 问题反馈</a></li>
-<li><strong>Bookmark Research</strong> (书签聚合研究):<br>
+<li style="margin-top: 8px;"><strong>Bookmark Research</strong> (书签聚合研究):<br>
+<div style="margin: 2px 0 4px 0; color: var(--text-secondary); font-size: 12px;">专门面向<font color="#66bbff">书签画布数据包</font>进行上下文调研，把结论沉淀为可复用 Wiki 知识；适配 <font color="#44cf6e">Codex</font>、<font color="#44cf6e">Claude Code</font>、<font color="#44cf6e">DeepSeek Harness (dsh)</font> 宿主。</div>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Research" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Research</a><br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Research/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> 问题反馈</a></li>
 </ul>
 <hr>
 <h3>关联生态项目</h3>
 <ul>
-<li><strong>Browser Bookmark Hub 组织</strong>:<br>
+<li><strong>组织仓库列表</strong>:<br>
 <a href="https://github.com/orgs/Browser-bookmark-hub/repositories" target="_blank"><i class="fab fa-github"></i> https://github.com/orgs/Browser-bookmark-hub/repositories</a></li>
-<li><strong>Bookmark Backup</strong> (书签备份):<br>
+<li style="margin-top: 6px;"><strong>Bookmark Backup</strong> (书签备份):<br>
+<div style="margin: 2px 0 4px 0; color: var(--text-secondary); font-size: 12px;">Git 式书签版本管理与 MD 网页存档。</div>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Backup" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Backup</a></li>
-<li><strong>Bookmark Record and Recommend</strong> (书签记录与推荐):<br>
+<li style="margin-top: 6px;"><strong>Bookmark Record and Recommend</strong> (书签记录与推荐):<br>
+<div style="margin: 2px 0 4px 0; color: var(--text-secondary); font-size: 12px;">统计书签树里的浏览次数、停留时间、打开次数等，并提供动态智能推荐。</div>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend</a></li>
 </ul>
 <hr>
 <h3>数据兼容说明</h3>
-<p style="text-indent: 18px;">这两个生态项目（Bookmark Backup & Bookmark Record and Recommend）导出的 JSON/HTML 备份文件，均支持直接拖入书签画布或通过导入功能，在画布中快速形成临时的栏目卡片。</p>`,
-        'en': `<h3 style="margin-top: 0;">Main Project</h3>
+<p style="margin: 6px 0; line-height: 1.5; font-size: 12px;">这两个生态项目导出的 JSON 或 HTML 备份文件，均支持直接拖入或导入书签画布生成临时卡片；导出的画布包也可配合 Bookmark Research 开展跨栏目研究与检索。</p>`,
+        'en': `<h2>Open Source</h2>
+<h3 style="margin-top: 0;">Main Project</h3>
 <ul>
 <li><strong>Bookmark Canvas</strong>:<br>
+<div style="margin: 2px 0 4px 0; color: var(--text-secondary); font-size: 12px;">Spatial visual bookmark manager built on JSON Canvas, organizing native browser bookmarks, temporary sections, card groups, and connection lines on a unified canvas.</div>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Canvas</a><br>
+<a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases" target="_blank" style="font-size: 11px;"><i class="fas fa-tag"></i> Releases</a><br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> Feedback / Issues</a></li>
-<li><strong>Bookmark Research</strong>:<br>
+<li style="margin-top: 8px;"><strong>Bookmark Research</strong>:<br>
+<div style="margin: 2px 0 4px 0; color: var(--text-secondary); font-size: 12px;">Dedicated research tool for <font color="#66bbff">Bookmark Canvas packages</font> that turns findings into reusable Wiki knowledge; adapts to <font color="#44cf6e">Codex</font>, <font color="#44cf6e">Claude Code</font>, and <font color="#44cf6e">DeepSeek Harness (dsh)</font> hosts.</div>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Research" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Research</a><br>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Research/issues" target="_blank" style="font-size: 11px;"><i class="fas fa-exclamation-circle"></i> Feedback / Issues</a></li>
 </ul>
 <hr>
 <h3>Ecosystem Projects</h3>
 <ul>
-<li><strong>Browser Bookmark Hub Repositories</strong>:<br>
+<li><strong>Repositories</strong>:<br>
 <a href="https://github.com/orgs/Browser-bookmark-hub/repositories" target="_blank"><i class="fab fa-github"></i> https://github.com/orgs/Browser-bookmark-hub/repositories</a></li>
-<li><strong>Bookmark Backup</strong>:<br>
+<li style="margin-top: 6px;"><strong>Bookmark Backup</strong>:<br>
+<div style="margin: 2px 0 4px 0; color: var(--text-secondary); font-size: 12px;">Git-style bookmark versioning and Markdown web archiving.</div>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Backup" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Backup</a></li>
-<li><strong>Bookmark Record and Recommend</strong>:<br>
+<li style="margin-top: 6px;"><strong>Bookmark Record and Recommend</strong>:<br>
+<div style="margin: 2px 0 4px 0; color: var(--text-secondary); font-size: 12px;">Tracks visit counts, active time, open frequencies, and metrics in the bookmark tree with smart recommendations.</div>
 <a href="https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend" target="_blank"><i class="fab fa-github"></i> https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend</a></li>
 </ul>
 <hr>
-<h3>Compatibility Note</h3>
-<p style="text-indent: 18px;">The JSON/HTML files exported by Bookmark Backup and Bookmark Record and Recommend can be directly dragged or imported onto the canvas to form temporary section cards.</p>`
+<h3>Data Compatibility Note</h3>
+<p style="margin: 6px 0; line-height: 1.5; font-size: 12px;">JSON or HTML backup files exported by Bookmark Backup and Bookmark Record and Recommend can be directly dragged or imported onto the canvas to form temporary section cards; exported packages can also be analyzed with Bookmark Research.</p>`
     },
     canvasHelpPanelFeatures: {
         'zh_CN': `<h2>特色功能</h2>

@@ -1,6 +1,6 @@
 # Initial Guide
 
-> This document preserves the three initial guide cards shown when a canvas has no saved canvas state: **Canvas Basics**, **Quick Actions**, and **Features**. The cards can be edited or deleted in the canvas; this file remains a complete static reference.
+> This document preserves the initial guide cards shown when a canvas has no saved canvas state: **Open Source**, **Features**, **Canvas Basics**, and **Quick Actions**. The cards can be edited or deleted in the canvas; this file remains a complete static reference.
 
 ## Canvas Basics
 
@@ -125,3 +125,27 @@ Shortcuts can be customized through **Manage** at top-left.
 
 > [!WARNING]
 > **Safety warning (critical):** Push cleans the remote sync directory. Do **not** keep unrelated files there, including personal notes or media, because they can be **permanently deleted**. Bookmark Canvas also does not support external file nodes such as videos, audio, images, or PDFs.
+
+## Open Source
+
+### Main Project
+- **Bookmark Canvas**:
+  Spatial visual bookmark manager built on JSON Canvas, organizing native browser bookmarks, temporary sections, card groups, and connection lines on a unified canvas.
+  [GitHub Repository](https://github.com/Browser-bookmark-hub/Bookmark-Canvas) / [Releases](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/releases) / [Feedback & Issues](https://github.com/Browser-bookmark-hub/Bookmark-Canvas/issues)
+- **Bookmark Research**:
+  Dedicated research tool for <font color="#66bbff">Bookmark Canvas packages</font> that turns findings into reusable Wiki knowledge; adapts to <font color="#44cf6e">Codex</font>, <font color="#44cf6e">Claude Code</font>, and <font color="#44cf6e">DeepSeek Harness (dsh)</font> hosts.
+  [GitHub Repository](https://github.com/Browser-bookmark-hub/Bookmark-Research) / [Feedback & Issues](https://github.com/Browser-bookmark-hub/Bookmark-Research/issues)
+
+### Ecosystem Projects
+- **Browser Bookmark Hub Org**:
+  [Repositories](https://github.com/orgs/Browser-bookmark-hub/repositories)
+- **Bookmark Backup**:
+  Git-style bookmark versioning and Markdown web archiving.
+  [GitHub Repository](https://github.com/Browser-bookmark-hub/Bookmark-Backup)
+- **Bookmark Record and Recommend**:
+  Tracks visit counts, active time, open frequencies, and metrics in the bookmark tree with smart recommendations.
+  [GitHub Repository](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend)
+
+### Data Compatibility Note
+JSON or HTML backup files exported by Bookmark Backup and Bookmark Record and Recommend can be directly dragged or imported onto the canvas to form temporary section cards; exported packages can also be analyzed with Bookmark Research.
+

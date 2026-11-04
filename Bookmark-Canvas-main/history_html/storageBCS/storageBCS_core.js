@@ -4520,6 +4520,7 @@ function __getStableBuiltinBlankSectionFilename(nodeId) {
     if (id === 'md-node-demo-bookmark-guide') return 'Canvas Basics';
     if (id === 'md-node-demo-shortcut-guide') return 'Quick Actions';
     if (id === 'md-node-demo-batch-feature') return 'Features';
+    if (id === 'md-node-demo-open-source-guide') return 'Open Source';
     return '';
 }
 

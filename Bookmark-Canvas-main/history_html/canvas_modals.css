@@ -276,8 +276,10 @@
     padding: 0;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
     z-index: 20000;
+    width: min(520px, calc(100vw - 32px));
     min-width: 320px;
     max-width: 520px;
+    box-sizing: border-box;
 }
 
 .canvas-help-modal-header {
@@ -368,14 +370,23 @@
     padding: 12px 14px;
     max-height: 360px;
     overflow: auto;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .canvas-help-panel {
     display: none;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .canvas-help-panel.active {
     display: block;
+}
+
+.canvas-help-panel-content {
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .canvas-help-panel-content h2 {
@@ -1152,6 +1163,12 @@ html[lang="en"] #canvasOpenSourceModal.canvas-manage-modal {
 html.side-panel-mode .canvas-manage-modal {
     left: max(8px, calc((100vw - 480px) / 2));
     min-width: 280px;
+    max-width: calc(100vw - 16px);
+}
+
+html.side-panel-mode .canvas-help-modal {
+    left: max(8px, calc((100vw - 520px) / 2));
+    width: min(520px, calc(100vw - 16px));
     max-width: calc(100vw - 16px);
 }
 
