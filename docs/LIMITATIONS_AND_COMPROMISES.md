@@ -91,6 +91,8 @@ This is an inherent limitation of a browser-extension-plus-DOM-Canvas implementa
 
 ## Compromises
 
+
+
 ### 1. No attachment support
 
 One of the major product compromises is that Bookmark Canvas does not support attachments.
@@ -209,3 +211,64 @@ References:
 - <https://developer.chrome.com/docs/extensions/reference/manifest>
 - <https://developer.chrome.com/docs/extensions/reference/manifest/web-accessible-resources>
 - <https://developer.chrome.com/docs/extensions/develop/concepts/service-workers>
+
+### 8. Temporary Section empty placeholders are not sanitized destructively; resolved via constraint templates and companion plugin derived index projections
+
+❌ **Intentional main-branch compromise: No low-level BCS historical data sanitization or destructive runtime migration is performed.**
+
+Temporary Section source JSON has long contained placeholder fields left behind by legacy serialization shapes: `folder` nodes typically carry an empty `url: ""` and `bookmark` nodes typically carry an empty `children: []`. These redundant fields can cause semantic confusion when processed by LLMs / Agents (why does a folder have a URL? why does a bookmark have children?) and waste approximately 15%~25% of context tokens.
+
+Although upgrading storage protocols and executing aggressive full sanitization is technically possible, after in-depth evaluation and experimentation, the main branch adopted an intentional architecture compromise: **preserve existing BCS storage protocols and historical source data completely intact, avoiding introducing catastrophic data corruption risks into production, and resolve the issue non-invasively at higher layers via constraint files + new companion plugin derived index projections.**
+
+#### Why choose this compromise? (Fatal risks of low-level blanket sanitization)
+
+1. **Runtime crashes and fatal `TypeError` hazards:**
+   Substantial legacy logic across the codebase (such as drag-and-drop insertions, cross-section moves, and bookmark-tree expansions) implicitly assumes the presence of node fields. If the underlying data strips `children: []` from bookmark nodes, subsequent drag-and-drop actions that access `bookmark.children.length` or `bookmark.children.push(...)` without rigorous guards will trigger a fatal runtime `TypeError` that crashes canvas interactions. In cross-section moves, removing the original node before validating the target could also cause silent data loss.
+2. **Tight full-pipeline coupling and excessive maintenance cost:**
+   Temporary Sections touch dozens of touchpoints: the BCS storage protocol (`bcs:section:*`), runtime restoration logic, the automatic backup slot (`bcs:backup:slot`), clipboard history (`bcs:clipboard-history`), legacy section snapshots (`bcs:temp-snapshot`), GitHub Push / Pull, JSON / HTML / ZIP import and export routines, multiple clone/paste handlers, and over six serialization functions. Any missed entry would cause dirty data to resurface or break backward compatibility.
+3. **Startup timing and race conditions:**
+   During extension startup and initialization, asynchronous BCS reads, backup slot protection, and in-memory flushes can race. Executing sanitizers before in-memory state is fully ready risks misidentifying sections as empty, potentially wiping or overwriting valid historical data.
+
+#### Explicitly non-implemented actions (Compromise boundaries)
+
+- **Do not modify the BCS storage protocol, runtime recovery logic, or standard save routines.**
+- **Do not perform one-time data sanitization on historical sections, backup slots, or clipboard history.**
+- **Do not rewrite source data during backup, import, export, GitHub Push / Pull, JSON / HTML / ZIP, or cross-type conversion.**
+- **Do not individually re-engineer every legacy serializer, clone, paste, drag/drop handler, or constructor.**
+- **Do not treat constraint templates or plugin index projections as a new source file format, nor force-migrate legacy user data accordingly.**
+
+#### ✅ Practical solution: constraint templates + companion plugin derived index projections
+
+The system adopts a non-invasive two-layer boundary that cleanly resolves the issue with zero risk:
+
+1. **Low-level source data remains as-is with explicit type checking:**
+   Source data retains `url: ""` on `folder` nodes and `children: []` on `bookmark` nodes. All application logic and Agent read/write operations strictly check the explicit `type` (`folder` / `bookmark`) rather than inferring types from field presence. An empty `children: []` on a folder represents a valid empty-folder state and is preserved.
+2. **Constraint files (AGENTS templates) guide model behavior:**
+   Self-contained bilingual `AGENTS_template` files inform Agents that these two empty placeholders are historical serialization shapes rather than corruption. Agents must ignore empty `url`s on folders and empty `children` on bookmarks, and must not rewrite source files solely to clean placeholders; when writing back, Agents must re-read original nodes to preserve unmodified and unknown attributes.
+3. **New companion plugin [Bookmark Research](https://github.com/Browser-bookmark-hub/Bookmark-Research) derived index projections (Already Implemented):**
+   This derived indexing capability has already been fully delivered by the official standalone companion plugin [Bookmark Research](https://github.com/Browser-bookmark-hub/Bookmark-Research) (supporting Codex, Claude Code, DeepSeek Harness (dsh), etc., via Skill + local MCP + CLI). The plugin builds read-only derived indices outside exported canvas packages without modifying canvas data. When projecting targeted searches (`search_bookmarks`), context queries (`get_context`), or tree outlines (`inventory`) for models, the plugin automatically omits redundant empty `url`s on folders and empty `children` on bookmarks, outputting flattened, compact representations. This completely eliminates model confusion and saves 15%~25% token overhead without touching user source packages.
+
+#### Development branch (dev) exploration and commit records
+
+In the experimental development branch (`feat/experimental-schema-v3-sanitization`, the dev experimental branch), full low-level sanitization and protocol upgrade were fully implemented and validated:
+
+- **Core implementation commit:**
+  - **Commit ID:** `808e20bf5394b85f53b9886e5f408beb2b5b57d6`
+  - **Branch:** `feat/experimental-schema-v3-sanitization`
+  - **Commit title:** `feat(test): 临时栏目数据清洗`
+  - **Explorations:**
+    - Designed storage schemaVersion 5→6 migration routine;
+    - Refactored 6 serialization functions to conditional assignment (bookmarks only write `url`, folders only write `children`);
+    - Added normalizers at all import/recovery entry points to block legacy dirty data;
+    - Implemented runtime guards (preventing `TypeError` when dragging into bookmarks and preventing premature deletion before move validation);
+    - Implemented startup timing protection (`skipRuntimeFlush` mode reading persisted BCS, deduplicated in-flight promises, and `__canvasTempStateBcsLoadInProgress` write-lock guard with 15s watchdog);
+    - Produced comprehensive review documentation and automated tests: `tests/sanitize_and_bcs.test.js`, `tools/check-bcs-local-storage.js`, etc.
+- **Specification and documentation evolution commits:**
+  - **Commit ID:** `cd280a78952b6442d53d3e762064404602972438` / `f74c2f5cf2d296713c5d36a8e407cd6742e3b803`
+  - **Commit title:** `feat: 模板文件 与 临时栏目空字段问题docs`
+  - **Note:** Following evaluation, the main branch decided against merging invasive low-level data cleaning, converging instead on the boundary of "constraint templates + derived index projections".
+- **Historical preparatory refactoring commit:**
+  - **Commit ID:** `cc520ae01bc7217878a9f3800b2c1d0e3b73df1b` (Tag: `重构--临时栏目--清除两个字段`)
+  - **Commit title:** `refactor: 清除「"originPermanent""sequenceNumber"」`, removing legacy sequence numbers and permanent origin relations from Temporary Sections.
+
+
