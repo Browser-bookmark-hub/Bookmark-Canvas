@@ -7753,6 +7753,12 @@ function setupCanvasDropFeedback() {
                     if (finalSrc) {
                         const editorEl = cardEl.querySelector('.md-canvas-editor');
                         if (editorEl && document.activeElement === editorEl) {
+                            if (editorEl.__tiptapInstance) {
+                                editorEl.__tiptapInstance.insertContent(`![](${finalSrc})`);
+                                __syncMdNodeFromEditor(node, editorEl);
+                                saveCanvasManifestOnly();
+                                return;
+                            }
                             const selection = window.getSelection();
                             if (selection.rangeCount > 0) {
                                 const range = selection.getRangeAt(0).cloneRange();
@@ -7763,7 +7769,6 @@ function setupCanvasDropFeedback() {
                                 range.collapse(true);
                                 selection.removeAllRanges();
                                 selection.addRange(range);
-                                __tryConvertInlinePatternsInTextNode(editorEl, textNode);
                                 __syncMdNodeFromEditor(node, editorEl);
                                 saveCanvasManifestOnly();
                                 return;
@@ -7785,6 +7790,12 @@ function setupCanvasDropFeedback() {
                     if (text) {
                         const editorEl = cardEl.querySelector('.md-canvas-editor');
                         if (editorEl && document.activeElement === editorEl) {
+                            if (editorEl.__tiptapInstance) {
+                                editorEl.__tiptapInstance.insertContent(text);
+                                __syncMdNodeFromEditor(node, editorEl);
+                                saveCanvasManifestOnly();
+                                return;
+                            }
                             const selection = window.getSelection();
                             if (selection.rangeCount > 0) {
                                 const range = selection.getRangeAt(0).cloneRange();
@@ -7795,7 +7806,6 @@ function setupCanvasDropFeedback() {
                                 range.collapse(true);
                                 selection.removeAllRanges();
                                 selection.addRange(range);
-                                __tryConvertInlinePatternsInTextNode(editorEl, textNode);
                                 __syncMdNodeFromEditor(node, editorEl);
                                 saveCanvasManifestOnly();
                                 return;
@@ -11275,24 +11285,8 @@ function __renderCanvasMixedInlineMarkdownHtml(source) {
     let safeHtml = __normalizeCanvasRichHtml(rendered || raw);
     if (!safeHtml && rendered) safeHtml = __normalizeCanvasRichHtml(raw);
     if (!safeHtml) return '';
-
-    const tmp = document.createElement('div');
-    tmp.innerHTML = safeHtml;
-    let changed = true;
-    let loop = 0;
-    while (changed && loop++ < 10) {
-        changed = false;
-        const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT, null, false);
-        const textNodes = [];
-        let n;
-        while (n = walker.nextNode()) textNodes.push(n);
-        for (const tn of textNodes) {
-            if (!tn || !tn.parentNode) continue;
-            if (tn.parentNode.closest && tn.parentNode.closest('code, pre, a')) continue;
-            if (__tryConvertInlinePatternsInTextNode(tmp, tn)) changed = true;
-        }
-    }
-    return __normalizeCanvasRichHtml(tmp.innerHTML) || safeHtml;
+    safeHtml = safeHtml.replace(/==([^=]+)==/g, '<mark>$1</mark>');
+    return safeHtml;
 }
 
 function __setCanvasDescriptionToolbarTopLayer({ cardEl, containerEl, controlsEl, active }) {
@@ -11327,14 +11321,35 @@ function __setCanvasDescriptionToolbarTopLayer({ cardEl, containerEl, controlsEl
 function __positionCanvasFloatingPopoverAboveButton(pop, btn) {
     if (!pop || !btn || !btn.getBoundingClientRect) return;
     const rect = btn.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect ? pop.getBoundingClientRect() : null;
+    const popHeight = (popRect && popRect.height) || pop.offsetHeight || 40;
+    const popWidth = (popRect && popRect.width) || pop.offsetWidth || 200;
+    const PADDING = 10;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 800;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1200;
+
     pop.style.position = 'fixed';
-    pop.style.left = `${Math.round(rect.left + rect.width / 2)}px`;
-    pop.style.top = `${Math.round(rect.top)}px`;
     pop.style.right = 'auto';
     pop.style.bottom = 'auto';
-    pop.style.transform = 'translate(-50%, calc(-100% - 4px))';
     pop.style.zIndex = '2147483647';
     pop.style.pointerEvents = 'auto';
+
+    // 视口边界钳制与翻转：若上方空间不足，自动翻转到按钮下方展示，防止被顶出屏幕
+    const preferAbove = (rect.top - popHeight - 6) >= PADDING;
+    if (preferAbove) {
+        pop.style.top = `${Math.round(rect.top)}px`;
+        pop.style.transform = 'translate(-50%, calc(-100% - 4px))';
+    } else {
+        const topCoord = Math.min(viewportHeight - popHeight - PADDING, rect.bottom + 4);
+        pop.style.top = `${Math.round(Math.max(PADDING, topCoord))}px`;
+        pop.style.transform = 'translate(-50%, 0)';
+    }
+
+    // 水平边界钳制：防止左右超出视口边缘
+    const rawCenterX = rect.left + rect.width / 2;
+    const halfWidth = popWidth / 2;
+    const clampedCenterX = Math.max(halfWidth + PADDING, Math.min(viewportWidth - halfWidth - PADDING, rawCenterX));
+    pop.style.left = `${Math.round(clampedCenterX)}px`;
 }
 
 function __looksLikeEscapedHtmlTagContent(value) {
@@ -14225,6 +14240,17 @@ function __updateAllMdNodeLowDetailOverlays() {
 function __cleanupMdNodeElementLifecycle(el) {
     if (!el) return;
     try {
+        if (el.__tiptapInstance && typeof el.__tiptapInstance.destroy === 'function') {
+            el.__tiptapInstance.destroy();
+            el.__tiptapInstance = null;
+        }
+        const innerEditor = el.querySelector && el.querySelector('.md-canvas-editor');
+        if (innerEditor && innerEditor.__tiptapInstance && typeof innerEditor.__tiptapInstance.destroy === 'function') {
+            innerEditor.__tiptapInstance.destroy();
+            innerEditor.__tiptapInstance = null;
+        }
+    } catch (_) { }
+    try {
         if (el.__mdNodeSelectionChangeHandler) {
             document.removeEventListener('selectionchange', el.__mdNodeSelectionChangeHandler);
             el.__mdNodeSelectionChangeHandler = null;
@@ -14359,6 +14385,7 @@ function showCanvasNodeLoadError(element, data, errorMsg, isTemp) {
         element.appendChild(retryBtn);
     } catch (_) {}
 }
+
 
 function renderMdNode(node, options = {}) {
     const container = document.getElementById('canvasContent');
@@ -14586,6 +14613,18 @@ function __renderMdNodeImpl(node, options = {}) {
     let currentFontColor = '#2DC26B';
     let previousFontColor = '#2DC26B';
 
+    let suppressBlurExit = false;
+    let suppressBlurExitTimer = null;
+    const markToolbarInteraction = () => {
+        suppressBlurExit = true;
+        if (suppressBlurExitTimer) {
+            clearTimeout(suppressBlurExitTimer);
+        }
+        suppressBlurExitTimer = setTimeout(() => {
+            suppressBlurExit = false;
+        }, 300);
+    };
+
     // 创建格式工具栏弹层（单行布局）
     const createFormatPopover = () => {
         let pop = toolbar.querySelector('.md-format-popover');
@@ -14636,6 +14675,13 @@ function __renderMdNodeImpl(node, options = {}) {
 
         toolbar.appendChild(pop);
         preventCanvasEventsPropagation(pop);
+        pop.addEventListener('mousedown', (e) => {
+            markToolbarInteraction();
+            const isTextInput = e.target && e.target.matches && e.target.matches('input[type="text"], input[type="number"]');
+            if (!isTextInput) {
+                e.preventDefault();
+            }
+        }, true);
         try {
             pop.__fontColorLifecycleObserver = new MutationObserver(() => {
                 if (!pop.classList.contains('open')) closeFontColorPopover();
@@ -14643,6 +14689,20 @@ function __renderMdNodeImpl(node, options = {}) {
             pop.__fontColorLifecycleObserver.observe(pop, { attributes: true, attributeFilter: ['class'] });
         } catch (_) { }
         return pop;
+    };
+
+    // 打开格式工具栏（全屏模式下除外）
+    const openFormatPopover = () => {
+        if (el.classList.contains('canvas-node-maximized')) return;
+        const pop = createFormatPopover();
+        if (!pop.classList.contains('open')) {
+            pop.classList.add('open');
+            const formatBtn = toolbar.querySelector('[data-action="md-format-toggle"]');
+            if (formatBtn) formatBtn.classList.add('active');
+            updateCanvasPopoverState(true);
+            const sizeValue = pop.querySelector('.md-format-size-value');
+            if (sizeValue) sizeValue.textContent = node.fontSize + 'px';
+        }
     };
 
     // 切换格式工具栏显示
@@ -14656,18 +14716,16 @@ function __renderMdNodeImpl(node, options = {}) {
         if (isOpen) {
             closeFormatPopover();
         } else {
-            pop.classList.add('open');
-            btn.classList.add('active');
-            updateCanvasPopoverState(true);
-            // 更新字号显示
-            const sizeValue = pop.querySelector('.md-format-size-value');
-            if (sizeValue) sizeValue.textContent = node.fontSize + 'px';
+            openFormatPopover();
         }
     };
 
-    // 关闭格式工具栏
+    // 关闭格式工具栏及其所有二级弹层（彻底复位，杜绝重复进出死锁）
     const closeFormatPopover = () => {
         closeFontColorPopover();
+        try { closeAlignPopover(); } catch (_) { }
+        try { closeHeadingPopover(); } catch (_) { }
+        try { closeListPopover(); } catch (_) { }
         const pop = toolbar.querySelector('.md-format-popover');
         if (pop) {
             pop.classList.remove('open');
@@ -14678,7 +14736,7 @@ function __renderMdNodeImpl(node, options = {}) {
         if (formatBtn) formatBtn.classList.remove('active');
     };
 
-    // 定位弹层到按钮正上方居中
+    // 定位弹层到按钮正上方居中（带视口边界钳制与翻转）
     const positionPopoverAboveBtn = (pop, btn) => {
         const formatPop = toolbar.querySelector('.md-format-popover');
         if (!formatPop) return;
@@ -14686,10 +14744,20 @@ function __renderMdNodeImpl(node, options = {}) {
         const formatRect = formatPop.getBoundingClientRect();
         // 计算按钮中心相对于格式弹层的位置
         const btnCenterX = btnRect.left + btnRect.width / 2 - formatRect.left;
-        pop.style.top = '-4px';
-        pop.style.bottom = 'auto';
-        pop.style.left = btnCenterX + 'px';
-        pop.style.transform = 'translateX(-50%) translateY(-100%)';
+        const popRect = pop.getBoundingClientRect ? pop.getBoundingClientRect() : null;
+        const popHeight = (popRect && popRect.height) || 40;
+        const flipBelow = (formatRect.top - popHeight - 6) < 10;
+        if (flipBelow) {
+            pop.style.top = 'calc(100% + 4px)';
+            pop.style.bottom = 'auto';
+            pop.style.left = btnCenterX + 'px';
+            pop.style.transform = 'translateX(-50%) translateY(0)';
+        } else {
+            pop.style.top = '-4px';
+            pop.style.bottom = 'auto';
+            pop.style.left = btnCenterX + 'px';
+            pop.style.transform = 'translateX(-50%) translateY(-100%)';
+        }
     };
 
     const HTML_TOOL_COLORS = ['#888888', '#66bbff', '#fb464c', '#e9973f', '#e0de71', '#44cf6e', '#53dfdd', '#a882ff'];
@@ -14719,33 +14787,6 @@ function __renderMdNodeImpl(node, options = {}) {
         const { sel, range } = resolved;
         const selected = range.toString();
         wrapper.textContent = selected || (lang === 'en' ? 'text' : '文本');
-        if (
-            expandedElement &&
-            expandedElement.parentNode &&
-            range.startContainer === expandedElement &&
-            range.endContainer === expandedElement
-        ) {
-            const sourceText = String(wrapper.outerHTML || '');
-            if (!sourceText) return false;
-            const original = String(expandedElement.textContent || '');
-            const start = Math.max(0, Math.min(range.startOffset, original.length));
-            const end = Math.max(start, Math.min(range.endOffset, original.length));
-            expandedElement.textContent = original.slice(0, start) + sourceText + original.slice(end);
-            const nextOffset = start + sourceText.length;
-            range.setStart(expandedElement, nextOffset);
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            savedSelection = {
-                range: range.cloneRange(),
-                text: ''
-            };
-            __syncMdNodeFromEditor(node, editor);
-            saveCanvasManifestOnly();
-            try { if (undoManager) undoManager.scheduleRecord('html-tool-source-insert'); } catch (_) { }
-            editor.focus();
-            return true;
-        }
         savedSelection = null;
         range.deleteContents();
         range.insertNode(wrapper);
@@ -14757,7 +14798,6 @@ function __renderMdNodeImpl(node, options = {}) {
         sel.addRange(range);
         __syncMdNodeFromEditor(node, editor);
         saveCanvasManifestOnly();
-        try { if (undoManager) undoManager.scheduleRecord('html-tool-insert'); } catch (_) { }
         editor.focus();
         return true;
     };
@@ -14790,10 +14830,16 @@ function __renderMdNodeImpl(node, options = {}) {
         pop.className = 'md-fontcolor-popover md-color-popover';
         pop.dataset.ownerToolbar = ownerId;
         preventCanvasEventsPropagation(pop);
+        const defaultTitle = lang === 'en' ? 'Default font color (Remove color)' : '默认字体颜色（清除颜色）';
         const rgbPickerTitle = lang === 'en' ? 'RGB Color Picker' : 'RGB颜色选择器';
         const recentTitle = lang === 'en' ? 'Previous color' : '上一次颜色';
         const gradientId = `rainbow-gradient-font-${ownerId.replace(/[^a-z0-9_-]/gi, '-')}`;
-        pop.innerHTML = HTML_TOOL_COLORS.map(color =>
+        pop.innerHTML = `
+            <button class="md-color-chip md-color-chip-default" data-action="md-fontcolor-apply" data-color="default" title="${defaultTitle}">
+                <i class="fas fa-ban"></i>
+            </button>
+            <span class="md-color-divider" aria-hidden="true"></span>
+        ` + HTML_TOOL_COLORS.map(color =>
             `<span class="md-color-chip" data-action="md-fontcolor-apply" data-color="${color}" style="background:${color}" title="${color}"></span>`
         ).join('') + `
             <span class="md-color-divider" aria-hidden="true"></span>
@@ -14902,8 +14948,37 @@ function __renderMdNodeImpl(node, options = {}) {
     };
 
     const insertFontColor = (color) => {
+        if (!color || color === 'default' || color === 'reset') {
+            const inst = tiptapInstance || (editor && editor.__tiptapInstance);
+            if (inst) {
+                inst.unsetColor();
+                const fontColorBtn = toolbar.querySelector('[data-action="md-fontcolor-toggle"] span');
+                if (fontColorBtn) fontColorBtn.style.borderBottomColor = 'currentColor';
+                saveEditorContent();
+                return;
+            }
+            return;
+        }
         const safeColor = String(color || '').trim();
         if (!safeColor) return;
+        if (editor.__tiptapInstance) {
+            editor.__tiptapInstance.setColor(safeColor);
+            if (currentFontColor && currentFontColor !== safeColor) previousFontColor = currentFontColor;
+            currentFontColor = safeColor;
+            editor.__htmlToolFontColor = safeColor;
+            const pop = (typeof CSS !== 'undefined' && CSS.escape)
+                ? document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(String(node.id || 'blank-md-node'))}"]`)
+                : null;
+            const recentChip = pop ? pop.querySelector('.md-fontcolor-recent-chip') : null;
+            if (recentChip) {
+                recentChip.dataset.color = previousFontColor || '#2DC26B';
+                recentChip.style.backgroundColor = previousFontColor || '#2DC26B';
+            }
+            const fontColorBtn = toolbar.querySelector('[data-action="md-fontcolor-toggle"] span');
+            if (fontColorBtn) fontColorBtn.style.borderBottomColor = safeColor;
+            saveEditorContent();
+            return;
+        }
         const wrapper = document.createElement('font');
         wrapper.setAttribute('color', safeColor);
         if (insertHtmlToolElement(wrapper)) {
@@ -14971,6 +15046,11 @@ function __renderMdNodeImpl(node, options = {}) {
 
     const insertAlign = (alignType) => {
         const safeAlign = /^(left|center|right|justify)$/.test(String(alignType || '')) ? String(alignType) : 'left';
+        if (editor.__tiptapInstance) {
+            editor.__tiptapInstance.setTextAlign(safeAlign);
+            saveEditorContent();
+            return;
+        }
         const wrapper = safeAlign === 'center' ? document.createElement('center') : document.createElement('p');
         if (safeAlign !== 'center') wrapper.setAttribute('align', safeAlign);
         insertHtmlToolElement(wrapper);
@@ -15126,6 +15206,30 @@ function __renderMdNodeImpl(node, options = {}) {
     };
 
     const doInsert = (formatType) => {
+        if (editor && editor.__tiptapInstance) {
+            const inst = editor.__tiptapInstance;
+            switch (formatType) {
+                case 'bold': inst.toggleBold(); break;
+                case 'italic': inst.toggleItalic(); break;
+                case 'underline': inst.toggleUnderline(); break;
+                case 'highlight': inst.toggleHighlight(); break;
+                case 'strike': inst.toggleStrike(); break;
+                case 'code': inst.toggleCode(); break;
+                case 'quote': inst.toggleBlockquote(); break;
+                case 'h1': inst.toggleHeading(1); break;
+                case 'h2': inst.toggleHeading(2); break;
+                case 'h3': inst.toggleHeading(3); break;
+                case 'h4': inst.toggleHeading(4); break;
+                case 'h5': inst.toggleHeading(5); break;
+                case 'h6': inst.toggleHeading(6); break;
+                case 'ul': inst.toggleBulletList(); break;
+                case 'ol': inst.toggleOrderedList(); break;
+                case 'task': inst.toggleTaskList(); break;
+                default: break;
+            }
+            saveEditorContent();
+            return;
+        }
         // 获取当前选区
         const sel = window.getSelection();
         if (!sel.rangeCount) {
@@ -15284,23 +15388,39 @@ function __renderMdNodeImpl(node, options = {}) {
             // 保存内容
             __syncMdNodeFromEditor(node, editor);
             saveCanvasManifestOnly();
-            try { if (undoManager) undoManager.scheduleRecord('tool-insert'); } catch (_) { }
         }
 
         editor.focus();
     };
 
-    // 编辑器（实时渲染的 WYSIWYG 编辑器）
+    // 编辑器（现代化的 Tiptap 2 WYSIWYG 编辑器）
     const editor = document.createElement('div');
     editor.className = 'md-canvas-editor md-wysiwyg-editor md-canvas-text';
-    editor.contentEditable = 'true';
     editor.spellcheck = false;
 
-    // 覆盖 focus 方法，防止 contenteditable 聚焦时滚动条自动跳回顶端
+    // 保存编辑器内容并触发防抖持久化
+    function saveEditorContent(force = false) {
+        const changed = __syncMdNodeFromEditor(node, editor);
+        if (changed || force) {
+            saveCanvasManifestOnly();
+        }
+    }
+
+    // 覆盖 focus 方法，防止 contenteditable / tiptap 聚焦时滚动条自动跳回顶端
     const originalFocus = editor.focus;
     editor.focus = function(options) {
         const savedScrollTop = editor.scrollTop;
         const savedScrollLeft = editor.scrollLeft;
+        if (editor.__tiptapInstance) {
+            editor.__tiptapInstance.focus(null, { scrollIntoView: false });
+            editor.scrollTop = savedScrollTop;
+            editor.scrollLeft = savedScrollLeft;
+            requestAnimationFrame(() => {
+                if (editor.scrollTop !== savedScrollTop) editor.scrollTop = savedScrollTop;
+                if (editor.scrollLeft !== savedScrollLeft) editor.scrollLeft = savedScrollLeft;
+            });
+            return;
+        }
         editor.__isFocusing = true;
         originalFocus.call(editor, options);
         editor.scrollTop = savedScrollTop;
@@ -15329,18 +15449,27 @@ function __renderMdNodeImpl(node, options = {}) {
     // - 文本节点统一按 text body 渲染（官方 text node 对齐）。
     const isCanvasNativeText = __isCanvasNativeTextNode(node);
     const rawMarkdownSource = __deriveMdNodeMarkdownSource(node);
-    if (rawMarkdownSource) {
+    const initialMdSource = rawMarkdownSource || (typeof node.text === 'string' ? node.text : '');
+
+    // 优先采用工业级 Tiptap 2 + ProseMirror 现代化无头架构驱动
+    let tiptapInstance = null;
+    if (typeof window !== 'undefined' && window.CanvasTiptapEngine && typeof window.CanvasTiptapEngine.create === 'function') {
         try {
-            editor.innerHTML = __renderMarkdownToCanvasRichHtml(rawMarkdownSource, {
-                forceLinePreserve: true
+            tiptapInstance = window.CanvasTiptapEngine.create(editor, {
+                initialMarkdown: initialMdSource,
+                editable: true,
+                onUpdate: (md, html) => {
+                    saveEditorContent(true);
+                }
             });
-        } catch { editor.textContent = rawMarkdownSource; }
-    } else if (node.html) {
-        editor.innerHTML = node.html;
-    } else if (typeof node.text === 'string' && node.text) {
-        editor.textContent = node.text;
+            editor.__tiptapInstance = tiptapInstance;
+            el.__tiptapInstance = tiptapInstance;
+        } catch (err) {
+            console.warn('[MdNode] Tiptap init fallback:', err);
+            tiptapInstance = null;
+        }
     }
-    try { __applyHeadingCollapse(editor); } catch (_) { }
+
 
     // 保存选区函数（用于工具栏点击时恢复）
     const saveSelection = () => {
@@ -15386,1939 +15515,6 @@ function __renderMdNodeImpl(node, options = {}) {
         }, { passive: true });
     }
 
-    // 格式化元素与 Markdown 语法的映射
-    const formatMap = {
-        'STRONG': { prefix: '**', suffix: '**' },
-        'B': { prefix: '**', suffix: '**' },
-        'EM': { prefix: '_', suffix: '_' },
-        'I': { prefix: '_', suffix: '_' },
-        // underline 使用 HTML 语法（便于“展开为源码/离开后重渲染”的体验）
-        'U': { prefix: '', suffix: '' },
-        'DEL': { prefix: '~~', suffix: '~~' },
-        'S': { prefix: '~~', suffix: '~~' },
-        'MARK': { prefix: '==', suffix: '==' },
-        'CODE': { prefix: '`', suffix: '`' },
-    };
-
-    // 当前展开的元素（用于失焦时重新渲染）
-    let expandedElement = null;
-    let expandedMarkdown = null;
-    let expandedType = null; // 'simple'
-    let preserveExpandedSourceUntil = 0;
-    const markExpandedSourceToolbarInteraction = (durationMs = 1200) => {
-        preserveExpandedSourceUntil = Math.max(preserveExpandedSourceUntil, Date.now() + durationMs);
-    };
-    const isFontColorPopoverActive = () => {
-        if (Date.now() < preserveExpandedSourceUntil) return true;
-        const ownerId = String(node.id || 'blank-md-node');
-        let pop = null;
-        try {
-            pop = (typeof CSS !== 'undefined' && CSS.escape)
-                ? document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(ownerId)}"]`)
-                : toolbar.querySelector('.md-fontcolor-popover');
-        } catch (_) {
-            pop = toolbar.querySelector('.md-fontcolor-popover');
-        }
-        if (!pop) return false;
-        const activeEl = document.activeElement;
-        return pop.classList.contains('open') || (activeEl && pop.contains(activeEl));
-    };
-
-    // 统一判定：当前光标是否仍在“展开的源码文本节点”内
-    const isCaretInsideExpandedSource = () => {
-        if (!expandedElement || !expandedElement.parentNode) return false;
-        const sel = window.getSelection();
-        if (!sel || !sel.rangeCount) return false;
-        const range = sel.getRangeAt(0);
-        return range && range.startContainer === expandedElement;
-    };
-
-    // 只要光标离开展开的源码节点，就立即重渲染
-    const scheduleReRenderIfCaretLeftExpanded = (() => {
-        let rafId = 0;
-        return () => {
-            if (!expandedElement || !expandedElement.parentNode) return;
-            if (isFontColorPopoverActive()) return;
-            if (rafId) cancelAnimationFrame(rafId);
-            rafId = requestAnimationFrame(() => {
-                rafId = 0;
-                if (isFontColorPopoverActive()) return;
-                if (expandedElement && expandedElement.parentNode && !isCaretInsideExpandedSource()) {
-                    reRenderExpanded();
-                }
-            });
-        };
-    })();
-
-    // 获取特殊格式元素的源码表示
-    const getSourceCode = (el) => {
-        const tagName = el.tagName;
-        const content = String(el.textContent || '');
-        const htmlContent = String(el.innerHTML || '');
-        const getInlineSource = (rawHtml, fallbackText = '') => {
-            const markdownLike = __htmlToMarkdown(String(rawHtml || ''), {
-                trimResult: false,
-                compactNewlines: false,
-                paragraphBreaks: false,
-                hardLineBreaks: true
-            });
-            return __normalizeCanvasMarkdownSource(
-                __repairLegacyCanvasMarkdownSource(
-                    String(markdownLike || fallbackText || '')
-                )
-            );
-        };
-        const inlineContent = getInlineSource(htmlContent, content);
-
-        const htmlToolSource = __expandCanvasHtmlToolElementToSource(el);
-        if (htmlToolSource) return htmlToolSource;
-
-        // hr: --- 水平分割线
-        if (tagName === 'HR') {
-            return {
-                source: '---',
-                prefix: '',
-                suffix: '',
-                type: 'hr'
-            };
-        }
-
-        // blockquote: > text（保留内部 HTML）
-        if (tagName === 'BLOCKQUOTE') {
-            const quoteContent = getInlineSource(el.innerHTML, el.textContent).trim();
-            return {
-                source: `> ${quoteContent}`,
-                prefix: '> ',
-                suffix: '',
-                type: 'quote'
-            };
-        }
-
-        // li: - item / 1. item（保留内部 HTML）
-        if (tagName === 'LI') {
-            const parent = el.parentElement;
-            const itemSource = getInlineSource(el.innerHTML, el.textContent).trim();
-            if (parent && parent.tagName === 'UL') {
-                return {
-                    source: `- ${itemSource}`,
-                    prefix: '- ',
-                    suffix: '',
-                    type: 'li-ul'
-                };
-            }
-            if (parent && parent.tagName === 'OL') {
-                const siblings = Array.from(parent.children).filter(child => child && child.tagName === 'LI');
-                const idx = siblings.indexOf(el) + 1;
-                const n = idx > 0 ? idx : 1;
-                return {
-                    source: `${n}. ${itemSource}`,
-                    prefix: `${n}. `,
-                    suffix: '',
-                    type: 'li-ol'
-                };
-            }
-        }
-
-        // ul: - item（保留内部 HTML）
-        if (tagName === 'UL') {
-            const items = Array.from(el.querySelectorAll('li'))
-                .map(li => `- ${getInlineSource(li.innerHTML, li.textContent).trim()}`)
-                .join('\n');
-            return {
-                source: items,
-                prefix: '- ',
-                suffix: '',
-                type: 'ul'
-            };
-        }
-
-        // ol: 1. item（保留内部 HTML）
-        if (tagName === 'OL') {
-            const items = Array.from(el.querySelectorAll('li'))
-                .map((li, i) => `${i + 1}. ${getInlineSource(li.innerHTML, li.textContent).trim()}`)
-                .join('\n');
-            return {
-                source: items,
-                prefix: '1. ',
-                suffix: '',
-                type: 'ol'
-            };
-        }
-
-        // task: - [ ] text 或 - [x] text（保留内部 HTML）
-        if (el.classList && el.classList.contains('md-task-item')) {
-            const checkbox = el.querySelector('input[type="checkbox"]');
-            const checked = checkbox && checkbox.checked;
-            // 获取除 checkbox 以外的内容
-            const clone = el.cloneNode(true);
-            const cb = clone.querySelector('input[type="checkbox"]');
-            if (cb) cb.remove();
-            const taskSource = getInlineSource(clone.innerHTML, clone.textContent).trim();
-            return {
-                source: checked ? `- [x] ${taskSource}` : `- [ ] ${taskSource}`,
-                prefix: checked ? '- [x] ' : '- [ ] ',
-                suffix: '',
-                type: 'task'
-            };
-        }
-
-        // external link: [text](URL)
-        if (tagName === 'A') {
-            const href = String(el.getAttribute('href') || '').trim();
-            if (!href) return null;
-            const labelRaw = String(el.textContent || href);
-            const label = labelRaw.replace(/]/g, '\\]');
-            return {
-                source: `[${label}](${href})`,
-                prefix: '[',
-                suffix: `](${href})`,
-                type: 'link'
-            };
-        }
-
-        // 标题: 支持 ATX 和 Setext 两种格式
-        // Setext 格式通过 dataset.setextType 标识
-        // 标准规则: === → H1, --- → H2
-        if (tagName === 'H1') {
-            // 检查是否为 Setext 格式（=== → H1）
-            if (el.dataset && el.dataset.setextType) {
-                const separator = el.dataset.setextType;
-                // 从渲染的元素中提取标题文字
-                // 元素结构：标题文字 + <br> + <span class="setext-separator">分隔符</span>
-                // 使用 childNodes 提取纯文本部分（不包括 separator span）
-                let headerText = '';
-                for (let node of el.childNodes) {
-                    if (node.nodeType === Node.TEXT_NODE) {
-                        headerText += node.textContent;
-                    } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'BR' && !node.classList.contains('setext-separator')) {
-                        headerText += node.textContent;
-                    }
-                }
-                headerText = headerText.trim();
-
-                return {
-                    source: `${headerText}\n${separator}`,
-                    prefix: '',
-                    suffix: '\n' + separator,
-                    type: 'setext-heading'
-                };
-            }
-            return {
-                source: `# ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
-                prefix: '# ',
-                suffix: '',
-                type: 'heading'
-            };
-        }
-        if (tagName === 'H2') {
-            // 检查是否为 Setext 格式（--- → H2）
-            if (el.dataset && el.dataset.setextType) {
-                const separator = el.dataset.setextType;
-                // 从渲染的元素中提取标题文字
-                // 元素结构：标题文字 + <br> + <span class="setext-separator">分隔符</span>
-                // 使用 childNodes 提取纯文本部分（不包括 separator span）
-                let headerText = '';
-                for (let node of el.childNodes) {
-                    if (node.nodeType === Node.TEXT_NODE) {
-                        headerText += node.textContent;
-                    } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'BR' && !node.classList.contains('setext-separator')) {
-                        headerText += node.textContent;
-                    }
-                }
-                headerText = headerText.trim();
-
-                return {
-                    source: `${headerText}\n${separator}`,
-                    prefix: '',
-                    suffix: '\n' + separator,
-                    type: 'setext-heading'
-                };
-            }
-            return {
-                source: `## ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
-                prefix: '## ',
-                suffix: '',
-                type: 'heading'
-            };
-        }
-        if (tagName === 'H3') {
-            return {
-                source: `### ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
-                prefix: '### ',
-                suffix: '',
-                type: 'heading'
-            };
-        }
-        if (tagName === 'H4') {
-            return {
-                source: `#### ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
-                prefix: '#### ',
-                suffix: '',
-                type: 'heading'
-            };
-        }
-        if (tagName === 'H5') {
-            return {
-                source: `##### ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
-                prefix: '##### ',
-                suffix: '',
-                type: 'heading'
-            };
-        }
-        if (tagName === 'H6') {
-            return {
-                source: `###### ${getInlineSource(el.innerHTML, el.textContent).trim()}`,
-                prefix: '###### ',
-                suffix: '',
-                type: 'heading'
-            };
-        }
-
-        return null;
-    };
-
-    // 点击格式化元素时展开为源码
-    // cursorPosition: 'middle'(默认), 'start', 'end'
-    const expandToMarkdown = (formattedEl, cursorPosition = 'middle') => {
-        const tagName = formattedEl.tagName;
-
-        // 处理特殊格式（headings、hr 等）
-        const specialFormat = getSourceCode(formattedEl);
-        if (specialFormat) {
-            const parent = formattedEl.parentNode;
-
-            // 对于 Setext 标题，需要用 <br> 来表示换行（contenteditable 不显示 \n）
-            if (specialFormat.type === 'setext-heading') {
-                // 从渲染的元素中提取标题文字（不包括分隔符）
-                // 元素结构：标题文字 + <br> + <span class="setext-separator">分隔符</span>
-                let headerText = '';
-                for (let node of formattedEl.childNodes) {
-                    if (node.nodeType === Node.TEXT_NODE) {
-                        headerText += node.textContent;
-                    } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'BR' && !node.classList.contains('setext-separator')) {
-                        headerText += node.textContent;
-                    }
-                }
-                headerText = headerText.trim();
-
-                const underline = formattedEl.dataset.setextType || '---';
-
-                const textNode1 = document.createTextNode(headerText);
-                const brNode = document.createElement('br');
-                const textNode2 = document.createTextNode(underline);
-
-                parent.insertBefore(textNode1, formattedEl);
-                parent.insertBefore(brNode, formattedEl);
-                parent.insertBefore(textNode2, formattedEl);
-                parent.removeChild(formattedEl);
-
-                expandedElement = textNode2; // 记录下划线节点
-                expandedMarkdown = specialFormat.source;
-                expandedType = specialFormat.type;
-
-                // 光标放在下划线末尾
-                const sel = window.getSelection();
-                const range = document.createRange();
-                range.setStart(textNode2, textNode2.length);
-                range.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(range);
-
-                return true;
-            }
-
-            const textNode = document.createTextNode(specialFormat.source);
-            parent.replaceChild(textNode, formattedEl);
-
-            // 对于通过 # 语法形成的标题，在源码行后面显式插入一个 <br>
-            // 确保原本在标题下一行的内容不会“挤到”同一行右侧
-            if (specialFormat.type === 'heading') {
-                const nextSibling = textNode.nextSibling;
-                if (!nextSibling || !(nextSibling.nodeType === Node.ELEMENT_NODE && nextSibling.tagName === 'BR')) {
-                    const brAfter = document.createElement('br');
-                    brAfter.setAttribute('data-md-auto-br', 'heading');
-                    if (nextSibling) {
-                        parent.insertBefore(brAfter, nextSibling);
-                    } else {
-                        parent.appendChild(brAfter);
-                    }
-                }
-            }
-
-            expandedElement = textNode;
-            expandedMarkdown = specialFormat.source;
-            expandedType = specialFormat.type;
-
-            const sel = window.getSelection();
-            const range = document.createRange();
-            let cursorPos;
-            if (cursorPosition === 'start') {
-                cursorPos = 0;
-            } else if (cursorPosition === 'end') {
-                cursorPos = specialFormat.source.length;
-            } else {
-                // 对于没有文本内容的元素（如 hr），光标放在中间
-                const contentLen = formattedEl.textContent ? formattedEl.textContent.length : 0;
-                cursorPos = specialFormat.prefix.length + Math.floor(contentLen / 2);
-                // 确保光标位置在有效范围内
-                cursorPos = Math.max(0, Math.min(cursorPos, specialFormat.source.length));
-            }
-            range.setStart(textNode, Math.min(cursorPos, textNode.length));
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-
-            return true;
-        }
-
-        // 处理简单格式（Markdown）
-        const format = formatMap[tagName];
-        if (!format) return false;
-
-        // 不直接拼 innerHTML，避免把 <em>/<strong> 等标签源码写回 markdown。
-        const inlineSource = __normalizeCanvasMarkdownSource(
-            __repairLegacyCanvasMarkdownSource(
-                __htmlToMarkdown(String(formattedEl.innerHTML || ''), {
-                    trimResult: false,
-                    compactNewlines: false,
-                    paragraphBreaks: false,
-                    hardLineBreaks: true
-                })
-            )
-        );
-        const markdownBody = String(
-            inlineSource || formattedEl.textContent || ''
-        ).replace(/\u00A0/g, ' ');
-        const markdown = format.prefix + markdownBody + format.suffix;
-
-        // 创建文本节点替换格式化元素
-        const textNode = document.createTextNode(markdown);
-        formattedEl.parentNode.replaceChild(textNode, formattedEl);
-
-        // 记录展开的状态
-        expandedElement = textNode;
-        expandedMarkdown = markdown;
-        expandedType = 'simple';
-
-        // 根据参数决定光标位置
-        const sel = window.getSelection();
-        const range = document.createRange();
-        let cursorPos;
-        const plainTextLen = formattedEl.textContent ? formattedEl.textContent.length : 0;
-        if (cursorPosition === 'start') {
-            cursorPos = 0;
-        } else if (cursorPosition === 'end') {
-            cursorPos = markdown.length;
-        } else {
-            cursorPos = format.prefix.length + Math.floor(plainTextLen / 2);
-        }
-        range.setStart(textNode, Math.max(0, Math.min(cursorPos, textNode.length)));
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-
-        return true;
-    };
-
-    // 实时 Markdown 渲染：检测并转换 Markdown 语法
-    const liveRenderMarkdown = () => {
-        if (!__CANVAS_ENABLE_EDITOR_LIVE_DOM_REWRITE) {
-            saveEditorContent();
-            return;
-        }
-        const sel = window.getSelection();
-        if (!sel.rangeCount) return;
-
-        const range = sel.getRangeAt(0);
-        if (!editor.contains(range.startContainer)) return;
-
-        // 获取当前光标所在的文本节点
-        let textNode = range.startContainer;
-        if (textNode.nodeType !== Node.TEXT_NODE) return;
-
-        // 如果正在编辑展开的元素，不要渲染
-        if (textNode === expandedElement) return;
-
-        const text = textNode.textContent;
-        const cursorPos = range.startOffset;
-
-        // 辅助函数：查找下一个“行”节点（兼容 TextNode 和 Block Element）
-        const findNextLineNode = (node) => {
-            let next = node.nextSibling;
-
-            // 1. 同级查找
-            while (next) {
-                // 跳过空文本/注释
-                if (next.nodeType === Node.TEXT_NODE && !next.textContent.trim()) {
-                    next = next.nextSibling;
-                    continue;
-                }
-                // 跳过 BR
-                if (next.tagName === 'BR') {
-                    next = next.nextSibling;
-                    continue;
-                }
-                break;
-            }
-
-            if (next) return next;
-
-            // 2. 跨块查找 (如果当前在 DIV/P 内，找父元素的下一个兄弟)
-            const parent = node.parentNode;
-            if (parent && (parent.tagName === 'DIV' || parent.tagName === 'P') && parent.parentNode === editor) {
-                let nextBlock = parent.nextSibling;
-                while (nextBlock && nextBlock.nodeType === Node.TEXT_NODE && !nextBlock.textContent.trim()) {
-                    nextBlock = nextBlock.nextSibling;
-                }
-                if (nextBlock) return nextBlock;
-            }
-
-            return null;
-        };
-
-        // 辅助函数：查找上一个“行”节点（兼容 TextNode 和 Block Element）
-        const findPrevLineNode = (node) => {
-            let prev = node.previousSibling;
-
-            // 1. 同级查找
-            while (prev) {
-                if (prev.nodeType === Node.TEXT_NODE && !prev.textContent.trim()) {
-                    prev = prev.previousSibling;
-                    continue;
-                }
-                if (prev.tagName === 'BR') {
-                    prev = prev.previousSibling;
-                    continue;
-                }
-                break;
-            }
-
-            if (prev) return prev;
-
-            // 2. 跨块查找
-            const parent = node.parentNode;
-            if (parent && (parent.tagName === 'DIV' || parent.tagName === 'P') && parent.parentNode === editor) {
-                let prevBlock = parent.previousSibling;
-                while (prevBlock && prevBlock.nodeType === Node.TEXT_NODE && !prevBlock.textContent.trim()) {
-                    prevBlock = prevBlock.previousSibling;
-                }
-                if (prevBlock) return prevBlock;
-            }
-
-            return null;
-        };
-
-        // 获取节点文本内容的辅助函数
-        const getNodeText = (node) => {
-            return node.textContent || '';
-        };
-
-        // Setext 标题前瞻检测（当在标题文本行输入时，检测下一行是否为分隔符）
-        // 只有当当前行不是分隔符时才进行检测
-        const isSeparator = /^[\u200B]*([-=])\1+\s*$/.test(text);
-        if (!isSeparator && text.trim()) {
-            const nextNode = findNextLineNode(textNode);
-
-            let foundSetext = false;
-            let setextLevel = ''; // h1 or h2
-            let setextType = ''; // --- or ===
-
-            if (nextNode) {
-                const nextText = getNodeText(nextNode);
-
-                // 1. 下一行是 HR 元素（对应 ---）
-                if (nextNode.tagName === 'HR') {
-                    // Text + HR(---) => H2
-                    foundSetext = true;
-                    setextLevel = 'h2';
-                    setextType = '---';
-                }
-                // 2. 下一行是文本（TextNode 或 Block），且内容是 --- 或 ===
-                else {
-                    const dashMatch = nextText.match(/^[\u200B]*(-{3,})\s*$/);
-                    const equalMatch = nextText.match(/^[\u200B]*(={3,})\s*$/);
-
-                    if (dashMatch) {
-                        // Text + --- => H2
-                        foundSetext = true;
-                        setextLevel = 'h2';
-                        setextType = dashMatch[1];  // 保存实际的分隔符（如 ---、----、-----）
-                    } else if (equalMatch) {
-                        // Text + === => H1
-                        foundSetext = true;
-                        setextLevel = 'h1';
-                        setextType = equalMatch[1];  // 保存实际的分隔符（如 ===、====、=====）
-                    }
-                }
-            }
-
-            if (foundSetext) {
-                const newEl = document.createElement(setextLevel);
-                // Setext 标题显示为：标题文字 + 换行 + 分隔符（两行，分隔符保持原始大小）
-                const headerTextEscaped = text.trim().replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                newEl.innerHTML = `${headerTextEscaped}<br><span class="setext-separator" style="font-size: 14px; font-weight: normal; color: #999;">${setextType}</span>`;
-                newEl.dataset.setextType = setextType;
-
-                // 插入新标题（位置在当前节点之前）
-                const insertParent = textNode.parentNode === editor ? editor : textNode.parentNode.parentNode;
-                const insertRef = textNode.parentNode === editor ? textNode : textNode.parentNode;
-
-                insertParent.insertBefore(newEl, insertRef);
-
-                // 移除旧节点（当前文本节点 + 下一行节点）
-                // 注意：如果是在块元素内，可能需要移除整个块
-                const removeNodeAndBlock = (n) => {
-                    if (!n) return;
-                    if (n.parentNode === editor) {
-                        // Block element or direct text node
-                        editor.removeChild(n);
-                    } else if (n.parentNode && n.parentNode.parentNode === editor && (n.parentNode.tagName === 'DIV' || n.parentNode.tagName === 'P')) {
-                        // Inside a block, remove the whole block
-                        editor.removeChild(n.parentNode);
-                    } else if (n.parentNode) {
-                        n.parentNode.removeChild(n);
-                    }
-                };
-
-                // 移除当前节点
-                removeNodeAndBlock(textNode);
-
-                // 移除下一行节点
-                removeNodeAndBlock(nextNode);
-
-                // 在后面添加零宽空格
-                const afterNode = document.createTextNode('\u200B');
-                if (newEl.nextSibling) {
-                    insertParent.insertBefore(afterNode, newEl.nextSibling);
-                } else {
-                    insertParent.appendChild(afterNode);
-                }
-
-                // 恢复光标位置
-                const newRange = document.createRange();
-                newRange.setStart(afterNode, 1);
-                newRange.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(newRange);
-
-                expandedElement = null;
-                expandedMarkdown = null;
-                expandedType = null;
-
-                saveEditorContent();
-                return;
-            }
-        }
-
-        // Markdown 模式列表（按优先级排序）
-        const patterns = [
-            { type: 'link', regex: /\[([^\]]+?)\]\(([^)]+?)\)/, tag: 'a', contentIndex: 1, hrefIndex: 2 }, // [文字](URL)
-            { regex: /\*\*(.+?)\*\*/, tag: 'strong' },           // **粗体**
-            { regex: /\*(.+?)\*/, tag: 'em' },                   // *斜体*
-            { regex: /~~(.+?)~~/, tag: 'del' },                  // ~~删除线~~
-            { regex: /==(.+?)==/, tag: 'mark' },                 // ==高亮==
-            { regex: /`([^`]+)`/, tag: 'code' },                 // `代码`
-            { regex: /\[\[(.+?)\]\]/, tag: 'span', className: 'md-wikilink' }, // [[链接]]
-            {
-                type: 'bare-url',
-                regex: /(^|[\s(\[{\<"'“‘*_~`])((?:https?:\/\/|mailto:|tel:)[^\s<>"“”'‘’]+)(?=$|[\s)\]}>.,;:!?"'“”‘’])/i,
-                tag: 'a',
-                boundaryGroupIndex: 1,
-                urlGroupIndex: 2
-            },
-            {
-                type: 'www-url',
-                regex: /(^|[\s(\[{\<"'“‘*_~`])((?:www\.)[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"“”'‘’]*)?)(?=$|[\s)\]}>.,;:!?"'“”‘’])/i,
-                tag: 'a',
-                boundaryGroupIndex: 1,
-                urlGroupIndex: 2
-            }
-        ];
-
-        const htmlPatterns = [];
-
-        // Setext 标题和水平分割线检测（回溯检测：当输入分隔符时，检测上一行是否为标题文本）
-        const setextDashMatch = text.match(/^[\u200B]*(-{3,})\s*$/);    // --- → H2
-        const setextEqualMatch = text.match(/^[\u200B]*(={3,})\s*$/);   // === → H1
-
-        if (setextDashMatch || setextEqualMatch) {
-            const prevNode = findPrevLineNode(textNode);
-
-            if (prevNode) {
-                // 获取上一行的文本内容（移除零宽空格）
-                const headerText = getNodeText(prevNode).replace(/\u200B/g, '').trim();
-
-                // 如果上一行是 HR 元素、空内容、或只包含零宽空格，不尝试创建标题，直接跳过
-                if (prevNode.tagName === 'HR' || !headerText || /^[-=]{3,}$/.test(headerText)) {
-                    // 继续执行后续的 HR 创建逻辑
-                } else {
-                    // 确保上一行有有效内容且不是分隔符
-                    if (headerText) {
-                        // 标准规则: === → H1, --- → H2
-                        const level = setextEqualMatch ? 'h1' : 'h2';
-                        const separator = setextEqualMatch ? setextEqualMatch[1] : setextDashMatch[1];
-
-                        const newEl = document.createElement(level);
-                        // Setext 标题显示为：标题文字 + 换行 + 分隔符（两行，分隔符保持原始大小）
-                        const headerTextEscaped = headerText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                        newEl.innerHTML = `${headerTextEscaped}<br><span class="setext-separator" style="font-size: 14px; font-weight: normal; color: #999;">${separator}</span>`;
-                        newEl.dataset.setextType = separator;
-
-                        // 插入位置确定
-                        const insertParent = textNode.parentNode === editor ? editor : textNode.parentNode.parentNode;
-                        const insertRef = (prevNode.parentNode === editor) ? prevNode : prevNode.parentNode;
-
-                        insertParent.insertBefore(newEl, insertRef);
-
-                        // 移除节点Helper
-                        const removeNodeAndBlock = (n) => {
-                            if (!n) return;
-                            if (n.parentNode === editor) {
-                                editor.removeChild(n);
-                            } else if (n.parentNode && n.parentNode.parentNode === editor && (n.parentNode.tagName === 'DIV' || n.parentNode.tagName === 'P')) {
-                                editor.removeChild(n.parentNode);
-                            } else if (n.parentNode) {
-                                n.parentNode.removeChild(n);
-                            }
-                        };
-
-                        // 移除上一行
-                        removeNodeAndBlock(prevNode);
-
-                        // 移除当前行（分隔符）
-                        removeNodeAndBlock(textNode);
-
-                        // 移除当前的 ---/=== 文本节点
-                        const afterNode = document.createTextNode('\u200B');
-                        if (newEl.nextSibling) {
-                            insertParent.insertBefore(afterNode, newEl.nextSibling);
-                        } else {
-                            insertParent.appendChild(afterNode);
-                        }
-
-                        // 恢复光标位置
-                        const newRange = document.createRange();
-                        newRange.setStart(afterNode, afterNode.textContent.length);
-                        newRange.collapse(true);
-                        sel.removeAllRanges();
-                        sel.addRange(newRange);
-
-                        expandedElement = null;
-                        expandedMarkdown = null;
-                        expandedType = null;
-
-                        saveEditorContent();
-                        return;
-                    }
-                }
-            }
-
-            // 逻辑 2: 水平分割线 (仅限 ---, 且没有形成标题时)
-            if (setextDashMatch) {
-                const hr = document.createElement('hr');
-
-                const parent = textNode.parentNode;
-
-                // 如果在 Block 内，需要在 Block 外插入 HR，或者把 Block 替换
-                if (parent.tagName === 'DIV' || parent.tagName === 'P') {
-                    // 在 Block 前插入 HR
-                    parent.parentNode.insertBefore(hr, parent);
-
-                    // 清空当前 Block 的内容，保留 Block 本身以保持光标位置
-                    textNode.textContent = '\u200B';
-
-                    // 设置光标
-                    try {
-                        const newRange = document.createRange();
-                        newRange.setStart(textNode, 1);
-                        newRange.collapse(true);
-                        sel.removeAllRanges();
-                        sel.addRange(newRange);
-                    } catch (e) {
-                        // 光标设置失败，静默处理
-                    }
-                } else {
-                    // 在当前文本节点前插入 HR
-                    parent.insertBefore(hr, textNode);
-
-                    // 清空当前文本节点为零宽空格
-                    textNode.textContent = '\u200B';
-
-                    // 设置光标
-                    try {
-                        const newRange = document.createRange();
-                        newRange.setStart(textNode, 1);
-                        newRange.collapse(true);
-                        sel.removeAllRanges();
-                        sel.addRange(newRange);
-                    } catch (e) {
-                        // 光标设置失败，静默处理
-                    }
-                }
-
-                expandedElement = null;
-                expandedMarkdown = null;
-                expandedType = null;
-
-                saveEditorContent();
-                return;
-            }
-        }
-
-        // 块级 Markdown 模式（需要特殊处理）
-        // ATX 标题规则：
-        //   - # 必须在行首
-        //   - # 后面必须有至少一个空格
-        //   - 支持 H1-H6（1-6个 #）
-        //   - 超过6个 # 不会被渲染为标题
-        //   - #标题（无空格）不会被渲染
-        //   -兼容零宽空格(\u200B)
-        const blockPatterns = [
-            { regex: /^[\u200B]*######\s(.+)$/, type: 'h6', contentIndex: 1 },    // ###### 六级标题
-            { regex: /^[\u200B]*#####\s(.+)$/, type: 'h5', contentIndex: 1 },     // ##### 五级标题
-            { regex: /^[\u200B]*####\s(.+)$/, type: 'h4', contentIndex: 1 },      // #### 四级标题
-            { regex: /^[\u200B]*###\s(.+)$/, type: 'h3', contentIndex: 1 },       // ### 三级标题
-            { regex: /^[\u200B]*##\s(.+)$/, type: 'h2', contentIndex: 1 },        // ## 二级标题
-            { regex: /^[\u200B]*#\s(.+)$/, type: 'h1', contentIndex: 1 },         // # 一级标题
-            { regex: /^[\u200B]*>\s*(.*)$/, type: 'blockquote', contentIndex: 1 },
-            { regex: /^[\u200B]*-\s+\[\s*\]\s*(.*)$/, type: 'task-unchecked', contentIndex: 1 },
-            { regex: /^[\u200B]*-\s+\[x\]\s*(.*)$/i, type: 'task-checked', contentIndex: 1 },
-            { regex: /^[\u200B]*-\s+(.+)$/, type: 'ul', contentIndex: 1 },
-            { regex: /^[\u200B]*(\d+)\.\s+(.+)$/, type: 'ol', contentIndex: 2 },
-        ];
-
-        // 检查块级模式
-        for (const pattern of blockPatterns) {
-            const match = text.match(pattern.regex);
-            // 放宽条件：只要匹配成功就尝试渲染（不要求光标必须在末尾）
-            if (match) {
-                let newEl;
-                const parent = textNode.parentNode;
-
-                // 辅助函数：将内联 Markdown 语法转换为 HTML
-                const parseInlineMarkdown = (text) => {
-                    if (!text) return text;
-                    // 先转义用户输入中的原始 HTML，避免把字面量 `<em>` 当真实标签吃掉
-                    const safe = String(text)
-                        .replace(/&/g, '&amp;')
-                        .replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;')
-                        .replace(/"/g, '&quot;')
-                        .replace(/'/g, '&#39;');
-                    // 按顺序处理：粗体、斜体、删除线、高亮、代码
-                    return safe
-                        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                        .replace(/_(.+?)_/g, '<em>$1</em>')
-                        .replace(/~~(.+?)~~/g, '<del>$1</del>')
-                        .replace(/==(.+?)==/g, '<mark>$1</mark>')
-                        .replace(/`([^`]+)`/g, '<code>$1</code>');
-                };
-
-                // 辅助函数：安全地设置元素内容
-                const setContent = (element, content) => {
-                    // 先解析 Markdown 再用 innerHTML
-                    const parsed = parseInlineMarkdown(content);
-                    if (/<[^>]+>/.test(parsed)) {
-                        element.innerHTML = parsed;
-                    } else {
-                        element.textContent = content;
-                    }
-                };
-
-                // ATX 标题处理
-                if (pattern.type === 'h1') {
-                    newEl = document.createElement('h1');
-                    setContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h2') {
-                    newEl = document.createElement('h2');
-                    setContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h3') {
-                    newEl = document.createElement('h3');
-                    setContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h4') {
-                    newEl = document.createElement('h4');
-                    setContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h5') {
-                    newEl = document.createElement('h5');
-                    setContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h6') {
-                    newEl = document.createElement('h6');
-                    setContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'blockquote') {
-                    newEl = document.createElement('blockquote');
-                    setContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'task-unchecked' || pattern.type === 'task-checked') {
-                    newEl = document.createElement('div');
-                    newEl.className = 'md-task-item';
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.name = 'markdown-task-checkbox';
-                    checkbox.className = 'md-task-checkbox';
-                    checkbox.checked = pattern.type === 'task-checked';
-                    newEl.appendChild(checkbox);
-                    // 任务内容可能包含 HTML
-                    const contentSpan = document.createElement('span');
-                    setContent(contentSpan, ' ' + (match[pattern.contentIndex] || ''));
-                    newEl.appendChild(contentSpan);
-                } else if (pattern.type === 'ul') {
-                    newEl = document.createElement('ul');
-                    const li = document.createElement('li');
-                    setContent(li, match[pattern.contentIndex] || '');
-                    newEl.appendChild(li);
-                } else if (pattern.type === 'ol') {
-                    newEl = document.createElement('ol');
-                    const li = document.createElement('li');
-                    setContent(li, match[pattern.contentIndex] || '');
-                    newEl.appendChild(li);
-                }
-
-                if (newEl) {
-                    const afterNode = document.createTextNode('\u200B');
-                    parent.insertBefore(newEl, textNode);
-                    parent.insertBefore(afterNode, textNode);
-                    parent.removeChild(textNode);
-
-                    const newRange = document.createRange();
-                    newRange.setStart(afterNode, 1);
-                    newRange.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(newRange);
-
-                    expandedElement = null;
-                    expandedMarkdown = null;
-                    expandedType = null;
-
-                    saveEditorContent();
-                    return;
-                }
-            }
-        }
-
-        // 先检查 HTML 模式
-        for (const pattern of htmlPatterns) {
-            const match = text.match(pattern.regex);
-            if (match && match.index !== undefined) {
-                const matchStart = match.index;
-                const matchEnd = matchStart + match[0].length;
-
-                if (cursorPos >= matchEnd) {
-                    const before = text.substring(0, matchStart);
-                    const content = match[pattern.contentIndex];
-                    const after = text.substring(matchEnd);
-                    const cursorInAfter = Math.max(0, Math.min(cursorPos - matchEnd, after.length));
-
-                    const newEl = document.createElement(pattern.tag);
-                    if (pattern.attrName && pattern.attrIndex) {
-                        newEl.setAttribute(pattern.attrName, match[pattern.attrIndex]);
-                    }
-                    // 如果内容包含 HTML 标签则用 innerHTML
-                    if (/<[^>]+>/.test(content)) {
-                        newEl.innerHTML = content;
-                    } else {
-                        newEl.textContent = content;
-                    }
-
-                    const parent = textNode.parentNode;
-                    const beforeNode = document.createTextNode(before);
-                    const afterNode = document.createTextNode(after || '\u200B');
-
-                    parent.insertBefore(beforeNode, textNode);
-                    parent.insertBefore(newEl, textNode);
-                    parent.insertBefore(afterNode, textNode);
-                    parent.removeChild(textNode);
-
-                    const newRange = document.createRange();
-                    newRange.setStart(afterNode, after ? cursorInAfter : 1);
-                    newRange.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(newRange);
-
-                    expandedElement = null;
-                    expandedMarkdown = null;
-                    expandedType = null;
-
-                    saveEditorContent();
-                    return;
-                }
-            }
-        }
-
-        // 检查 Markdown 模式
-        for (const pattern of patterns) {
-            const match = text.match(pattern.regex);
-            if (match && match.index !== undefined) {
-                const matchStart = match.index;
-                let matchEnd = matchStart + match[0].length;
-
-                if (pattern.type === 'bare-url' || pattern.type === 'www-url' || pattern.type === 'link') {
-                    if (textNode.parentNode && textNode.parentNode.closest && textNode.parentNode.closest('a')) {
-                        continue;
-                    }
-                }
-                if (pattern.type === 'bare-url' || pattern.type === 'www-url') {
-                    const beforeText = text.substring(0, matchStart);
-                    const boundaryChar = match[pattern.boundaryGroupIndex] || '';
-                    if (boundaryChar.includes('(') && /\]\s*$/.test(beforeText)) continue;
-                    const countChar = (s, ch) => {
-                        let c = 0;
-                        for (let i = 0; i < s.length; i++) if (s[i] === ch) c++;
-                        return c;
-                    };
-                    if (countChar(beforeText, '<') > countChar(beforeText, '>')) continue;
-                    if (countChar(beforeText, '[') > countChar(beforeText, ']')) continue;
-                }
-
-                // 只在光标位于匹配文本之后时才渲染（即用户刚完成输入）
-                if (cursorPos >= matchEnd) {
-                    const countChar = (s, ch) => {
-                        let c = 0;
-                        for (let i = 0; i < s.length; i++) if (s[i] === ch) c++;
-                        return c;
-                    };
-                    const splitAutoUrlSuffix = (candidateUrl) => {
-                        let url = String(candidateUrl || '');
-                        let suffix = '';
-                        if (!url) return { url: '', suffix: '' };
-
-                        const takeLast = () => {
-                            suffix = url.slice(-1) + suffix;
-                            url = url.slice(0, -1);
-                        };
-
-                        const stripUnbalanced = (openCh, closeCh) => {
-                            while (url && url.endsWith(closeCh) && countChar(url, closeCh) > countChar(url, openCh)) {
-                                takeLast();
-                            }
-                        };
-
-                        let changed = true;
-                        while (changed && url) {
-                            changed = false;
-                            while (url) {
-                                const last = url[url.length - 1];
-                                if (/[.,;:!?]/.test(last) || /["'“”‘’`>]/.test(last)) {
-                                    takeLast();
-                                    changed = true;
-                                    continue;
-                                }
-                                break;
-                            }
-                            const beforeLen = url.length;
-                            stripUnbalanced('(', ')');
-                            stripUnbalanced('[', ']');
-                            stripUnbalanced('{', '}');
-                            if (url.length !== beforeLen) changed = true;
-                        }
-
-                        return { url, suffix };
-                    };
-                    const sanitizeAutoHref = (href) => {
-                        const raw = String(href || '').trim();
-                        if (!raw) return null;
-                        try {
-                            if (typeof ObsidianMarkdown !== 'undefined' && typeof ObsidianMarkdown.sanitizeHref === 'function') {
-                                return ObsidianMarkdown.sanitizeHref(raw);
-                            }
-                        } catch (_) { }
-                        const normalized = /^www\./i.test(raw) ? `http://${raw}` : (raw.startsWith('//') ? `https:${raw}` : raw);
-                        if (normalized.startsWith('#')) return normalized;
-                        try {
-                            const u = new URL(normalized, 'https://dummy.local');
-                            const ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:';
-                            return ok ? normalized : null;
-                        } catch (_) {
-                            return null;
-                        }
-                    };
-
-                    let before = '';
-                    let after = '';
-                    let afterText = '';
-                    let cursorInAfter = 0;
-                    let content = match[1];
-                    let hrefRaw = '';
-                    let autoUrlDisplay = '';
-                    let autoUrlHref = '';
-                    let autoUrlSuffix = '';
-
-                    if (pattern.type === 'bare-url' || pattern.type === 'www-url') {
-                        const boundary = match[pattern.boundaryGroupIndex] || '';
-                        const rawUrl = match[pattern.urlGroupIndex] || '';
-                        const replaceStart = matchStart + boundary.length;
-                        matchEnd = replaceStart + rawUrl.length;
-                        if (cursorPos < matchEnd) continue;
-                        // While typing: if the URL reaches the end of this text node (or only ZWSP remains),
-                        // defer auto-linking until the user types a delimiter (space/punctuation).
-                        const remaining = text.substring(matchEnd).replace(/\u200B/g, '');
-                        if (!remaining) continue;
-
-                        const split = splitAutoUrlSuffix(rawUrl);
-                        autoUrlDisplay = split.url;
-                        autoUrlSuffix = split.suffix;
-                        if (!autoUrlDisplay) continue;
-                        autoUrlHref = sanitizeAutoHref(autoUrlDisplay);
-                        if (!autoUrlHref) continue;
-
-                        before = text.substring(0, replaceStart);
-                        after = autoUrlSuffix + text.substring(matchEnd);
-                        afterText = after || '\u200B';
-                        cursorInAfter = after
-                            ? Math.max(0, Math.min(autoUrlSuffix.length + (cursorPos - matchEnd), after.length))
-                            : 1;
-                    } else {
-                        before = text.substring(0, matchStart);
-                        after = text.substring(matchEnd);
-                        afterText = after || '\u200B';
-                        cursorInAfter = after
-                            ? Math.max(0, Math.min(cursorPos - matchEnd, after.length))
-                            : 1;
-                    }
-
-                    // 创建新元素
-                    let newEl = null;
-                    if (pattern.type === 'link') {
-                        hrefRaw = String(match[pattern.hrefIndex] || '').trim();
-                        const safeHref = sanitizeAutoHref(hrefRaw);
-                        if (!safeHref) continue;
-                        newEl = document.createElement('a');
-                        newEl.setAttribute('href', safeHref);
-                        newEl.setAttribute('target', '_blank');
-                        newEl.setAttribute('rel', 'noopener noreferrer');
-                        newEl.textContent = String(match[pattern.contentIndex] || '').trim() || safeHref;
-                    } else if (pattern.type === 'bare-url' || pattern.type === 'www-url') {
-                        newEl = document.createElement('a');
-                        newEl.setAttribute('href', autoUrlHref);
-                        newEl.setAttribute('target', '_blank');
-                        newEl.setAttribute('rel', 'noopener noreferrer');
-                        newEl.textContent = autoUrlDisplay;
-                    } else {
-                        newEl = document.createElement(pattern.tag);
-                        if (pattern.className) newEl.className = pattern.className;
-                        // 如果内容包含 HTML 标签则用 innerHTML
-                        if (/<[^>]+>/.test(content)) {
-                            newEl.innerHTML = content;
-                        } else {
-                            newEl.textContent = content;
-                        }
-                    }
-
-                    // 替换文本节点
-                    const parent = textNode.parentNode;
-                    const beforeNode = document.createTextNode(before);
-                    const afterNode = document.createTextNode(afterText || '\u200B');
-
-                    parent.insertBefore(beforeNode, textNode);
-                    parent.insertBefore(newEl, textNode);
-                    parent.insertBefore(afterNode, textNode);
-                    parent.removeChild(textNode);
-
-                    // 将光标移到新元素之后
-                    const newRange = document.createRange();
-                    newRange.setStart(afterNode, after ? cursorInAfter : 1);
-                    newRange.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(newRange);
-
-                    // 清除展开状态
-                    expandedElement = null;
-                    expandedMarkdown = null;
-                    expandedType = null;
-
-                    // 保存内容
-                    saveEditorContent();
-                    return;
-                }
-            }
-        }
-    };
-
-    // 重新渲染展开的 Markdown（当光标离开时）
-    const reRenderExpanded = () => {
-        if (!expandedElement || !expandedElement.parentNode) {
-            expandedElement = null;
-            expandedMarkdown = null;
-            expandedType = null;
-            return;
-        }
-
-        const normalizeExternalHref = (href) => {
-            const h = String(href || '').trim();
-            if (!h) return '';
-            if (h.startsWith('#')) return h;
-            if (/^www\./i.test(h)) return `http://${h}`;
-            if (h.startsWith('//')) return `https:${h}`;
-            return h;
-        };
-
-        const sanitizeLinkHref = (href) => {
-            const normalized = normalizeExternalHref(href);
-            if (!normalized) return null;
-            try {
-                if (typeof ObsidianMarkdown !== 'undefined' && typeof ObsidianMarkdown.sanitizeHref === 'function') {
-                    return ObsidianMarkdown.sanitizeHref(normalized);
-                }
-            } catch (_) { }
-            if (normalized.startsWith('#')) return normalized;
-            try {
-                const u = new URL(normalized, 'https://dummy.local');
-                const ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:' || u.protocol === 'obsidian:';
-                return ok ? normalized : null;
-            } catch (_) {
-                return null;
-            }
-        };
-
-        // 辅助函数：将内联 Markdown 语法转换为 HTML
-        const parseInlineMarkdown = (text) => {
-            if (!text) return text;
-            const safe = String(text)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-            return safe
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                .replace(/_(.+?)_/g, '<em>$1</em>')
-                .replace(/~~(.+?)~~/g, '<del>$1</del>')
-                .replace(/==(.+?)==/g, '<mark>$1</mark>')
-                .replace(/`([^`]+)`/g, '<code>$1</code>');
-        };
-
-        const textNode = expandedElement;
-        const text = textNode.textContent;
-        const savedType = expandedType;
-        const normalizedText = String(text || '').replace(/\u200B/g, '').trim();
-
-        // 清除展开状态（必须在渲染前清除）
-        expandedElement = null;
-        expandedMarkdown = null;
-        expandedType = null;
-
-        if (savedType === 'html-tool' || __isCanvasHtmlToolSource(normalizedText)) {
-            if (__replaceTextNodeWithCanvasHtmlToolSource(textNode, normalizedText)) {
-                saveEditorContent();
-                return;
-            }
-        }
-
-        // Link: [text](URL) 还原回 <a>
-        if (savedType === 'link') {
-            const m = normalizedText.match(/^\[([^\]]+?)\]\(([^)]+?)\)$/);
-            if (m) {
-                const label = m[1];
-                const hrefRaw = m[2];
-                const safeHref = sanitizeLinkHref(hrefRaw);
-                if (safeHref) {
-                    const a = document.createElement('a');
-                    a.setAttribute('href', safeHref);
-                    a.setAttribute('target', '_blank');
-                    a.setAttribute('rel', 'noopener noreferrer');
-                    const parsed = parseInlineMarkdown(label);
-                    if (/<[^>]+>/.test(parsed)) a.innerHTML = parsed;
-                    else a.textContent = label;
-                    textNode.parentNode.replaceChild(a, textNode);
-                    saveEditorContent();
-                    return;
-                }
-            }
-        }
-
-        // 列表项：LI 级别的源码 → 还原回 <li>
-        if (savedType === 'li-ul' || savedType === 'li-ol') {
-            const parent = textNode.parentNode;
-            const parentTag = parent && parent.nodeType === Node.ELEMENT_NODE ? parent.tagName : null;
-            const expectedParent = savedType === 'li-ul' ? 'UL' : 'OL';
-            if (parent && parentTag === expectedParent) {
-                const raw = (text || '').replace(/\u200B/g, '').trim();
-                let itemText = raw;
-                if (savedType === 'li-ul') {
-                    const m = raw.match(/^[-*+]\s+(.*)$/);
-                    itemText = m ? m[1] : raw;
-                } else {
-                    const m = raw.match(/^\d+\.\s+(.*)$/);
-                    itemText = m ? m[1] : raw;
-                }
-                const li = document.createElement('li');
-                // 先解析 Markdown 再检查 HTML 标签
-                const parsed = parseInlineMarkdown(itemText);
-                if (/<[^>]+>/.test(parsed)) {
-                    li.innerHTML = parsed;
-                } else {
-                    li.textContent = itemText;
-                }
-                parent.replaceChild(li, textNode);
-                saveEditorContent();
-                return;
-            }
-        }
-
-        const htmlPatterns = [];
-
-        // Setext 标题语法检测（处理两行结构：内容 + <br> + ---/===）
-        // 标准规则: === → H1, --- → H2
-        const setextH1Match = text.match(/^[\u200B]*(={3,})\s*$/);  // === → H1
-        const setextH2Match = text.match(/^[\u200B]*(-{3,})\s*$/);  // --- → H2
-        const isSetextH1 = !!setextH1Match;
-        const isSetextH2 = !!setextH2Match;
-
-        if (isSetextH1 || isSetextH2) {
-            const parent = textNode.parentNode;
-            if (parent) {
-                // 向前查找：<br> 和上一行文本
-                let prevNode = textNode.previousSibling;
-                let brNode = null;
-                let contentNode = null;
-
-                // 跳过空文本节点
-                while (prevNode && prevNode.nodeType === Node.TEXT_NODE &&
-                    prevNode.textContent.trim() === '') {
-                    prevNode = prevNode.previousSibling;
-                }
-
-                // 找到 <br>
-                if (prevNode && prevNode.nodeType === Node.ELEMENT_NODE && prevNode.tagName === 'BR') {
-                    brNode = prevNode;
-                    prevNode = prevNode.previousSibling;
-
-                    // 跳过空文本节点
-                    while (prevNode && prevNode.nodeType === Node.TEXT_NODE &&
-                        prevNode.textContent.trim() === '') {
-                        prevNode = prevNode.previousSibling;
-                    }
-
-                    // 找到内容文本节点
-                    if (prevNode && prevNode.nodeType === Node.TEXT_NODE) {
-                        contentNode = prevNode;
-                    }
-                }
-
-                if (contentNode && contentNode.textContent.trim()) {
-                    // 有上一行内容，创建标题
-                    const headingLevel = isSetextH1 ? 'h1' : 'h2';
-                    const separator = isSetextH1 ? setextH1Match[1] : setextH2Match[1];
-                    const newEl = document.createElement(headingLevel);
-                    // Setext 标题显示为：标题文字 + 换行 + 分隔符（两行，分隔符保持原始大小）
-                    // 分隔符部分设为不可编辑，让用户只能修改标题文字
-                    const headerTextEscaped = contentNode.textContent.trim().replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                    newEl.innerHTML = `${headerTextEscaped}<br contenteditable="false"><span class="setext-separator" contenteditable="false" style="font-size: 14px; font-weight: normal; color: #999; user-select: none;">${separator}</span>`;
-                    newEl.dataset.setextType = separator;
-
-                    // 用标题节点替换原始“内容文本节点”，并移除 <br> 与下划线节点
-                    const contentParent = contentNode.parentNode;
-                    if (!contentParent) return;
-                    contentParent.replaceChild(newEl, contentNode);
-                    if (brNode && brNode.parentNode) brNode.parentNode.removeChild(brNode);
-                    if (textNode.parentNode) textNode.parentNode.removeChild(textNode);
-
-                    // 清理标题后由旧逻辑插入/遗留的占位符与换行，避免产生额外空行
-                    let removedZwsp = false;
-                    while (newEl.nextSibling &&
-                        newEl.nextSibling.nodeType === Node.TEXT_NODE &&
-                        newEl.nextSibling.textContent &&
-                        newEl.nextSibling.textContent.replace(/\u200B/g, '') === '' &&
-                        newEl.nextSibling.nextSibling) {
-                        removedZwsp = true;
-                        newEl.nextSibling.parentNode.removeChild(newEl.nextSibling);
-                    }
-                    while (newEl.nextSibling &&
-                        newEl.nextSibling.nodeType === Node.ELEMENT_NODE &&
-                        newEl.nextSibling.tagName === 'BR' &&
-                        (newEl.nextSibling.getAttribute('data-md-auto-br') === 'heading' || removedZwsp)) {
-                        newEl.nextSibling.parentNode.removeChild(newEl.nextSibling);
-                    }
-
-                    // 若标题位于末尾，保留一个占位符以便光标落点
-                    if (!newEl.nextSibling) {
-                        contentParent.appendChild(document.createTextNode('\u200B'));
-                    }
-                    saveEditorContent();
-                    return;
-                } else if (isSetextH2) {
-                    // 没有上一行内容，--- 变成水平分割线
-                    const hrEl = document.createElement('hr');
-
-                    // 移除可能存在的 <br>
-                    if (brNode && brNode.parentNode) brNode.parentNode.removeChild(brNode);
-
-                    // 直接替换，避免在分隔线后额外插入“空行”
-                    parent.replaceChild(hrEl, textNode);
-
-                    // 如果分隔线后面紧跟的是我们插入的 \u200B 占位符，并且后面还有真实内容，则清理它，避免产生额外空行
-                    while (hrEl.nextSibling &&
-                        hrEl.nextSibling.nodeType === Node.TEXT_NODE &&
-                        hrEl.nextSibling.textContent &&
-                        hrEl.nextSibling.textContent.replace(/\u200B/g, '') === '' &&
-                        hrEl.nextSibling.nextSibling) {
-                        hrEl.nextSibling.parentNode.removeChild(hrEl.nextSibling);
-                    }
-
-                    // 若分隔线位于末尾，保留一个占位符以便光标落点
-                    if (!hrEl.nextSibling) {
-                        parent.appendChild(document.createTextNode('\u200B'));
-                    }
-                    saveEditorContent();
-                    return;
-                }
-            }
-        }
-
-        // 水平分割线 ---（单独一行，没有其他内容）
-        const hrPattern = /^[\u200B]*-{3,}\s*$/;
-        if (savedType === 'hr' && hrPattern.test(text)) {
-            const parent = textNode.parentNode;
-            if (parent) {
-                const hrEl = document.createElement('hr');
-
-                // 直接替换，避免在分隔线后额外插入“空行”
-                parent.replaceChild(hrEl, textNode);
-
-                // 如果分隔线后面紧跟的是我们插入的 \u200B 占位符，并且后面还有真实内容，则清理它，避免产生额外空行
-                while (hrEl.nextSibling &&
-                    hrEl.nextSibling.nodeType === Node.TEXT_NODE &&
-                    hrEl.nextSibling.textContent &&
-                    hrEl.nextSibling.textContent.replace(/\u200B/g, '') === '' &&
-                    hrEl.nextSibling.nextSibling) {
-                    hrEl.nextSibling.parentNode.removeChild(hrEl.nextSibling);
-                }
-
-                // 若分隔线位于末尾，保留一个占位符以便光标落点
-                if (!hrEl.nextSibling) {
-                    parent.appendChild(document.createTextNode('\u200B'));
-                }
-                saveEditorContent();
-                return;
-            }
-        }
-
-        // 块级 Markdown 模式
-        // ATX 标题规则：# 在行首，后面必须有空格，支持 H1-H6
-        const blockPatterns = [
-            { regex: /^######\s(.+)$/, type: 'h6', contentIndex: 1 },    // ###### 六级标题
-            { regex: /^#####\s(.+)$/, type: 'h5', contentIndex: 1 },     // ##### 五级标题
-            { regex: /^####\s(.+)$/, type: 'h4', contentIndex: 1 },      // #### 四级标题
-            { regex: /^###\s(.+)$/, type: 'h3', contentIndex: 1 },       // ### 三级标题
-            { regex: /^##\s(.+)$/, type: 'h2', contentIndex: 1 },        // ## 二级标题
-            { regex: /^#\s(.+)$/, type: 'h1', contentIndex: 1 },         // # 一级标题
-            { regex: /^>\s*(.*)$/, type: 'blockquote', contentIndex: 1 },
-            { regex: /^-\s+\[\s*\]\s*(.*)$/, type: 'task-unchecked', contentIndex: 1 },
-            { regex: /^-\s+\[x\]\s*(.*)$/i, type: 'task-checked', contentIndex: 1 },
-            { regex: /^-\s+(.+)$/, type: 'ul', contentIndex: 1 },
-            { regex: /^(\d+)\.\s+(.+)$/, type: 'ol', contentIndex: 2 },
-        ];
-
-        // 检查块级模式
-        for (const pattern of blockPatterns) {
-            const match = text.match(pattern.regex);
-            if (match) {
-                let newEl;
-                const parent = textNode.parentNode;
-                if (!parent) return;
-
-                // 辅助函数：将内联 Markdown 语法转换为 HTML
-                const parseInlineMarkdown = (text) => {
-                    if (!text) return text;
-                    const safe = String(text)
-                        .replace(/&/g, '&amp;')
-                        .replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;')
-                        .replace(/"/g, '&quot;')
-                        .replace(/'/g, '&#39;');
-                    return safe
-                        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                        .replace(/_(.+?)_/g, '<em>$1</em>')
-                        .replace(/~~(.+?)~~/g, '<del>$1</del>')
-                        .replace(/==(.+?)==/g, '<mark>$1</mark>')
-                        .replace(/`([^`]+)`/g, '<code>$1</code>');
-                };
-
-                // 辅助函数：安全地设置元素内容（解析 Markdown 后用 innerHTML）
-                const setElementContent = (element, content) => {
-                    if (__looksLikeHtmlTagContent(content)) {
-                        const rendered = __renderCanvasMixedInlineMarkdownHtml(content);
-                        if (rendered) {
-                            element.innerHTML = rendered;
-                            return;
-                        }
-                    }
-                    const parsed = parseInlineMarkdown(content);
-                    if (/<[^>]+>/.test(parsed)) {
-                        element.innerHTML = parsed;
-                    } else {
-                        element.textContent = content;
-                    }
-                };
-
-                // ATX 标题处理
-                if (pattern.type === 'h1') {
-                    newEl = document.createElement('h1');
-                    setElementContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h2') {
-                    newEl = document.createElement('h2');
-                    setElementContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h3') {
-                    newEl = document.createElement('h3');
-                    setElementContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h4') {
-                    newEl = document.createElement('h4');
-                    setElementContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h5') {
-                    newEl = document.createElement('h5');
-                    setElementContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'h6') {
-                    newEl = document.createElement('h6');
-                    setElementContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'blockquote') {
-                    newEl = document.createElement('blockquote');
-                    setElementContent(newEl, match[pattern.contentIndex] || '');
-                } else if (pattern.type === 'task-unchecked' || pattern.type === 'task-checked') {
-                    newEl = document.createElement('div');
-                    newEl.className = 'md-task-item';
-                    const cb = document.createElement('input');
-                    cb.type = 'checkbox';
-                    cb.name = 'markdown-task-checkbox';
-                    cb.className = 'md-task-checkbox';
-                    cb.checked = pattern.type === 'task-checked';
-                    newEl.appendChild(cb);
-                    // 任务项内容可能包含 HTML
-                    const contentSpan = document.createElement('span');
-                    setElementContent(contentSpan, ' ' + (match[pattern.contentIndex] || ''));
-                    newEl.appendChild(contentSpan);
-                } else if (pattern.type === 'ul') {
-                    newEl = document.createElement('ul');
-                    const li = document.createElement('li');
-                    setElementContent(li, match[pattern.contentIndex] || '');
-                    newEl.appendChild(li);
-                } else if (pattern.type === 'ol') {
-                    newEl = document.createElement('ol');
-                    const li = document.createElement('li');
-                    setElementContent(li, match[pattern.contentIndex] || '');
-                    newEl.appendChild(li);
-                }
-                if (newEl) {
-                    const isHeading = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(pattern.type);
-                    if (isHeading) {
-                        parent.replaceChild(newEl, textNode);
-
-                        // 清理标题后由旧逻辑插入/遗留的占位符与换行，避免产生额外空行
-                        let removedZwsp = false;
-                        while (newEl.nextSibling &&
-                            newEl.nextSibling.nodeType === Node.TEXT_NODE &&
-                            newEl.nextSibling.textContent &&
-                            newEl.nextSibling.textContent.replace(/\u200B/g, '') === '' &&
-                            newEl.nextSibling.nextSibling) {
-                            removedZwsp = true;
-                            newEl.nextSibling.parentNode.removeChild(newEl.nextSibling);
-                        }
-                        while (newEl.nextSibling &&
-                            newEl.nextSibling.nodeType === Node.ELEMENT_NODE &&
-                            newEl.nextSibling.tagName === 'BR' &&
-                            (newEl.nextSibling.getAttribute('data-md-auto-br') === 'heading' || removedZwsp)) {
-                            newEl.nextSibling.parentNode.removeChild(newEl.nextSibling);
-                        }
-
-                        // 若标题位于末尾，保留一个占位符以便光标落点
-                        if (!newEl.nextSibling) {
-                            parent.appendChild(document.createTextNode('\u200B'));
-                        }
-                    } else {
-                        const afterNode = document.createTextNode('\u200B');
-                        parent.insertBefore(newEl, textNode);
-                        parent.insertBefore(afterNode, textNode);
-                        parent.removeChild(textNode);
-                    }
-                    saveEditorContent();
-                    return;
-                }
-            }
-        }
-
-        // 先检查 HTML 模式
-        for (const pattern of htmlPatterns) {
-            const match = text.match(pattern.regex);
-            if (match && match.index !== undefined) {
-                const matchStart = match.index;
-                const matchEnd = matchStart + match[0].length;
-                const before = text.substring(0, matchStart);
-                const content = match[pattern.contentIndex];
-                const after = text.substring(matchEnd);
-
-                const newEl = document.createElement(pattern.tag);
-                if (pattern.attrName && pattern.attrIndex) {
-                    newEl.setAttribute(pattern.attrName, match[pattern.attrIndex]);
-                }
-                newEl.textContent = content;
-
-                const parent = textNode.parentNode;
-                if (!parent) return;
-
-                const beforeNode = document.createTextNode(before);
-                const afterNode = document.createTextNode(after || '\u200B');
-
-                parent.insertBefore(beforeNode, textNode);
-                parent.insertBefore(newEl, textNode);
-                parent.insertBefore(afterNode, textNode);
-                parent.removeChild(textNode);
-
-                saveEditorContent();
-                return;
-            }
-        }
-
-        // Markdown 模式列表
-        const patterns = [
-            { regex: /\*\*(.+?)\*\*/, tag: 'strong' },
-            { regex: /\*(.+?)\*/, tag: 'em' },
-            { regex: /~~(.+?)~~/, tag: 'del' },
-            { regex: /==(.+?)==/, tag: 'mark' },
-            { regex: /`([^`]+)`/, tag: 'code' },
-            { regex: /\[\[(.+?)\]\]/, tag: 'span', className: 'md-wikilink' },
-        ];
-
-        for (const pattern of patterns) {
-            const match = text.match(pattern.regex);
-            if (match && match.index !== undefined) {
-                const matchStart = match.index;
-                const matchEnd = matchStart + match[0].length;
-                const before = text.substring(0, matchStart);
-                const content = match[1];
-                const after = text.substring(matchEnd);
-
-                // 创建新元素
-                const newEl = document.createElement(pattern.tag);
-                if (pattern.className) newEl.className = pattern.className;
-                // 如果内容包含 HTML 标签则用 innerHTML
-                if (/<[^>]+>/.test(content)) {
-                    newEl.innerHTML = content;
-                } else {
-                    newEl.textContent = content;
-                }
-
-                // 替换文本节点
-                const parent = textNode.parentNode;
-                if (!parent) return;
-
-                const beforeNode = document.createTextNode(before);
-                // 如果后面没有内容，添加零宽空格
-                const afterNode = document.createTextNode(after || '\u200B');
-
-                parent.insertBefore(beforeNode, textNode);
-                parent.insertBefore(newEl, textNode);
-                parent.insertBefore(afterNode, textNode);
-                parent.removeChild(textNode);
-
-                // 保存内容
-                saveEditorContent();
-                return;
-            }
-        }
-    };
-
-    // 空白栏目：自定义撤销/重做（修复 DOM 直接改写导致的 Ctrl+Z 不可用/顺序混乱）
-    let undoManager = null;
-
-    // 保存编辑器内容
-    const saveEditorContent = () => {
-        const changed = __syncMdNodeFromEditor(node, editor);
-        if (changed) {
-            saveCanvasManifestOnly();
-        }
-        try { if (undoManager) undoManager.scheduleRecord('save'); } catch (_) { }
-    };
-
-    // 初始化 undo/redo 管理器（每个 md-node 独立）
-    (() => {
-        try {
-            if (!CanvasState.mdUndoStates) {
-                CanvasState.mdUndoStates = new Map();
-            }
-            const getNodePath = (root, target) => {
-                if (!root || !target) return null;
-                const path = [];
-                let nodeCur = target;
-                while (nodeCur && nodeCur !== root) {
-                    const parent = nodeCur.parentNode;
-                    if (!parent) return null;
-                    const idx = Array.prototype.indexOf.call(parent.childNodes, nodeCur);
-                    if (idx < 0) return null;
-                    path.unshift(idx);
-                    nodeCur = parent;
-                }
-                return nodeCur === root ? path : null;
-            };
-
-            const resolveNodePath = (root, path) => {
-                if (!root || !Array.isArray(path)) return null;
-                let cur = root;
-                for (const idx of path) {
-                    if (!cur || !cur.childNodes || idx < 0 || idx >= cur.childNodes.length) return null;
-                    cur = cur.childNodes[idx];
-                }
-                return cur;
-            };
-
-            const clampOffset = (nodeForOffset, offset) => {
-                const safe = Math.max(0, Number.isFinite(offset) ? offset : 0);
-                if (!nodeForOffset) return 0;
-                if (nodeForOffset.nodeType === Node.TEXT_NODE) {
-                    const len = (nodeForOffset.textContent || '').length;
-                    return Math.min(safe, len);
-                }
-                if (nodeForOffset.nodeType === Node.ELEMENT_NODE) {
-                    return Math.min(safe, nodeForOffset.childNodes.length);
-                }
-                return 0;
-            };
-
-            const captureSelection = () => {
-                const sel = window.getSelection();
-                if (!sel || !sel.rangeCount) return null;
-                const range = sel.getRangeAt(0);
-                if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
-                const startPath = getNodePath(editor, range.startContainer);
-                const endPath = getNodePath(editor, range.endContainer);
-                if (!startPath || !endPath) return null;
-                return {
-                    startPath,
-                    startOffset: range.startOffset,
-                    endPath,
-                    endOffset: range.endOffset,
-                    collapsed: range.collapsed
-                };
-            };
-
-            const restoreSelection = (selData) => {
-                try {
-                    if (!selData) return;
-                    const startNode = resolveNodePath(editor, selData.startPath) || editor;
-                    const endNode = resolveNodePath(editor, selData.endPath) || startNode;
-                    const range = document.createRange();
-                    range.setStart(startNode, clampOffset(startNode, selData.startOffset));
-                    range.setEnd(endNode, clampOffset(endNode, selData.endOffset));
-                    const sel = window.getSelection();
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                } catch (_) { }
-            };
-
-            const snapshot = () => ({
-                html: editor.innerHTML,
-                fontSize: typeof node.fontSize === 'number' ? node.fontSize : MD_NODE_DEFAULT_FONT_SIZE,
-                selection: captureSelection(),
-                scrollTop: editor.scrollTop || 0,
-                scrollLeft: editor.scrollLeft || 0
-            });
-
-            const isSameSnapshot = (a, b) => {
-                if (!a || !b) return false;
-                return a.html === b.html && a.fontSize === b.fontSize;
-            };
-
-            const persisted = CanvasState.mdUndoStates.get(node.id) || null;
-            const state = {
-                stack: Array.isArray(persisted && persisted.stack) ? persisted.stack : [],
-                index: Number.isFinite(persisted && persisted.index) ? persisted.index : -1
-            };
-
-            let recordRaf = 0;
-            const MAX_STACK = 300;
-
-            const syncExpandedStateFromSelection = (wasExpanded = false) => {
-                try {
-                    // 只有在“撤销前已经处于展开源码态”时才进行同步，避免把普通 Markdown token 误判为展开态
-                    if (!wasExpanded) return;
-
-                    const sel = window.getSelection();
-                    if (!sel || !sel.rangeCount) return;
-                    const range = sel.getRangeAt(0);
-                    if (!range || !editor.contains(range.startContainer)) return;
-
-                    const container = range.startContainer;
-                    if (!container || container.nodeType !== Node.TEXT_NODE) return;
-                    if (!container.parentNode) return;
-
-                    const raw = String(container.textContent || '');
-                    const text = raw.replace(/\u200B/g, '').trim();
-                    if (!text) return;
-
-                    // 仅在“整段文本看起来就是一段源码 token”时才视为展开态，避免误判普通段落
-                    const looksLikeExpandedToken = (() => {
-                        if (/^\*\*[\s\S]+?\*\*$/.test(text)) return true; // **bold**
-                        if (/^\*[\s\S]+?\*$/.test(text)) return true; // *italic*
-                        if (/^_[\s\S]+?_$/.test(text)) return true; // _italic_
-                        if (/^~~[\s\S]+?~~$/.test(text)) return true; // ~~del~~
-                        if (/^==[\s\S]+?==$/.test(text)) return true; // ==mark==
-                        if (/^`[^`]+`$/.test(text)) return true; // `code`
-                        if (/^\[\[[\s\S]+?\]\]$/.test(text)) return true; // [[wikilink]]
-                        // Setext 标题分隔符行（--- / ===）
-                        if (/^(-{3,}|={3,})$/.test(text)) return true;
-                        // 列表项（展开后 <li> 会变成 UL/OL 内的 TextNode）
-                        const p = container.parentNode;
-                        if (p && p.nodeType === Node.ELEMENT_NODE && (p.tagName === 'UL' || p.tagName === 'OL')) {
-                            if (/^[-*+]\s+/.test(text) || /^\d+\.\s+/.test(text)) return true;
-                        }
-                        return false;
-                    })();
-
-                    if (!looksLikeExpandedToken) return;
-
-                    expandedElement = container;
-                    expandedMarkdown = raw;
-                    // 仅列表需要额外类型信息；其他交给 reRenderExpanded 内部识别
-                    const parentEl = container.parentNode;
-                    if (parentEl && parentEl.nodeType === Node.ELEMENT_NODE && parentEl.tagName === 'UL') {
-                        expandedType = 'li-ul';
-                    } else if (parentEl && parentEl.nodeType === Node.ELEMENT_NODE && parentEl.tagName === 'OL') {
-                        expandedType = 'li-ol';
-                    } else {
-                        expandedType = 'simple';
-                    }
-                } catch (_) { }
-            };
-
-            undoManager = {
-                isRestoring: false,
-                cancelPendingRecord: () => {
-                    if (recordRaf) {
-                        cancelAnimationFrame(recordRaf);
-                        recordRaf = 0;
-                    }
-                },
-                scheduleRecord: (reason = 'unknown') => {
-                    if (undoManager.isRestoring) return;
-                    if (recordRaf) cancelAnimationFrame(recordRaf);
-                    recordRaf = requestAnimationFrame(() => {
-                        recordRaf = 0;
-                        undoManager.recordNow(reason);
-                    });
-                },
-                recordNow: (reason = 'unknown') => {
-                    if (undoManager.isRestoring) return;
-                    const snap = snapshot();
-
-                    // 初始化或同步当前指针
-                    if (state.index < 0) {
-                        state.stack = [snap];
-                        state.index = 0;
-                        CanvasState.mdUndoStates.set(node.id, { stack: state.stack, index: state.index });
-                        return;
-                    }
-
-                    // 如果当前指针不是最后一个，截断“未来”
-                    if (state.index < state.stack.length - 1) {
-                        state.stack = state.stack.slice(0, state.index + 1);
-                    }
-
-                    // 去重：避免重复写入相同内容
-                    const cur = state.stack[state.index];
-                    if (isSameSnapshot(cur, snap)) {
-                        // 更新 selection/scroll（不影响撤销内容，但避免恢复位置错乱）
-                        state.stack[state.index] = snap;
-                        CanvasState.mdUndoStates.set(node.id, { stack: state.stack, index: state.index });
-                        return;
-                    }
-
-                    state.stack.push(snap);
-                    state.index = state.stack.length - 1;
-                    if (state.stack.length > MAX_STACK) {
-                        const overflow = state.stack.length - MAX_STACK;
-                        state.stack.splice(0, overflow);
-                        state.index = Math.max(0, state.index - overflow);
-                    }
-                    CanvasState.mdUndoStates.set(node.id, { stack: state.stack, index: state.index });
-                },
-                reset: (reason = 'reset') => {
-                    try { undoManager.cancelPendingRecord(); } catch (_) { }
-                    try {
-                        const snap = snapshot();
-                        state.stack = [snap];
-                        state.index = 0;
-                        CanvasState.mdUndoStates.set(node.id, { stack: state.stack, index: state.index });
-                    } catch (_) { }
-                },
-                undo: () => {
-                    if (state.index <= 0) return;
-                    undoManager.cancelPendingRecord();
-                    undoManager.isRestoring = true;
-                    try {
-                        const wasExpanded = !!expandedElement || !!expandedMarkdown || !!expandedType;
-                        state.index -= 1;
-                        const snap = state.stack[state.index];
-                        if (snap) {
-                            editor.innerHTML = snap.html;
-                            // innerHTML 会重建 DOM，旧的 expandedElement 会失效
-                            expandedElement = null;
-                            expandedMarkdown = null;
-                            expandedType = null;
-                            node.fontSize = snap.fontSize;
-                            editor.style.fontSize = node.fontSize + 'px';
-                            editor.scrollTop = snap.scrollTop || 0;
-                            editor.scrollLeft = snap.scrollLeft || 0;
-                            restoreSelection(snap.selection);
-                            // 撤销/反撤销会重建 DOM：同步“展开源码”状态，确保后续能正常重新渲染
-                            syncExpandedStateFromSelection(wasExpanded);
-                            // 注意：不要在此处触发异步 reRender（会立刻写入新快照并截断 redo 栈）
-                            try {
-                                if (expandedElement && expandedElement.parentNode) {
-                                    reRenderExpanded();
-                                }
-                            } catch (_) { }
-                            try { liveRenderMarkdown(); } catch (_) { }
-                            saveEditorContent();
-                        }
-                        CanvasState.mdUndoStates.set(node.id, { stack: state.stack, index: state.index });
-                    } finally {
-                        undoManager.isRestoring = false;
-                    }
-                },
-                redo: () => {
-                    if (state.index >= state.stack.length - 1) return;
-                    undoManager.cancelPendingRecord();
-                    undoManager.isRestoring = true;
-                    try {
-                        const wasExpanded = !!expandedElement || !!expandedMarkdown || !!expandedType;
-                        state.index += 1;
-                        const snap = state.stack[state.index];
-                        if (snap) {
-                            editor.innerHTML = snap.html;
-                            // innerHTML 会重建 DOM，旧的 expandedElement 会失效
-                            expandedElement = null;
-                            expandedMarkdown = null;
-                            expandedType = null;
-                            node.fontSize = snap.fontSize;
-                            editor.style.fontSize = node.fontSize + 'px';
-                            editor.scrollTop = snap.scrollTop || 0;
-                            editor.scrollLeft = snap.scrollLeft || 0;
-                            restoreSelection(snap.selection);
-                            // 撤销/反撤销会重建 DOM：同步“展开源码”状态，确保后续能正常重新渲染
-                            syncExpandedStateFromSelection(wasExpanded);
-                            // 注意：不要在此处触发异步 reRender（会立刻写入新快照并截断 redo 栈）
-                            try {
-                                if (expandedElement && expandedElement.parentNode) {
-                                    reRenderExpanded();
-                                }
-                            } catch (_) { }
-                            try { liveRenderMarkdown(); } catch (_) { }
-                            saveEditorContent();
-                        }
-                        CanvasState.mdUndoStates.set(node.id, { stack: state.stack, index: state.index });
-                    } finally {
-                        undoManager.isRestoring = false;
-                    }
-                }
-            };
-
-            // 初始快照
-            undoManager.recordNow('init');
-        } catch (e) {
-            // undo 不可用时，不影响正常编辑
-            undoManager = null;
-        }
-    })();
-
     // 进入编辑状态（点击时）
     const enterEdit = () => {
         if (node.isEditing) return;
@@ -17347,86 +15543,11 @@ function __renderMdNodeImpl(node, options = {}) {
         });
 
         // 保存内容
-        try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
         saveEditorContent();
-
-        // 退出编辑后按 canonical markdown 重新渲染，避免源码节点残留导致换行逐次折叠。
-        try {
-            const canonicalSource = __repairLegacyCanvasMarkdownSource(
-                isCanvasNativeText
-                    ? __resolveCanvasNativeTextNodeBody(node)
-                    : __deriveMdNodeMarkdownSource(node)
-            );
-            if (String(canonicalSource || '').trim()) {
-                editor.innerHTML = __renderMarkdownToCanvasRichHtml(canonicalSource, {
-                    forceLinePreserve: true
-                });
-                try { __applyHeadingCollapse(editor); } catch (_) { }
-            }
-            expandedElement = null;
-            expandedMarkdown = null;
-            expandedType = null;
-        } catch (_) { }
     };
 
-    // 实时渲染：监听输入事件（带防抖，避免输入时频繁渲染）
-    let renderDebounceTimer = null;
-    const RENDER_DEBOUNCE_DELAY = 250; // 降低到 250ms：减少手动输入到渲染的等待，但仍避免“还没打完就被渲染”
-    let suppressBlurExit = false;
-    let suppressBlurExitTimer = null;
-    const markToolbarInteraction = () => {
-        markExpandedSourceToolbarInteraction();
-        suppressBlurExit = true;
-        if (suppressBlurExitTimer) {
-            clearTimeout(suppressBlurExitTimer);
-        }
-        suppressBlurExitTimer = setTimeout(() => {
-            suppressBlurExit = false;
-        }, 200);
-    };
-
-    editor.addEventListener('input', (e) => {
-        if (undoManager && undoManager.isRestoring) return;
-
-        // 若用户已经把光标移出“展开的源码”，立即重渲染（避免只靠方向键触发）
-        scheduleReRenderIfCaretLeftExpanded();
-
-        // 输入法合成阶段不要触发即时渲染，避免候选中途被替换（compositionend 会兜底）
-        if (e && e.isComposing) {
-            return;
-        }
-
-        // 清除之前的定时器
-        if (renderDebounceTimer) {
-            clearTimeout(renderDebounceTimer);
-        }
-
-        // 对“闭合分隔符/标签结束/粘贴”等场景，立即渲染，避免必须停顿 400ms 才生效
-        // 典型例子：==12345==6789，在输入第二个 == 后应立刻渲染且光标保持在原位置（不回跳）
-        const inputType = (e && typeof e.inputType === 'string') ? e.inputType : '';
-        const data = (e && typeof e.data === 'string') ? e.data : '';
-        const shouldRenderImmediately = (
-            inputType === 'insertFromPaste' ||
-            inputType === 'insertFromDrop' ||
-            /[*~=`=<>/\\]]/.test(data)
-        );
-
-        if (shouldRenderImmediately) {
-            liveRenderMarkdown();
-            renderDebounceTimer = null;
-            try { if (undoManager) undoManager.scheduleRecord('input-immediate'); } catch (_) { }
-            return;
-        }
-
-        // 其他普通输入：延迟渲染，避免“还没打完就被渲染”
-        renderDebounceTimer = setTimeout(() => {
-            liveRenderMarkdown();
-            try { if (undoManager) undoManager.scheduleRecord('input-debounced'); } catch (_) { }
-            renderDebounceTimer = null;
-        }, RENDER_DEBOUNCE_DELAY);
-
-        // 记录一次输入快照（即使本次没有触发语法渲染，也要支持逐步撤销）
-        try { if (undoManager) undoManager.scheduleRecord('input'); } catch (_) { }
+    editor.addEventListener('input', () => {
+        saveEditorContent();
     });
 
     // 编辑器获得焦点时进入编辑状态
@@ -17434,9 +15555,8 @@ function __renderMdNodeImpl(node, options = {}) {
         enterEdit();
     });
 
-    // 编辑器失去焦点时退出编辑状态并重新渲染展开的内容
+    // 编辑器失去焦点时退出编辑状态
     editor.addEventListener('blur', () => {
-        if (!isFontColorPopoverActive()) reRenderExpanded();
         if (el.classList.contains('canvas-node-maximized') || fullscreenEditLock) {
             return;
         }
@@ -17447,267 +15567,30 @@ function __renderMdNodeImpl(node, options = {}) {
         }, 0);
     });
 
-    // 鼠标/输入法/键盘：只要光标离开展开源码就重渲染
-    editor.addEventListener('mouseup', () => {
-        scheduleReRenderIfCaretLeftExpanded();
-    });
-    editor.addEventListener('keyup', () => {
-        scheduleReRenderIfCaretLeftExpanded();
-    });
-    editor.addEventListener('compositionend', () => {
-        scheduleReRenderIfCaretLeftExpanded();
-        // 合成结束后立刻尝试渲染（避免中文输入导致渲染延后）
-        try {
-            liveRenderMarkdown();
-            if (undoManager) undoManager.scheduleRecord('compositionend');
-        } catch (_) { }
-    });
-
-    // 【关键修复】使用 selectionchange 检测光标移动，确保离开展开源码后立即重渲染
-    // 这对于颜色、字体等工具展开源码后的重渲染至关重要
-    // 注意：selectionchange 是 document 级别事件，需要检查选区是否在当前编辑器内
-    const onSelectionChange = () => {
-        // 只有当编辑器有焦点时才处理
-        if (!editor.contains(document.activeElement) && document.activeElement !== editor) return;
-        // 检查选区是否在编辑器内
-        const sel = window.getSelection();
-        if (!sel || !sel.rangeCount) return;
-        const range = sel.getRangeAt(0);
-        if (!editor.contains(range.startContainer)) return;
-        // 调度重渲染检查
-        scheduleReRenderIfCaretLeftExpanded();
-    };
-    document.addEventListener('selectionchange', onSelectionChange);
-    el.__mdNodeSelectionChangeHandler = onSelectionChange;
-
-    // 快捷键处理
+    // 快捷键处理 (ESC / Undo / Redo)
     editor.addEventListener('keydown', (e) => {
-        // Undo / Redo（修复工具插入与自动渲染无法撤销、撤销顺序混乱）
-        if (undoManager && (e.ctrlKey || e.metaKey) && !e.altKey) {
-            const key = (e.key || '').toLowerCase();
-            const isZ = key === 'z';
-            const isY = key === 'y';
-            if (isZ) {
-                e.preventDefault();
-                e.stopPropagation();
-                // 撤销/反撤销前先取消“延迟渲染/延迟记录”，避免把 redo 栈提前截断
-                try {
-                    if (renderDebounceTimer) {
-                        clearTimeout(renderDebounceTimer);
-                        renderDebounceTimer = null;
-                    }
-                    if (undoManager.cancelPendingRecord) undoManager.cancelPendingRecord();
-                } catch (_) { }
-                if (e.shiftKey) undoManager.redo();
-                else undoManager.undo();
-                return;
-            }
-            if (isY) {
-                e.preventDefault();
-                e.stopPropagation();
-                try {
-                    if (renderDebounceTimer) {
-                        clearTimeout(renderDebounceTimer);
-                        renderDebounceTimer = null;
-                    }
-                    if (undoManager.cancelPendingRecord) undoManager.cancelPendingRecord();
-                } catch (_) { }
-                undoManager.redo();
-                return;
-            }
-        }
-
         if (e.key === 'Escape') {
             e.preventDefault();
             editor.blur();
             return;
         }
-
-        // Backspace：删除到格式化元素时，先展开为源码
-        if (e.key === 'Backspace') {
-            const sel = window.getSelection();
-            if (!sel.rangeCount) return;
-            const range = sel.getRangeAt(0);
-
-            // 只处理光标（非选区）
-            if (!range.collapsed) return;
-
-            const container = range.startContainer;
-            const offset = range.startOffset;
-
-            // 检查元素是否为格式化元素（Markdown 或 HTML 格式）
-            const isFormattedElement = (el) => {
-                if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
-                const tag = el.tagName;
-                // Markdown 格式
-                if (formatMap[tag]) return true;
-                // 块级格式：blockquote, hr, ul, ol, task
-                if (tag === 'BLOCKQUOTE' || tag === 'HR' || tag === 'LI') return true;
-                if (el.classList && el.classList.contains('md-task-item')) return true;
-                // 标题格式：h1-h6
-                if (tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4' || tag === 'H5' || tag === 'H6') return true;
-                return false;
-            };
-
-            // 查找紧邻光标前的格式化元素
-            const findAdjacentFormattedEl = () => {
-                // 情况A：光标在文本节点内
-                if (container.nodeType === Node.TEXT_NODE) {
-                    // 在文本开头，或在零宽空格的位置1
-                    if (offset === 0 || (offset === 1 && container.textContent.charAt(0) === '\u200B')) {
-                        let prev = container.previousSibling;
-                        // 跳过空文本节点和零宽空格
-                        while (prev && prev.nodeType === Node.TEXT_NODE &&
-                            (prev.textContent === '' || prev.textContent === '\u200B')) {
-                            prev = prev.previousSibling;
-                        }
-                        if (isFormattedElement(prev)) {
-                            return { el: prev, cleanup: offset === 1 && container.textContent === '\u200B' ? container : null };
-                        }
-                    }
-                }
-
-                // 情况B：光标在元素节点内（如 editor 本身）
-                if (container.nodeType === Node.ELEMENT_NODE && offset > 0) {
-                    let prevChild = container.childNodes[offset - 1];
-                    // 跳过零宽空格
-                    let cleanup = null;
-                    if (prevChild && prevChild.nodeType === Node.TEXT_NODE && prevChild.textContent === '\u200B') {
-                        cleanup = prevChild;
-                        prevChild = container.childNodes[offset - 2];
-                    }
-                    if (isFormattedElement(prevChild)) {
-                        return { el: prevChild, cleanup };
-                    }
-                }
-
-                // 情况C：光标在格式化元素内部的开头
-                const formattedParent = container.parentElement?.closest('strong, b, em, i, u, del, s, mark, code, a, blockquote, hr, li, .md-task-item, h1, h2, h3, h4, h5, h6');
-                if (formattedParent && editor.contains(formattedParent)) {
-                    const isAtStart = (container.nodeType === Node.TEXT_NODE && offset === 0) ||
-                        (container === formattedParent && offset === 0);
-                    if (isAtStart) {
-                        return { el: formattedParent, cleanup: null };
-                    }
-                }
-
-                return null;
-            };
-
-            const result = findAdjacentFormattedEl();
-            if (result) {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+            const key = (e.key || '').toLowerCase();
+            if (key === 'z') {
                 e.preventDefault();
-                if (result.cleanup) {
-                    result.cleanup.parentNode?.removeChild(result.cleanup);
+                if (editor.__tiptapInstance) {
+                    if (e.shiftKey) editor.__tiptapInstance.redo();
+                    else editor.__tiptapInstance.undo();
                 }
-                expandToMarkdown(result.el, 'end');
                 return;
             }
-        }
-
-        // Delete：删除到格式化元素时，先展开为源码
-        if (e.key === 'Delete') {
-            const sel = window.getSelection();
-            if (!sel.rangeCount) return;
-            const range = sel.getRangeAt(0);
-
-            if (!range.collapsed) return;
-
-            const container = range.startContainer;
-            const offset = range.startOffset;
-
-            // 检查元素是否为格式化元素（Markdown 或 HTML 格式）
-            const isFormattedEl = (el) => {
-                if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
-                const tag = el.tagName;
-                if (formatMap[tag]) return true;
-                // 块级格式
-                if (tag === 'BLOCKQUOTE' || tag === 'HR' || tag === 'LI') return true;
-                if (el.classList && el.classList.contains('md-task-item')) return true;
-                // 标题格式：h1-h6
-                if (tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4' || tag === 'H5' || tag === 'H6') return true;
-                return false;
-            };
-
-            // 查找紧邻光标后的格式化元素
-            const findNextFormattedEl = () => {
-                if (container.nodeType === Node.TEXT_NODE) {
-                    const len = container.textContent.length;
-                    // 在文本末尾，或在零宽空格结尾位置
-                    if (offset === len || (offset === len - 1 && container.textContent.charAt(len - 1) === '\u200B')) {
-                        let next = container.nextSibling;
-                        while (next && next.nodeType === Node.TEXT_NODE &&
-                            (next.textContent === '' || next.textContent === '\u200B')) {
-                            next = next.nextSibling;
-                        }
-                        if (isFormattedEl(next)) {
-                            return next;
-                        }
-                    }
-                }
-
-                if (container.nodeType === Node.ELEMENT_NODE && offset < container.childNodes.length) {
-                    let nextChild = container.childNodes[offset];
-                    if (nextChild && nextChild.nodeType === Node.TEXT_NODE && nextChild.textContent === '\u200B') {
-                        nextChild = container.childNodes[offset + 1];
-                    }
-                    if (isFormattedEl(nextChild)) {
-                        return nextChild;
-                    }
-                }
-
-                return null;
-            };
-
-            const nextEl = findNextFormattedEl();
-            if (nextEl) {
+            if (key === 'y') {
                 e.preventDefault();
-                expandToMarkdown(nextEl, 'start');
+                if (editor.__tiptapInstance) {
+                    editor.__tiptapInstance.redo();
+                }
                 return;
             }
-        }
-
-        // 方向键移动：
-        // - 当光标离开当前展开的源码区域时，自动重新渲染
-        // - 当光标移动到某个格式化元素内部时，自动展开为源码
-        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-            setTimeout(() => {
-                const sel = window.getSelection();
-                if (!sel || !sel.rangeCount) return;
-                let range = sel.getRangeAt(0);
-
-                // 如果已经展开源码且光标离开了该区域，则先重新渲染
-                if (expandedElement && expandedElement.parentNode && !isCaretInsideExpandedSource()) {
-                    reRenderExpanded();
-                    const selAfter = window.getSelection();
-                    if (!selAfter || !selAfter.rangeCount) return;
-                    range = selAfter.getRangeAt(0);
-                }
-
-                // 当前没有展开的源码时，检测是否进入了某个格式化元素
-                if (!expandedElement) {
-                    let container = range.startContainer;
-                    if (container.nodeType === Node.TEXT_NODE && container.parentElement) {
-                        // 避免零宽空格节点干扰判断
-                        if (container.textContent === '\u200B') {
-                            container = container.parentElement;
-                        } else {
-                            container = container.parentElement;
-                        }
-                    }
-
-                    let formattedEl = null;
-                    if (container.nodeType === Node.ELEMENT_NODE) {
-                        formattedEl = container.closest('strong, b, em, i, u, del, s, mark, code, a, blockquote, hr, li, .md-task-item, h1, h2, h3, h4, h5, h6');
-                    }
-
-                    if (formattedEl && editor.contains(formattedEl)) {
-                        // 根据方向键大致决定光标落点在源码的开头还是结尾
-                        const cursorPos = (e.key === 'ArrowLeft' || e.key === 'ArrowUp') ? 'end' : 'start';
-                        expandToMarkdown(formattedEl, cursorPos);
-                    }
-                }
-            }, 0);
         }
     });
 
@@ -17721,7 +15604,6 @@ function __renderMdNodeImpl(node, options = {}) {
     if (scrollPersist && typeof scrollPersist.top === 'number') {
         editor.scrollTop = scrollPersist.top || 0;
         editor.scrollLeft = scrollPersist.left || 0;
-        // 延迟兜底：避免 DOM 渲染抖动或渲染延迟导致的滚动位置失效
         setTimeout(() => {
             if (editor.scrollTop !== scrollPersist.top) {
                 editor.scrollTop = scrollPersist.top || 0;
@@ -17734,7 +15616,7 @@ function __renderMdNodeImpl(node, options = {}) {
 
     updateNodeFullscreenButtons();
 
-    // 点击处理：格式化元素展开为源码，链接打开
+    // 点击处理：标题折叠、任务复选框切换与链接打开
     editor.addEventListener('click', (e) => {
         if (__handleHeadingCollapseClick(editor, e)) {
             saveEditorContent();
@@ -17748,7 +15630,6 @@ function __renderMdNodeImpl(node, options = {}) {
 
         // 任务checkbox点击 - 切换选中状态
         if (target.classList && target.classList.contains('md-task-checkbox')) {
-            // checkbox状态已经由浏览器自动切换，只需保存
             saveEditorContent();
             return;
         }
@@ -17756,9 +15637,7 @@ function __renderMdNodeImpl(node, options = {}) {
         // 链接点击
         const link = target.closest('a');
         if (link && link.href) {
-            // 已被全局超链接处理器接管（避免重复打开）
             if (e.defaultPrevented) return;
-            // 修饰键交给浏览器默认行为
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
             e.preventDefault();
             e.stopPropagation();
@@ -17773,68 +15652,7 @@ function __renderMdNodeImpl(node, options = {}) {
             }
             return;
         }
-
-        // 判断当前点击是否仍在已展开的源码区域内（允许继续选择文字，而不触发重新渲染）
-        const isClickInsideExpanded = isCaretInsideExpandedSource() || rawTarget === expandedElement;
-
-        // 点击格式化元素时展开为 Markdown 源码（包括 HTML 格式）- 排除checkbox
-        let formattedEl = target.closest('strong, b, em, i, u, del, s, mark, code, a, font, span[style], center, p[align], blockquote, hr, li, .md-task-item, h1, h2, h3, h4, h5, h6');
-        // 标题是高频操作：无论点击标题内部的哪个子元素，都优先按整个标题处理（保留 # / ## / ### 语义）
-        const headingEl = target.closest('h1, h2, h3, h4, h5, h6');
-        if (headingEl && editor.contains(headingEl)) {
-            formattedEl = headingEl;
-        }
-        if (formattedEl && editor.contains(formattedEl)) {
-            // 优化：对于块级元素（列表、引用），只有点击元素左侧（符号/Padding）时才展开源码
-            // 点击右侧文本内容时保持富文本编辑模式
-            //
-            // NOTE: 标题（# / ## / ### ...）属于高频操作，这里保持“直接点击即可展开源码”的行为。
-            const isBlockRestricted = formattedEl.tagName === 'LI' || formattedEl.tagName === 'BLOCKQUOTE';
-            if (isBlockRestricted) {
-                // 如果点击的是子元素（如 strong, em, a）或其内部文本区域，视为点击内容 -> 不展开
-                if (target !== formattedEl) return;
-
-                // 获取点击相对元素的横坐标
-                const rect = formattedEl.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-
-                // 获取左侧缩进宽度（通常包含 bullet/marker）
-                const style = window.getComputedStyle(formattedEl);
-                const paddingLeft = parseFloat(style.paddingLeft);
-                // 设定热区阈值：至少 25px，或者使用 paddingLeft
-                const threshold = paddingLeft > 10 ? paddingLeft : 25;
-
-                // 如果点击位置在热区右侧，视为点击文本 -> 不展开
-                if (clickX > threshold) return;
-            }
-            // 特殊处理：Setext标题（带有分隔符的H1/H2）点击时不展开为源码
-            // 而是让标题内容可编辑，保持渲染后的标题格式
-            const isSetextHeading = (formattedEl.tagName === 'H1' || formattedEl.tagName === 'H2') &&
-                formattedEl.dataset && formattedEl.dataset.setextType;
-
-            if (isSetextHeading) {
-                // 先重新渲染之前展开的元素
-                if (expandedElement && expandedElement.parentNode && !isClickInsideExpanded) {
-                    reRenderExpanded();
-                }
-                // Setext标题保持渲染后的格式，直接可编辑，不展开为源码
-                // 标题元素本身在contenteditable中，用户可以直接修改文字内容
-                // 不做任何操作，让浏览器默认的编辑行为生效
-                return;
-            }
-
-            // 其他格式化元素：展开为源码
-            // 先重新渲染之前展开的元素（如果此次点击不在源码区域内）
-            if (expandedElement && expandedElement.parentNode && !isClickInsideExpanded) {
-                reRenderExpanded();
-            }
-            expandToMarkdown(formattedEl);
-        } else if (expandedElement && expandedElement.parentNode && !isClickInsideExpanded) {
-            // 点击其他位置时，重新渲染之前展开的元素
-            reRenderExpanded();
-        }
     });
-
 
     // 复制时转换为 Markdown 源码格式（而非渲染后的富文本）
     editor.addEventListener('copy', (e) => {
@@ -17854,9 +15672,13 @@ function __renderMdNodeImpl(node, options = {}) {
         // 全选整卡时优先复制节点 canonical markdown（统一来自 text）。
         let finalSource = '';
         if (isAll) {
-            finalSource = __resolveCanvasNativeTextNodeBody(node);
-            if (!String(finalSource || '').trim()) {
-                finalSource = __htmlToMarkdown(htmlSource);
+            if (editor.__tiptapInstance && typeof editor.__tiptapInstance.getMarkdown === 'function') {
+                finalSource = editor.__tiptapInstance.getMarkdown();
+            } else {
+                finalSource = __resolveCanvasNativeTextNodeBody(node);
+                if (!String(finalSource || '').trim()) {
+                    finalSource = __htmlToMarkdown(htmlSource);
+                }
             }
         } else {
             finalSource = __htmlToMarkdown(htmlSource);
@@ -17983,66 +15805,19 @@ function __renderMdNodeImpl(node, options = {}) {
                             if (dataUrl) {
                                 const alt = (file.name || 'image').replace(/[\r\n]/g, ' ').trim();
                                 const textToInsert = `![${alt}](${dataUrl})`;
-                                __insertTextAtSelection(textToInsert);
-                                saveEditorContent();
+                                if (editor.__tiptapInstance) {
+                                    editor.__tiptapInstance.insertContent(textToInsert);
+                                } else {
+                                    __insertTextAtSelection(textToInsert);
+                                }
+                                saveEditorContent(true);
                             }
                         });
                         return;
                     }
                 }
             }
-            const clipboardHtml = cd ? String(cd.getData('application/x-bookmark-canvas-html') || cd.getData('text/html') || '') : '';
-            const plain = cd ? String(cd.getData('text/plain') || '') : '';
-            const normalized = plain.replace(/\r\n/g, '\n');
-            const trimmed = normalized.trim();
-            const looksLikeBlockMd = /(^|\n)\s*(#{1,6}\s+|>\s+|[-*]\s*(?:\[[ xX]\]\s+)?|\d+\.\s+|```)/.test(trimmed);
-            const isMultiLine = /\n/.test(trimmed);
-            const safeHtml = clipboardHtml ? __normalizeCanvasRichHtml(clipboardHtml) : '';
-            const hasHtmlTags = __looksLikeHtmlTagContent(clipboardHtml);
-
-            if (safeHtml && hasHtmlTags) {
-                e.preventDefault();
-                __insertHtmlAtSelection(safeHtml);
-                setTimeout(() => {
-                    saveEditorContent();
-                }, 0);
-                return;
-            }
-
-            if (trimmed && (isMultiLine || looksLikeBlockMd) && typeof marked !== 'undefined') {
-                e.preventDefault();
-                let parsedHtml = '';
-                try { parsedHtml = __renderMarkdownToCanvasRichHtml(trimmed); } catch (_) { parsedHtml = ''; }
-                const safe = __normalizeCanvasRichHtml(parsedHtml);
-                if (safe) {
-                    __insertHtmlAtSelection(safe);
-                } else {
-                    __insertTextAtSelection(normalized);
-                }
-                setTimeout(() => {
-                    saveEditorContent();
-                }, 0);
-                return;
-            }
-
-            if (trimmed && (isMultiLine || looksLikeBlockMd) && typeof marked === 'undefined') {
-                e.preventDefault();
-                const esc = (s) => String(s || '')
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;')
-                    .replace(/'/g, '&#39;');
-                const lines = normalized.split('\n');
-                const html = lines.map(line => `<div>${esc(line)}</div>`).join('');
-                __insertHtmlAtSelection(html);
-                setTimeout(() => {
-                    saveEditorContent();
-                }, 0);
-                return;
-            }
         } catch (_) { }
-
         setTimeout(() => {
             try { saveEditorContent(); } catch (_) { }
         }, 50);
@@ -18091,7 +15866,7 @@ function __renderMdNodeImpl(node, options = {}) {
         return true;
     };
 
-    const enterEditMode = () => {
+    const enterEditMode = (eventOrCoords = null) => {
         isInEditMode = true;
         ctrlPausedEdit = false;
         if (!node.isEditing) {
@@ -18099,7 +15874,32 @@ function __renderMdNodeImpl(node, options = {}) {
         }
         node.isEditing = true;
         el.setAttribute('data-editing', 'true');
-        editor.focus();
+
+        // 用户要求：除卡片全屏外，进入编辑状态时格式工具栏一直出现
+        if (!el.classList.contains('canvas-node-maximized')) {
+            openFormatPopover();
+        }
+
+        const savedScrollTop = editor.scrollTop;
+        const savedScrollLeft = editor.scrollLeft;
+
+        let focused = false;
+        if (eventOrCoords && editor.__tiptapInstance && typeof editor.__tiptapInstance.focusAtCoords === 'function') {
+            const coords = (typeof eventOrCoords.clientX === 'number')
+                ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
+                : eventOrCoords;
+            focused = editor.__tiptapInstance.focusAtCoords(coords, { scrollIntoView: false });
+        }
+        if (!focused) {
+            editor.focus();
+        }
+
+        editor.scrollTop = savedScrollTop;
+        editor.scrollLeft = savedScrollLeft;
+        requestAnimationFrame(() => {
+            if (editor.scrollTop !== savedScrollTop) editor.scrollTop = savedScrollTop;
+            if (editor.scrollLeft !== savedScrollLeft) editor.scrollLeft = savedScrollLeft;
+        });
     };
 
     const exitEditMode = () => {
@@ -18110,14 +15910,9 @@ function __renderMdNodeImpl(node, options = {}) {
         }
         node.isEditing = false;
         el.removeAttribute('data-editing');
-        // 退出栏目卡片时：清空撤销/反撤销栈（每次进入编辑都从当前内容开始）
-        try {
-            if (renderDebounceTimer) {
-                clearTimeout(renderDebounceTimer);
-                renderDebounceTimer = null;
-            }
-        } catch (_) { }
-        try { if (undoManager && undoManager.reset) undoManager.reset('exit-card'); } catch (_) { }
+
+        // 退出编辑模式时收起格式工具栏及其所有二级弹层
+        closeFormatPopover();
     };
 
     // Ctrl键暂停编辑（允许拖动/调整大小）
@@ -18147,8 +15942,6 @@ function __renderMdNodeImpl(node, options = {}) {
         setTimeout(() => {
             if (suppressBlurExit) return;
             if (document.activeElement !== editor && !el.contains(document.activeElement)) {
-                // Finalize deferred auto-links (e.g. bare URL at end) before leaving edit mode
-                try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
                 try { saveEditorContent(); } catch (_) { }
                 exitEditMode();
             }
@@ -18198,7 +15991,7 @@ function __renderMdNodeImpl(node, options = {}) {
         if (el.classList.contains('canvas-node-maximized')) {
             if (!isInEditMode) {
                 try { selectMdNode(node.id); } catch (_) { }
-                enterEditMode();
+                enterEditMode(e);
             }
             return;
         }
@@ -18318,11 +16111,11 @@ function __renderMdNodeImpl(node, options = {}) {
             }
             e.preventDefault();
             e.stopPropagation();
-            enterEditMode();
+            enterEditMode(e);
         }
     }, true);
 
-    // 禁用原生双击
+    // 双击进入编辑模式并在点击位置精确定位光标
     el.addEventListener('dblclick', (e) => {
         const target = (e.target && e.target.nodeType === Node.ELEMENT_NODE)
             ? e.target
@@ -18332,6 +16125,10 @@ function __renderMdNodeImpl(node, options = {}) {
         if (CanvasState.lowDetailActive || el.classList.contains('low-detail-active')) return;
         e.preventDefault();
         e.stopPropagation();
+        if (!isInEditMode) {
+            try { selectMdNode(node.id); } catch (_) { }
+            enterEditMode(e);
+        }
     }, true);
 
     const syncFullscreenEditing = () => {
@@ -18361,13 +16158,13 @@ function __renderMdNodeImpl(node, options = {}) {
     el.__mdNodeFullscreenObserver = fullscreenObserver;
     syncFullscreenEditing();
 
-    // 工具栏mousedown：阻止默认行为防止编辑器失焦
+    // 工具栏mousedown：阻止默认行为防止编辑器失焦与选区丢失
     toolbar.addEventListener('mousedown', (e) => {
         if (toolbar.contains(e.target)) {
             markToolbarInteraction();
         }
-        const actionEl = e.target.closest('button, [data-action], .md-color-chip');
-        if (actionEl && toolbar.contains(actionEl)) {
+        const isTextInput = e.target && e.target.matches && e.target.matches('input[type="text"], input[type="number"], .canvas-layout-zoom-input');
+        if (!isTextInput) {
             e.preventDefault(); // 防止 editor 失焦 / 编辑态被动退出
         }
     }, true);
@@ -18502,7 +16299,9 @@ function __renderMdNodeImpl(node, options = {}) {
         } else if (action === 'md-copy-content') {
             try {
                 let text = '';
-                if (isInEditMode && editor) {
+                if (editor && editor.__tiptapInstance && typeof editor.__tiptapInstance.getMarkdown === 'function') {
+                    text = editor.__tiptapInstance.getMarkdown();
+                } else if (isInEditMode && editor) {
                     text = editor.value != null ? editor.value : (editor.innerText || '');
                 }
                 if (!text && typeof __deriveMdNodeMarkdownSource === 'function') {
@@ -19185,7 +16984,12 @@ function removeMdNode(id, deleteChildren = false, options = {}) {
     }
 
     const el = document.getElementById(id);
-    if (el) el.remove();
+    if (el) {
+        if (el.__tiptapInstance && typeof el.__tiptapInstance.destroy === 'function') {
+            try { el.__tiptapInstance.destroy(); } catch (_) { }
+        }
+        el.remove();
+    }
     CanvasState.mdNodes = CanvasState.mdNodes.filter(n => n.id !== id);
     // Remove edges connected to this markdown node
     removeEdgesForNode(id, { skipSave: true });
@@ -19481,308 +17285,6 @@ function __placeCaretAtEnd(editableEl) {
     } catch (_) { }
 }
 
-// Keep visual-editing mode behavior: live DOM rewrite while typing.
-const __CANVAS_ENABLE_EDITOR_LIVE_DOM_REWRITE = true;
-
-function __tryConvertInlinePatternsInTextNode(editorEl, explicitNode = null) {
-    if (!editorEl) return false;
-    let textNode;
-    let cursorPos;
-    let sel = null;
-
-    if (explicitNode) {
-        if (explicitNode.nodeType !== Node.TEXT_NODE) return false;
-        textNode = explicitNode;
-        cursorPos = Number.MAX_SAFE_INTEGER; // Bypass typing check
-    } else {
-        sel = window.getSelection();
-        if (!sel || !sel.rangeCount) return false;
-        const range = sel.getRangeAt(0);
-        const start = range.startContainer;
-        if (!start || start.nodeType !== Node.TEXT_NODE) return false;
-        if (!editorEl.contains(start)) return false;
-        textNode = start;
-        cursorPos = range.startOffset;
-    }
-
-    const text = textNode.textContent || '';
-
-    const countChar = (s, ch) => {
-        let c = 0;
-        for (let i = 0; i < s.length; i++) if (s[i] === ch) c++;
-        return c;
-    };
-
-    const splitAutoUrlSuffix = (candidateUrl) => {
-        let url = String(candidateUrl || '');
-        let suffix = '';
-        if (!url) return { url: '', suffix: '' };
-
-        const takeLast = () => {
-            suffix = url.slice(-1) + suffix;
-            url = url.slice(0, -1);
-        };
-
-        const stripUnbalanced = (openCh, closeCh) => {
-            while (url && url.endsWith(closeCh) && countChar(url, closeCh) > countChar(url, openCh)) {
-                takeLast();
-            }
-        };
-
-        // Strip common trailing punctuation (keep it outside the link, Obsidian-style)
-        // Repeat because balancing may expose new trailing punctuation (e.g. "url.)")
-        let changed = true;
-        while (changed && url) {
-            changed = false;
-            while (url) {
-                const last = url[url.length - 1];
-                if (/[.,;:!?]/.test(last) || /["'“”‘’`>]/.test(last)) {
-                    takeLast();
-                    changed = true;
-                    continue;
-                }
-                break;
-            }
-
-            const beforeLen = url.length;
-            stripUnbalanced('(', ')');
-            stripUnbalanced('[', ']');
-            stripUnbalanced('{', '}');
-            if (url.length !== beforeLen) changed = true;
-        }
-
-        return { url, suffix };
-    };
-
-    const sanitizeAutoHref = (href) => {
-        const raw = String(href || '').trim();
-        if (!raw) return null;
-        try {
-            if (typeof ObsidianMarkdown !== 'undefined' && typeof ObsidianMarkdown.sanitizeHref === 'function') {
-                return ObsidianMarkdown.sanitizeHref(raw);
-            }
-        } catch (_) { }
-        const normalized = /^www\./i.test(raw) ? `http://${raw}` : (raw.startsWith('//') ? `https:${raw}` : raw);
-        if (normalized.startsWith('#')) return normalized;
-        try {
-            const u = new URL(normalized, 'https://dummy.local');
-            const ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:';
-            return ok ? normalized : null;
-        } catch (_) {
-            return null;
-        }
-    };
-
-    const patterns = [
-        // Markdown-like implicit syntax
-        { type: 'bold', regex: /\*\*(.+?)\*\*/, tag: 'strong', contentIndex: 1 },
-        { type: 'italic', regex: /\*(.+?)\*/, tag: 'em', contentIndex: 1 },
-        { type: 'italic', regex: /_(.+?)_/, tag: 'em', contentIndex: 1 },
-        { type: 'strike', regex: /~~(.+?)~~/, tag: 'del', contentIndex: 1 },
-        { type: 'highlight', regex: /==(.+?)==/, tag: 'mark', contentIndex: 1 },
-        { type: 'code', regex: /`([^`]+)`/, tag: 'code', contentIndex: 1 },
-        { type: 'wikilink', regex: /\[\[([^\]]+?)\]\]/, tag: 'span', className: 'md-wikilink', contentIndex: 1 },
-        { type: 'link', regex: /\[([^\]]+?)\]\(([^)]+?)\)/, tag: 'a', contentIndex: 1, hrefIndex: 2 },
-        // Obsidian-style auto external links (bare URL / www.*)
-        {
-            type: 'bare-url',
-            regex: /(^|[\s(\[{\<"'“‘*_~`])((?:https?:\/\/|mailto:|tel:)[^\s<>"“”'‘’]+)(?=$|[\s)\]}>.,;:!?"'“”‘’])/i,
-            tag: 'a',
-            boundaryGroupIndex: 1,
-            urlGroupIndex: 2
-        },
-        {
-            type: 'www-url',
-            regex: /(^|[\s(\[{\<"'“‘*_~`])((?:www\.)[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"“”'‘’]*)?)(?=$|[\s)\]}>.,;:!?"'“”‘’])/i,
-            tag: 'a',
-            boundaryGroupIndex: 1,
-            urlGroupIndex: 2
-        }
-    ];
-
-    for (const pattern of patterns) {
-        const match = text.match(pattern.regex);
-        if (!match || match.index == null) continue;
-
-        const matchStart = match.index;
-
-        if (pattern.type === 'bare-url' || pattern.type === 'www-url' || pattern.type === 'link') {
-            if (textNode.parentNode && textNode.parentNode.closest && textNode.parentNode.closest('a')) {
-                continue;
-            }
-        }
-        if (pattern.type === 'bare-url' || pattern.type === 'www-url') {
-            const beforeText = text.substring(0, matchStart);
-            const boundaryChar = match[pattern.boundaryGroupIndex] || '';
-            if (boundaryChar.includes('(') && /\]\s*$/.test(beforeText)) continue;
-            if (countChar(beforeText, '<') > countChar(beforeText, '>')) continue;
-            if (countChar(beforeText, '[') > countChar(beforeText, ']')) continue;
-        }
-
-        let replaceStart = matchStart;
-        let typingEnd = matchStart + match[0].length;
-        let before = '';
-        let after = '';
-        let afterText = '';
-
-        let autoUrlRaw = '';
-        let autoUrlDisplay = '';
-        let autoUrlHref = '';
-        let autoUrlSuffix = '';
-
-        let caretMatchEnd = 0;
-        let caretExtraOffset = 0;
-
-        if (pattern.boundaryGroupIndex && pattern.urlGroupIndex) {
-            const boundary = match[pattern.boundaryGroupIndex] || '';
-            autoUrlRaw = match[pattern.urlGroupIndex] || '';
-            replaceStart = matchStart + boundary.length;
-            typingEnd = replaceStart + autoUrlRaw.length;
-            if (cursorPos < typingEnd) continue; // user still typing inside the URL
-            // While typing: if the URL reaches the end of this text node (or only ZWSP remains),
-            // defer auto-linking until the user types a delimiter (space/punctuation) or we run an explicit scan.
-            if (!explicitNode) {
-                const remaining = text.substring(typingEnd).replace(/\u200B/g, '');
-                if (!remaining) continue;
-            }
-            before = text.substring(0, replaceStart);
-            after = text.substring(typingEnd);
-
-            const split = splitAutoUrlSuffix(autoUrlRaw);
-            autoUrlDisplay = split.url;
-            autoUrlSuffix = split.suffix;
-            if (!autoUrlDisplay) continue;
-            autoUrlHref = sanitizeAutoHref(autoUrlDisplay);
-            if (!autoUrlHref) continue;
-            afterText = (autoUrlSuffix + after) || '\u200B';
-            caretMatchEnd = typingEnd;
-            caretExtraOffset = autoUrlSuffix.length;
-        } else {
-            caretMatchEnd = matchStart + match[0].length;
-            if (cursorPos < caretMatchEnd) continue; // user still typing inside the pattern
-            before = text.substring(0, matchStart);
-            after = text.substring(caretMatchEnd);
-            afterText = after || '\u200B';
-        }
-
-        const parent = textNode.parentNode;
-        if (!parent) return false;
-
-        const beforeNode = before ? document.createTextNode(before) : null;
-        const afterNode = document.createTextNode(afterText);
-
-        const parseInlineMarkdown = (text) => {
-            if (!text) return text;
-            const safe = String(text)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-            return safe
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                .replace(/~~(.+?)~~/g, '<del>$1</del>')
-                .replace(/==(.+?)==/g, '<mark>$1</mark>')
-                .replace(/`([^`]+)`/g, '<code>$1</code>');
-        };
-
-        const setContent = (element, content) => {
-            const parsed = parseInlineMarkdown(content);
-            if (/<[^>]+>/.test(parsed)) {
-                element.innerHTML = parsed;
-            } else {
-                element.textContent = content;
-            }
-        };
-
-        let newNode = null;
-        if (pattern.type === 'link') {
-            const href = match[pattern.hrefIndex] || '';
-            const safeHref = (typeof ObsidianMarkdown !== 'undefined' && typeof ObsidianMarkdown.sanitizeHref === 'function')
-                ? ObsidianMarkdown.sanitizeHref(href)
-                : href;
-            if (!safeHref) {
-                newNode = document.createTextNode(match[0] || '');
-            } else {
-                const a = document.createElement('a');
-                a.setAttribute('href', safeHref);
-                a.setAttribute('target', '_blank');
-                a.setAttribute('rel', 'noopener noreferrer');
-                // Link text might contain formatting too
-                setContent(a, match[pattern.contentIndex] || '');
-                newNode = a;
-            }
-        } else if (pattern.type === 'bare-url' || pattern.type === 'www-url') {
-            const a = document.createElement('a');
-            a.setAttribute('href', autoUrlHref);
-            a.setAttribute('target', '_blank');
-            a.setAttribute('rel', 'noopener noreferrer');
-            // Auto link: keep raw URL text, do not parse inline markdown inside it
-            a.textContent = autoUrlDisplay;
-            newNode = a;
-        } else {
-            const newEl = document.createElement(pattern.tag);
-            if (pattern.className) newEl.className = pattern.className;
-            if (pattern.attrName && pattern.attrIndex) {
-                newEl.setAttribute(pattern.attrName, match[pattern.attrIndex]);
-            }
-            setContent(newEl, match[pattern.contentIndex] || '');
-            newNode = newEl;
-        }
-
-        if (beforeNode) parent.insertBefore(beforeNode, textNode);
-        parent.insertBefore(newNode, textNode);
-        parent.insertBefore(afterNode, textNode);
-        parent.removeChild(textNode);
-
-        // Restore caret in the "after" text node (same relative position after the match)
-        if (!explicitNode && sel) {
-            try {
-                const newRange = document.createRange();
-                const offsetInAfter = after
-                    ? Math.min(afterNode.length, Math.max(0, caretExtraOffset + (cursorPos - caretMatchEnd)))
-                    : 1;
-                newRange.setStart(afterNode, offsetInAfter);
-                newRange.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(newRange);
-            } catch (_) { }
-        }
-
-        return true;
-    }
-
-    return false;
-}
-
-function __finalizeInlinePatternsInEditor(editorEl) {
-    if (!editorEl) return false;
-    let changedOverall = false;
-    let loop = 0;
-    while (loop++ < 10) {
-        let changed = false;
-        const walker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT, null, false);
-        const textNodes = [];
-        let n;
-        while (n = walker.nextNode()) textNodes.push(n);
-
-        for (const tn of textNodes) {
-            if (!tn || !tn.parentNode) continue;
-            if (tn.parentNode.closest('code, pre, a')) continue;
-            if (__tryConvertInlinePatternsInTextNode(editorEl, tn)) {
-                changed = true;
-                changedOverall = true;
-            }
-        }
-
-        if (!changed) break;
-    }
-
-    try { __applyHeadingCollapse(editorEl); } catch (_) { }
-    return changedOverall;
-}
-
 function __renderMarkdownToCanvasRichHtml(markdownText, options = {}) {
     const val = String(markdownText || '');
     if (!val.trim()) {
@@ -19967,22 +17469,8 @@ function __renderMarkdownToCanvasRichHtml(markdownText, options = {}) {
 
         tmp.innerHTML = html;
 
-        let changed = true;
-        let loop = 0;
-        while (changed && loop++ < 10) {
-            changed = false;
-            const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT, null, false);
-            const textNodes = [];
-            let n;
-            while (n = walker.nextNode()) textNodes.push(n);
-            for (const tn of textNodes) {
-                if (!tn || !tn.parentNode) continue;
-                if (tn.parentNode.closest('code, pre, a')) continue;
-                if (__tryConvertInlinePatternsInTextNode(tmp, tn)) {
-                    changed = true;
-                }
-            }
-        }
+        // Highlight syntax support (安全替换，排除 pre/code 内部)
+        __applyCanvasHighlightSyntax(tmp);
 
         return tmp.innerHTML;
     };
@@ -20026,25 +17514,49 @@ function __renderMarkdownToCanvasRichHtml(markdownText, options = {}) {
             try { if (node.parentNode) node.parentNode.removeChild(node); } catch (_) { }
         });
     } catch (_) { }
-    let changed = true;
-    let loop = 0;
-    while (changed && loop++ < 10) {
-        changed = false;
-        const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT, null, false);
-        const textNodes = [];
-        let n;
-        while (n = walker.nextNode()) textNodes.push(n);
-
-        for (const tn of textNodes) {
-            if (!tn || !tn.parentNode) continue;
-            if (tn.parentNode.closest('code, pre, a')) continue;
-            if (__tryConvertInlinePatternsInTextNode(tmp, tn)) {
-                changed = true;
-            }
-        }
-    }
+    // Highlight syntax support (安全替换，排除 pre/code 内部)
+    __applyCanvasHighlightSyntax(tmp);
 
     return tmp.innerHTML;
+}
+
+function __applyCanvasHighlightSyntax(rootEl) {
+    if (!rootEl) return;
+    try {
+        const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, null, false);
+        const textNodesToReplace = [];
+        let tNode;
+        while ((tNode = walker.nextNode())) {
+            const parent = tNode.parentNode;
+            if (parent && (parent.closest('pre') || parent.closest('code'))) {
+                continue; // 彻底跳过代码块和行内代码，防止误伤
+            }
+            if (/==([^=\n]+)==/.test(tNode.nodeValue)) {
+                textNodesToReplace.push(tNode);
+            }
+        }
+        textNodesToReplace.forEach((node) => {
+            if (!node || !node.parentNode) return;
+            const text = node.nodeValue || '';
+            const frag = document.createDocumentFragment();
+            let lastIdx = 0;
+            const regex = /==([^=\n]+)==/g;
+            let m;
+            while ((m = regex.exec(text)) !== null) {
+                if (m.index > lastIdx) {
+                    frag.appendChild(document.createTextNode(text.slice(lastIdx, m.index)));
+                }
+                const mark = document.createElement('mark');
+                mark.textContent = m[1];
+                frag.appendChild(mark);
+                lastIdx = regex.lastIndex;
+            }
+            if (lastIdx < text.length) {
+                frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+            }
+            node.parentNode.replaceChild(frag, node);
+        });
+    } catch (_) { }
 }
 
 function __coerceDescriptionSourceToHtml(raw) {
@@ -20552,9 +18064,25 @@ function __ensureMdNodeMarkdownProtocol(node, options = {}) {
 
 function __syncMdNodeFromEditor(node, editor) {
     if (!node || typeof node !== 'object' || !editor) return false;
-    const isCanvasNativeText = __isCanvasNativeTextNode(node);
 
-    try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
+    if (editor.__tiptapInstance && typeof editor.__tiptapInstance.getMarkdown === 'function') {
+        const tiptapMd = editor.__tiptapInstance.getMarkdown();
+        const tiptapHtml = editor.__tiptapInstance.getHTML();
+        const changed = (node.text || '') !== tiptapMd || (node.markdownSource || '') !== tiptapMd;
+        node.text = tiptapMd;
+        node.markdownSource = tiptapMd;
+        node.html = tiptapHtml;
+        node.subtype = CANVAS_PLUGIN_MARKDOWN_SUBTYPE;
+        node.source = CANVAS_PLUGIN_MARKDOWN_SOURCE;
+        node.canvasTextKind = 'blank';
+        const el = document.getElementById(node.id);
+        if (el) {
+            try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) {}
+        }
+        return changed;
+    }
+
+    const isCanvasNativeText = __isCanvasNativeTextNode(node);
 
     if (isCanvasNativeText) {
         const markdownSource = __normalizeCanvasMarkdownSource(
@@ -20747,289 +18275,94 @@ function __handleHeadingCollapseClick(editorEl, e) {
     return true;
 }
 
-function __tryConvertBlockPatternsAtCaret(editorEl, explicitNode = null) {
-    if (!editorEl) return false;
-    const sel = window.getSelection();
-
-    // 如果没有 explicitNode，则必须依赖 selection
-    if (!explicitNode && (!sel || !sel.rangeCount)) return false;
-
-    let lineEl = null;
-    let lineTextNode = null;
-
-    if (explicitNode) {
-        if (explicitNode.nodeType === Node.TEXT_NODE) {
-            if (explicitNode.parentNode === editorEl) {
-                lineTextNode = explicitNode;
-            } else {
-                let cur = explicitNode.parentElement;
-                while (cur && cur !== editorEl && cur.parentElement !== editorEl) cur = cur.parentElement;
-                if (cur && cur !== editorEl && (cur.tagName === 'DIV' || cur.tagName === 'P')) lineEl = cur;
-            }
-        } else {
-            let cur = explicitNode;
-            if (cur !== editorEl) {
-                while (cur && cur !== editorEl && cur.parentElement !== editorEl) cur = cur.parentElement;
-                if (cur && cur !== editorEl && (cur.tagName === 'DIV' || cur.tagName === 'P')) lineEl = cur;
-            }
-        }
-    } else {
-        const range = sel.getRangeAt(0);
-        const startContainer = range.startContainer;
-        if (!startContainer || !editorEl.contains(startContainer)) return false;
-
-        const parentEl = (startContainer.nodeType === Node.ELEMENT_NODE)
-            ? startContainer
-            : (startContainer.parentElement || null);
-        if (parentEl && parentEl.closest && parentEl.closest('code')) return false;
-
-        if (startContainer.nodeType === Node.TEXT_NODE) {
-            if (startContainer.parentNode === editorEl) {
-                lineTextNode = startContainer;
-            } else {
-                let cur = startContainer.parentElement;
-                while (cur && cur !== editorEl && cur.parentElement !== editorEl) {
-                    cur = cur.parentElement;
-                }
-                if (cur && cur !== editorEl && (cur.tagName === 'DIV' || cur.tagName === 'P')) {
-                    lineEl = cur;
-                }
-            }
-        } else if (startContainer.nodeType === Node.ELEMENT_NODE) {
-            let cur = startContainer;
-            if (cur !== editorEl) {
-                while (cur && cur !== editorEl && cur.parentElement !== editorEl) {
-                    cur = cur.parentElement;
-                }
-                if (cur && cur !== editorEl && (cur.tagName === 'DIV' || cur.tagName === 'P')) {
-                    lineEl = cur;
-                }
-            }
-        }
-    }
-
-    const rawText = lineEl
-        ? (lineEl.textContent || '')
-        : (lineTextNode ? (lineTextNode.textContent || '') : '');
-    const text = rawText.replace(/\u200B/g, '').trim();
-    if (!text) return false;
-
-    const containerEl = lineEl || (lineTextNode ? lineTextNode.parentElement : null);
-    if (containerEl && containerEl.closest) {
-        const inExistingBlock = containerEl.closest('ul, ol, blockquote, li, .md-task-item, h1, h2, h3, h4, h5, h6');
-        if (inExistingBlock && inExistingBlock !== containerEl) return false;
-        const t = containerEl.tagName;
-        if (t === 'UL' || t === 'OL' || t === 'BLOCKQUOTE') return false;
-    }
-
-    // Setext heading: "Title" + next line of --- / ===
-    const findNextLineNode = (node) => {
-        if (!node) return null;
-        let next = node.nextSibling;
-        while (next) {
-            if (next.nodeType === Node.TEXT_NODE && !next.textContent.trim()) {
-                next = next.nextSibling;
-                continue;
-            }
-            if (next.nodeType === Node.ELEMENT_NODE && next.tagName === 'BR') {
-                next = next.nextSibling;
-                continue;
-            }
-            return next;
-        }
-        return null;
-    };
-
-    const getNodeText = (node) => {
-        if (!node) return '';
-        if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
-        if (node.nodeType === Node.ELEMENT_NODE) return node.textContent || '';
-        return '';
-    };
-
-    const removeNodeAndBlock = (n) => {
-        if (!n) return;
-        if (n.nodeType === Node.ELEMENT_NODE && (n.tagName === 'DIV' || n.tagName === 'P') && n.parentNode === editorEl) {
-            try { n.remove(); } catch (_) { }
-            return;
-        }
-        if (n.nodeType === Node.TEXT_NODE && n.parentNode && (n.parentNode.tagName === 'DIV' || n.parentNode.tagName === 'P') && n.parentNode.parentNode === editorEl) {
-            try { n.parentNode.remove(); } catch (_) { }
-            return;
-        }
-        try { n.remove(); } catch (_) { }
-    };
-
-    const hrMatch = text.match(/^(-{3,}|_{3,}|\*{3,})$/);
-    const headingMatch = text.match(/^(#{1,6})\s+(.+)$/);
-    const taskMatch = text.match(/^[-*]\s*\[( |x|X)\]\s+(.+)$/);
-    const olMatch = text.match(/^(\d+)\.\s+(.+)$/);
-    const quoteMatch = text.match(/^>\s+(.+)$/);
-    const ulMatch = text.match(/^[-*]\s+(.+)$/);
-
-    const parseInlineMarkdown = (text) => {
-        if (!text) return text;
-        const safe = String(text)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-        return safe
-            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\*(.+?)\*/g, '<em>$1</em>')
-            .replace(/_(.+?)_/g, '<em>$1</em>')
-            .replace(/~~(.+?)~~/g, '<del>$1</del>')
-            .replace(/==(.+?)==/g, '<mark>$1</mark>')
-            .replace(/`([^`]+)`/g, '<code>$1</code>');
-    };
-
-    const setContent = (element, content) => {
-        const parsed = parseInlineMarkdown(content);
-        if (/<[^>]+>/.test(parsed)) {
-            element.innerHTML = parsed;
-        } else {
-            element.textContent = content;
-        }
-    };
-
-    // Handle Setext headings before other block patterns
-    const isSeparator = /^[\u200B]*([-=])\1+\s*$/.test(text);
-    if (!isSeparator) {
-        const baseNode = lineEl || lineTextNode;
-        const nextNode = findNextLineNode(baseNode);
-        if (nextNode) {
-            const nextText = getNodeText(nextNode).replace(/\u200B/g, '').trim();
-            let level = 0;
-            if (nextNode.nodeType === Node.ELEMENT_NODE && nextNode.tagName === 'HR') {
-                level = 2;
-            } else if (/^-{3,}$/.test(nextText)) {
-                level = 2;
-            } else if (/^={3,}$/.test(nextText)) {
-                level = 1;
-            }
-            if (level) {
-                const heading = document.createElement('h' + level);
-                setContent(heading, String(text || '').trim());
-                const parent = lineEl ? lineEl.parentNode : (lineTextNode ? lineTextNode.parentNode : null);
-                const refNode = lineEl || lineTextNode;
-                if (!parent || !refNode) return false;
-
-                parent.insertBefore(heading, refNode);
-                const spacer = document.createTextNode('\u200B');
-                if (heading.nextSibling) parent.insertBefore(spacer, heading.nextSibling);
-                else parent.appendChild(spacer);
-                try { parent.removeChild(refNode); } catch (_) { }
-                removeNodeAndBlock(nextNode);
-
-                try {
-                    const newRange = document.createRange();
-                    newRange.setStart(spacer, 1);
-                    newRange.collapse(true);
-                    if (sel) {
-                        sel.removeAllRanges();
-                        sel.addRange(newRange);
-                    }
-                } catch (_) { }
-
-                return true;
-            }
-        }
-    }
-
-    let wrapper = null;
-    if (taskMatch) {
-        wrapper = document.createElement('div');
-        wrapper.className = 'md-task-item';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.name = 'markdown-task-checkbox';
-        cb.className = 'md-task-checkbox';
-        if (String(taskMatch[1] || '').trim().toLowerCase() === 'x') cb.checked = true;
-        wrapper.appendChild(cb);
-        const textSpan = document.createElement('span');
-        setContent(textSpan, ' ' + String(taskMatch[2] || '').trim());
-        wrapper.appendChild(textSpan);
-    } else if (hrMatch) {
-        wrapper = document.createElement('hr');
-    } else if (headingMatch) {
-        const level = Math.min(6, Math.max(1, String(headingMatch[1] || '').length));
-        wrapper = document.createElement('h' + level);
-        setContent(wrapper, String(headingMatch[2] || '').trim());
-    } else if (quoteMatch) {
-        wrapper = document.createElement('blockquote');
-        setContent(wrapper, String(quoteMatch[1] || '').trim());
-    } else if (olMatch) {
-        wrapper = document.createElement('ol');
-        const li = document.createElement('li');
-        setContent(li, String(olMatch[2] || '').trim());
-        wrapper.appendChild(li);
-    } else if (ulMatch) {
-        wrapper = document.createElement('ul');
-        const li = document.createElement('li');
-        setContent(li, String(ulMatch[1] || '').trim());
-        wrapper.appendChild(li);
-    }
-
-    if (!wrapper) return false;
-    const parent = lineEl ? lineEl.parentNode : (lineTextNode ? lineTextNode.parentNode : null);
-    const refNode = lineEl || lineTextNode;
-    if (!parent || !refNode) return false;
-
-    parent.insertBefore(wrapper, refNode);
-    const spacer = document.createTextNode('\u200B');
-    if (wrapper.nextSibling) parent.insertBefore(spacer, wrapper.nextSibling);
-    else parent.appendChild(spacer);
-    try { parent.removeChild(refNode); } catch (_) { }
-
-    try {
-        const newRange = document.createRange();
-        newRange.setStart(spacer, 1);
-        newRange.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(newRange);
-    } catch (_) { }
-
-    return true;
-}
-
-function __fullScanRenderDescriptionEditor(editorEl) {
-    if (!editorEl) return;
-    if (!__CANVAS_ENABLE_EDITOR_LIVE_DOM_REWRITE) return;
-
-    // 1. Process Block Patterns first
-    // We check direct children or text nodes
-    let children = Array.from(editorEl.childNodes);
-    for (const child of children) {
-        __tryConvertBlockPatternsAtCaret(editorEl, child);
-    }
-
-    // 2. Process Inline Patterns repeatedly until no changes
-    let changed = true;
-    let loop = 0;
-    while (changed && loop++ < 10) {
-        changed = false;
-        const walker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT, null, false);
-        const textNodes = [];
-        let node;
-        while (node = walker.nextNode()) textNodes.push(node);
-
-        for (const tn of textNodes) {
-            if (!tn.parentNode) continue;
-            // Skip if inside code block, pre or anchor
-            if (tn.parentNode.closest('code, pre, a')) continue;
-
-            if (__tryConvertInlinePatternsInTextNode(editorEl, tn)) {
-                changed = true;
-            }
-        }
-    }
-
-    try { __applyHeadingCollapse(editorEl); } catch (_) { }
-}
-
 function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isEditing, enterEdit, save, nodeId, fontSizeConfig, popoverAnchor }) {
     if (!editor || !toolbar || !formatToggleBtn) return null;
+
+    let tiptapInstance = null;
+
+    const saveEditorContent = () => {
+        try { if (typeof save === 'function') save(); } catch (_) { }
+    };
+
+    const mountTiptap = (initialMarkdown, eventOrCoords = null) => {
+        if (typeof window === 'undefined' || !window.CanvasTiptapEngine || typeof window.CanvasTiptapEngine.create !== 'function') {
+            return null;
+        }
+
+        const savedScrollTop = editor.scrollTop;
+        const savedScrollLeft = editor.scrollLeft;
+
+        if (tiptapInstance) {
+            tiptapInstance.setMarkdown(initialMarkdown || '', false);
+            editor.scrollTop = savedScrollTop;
+            editor.scrollLeft = savedScrollLeft;
+            if (eventOrCoords && typeof tiptapInstance.focusAtCoords === 'function') {
+                const coords = (typeof eventOrCoords.clientX === 'number')
+                    ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
+                    : eventOrCoords;
+                tiptapInstance.focusAtCoords(coords, { scrollIntoView: false });
+            } else {
+                tiptapInstance.focus(null, { scrollIntoView: false });
+            }
+            return tiptapInstance;
+        }
+        try {
+            editor.contentEditable = 'false';
+            editor.innerHTML = ''; // 彻底清空原有静态只读DOM，确保只有纯净的ProseMirror富文本节点，杜绝双层DOM堆叠
+            tiptapInstance = window.CanvasTiptapEngine.create(editor, {
+                initialMarkdown: initialMarkdown || '',
+                editable: true,
+                onUpdate: (md, html) => {
+                    editor.__tiptapMarkdown = md;
+                    saveEditorContent();
+                }
+            });
+            editor.__tiptapInstance = tiptapInstance;
+
+            editor.scrollTop = savedScrollTop;
+            editor.scrollLeft = savedScrollLeft;
+
+            if (eventOrCoords && typeof tiptapInstance.focusAtCoords === 'function') {
+                const coords = (typeof eventOrCoords.clientX === 'number')
+                    ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
+                    : eventOrCoords;
+                tiptapInstance.focusAtCoords(coords, { scrollIntoView: false });
+            } else {
+                tiptapInstance.focus(null, { scrollIntoView: false });
+            }
+
+            requestAnimationFrame(() => {
+                if (editor.scrollTop !== savedScrollTop) editor.scrollTop = savedScrollTop;
+                if (editor.scrollLeft !== savedScrollLeft) editor.scrollLeft = savedScrollLeft;
+            });
+            return tiptapInstance;
+        } catch (e) {
+            console.warn('[DescriptionEditor] Tiptap init failed:', e);
+            editor.contentEditable = 'true';
+            return null;
+        }
+    };
+
+    const flushTiptap = () => {
+        if (!tiptapInstance) return null;
+        const md = tiptapInstance.getMarkdown();
+        const html = tiptapInstance.getHTML();
+        try {
+            tiptapInstance.destroy();
+        } catch (_) { }
+        tiptapInstance = null;
+        editor.__tiptapInstance = null;
+        return { md, html };
+    };
+
+    const cancelTiptap = () => {
+        if (!tiptapInstance) return;
+        try {
+            tiptapInstance.destroy();
+        } catch (_) { }
+        tiptapInstance = null;
+        editor.__tiptapInstance = null;
+    };
 
     const getLang = () => (typeof currentLang !== 'undefined' ? currentLang : 'zh');
     const fontSizeCfg = fontSizeConfig || {};
@@ -21134,12 +18467,9 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     };
     editor.addEventListener('mouseup', saveSelection);
     editor.addEventListener('keyup', saveSelection);
-    // 修复粘贴后不自动渲染的问题
     editor.addEventListener('paste', (e) => {
-        // 多行/块级 Markdown 粘贴：直接解析为 HTML 插入，避免整段文本落在同一个节点导致无法命中规则
         try {
             const cd = e && e.clipboardData;
-            // 检查并处理剪贴板中直接粘贴的图片（例如屏幕截图）
             if (cd && cd.items) {
                 const imgItem = Array.from(cd.items).find(item => item && item.type.startsWith('image/'));
                 if (imgItem) {
@@ -21156,8 +18486,11 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                             if (dataUrl) {
                                 const alt = (file.name || 'image').replace(/[\r\n]/g, ' ').trim();
                                 const textToInsert = `![${alt}](${dataUrl})`;
-                                __insertTextAtSelection(textToInsert);
-                                __fullScanRenderDescriptionEditor(editor);
+                                if (tiptapInstance) {
+                                    tiptapInstance.insertContent(textToInsert);
+                                } else {
+                                    __insertTextAtSelection(textToInsert);
+                                }
                                 saveEditorContent();
                             }
                         });
@@ -21165,286 +18498,9 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                     }
                 }
             }
-            const clipboardHtml = cd ? String(cd.getData('application/x-bookmark-canvas-html') || cd.getData('text/html') || '') : '';
-            const plain = cd ? String(cd.getData('text/plain') || '') : '';
-            const normalized = plain.replace(/\r\n/g, '\n');
-            const trimmed = normalized.trim();
-            const looksLikeBlockMd = /(^|\n)\s*(#{1,6}\s+|>\s+|[-*]\s*(?:\[[ xX]\]\s+)?|\d+\.\s+|```)/.test(trimmed);
-            const isMultiLine = /\n/.test(trimmed);
-            const safeHtml = clipboardHtml ? __normalizeCanvasRichHtml(clipboardHtml) : '';
-            const hasHtmlTags = __looksLikeHtmlTagContent(clipboardHtml);
-
-            // 优先使用内部专用 HTML（避免 Markdown 往返导致格式丢失）
-            if (safeHtml && hasHtmlTags) {
-                e.preventDefault();
-                __insertHtmlAtSelection(safeHtml);
-                setTimeout(() => {
-                    __fullScanRenderDescriptionEditor(editor);
-                    saveEditorContent();
-                }, 0);
-                return;
-            }
-
-            if (trimmed && (isMultiLine || looksLikeBlockMd) && typeof marked !== 'undefined') {
-                e.preventDefault();
-                let parsedHtml = '';
-                try { parsedHtml = __renderMarkdownToCanvasRichHtml(trimmed); } catch (_) { parsedHtml = ''; }
-                const safe = __normalizeCanvasRichHtml(parsedHtml);
-                if (safe) {
-                    __insertHtmlAtSelection(safe);
-                } else {
-                    // Fallback: insert as plain text
-                    __insertTextAtSelection(normalized);
-                }
-                setTimeout(() => {
-                    __fullScanRenderDescriptionEditor(editor);
-                    saveEditorContent();
-                }, 0);
-                return;
-            }
-
-            // marked 不可用时：仍然把多行文本拆成多行节点，确保后续渲染规则可命中
-            if (trimmed && (isMultiLine || looksLikeBlockMd) && typeof marked === 'undefined') {
-                e.preventDefault();
-                const esc = (s) => String(s || '')
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;')
-                    .replace(/'/g, '&#39;');
-                const lines = normalized.split('\n');
-                const html = lines.map(line => `<div>${esc(line)}</div>`).join('');
-                __insertHtmlAtSelection(html);
-                setTimeout(() => {
-                    __fullScanRenderDescriptionEditor(editor);
-                    saveEditorContent();
-                }, 0);
-                return;
-            }
         } catch (_) { }
-
-        setTimeout(() => {
-            __fullScanRenderDescriptionEditor(editor);
-            saveEditorContent();
-        }, 50);
     });
 
-    const saveEditorContent = () => {
-        try { if (typeof save === 'function') save(); } catch (_) { }
-        try { if (undoManager) undoManager.scheduleRecord('save'); } catch (_) { }
-    };
-
-    // =========================================================================
-    // Markdown Editor Logic (Undo/Redo + Syntax Expansion)
-    // =========================================================================
-
-    // —— Undo/Redo Manager ——
-    let undoManager = null;
-    (() => {
-        try {
-            if (!CanvasState.mdUndoStates) {
-                CanvasState.mdUndoStates = new Map();
-            }
-            const idKey = nodeId || (editor.id ? editor.id : 'anonymous-editor-' + Math.random());
-
-            const getNodePath = (root, target) => {
-                if (!root || !target) return null;
-                const path = [];
-                let nodeCur = target;
-                while (nodeCur && nodeCur !== root) {
-                    const parent = nodeCur.parentNode;
-                    if (!parent) return null;
-                    const idx = Array.prototype.indexOf.call(parent.childNodes, nodeCur);
-                    if (idx < 0) return null;
-                    path.unshift(idx);
-                    nodeCur = parent;
-                }
-                return nodeCur === root ? path : null;
-            };
-
-            const resolveNodePath = (root, path) => {
-                if (!root || !Array.isArray(path)) return null;
-                let cur = root;
-                for (const idx of path) {
-                    if (!cur || !cur.childNodes || idx < 0 || idx >= cur.childNodes.length) return null;
-                    cur = cur.childNodes[idx];
-                }
-                return cur;
-            };
-
-            const clampOffset = (nodeForOffset, offset) => {
-                const safe = Math.max(0, Number.isFinite(offset) ? offset : 0);
-                if (!nodeForOffset) return 0;
-                if (nodeForOffset.nodeType === Node.TEXT_NODE) {
-                    const len = (nodeForOffset.textContent || '').length;
-                    return Math.min(safe, len);
-                }
-                if (nodeForOffset.nodeType === Node.ELEMENT_NODE) {
-                    return Math.min(safe, nodeForOffset.childNodes.length);
-                }
-                return 0;
-            };
-
-            const captureSelection = () => {
-                const sel = window.getSelection();
-                if (!sel || !sel.rangeCount) return null;
-                const range = sel.getRangeAt(0);
-                if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
-                const startPath = getNodePath(editor, range.startContainer);
-                const endPath = getNodePath(editor, range.endContainer);
-                if (!startPath || !endPath) return null;
-                return {
-                    startPath,
-                    startOffset: range.startOffset,
-                    endPath,
-                    endOffset: range.endOffset,
-                    collapsed: range.collapsed
-                };
-            };
-
-            const restoreSelection = (selData) => {
-                try {
-                    if (!selData) return;
-                    const startNode = resolveNodePath(editor, selData.startPath) || editor;
-                    const endNode = resolveNodePath(editor, selData.endPath) || startNode;
-                    const range = document.createRange();
-                    range.setStart(startNode, clampOffset(startNode, selData.startOffset));
-                    range.setEnd(endNode, clampOffset(endNode, selData.endOffset));
-                    const sel = window.getSelection();
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                } catch (_) { }
-            };
-
-            const snapshot = () => ({
-                html: editor.innerHTML,
-                selection: captureSelection(),
-                scrollTop: editor.scrollTop || 0,
-                scrollLeft: editor.scrollLeft || 0
-            });
-
-            const isSameSnapshot = (a, b) => {
-                if (!a || !b) return false;
-                return a.html === b.html;
-            };
-
-            const persisted = CanvasState.mdUndoStates.get(idKey) || null;
-            const state = {
-                stack: Array.isArray(persisted && persisted.stack) ? persisted.stack : [],
-                index: Number.isFinite(persisted && persisted.index) ? persisted.index : -1
-            };
-
-            let recordRaf = 0;
-            const MAX_STACK = 300;
-
-            const syncExpandedStateFromSelection = (wasExpanded = false) => {
-                // Similar logic to renderMdNode for re-identifying expanded token
-                if (!wasExpanded) return;
-                const sel = window.getSelection();
-                if (!sel || !sel.rangeCount) return;
-                const range = sel.getRangeAt(0);
-                if (!range || !editor.contains(range.startContainer)) return;
-                const container = range.startContainer;
-                if (!container || container.nodeType !== Node.TEXT_NODE || !container.parentNode) return;
-                expandedElement = null;
-                expandedMarkdown = null;
-                expandedType = null;
-            };
-
-            undoManager = {
-                isRestoring: false,
-                cancelPendingRecord: () => {
-                    if (recordRaf) { cancelAnimationFrame(recordRaf); recordRaf = 0; }
-                },
-                scheduleRecord: (reason = 'unknown') => {
-                    if (undoManager.isRestoring) return;
-                    if (recordRaf) cancelAnimationFrame(recordRaf);
-                    recordRaf = requestAnimationFrame(() => { recordRaf = 0; undoManager.recordNow(reason); });
-                },
-                recordNow: (reason = 'unknown') => {
-                    if (undoManager.isRestoring) return;
-                    const snap = snapshot();
-                    if (state.index < 0) {
-                        state.stack = [snap];
-                        state.index = 0;
-                        CanvasState.mdUndoStates.set(idKey, { stack: state.stack, index: state.index });
-                        return;
-                    }
-                    if (state.index < state.stack.length - 1) {
-                        state.stack = state.stack.slice(0, state.index + 1);
-                    }
-                    const cur = state.stack[state.index];
-                    if (isSameSnapshot(cur, snap)) {
-                        state.stack[state.index] = snap;
-                        CanvasState.mdUndoStates.set(idKey, { stack: state.stack, index: state.index });
-                        return;
-                    }
-                    state.stack.push(snap);
-                    state.index = state.stack.length - 1;
-                    if (state.stack.length > MAX_STACK) {
-                        const overflow = state.stack.length - MAX_STACK;
-                        state.stack.splice(0, overflow);
-                        state.index = Math.max(0, state.index - overflow);
-                    }
-                    CanvasState.mdUndoStates.set(idKey, { stack: state.stack, index: state.index });
-                },
-                reset: () => {
-                    undoManager.cancelPendingRecord();
-                    state.stack = [];
-                    state.index = -1;
-                    if (CanvasState.mdUndoStates) CanvasState.mdUndoStates.delete(idKey);
-                },
-                undo: () => {
-
-                    if (state.index <= 0) return;
-                    undoManager.cancelPendingRecord();
-                    undoManager.isRestoring = true;
-                    try {
-                        state.index -= 1;
-                        const snap = state.stack[state.index];
-                        if (snap) {
-                            editor.innerHTML = snap.html;
-                            expandedElement = null;
-                            expandedMarkdown = null;
-                            expandedType = null;
-                            editor.scrollTop = snap.scrollTop || 0;
-                            editor.scrollLeft = snap.scrollLeft || 0;
-                            restoreSelection(snap.selection);
-                            saveEditorContent(); // Keep data in sync
-                        }
-                    } finally {
-                        undoManager.isRestoring = false;
-                    }
-                },
-                redo: () => {
-                    if (state.index >= state.stack.length - 1) return;
-                    undoManager.cancelPendingRecord();
-                    undoManager.isRestoring = true;
-                    try {
-                        state.index += 1;
-                        const snap = state.stack[state.index];
-                        if (snap) {
-                            editor.innerHTML = snap.html;
-                            expandedElement = null;
-                            expandedMarkdown = null;
-                            expandedType = null;
-                            editor.scrollTop = snap.scrollTop || 0;
-                            editor.scrollLeft = snap.scrollLeft || 0;
-                            restoreSelection(snap.selection);
-                            saveEditorContent();
-                        }
-                    } finally {
-                        undoManager.isRestoring = false;
-                    }
-                }
-            };
-        } catch (e) { console.error('UndoManager init error', e); }
-    })();
-
-    // —— Expand/Collapse Logic ——
-    let expandedElement = null;
-    let expandedMarkdown = null;
-    let expandedType = null;
     let preserveExpandedSourceUntil = 0;
     const markExpandedSourceToolbarInteraction = (durationMs = 1200) => {
         preserveExpandedSourceUntil = Math.max(preserveExpandedSourceUntil, Date.now() + durationMs);
@@ -21464,605 +18520,6 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         const activeEl = document.activeElement;
         return pop.classList.contains('open') || (activeEl && pop.contains(activeEl));
     };
-    const formatMap = {
-        'STRONG': { prefix: '**', suffix: '**' },
-        'B': { prefix: '**', suffix: '**' },
-        'EM': { prefix: '_', suffix: '_' },
-        'I': { prefix: '_', suffix: '_' },
-        'U': { prefix: '', suffix: '' },
-        'DEL': { prefix: '~~', suffix: '~~' },
-        'S': { prefix: '~~', suffix: '~~' },
-        'MARK': { prefix: '==', suffix: '==' },
-        'CODE': { prefix: '`', suffix: '`' },
-    };
-
-    const isCaretInsideExpandedSource = () => {
-        if (!expandedElement || !expandedElement.parentNode) return false;
-        const sel = window.getSelection();
-        if (!sel || !sel.rangeCount) return false;
-        const range = sel.getRangeAt(0);
-        if (!range) return false;
-        // 检查光标是否在展开的元素内（包括直接在文本节点内，或在其子节点内）
-        return range.startContainer === expandedElement ||
-            (expandedElement.nodeType === Node.TEXT_NODE && range.startContainer === expandedElement) ||
-            (expandedElement.contains && expandedElement.contains(range.startContainer));
-    };
-
-    const checkAndExpandIfCaretEntered = () => {
-        // If currently expanded, let the 'leave' logic handle it
-        if (expandedElement && expandedElement.parentNode) return;
-
-        const sel = window.getSelection();
-        if (!sel || !sel.rangeCount) return;
-
-        let node = sel.anchorNode;
-        if (!node) return;
-
-        // Ensure we are inside this editor
-        if (!editor.contains(node)) return;
-
-        // Find closest formatted element
-        if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
-
-        // Only auto-expand inline-like formats here; block elements are handled by click rules.
-        const formatted = node.closest('strong, b, em, i, u, del, s, mark, code, a, font, span[style], center, p[align], h1, h2, h3, h4, h5, h6, hr');
-        if (formatted && editor.contains(formatted)) {
-            // Expand it!
-            expandToMarkdown(formatted);
-        }
-    };
-
-    const scheduleReRenderIfCaretLeftExpanded = (() => {
-        let rafId = 0;
-        return () => {
-            if (!expandedElement || !expandedElement.parentNode) return;
-            if (isFontColorPopoverActive()) return;
-            if (rafId) cancelAnimationFrame(rafId);
-            rafId = requestAnimationFrame(() => {
-                rafId = 0;
-                if (isFontColorPopoverActive()) return;
-                if (expandedElement && expandedElement.parentNode && !isCaretInsideExpandedSource()) {
-                    reRenderExpanded();
-                }
-            });
-        };
-    })();
-
-    const reRenderExpanded = () => {
-        const el = expandedElement;
-        if (!el || !el.parentNode) {
-            expandedElement = null; expandedMarkdown = null; expandedType = null;
-            return;
-        }
-
-        const normalizeExternalHref = (href) => {
-            const h = String(href || '').trim();
-            if (!h) return '';
-            if (h.startsWith('#')) return h;
-            if (/^www\./i.test(h)) return `http://${h}`;
-            if (h.startsWith('//')) return `https:${h}`;
-            return h;
-        };
-
-        const sanitizeLinkHref = (href) => {
-            const normalized = normalizeExternalHref(href);
-            if (!normalized) return null;
-            try {
-                if (typeof ObsidianMarkdown !== 'undefined' && typeof ObsidianMarkdown.sanitizeHref === 'function') {
-                    return ObsidianMarkdown.sanitizeHref(normalized);
-                }
-            } catch (_) { }
-            if (normalized.startsWith('#')) return normalized;
-            try {
-                const u = new URL(normalized, 'https://dummy.local');
-                const ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:' || u.protocol === 'obsidian:';
-                return ok ? normalized : null;
-            } catch (_) {
-                return null;
-            }
-        };
-
-        // 辅助函数：将内联 Markdown 语法转换为 HTML
-        const parseInlineMarkdown = (text) => {
-            if (!text) return text;
-            const safe = String(text)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-            return safe
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                .replace(/_(.+?)_/g, '<em>$1</em>')
-                .replace(/~~(.+?)~~/g, '<del>$1</del>')
-                .replace(/==(.+?)==/g, '<mark>$1</mark>')
-                .replace(/`([^`]+)`/g, '<code>$1</code>');
-        };
-
-        const rawText = el.textContent || '';
-        const text = rawText.replace(/\u200B/g, '').trim(); // 用于模式匹配的清理后文本
-        const parent = el.parentNode;
-        const savedType = expandedType;
-
-        expandedElement = null;
-        expandedMarkdown = null;
-        expandedType = null;
-
-        // 只有当原始文本完全为空或只有零宽空格时才删除元素
-        if (!rawText.replace(/\u200B/g, '').trim()) {
-            try { el.remove(); } catch (_) { }
-            return;
-        }
-
-        if (savedType === 'html-tool' || __isCanvasHtmlToolSource(text)) {
-            if (__replaceTextNodeWithCanvasHtmlToolSource(el, text)) {
-                saveEditorContent();
-                return;
-            }
-        }
-
-        // Link: [text](URL) 还原回 <a>
-        if (savedType === 'link') {
-            const m = text.match(/^\[([^\]]+?)\]\(([^)]+?)\)$/);
-            if (m) {
-                const label = m[1];
-                const hrefRaw = m[2];
-                const safeHref = sanitizeLinkHref(hrefRaw);
-                if (safeHref) {
-                    const a = document.createElement('a');
-                    a.setAttribute('href', safeHref);
-                    a.setAttribute('target', '_blank');
-                    a.setAttribute('rel', 'noopener noreferrer');
-                    const parsed = parseInlineMarkdown(label);
-                    if (/<[^>]+>/.test(parsed)) a.innerHTML = parsed;
-                    else a.textContent = label;
-                    parent.replaceChild(a, el);
-                    saveEditorContent();
-                    return;
-                }
-            }
-        }
-
-        // 列表项：LI 级别的源码 → 还原回 <li>
-        if (savedType === 'li-ul' || savedType === 'li-ol') {
-            const parentTag = parent && parent.nodeType === Node.ELEMENT_NODE ? parent.tagName : null;
-            const expectedParent = savedType === 'li-ul' ? 'UL' : 'OL';
-            if (parent && parentTag === expectedParent) {
-                const raw = text;
-                let itemText = raw;
-                if (savedType === 'li-ul') {
-                    const m = raw.match(/^[-*+]\s+(.*)$/);
-                    itemText = m ? m[1] : raw;
-                } else {
-                    const m = raw.match(/^\d+\.\s+(.*)$/);
-                    itemText = m ? m[1] : raw;
-                }
-                const li = document.createElement('li');
-                // 先解析 Markdown 再检查 HTML 标签
-                const parsed = parseInlineMarkdown(itemText);
-                if (/<[^>]+>/.test(parsed)) {
-                    li.innerHTML = parsed;
-                } else {
-                    li.textContent = itemText;
-                }
-                parent.replaceChild(li, el);
-                saveEditorContent();
-                return;
-            }
-        }
-
-        let newNode = null;
-
-        // 内联格式模式
-        const inlinePatterns = [
-            { regex: /^\*\*(.+?)\*\*$/, tag: 'strong', contentIndex: 1 },
-            { regex: /^_(.+?)_$/, tag: 'em', contentIndex: 1 },
-            { regex: /^\*(.+?)\*$/, tag: 'em', contentIndex: 1 },
-            { regex: /^~~(.+?)~~$/, tag: 'del', contentIndex: 1 },
-            { regex: /^==(.+?)==$/, tag: 'mark', contentIndex: 1 },
-            { regex: /^`([^`]+)`$/, tag: 'code', contentIndex: 1 }
-        ];
-
-        // 块级格式模式（ATX 标题、引用、列表、水平分割线等）
-        const blockPatterns = [
-            { regex: /^######\s(.+)$/, type: 'h6', contentIndex: 1 },
-            { regex: /^#####\s(.+)$/, type: 'h5', contentIndex: 1 },
-            { regex: /^####\s(.+)$/, type: 'h4', contentIndex: 1 },
-            { regex: /^###\s(.+)$/, type: 'h3', contentIndex: 1 },
-            { regex: /^##\s(.+)$/, type: 'h2', contentIndex: 1 },
-            { regex: /^#\s(.+)$/, type: 'h1', contentIndex: 1 },
-            { regex: /^>\s*(.*)$/, type: 'blockquote', contentIndex: 1 },
-            { regex: /^-\s+\[\s*\]\s*(.*)$/, type: 'task-unchecked', contentIndex: 1 },
-            { regex: /^-\s+\[x\]\s*(.*)$/i, type: 'task-checked', contentIndex: 1 },
-            { regex: /^-\s+(.+)$/, type: 'ul', contentIndex: 1 },
-            { regex: /^(\d+)\.\s+(.+)$/, type: 'ol', contentIndex: 2 },
-            // { regex: /^[\u200B]*-{3,}\s*$/, type: 'hr' }
-        ];
-
-        // 辅助函数：安全地设置元素内容（解析 Markdown 后用 innerHTML）
-        const setElementContent = (element, content) => {
-            if (__looksLikeHtmlTagContent(content)) {
-                const rendered = __renderCanvasMixedInlineMarkdownHtml(content);
-                if (rendered) {
-                    element.innerHTML = rendered;
-                    return;
-                }
-            }
-            const parsed = parseInlineMarkdown(content);
-            if (/<[^>]+>/.test(parsed)) {
-                element.innerHTML = parsed;
-            } else {
-                element.textContent = content;
-            }
-        };
-
-        // 先检查内联格式
-        for (const p of inlinePatterns) {
-            const m = text.match(p.regex);
-            if (m) {
-                const newEl = document.createElement(p.tag);
-                if (p.attrName) newEl.setAttribute(p.attrName, m[p.attrIndex]);
-                // 使用 setElementContent 以保留可能的内部 HTML
-                setElementContent(newEl, m[p.contentIndex]);
-                newNode = newEl;
-                break;
-            }
-        }
-
-        // 如果没有匹配内联格式，检查块级格式
-        if (!newNode) {
-
-            for (const pattern of blockPatterns) {
-                const match = text.match(pattern.regex);
-                if (match) {
-                    if (pattern.type === 'hr') {
-                        newNode = document.createElement('hr');
-                    } else if (pattern.type === 'h1' || pattern.type === 'h2' || pattern.type === 'h3' ||
-                        pattern.type === 'h4' || pattern.type === 'h5' || pattern.type === 'h6') {
-                        newNode = document.createElement(pattern.type);
-                        setElementContent(newNode, match[pattern.contentIndex] || '');
-                    } else if (pattern.type === 'blockquote') {
-                        newNode = document.createElement('blockquote');
-                        setElementContent(newNode, match[pattern.contentIndex] || '');
-                    } else if (pattern.type === 'ul') {
-                        const ul = document.createElement('ul');
-                        const li = document.createElement('li');
-                        setElementContent(li, match[pattern.contentIndex] || '');
-                        ul.appendChild(li);
-                        newNode = ul;
-                    } else if (pattern.type === 'ol') {
-                        const ol = document.createElement('ol');
-                        const li = document.createElement('li');
-                        setElementContent(li, match[pattern.contentIndex] || '');
-                        ol.appendChild(li);
-                        newNode = ol;
-                    } else if (pattern.type === 'task-unchecked' || pattern.type === 'task-checked') {
-                        const div = document.createElement('div');
-                        div.className = 'md-task-item';
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.name = 'markdown-task-checkbox';
-                        checkbox.className = 'md-task-checkbox';
-                        if (pattern.type === 'task-checked') checkbox.checked = true;
-                        div.appendChild(checkbox);
-                        // 任务列表项内容可能包含 HTML
-                        const contentSpan = document.createElement('span');
-                        setElementContent(contentSpan, ' ' + (match[pattern.contentIndex] || ''));
-                        div.appendChild(contentSpan);
-                        newNode = div;
-                    }
-                    break;
-                }
-            }
-        }
-
-        if (newNode) {
-            parent.replaceChild(newNode, el);
-            saveEditorContent();
-        } else {
-            // 如果没有匹配任何模式，创建一个普通的文本节点或 span 保留内容
-            // 不删除，保留原样
-            saveEditorContent();
-        }
-    };
-
-    // Since we don't have the full `expandToMarkdown` implementation here (it's 200 lines),
-    // we will implement a simplified version for common formats logic used in Blank Column.
-
-    // 获取特殊格式元素的源码表示（与空白栏目 getSourceCode 功能一致）
-    const getSourceCode = (el) => {
-        const tagName = el.tagName;
-        const content = String(el.textContent || '');
-        const htmlContent = String(el.innerHTML || '');
-        const getInlineSource = (rawHtml, fallbackText = '') => {
-            const markdownLike = __htmlToMarkdown(String(rawHtml || ''), {
-                trimResult: false,
-                compactNewlines: false,
-                paragraphBreaks: false,
-                hardLineBreaks: true
-            });
-            return __normalizeCanvasMarkdownSource(
-                __repairLegacyCanvasMarkdownSource(
-                    String(markdownLike || fallbackText || '')
-                )
-            );
-        };
-        const inlineContent = getInlineSource(htmlContent, content);
-
-        const htmlToolSource = __expandCanvasHtmlToolElementToSource(el);
-        if (htmlToolSource) return htmlToolSource;
-
-        // hr: --- 水平分割线
-        if (tagName === 'HR') {
-            return {
-                source: '---',
-                prefix: '',
-                suffix: '',
-                type: 'hr'
-            };
-        }
-
-        // blockquote: > text （保留内部 HTML）
-        if (tagName === 'BLOCKQUOTE') {
-            const quoteContent = getInlineSource(el.innerHTML, el.textContent).trim();
-            return {
-                source: `> ${quoteContent}`,
-                prefix: '> ',
-                suffix: '',
-                type: 'quote'
-            };
-        }
-
-        // li: - item / 1. item （保留内部 HTML）
-        if (tagName === 'LI') {
-            const parent = el.parentElement;
-            const itemSource = getInlineSource(el.innerHTML, el.textContent).trim();
-            if (parent && parent.tagName === 'UL') {
-                return {
-                    source: `- ${itemSource}`,
-                    prefix: '- ',
-                    suffix: '',
-                    type: 'li-ul'
-                };
-            }
-            if (parent && parent.tagName === 'OL') {
-                const siblings = Array.from(parent.children).filter(child => child && child.tagName === 'LI');
-                const idx = siblings.indexOf(el) + 1;
-                const n = idx > 0 ? idx : 1;
-                return {
-                    source: `${n}. ${itemSource}`,
-                    prefix: `${n}. `,
-                    suffix: '',
-                    type: 'li-ol'
-                };
-            }
-        }
-
-        // ul: - item （保留内部 HTML）
-        if (tagName === 'UL') {
-            const items = Array.from(el.querySelectorAll('li'))
-                .map(li => `- ${getInlineSource(li.innerHTML, li.textContent).trim()}`)
-                .join('\n');
-            return {
-                source: items,
-                prefix: '- ',
-                suffix: '',
-                type: 'ul'
-            };
-        }
-
-        // ol: 1. item （保留内部 HTML）
-        if (tagName === 'OL') {
-            const items = Array.from(el.querySelectorAll('li'))
-                .map((li, i) => `${i + 1}. ${getInlineSource(li.innerHTML, li.textContent).trim()}`)
-                .join('\n');
-            return {
-                source: items,
-                prefix: '1. ',
-                suffix: '',
-                type: 'ol'
-            };
-        }
-
-        // task: - [ ] text 或 - [x] text （保留内部 HTML）
-        if (el.classList && el.classList.contains('md-task-item')) {
-            const checkbox = el.querySelector('input[type="checkbox"]');
-            const checked = checkbox && checkbox.checked;
-            // 获取除 checkbox 以外的内容
-            const clone = el.cloneNode(true);
-            const cb = clone.querySelector('input[type="checkbox"]');
-            if (cb) cb.remove();
-            const taskSource = getInlineSource(clone.innerHTML, clone.textContent).trim();
-            return {
-                source: checked ? `- [x] ${taskSource}` : `- [ ] ${taskSource}`,
-                prefix: checked ? '- [x] ' : '- [ ] ',
-                suffix: '',
-                type: 'task'
-            };
-        }
-
-        // external link: [text](URL)
-        if (tagName === 'A') {
-            const href = String(el.getAttribute('href') || '').trim();
-            if (!href) return null;
-            const labelRaw = String(el.textContent || href);
-            const label = labelRaw.replace(/]/g, '\\]');
-            return {
-                source: `[${label}](${href})`,
-                prefix: '[',
-                suffix: `](${href})`,
-                type: 'link'
-            };
-        }
-
-        // 标题: H1-H6 （保留内部 HTML）
-        if (tagName === 'H1') {
-            return { source: `# ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '# ', suffix: '', type: 'heading' };
-        }
-        if (tagName === 'H2') {
-            return { source: `## ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '## ', suffix: '', type: 'heading' };
-        }
-        if (tagName === 'H3') {
-            return { source: `### ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '### ', suffix: '', type: 'heading' };
-        }
-        if (tagName === 'H4') {
-            return { source: `#### ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '#### ', suffix: '', type: 'heading' };
-        }
-        if (tagName === 'H5') {
-            return { source: `##### ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '##### ', suffix: '', type: 'heading' };
-        }
-        if (tagName === 'H6') {
-            return { source: `###### ${getInlineSource(el.innerHTML, el.textContent).trim()}`, prefix: '###### ', suffix: '', type: 'heading' };
-        }
-
-
-        return null;
-    };
-
-    const expandToMarkdown = (formattedEl) => {
-        const tagName = formattedEl.tagName;
-
-        // 先尝试处理特殊格式（headings, lists, quotes, hr 等）
-        const specialFormat = getSourceCode(formattedEl);
-        if (specialFormat) {
-            const parent = formattedEl.parentNode;
-            const textNode = document.createTextNode(specialFormat.source);
-            parent.replaceChild(textNode, formattedEl);
-
-            expandedElement = textNode;
-            expandedMarkdown = specialFormat.source;
-            expandedType = specialFormat.type;
-
-            // Place cursor
-            const sel = window.getSelection();
-            const range = document.createRange();
-            const contentLen = formattedEl.textContent ? formattedEl.textContent.length : 0;
-            let cursorPos = specialFormat.prefix.length + Math.floor(contentLen / 2);
-            cursorPos = Math.max(0, Math.min(cursorPos, specialFormat.source.length));
-            range.setStart(textNode, Math.min(cursorPos, textNode.length));
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            return true;
-        }
-
-        // 处理简单格式（粗体、斜体等，在 formatMap 中定义）
-        const format = formatMap[tagName];
-        if (format) {
-            // 不直接拼 innerHTML，避免把 <em>/<strong> 等标签源码写回 markdown。
-            const inlineSource = __normalizeCanvasMarkdownSource(
-                __repairLegacyCanvasMarkdownSource(
-                    __htmlToMarkdown(String(formattedEl.innerHTML || ''), {
-                        trimResult: false,
-                        compactNewlines: false,
-                        paragraphBreaks: false,
-                        hardLineBreaks: true
-                    })
-                )
-            );
-            const markdownBody = String(
-                inlineSource || formattedEl.textContent || ''
-            ).replace(/\u00A0/g, ' ');
-            const markdown = format.prefix + markdownBody + format.suffix;
-            const textNode = document.createTextNode(markdown);
-            formattedEl.parentNode.replaceChild(textNode, formattedEl);
-            expandedElement = textNode;
-            expandedMarkdown = markdown;
-            expandedType = 'simple';
-
-            // Place cursor
-            const sel = window.getSelection();
-            const range = document.createRange();
-            const plainTextLen = formattedEl.textContent ? formattedEl.textContent.length : 0;
-            const cursorPos = format.prefix.length + Math.floor(plainTextLen / 2);
-            range.setStart(textNode, Math.max(0, Math.min(cursorPos, textNode.length)));
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            return true;
-        }
-
-        return false;
-    };
-
-    // Attach Listeners
-    editor.addEventListener('keydown', (e) => {
-        if (e.metaKey || e.ctrlKey) {
-            if (e.key === 'z' || e.key === 'Z') {
-                e.preventDefault();
-                e.shiftKey ? (undoManager && undoManager.redo()) : (undoManager && undoManager.undo());
-            } else if (e.key === 'y') {
-                e.preventDefault();
-                undoManager && undoManager.redo();
-            }
-        }
-    });
-
-    // Expand on click
-    editor.addEventListener('click', (e) => {
-        if (!e.target) return;
-        if (__handleHeadingCollapseClick(editor, e)) {
-            saveEditorContent();
-            return;
-        }
-        if (typeof isEditing === 'function' && !isEditing()) return;
-
-        let target = e.target;
-
-        // If clicked inside editor but not on text directly
-        if (target !== editor && editor.contains(target)) {
-            // Find closest formatted element (including block-level elements)
-            const formatted = target.closest('strong, b, em, i, u, del, s, mark, code, a, font, span[style], center, p[align], blockquote, h1, h2, h3, h4, h5, h6, hr, li, .md-task-item');
-
-            if (formatted && editor.contains(formatted)) {
-                const isBlockRestricted = formatted.tagName === 'LI' || formatted.tagName === 'BLOCKQUOTE';
-                if (isBlockRestricted) {
-                    if (target !== formatted) return;
-                    const rect = formatted.getBoundingClientRect();
-                    const clickX = e.clientX - rect.left;
-                    const style = window.getComputedStyle(formatted);
-                    const paddingLeft = parseFloat(style.paddingLeft);
-                    const threshold = paddingLeft > 10 ? paddingLeft : 25;
-                    if (clickX > threshold) return;
-                }
-                // 如果已经有展开的元素，先重渲染
-                if (expandedElement && expandedElement.parentNode) {
-                    reRenderExpanded();
-                }
-                // 展开新元素
-                if (expandToMarkdown(formatted)) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-            }
-        }
-    });
-
-    // Collapse on leave / Expand on enter
-    // 监听选区变化，当光标离开展开的源码时重渲染
-    document.addEventListener('selectionchange', () => {
-        // 首先，始终检查是否需要重渲染（即使选区不在编辑器内）
-        scheduleReRenderIfCaretLeftExpanded();
-
-        // 然后，只有选区在编辑器内时才检查是否需要展开
-        const sel = window.getSelection();
-        if (!sel || !sel.rangeCount) return;
-        const range = sel.getRangeAt(0);
-        if (!editor.contains(range.startContainer)) return;
-
-        // 自动展开检查
-        checkAndExpandIfCaretEntered();
-    });
-
-    editor.addEventListener('blur', () => {
-        if (expandedElement && !isFontColorPopoverActive()) reRenderExpanded();
-    });
-
-    // 鼠标抬起时也检查是否需要重渲染
-    editor.addEventListener('mouseup', () => {
-        scheduleReRenderIfCaretLeftExpanded();
-    });
 
     // 创建格式工具栏弹层（单行布局）
     const createFormatPopover = () => {
@@ -22114,6 +18571,13 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         toolbar.appendChild(pop);
         preventCanvasEventsPropagation(pop);
+        pop.addEventListener('mousedown', (e) => {
+            markExpandedSourceToolbarInteraction();
+            const isTextInput = e.target && e.target.matches && e.target.matches('input[type="text"], input[type="number"]');
+            if (!isTextInput) {
+                e.preventDefault();
+            }
+        }, true);
         try {
             pop.__fontColorLifecycleObserver = new MutationObserver(() => {
                 if (!pop.classList.contains('open')) closeFontColorPopover();
@@ -22139,10 +18603,20 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         const btnRect = btn.getBoundingClientRect();
         const formatRect = formatPop.getBoundingClientRect();
         const btnCenterX = btnRect.left + btnRect.width / 2 - formatRect.left;
-        pop.style.top = '-4px';
-        pop.style.bottom = 'auto';
-        pop.style.left = btnCenterX + 'px';
-        pop.style.transform = 'translateX(-50%) translateY(-100%)';
+        const popRect = pop.getBoundingClientRect ? pop.getBoundingClientRect() : null;
+        const popHeight = (popRect && popRect.height) || 40;
+        const flipBelow = (formatRect.top - popHeight - 6) < 10;
+        if (flipBelow) {
+            pop.style.top = 'calc(100% + 4px)';
+            pop.style.bottom = 'auto';
+            pop.style.left = btnCenterX + 'px';
+            pop.style.transform = 'translateX(-50%) translateY(0)';
+        } else {
+            pop.style.top = '-4px';
+            pop.style.bottom = 'auto';
+            pop.style.left = btnCenterX + 'px';
+            pop.style.transform = 'translateX(-50%) translateY(-100%)';
+        }
     };
 
     const HTML_TOOL_COLORS = ['#888888', '#66bbff', '#fb464c', '#e9973f', '#e0de71', '#44cf6e', '#53dfdd', '#a882ff'];
@@ -22173,31 +18647,6 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         const lang = getLang();
         const selected = range.toString();
         wrapper.textContent = selected || (lang === 'en' ? 'text' : '文本');
-        if (
-            expandedElement &&
-            expandedElement.parentNode &&
-            range.startContainer === expandedElement &&
-            range.endContainer === expandedElement
-        ) {
-            const sourceText = String(wrapper.outerHTML || '');
-            if (!sourceText) return false;
-            const original = String(expandedElement.textContent || '');
-            const start = Math.max(0, Math.min(range.startOffset, original.length));
-            const end = Math.max(start, Math.min(range.endOffset, original.length));
-            expandedElement.textContent = original.slice(0, start) + sourceText + original.slice(end);
-            const nextOffset = start + sourceText.length;
-            range.setStart(expandedElement, nextOffset);
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-            savedSelection = {
-                range: range.cloneRange(),
-                text: ''
-            };
-            saveEditorContent();
-            editor.focus();
-            return true;
-        }
         savedSelection = null;
         range.deleteContents();
         range.insertNode(wrapper);
@@ -22241,10 +18690,16 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         pop.className = 'md-fontcolor-popover md-color-popover';
         pop.dataset.ownerToolbar = ownerId;
         preventCanvasEventsPropagation(pop);
+        const defaultTitle = getLang() === 'en' ? 'Default font color (Remove color)' : '默认字体颜色（清除颜色）';
         const rgbPickerTitle = getLang() === 'en' ? 'RGB Color Picker' : 'RGB颜色选择器';
         const recentTitle = getLang() === 'en' ? 'Previous color' : '上一次颜色';
         const gradientId = `rainbow-gradient-font-${ownerId.replace(/[^a-z0-9_-]/gi, '-')}`;
-        pop.innerHTML = HTML_TOOL_COLORS.map(color =>
+        pop.innerHTML = `
+            <button class="md-color-chip md-color-chip-default" data-action="md-fontcolor-apply" data-color="default" title="${defaultTitle}">
+                <i class="fas fa-ban"></i>
+            </button>
+            <span class="md-color-divider" aria-hidden="true"></span>
+        ` + HTML_TOOL_COLORS.map(color =>
             `<span class="md-color-chip" data-action="md-fontcolor-apply" data-color="${color}" style="background:${color}" title="${color}"></span>`
         ).join('') + `
             <span class="md-color-divider" aria-hidden="true"></span>
@@ -22353,8 +18808,40 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     };
 
     const insertFontColor = (color) => {
+        if (!color || color === 'default' || color === 'reset') {
+            const inst = tiptapInstance || (editor && editor.__tiptapInstance);
+            if (inst) {
+                inst.unsetColor();
+                const fontColorBtn = toolbar.querySelector('[data-action="md-fontcolor-toggle"] span');
+                if (fontColorBtn) fontColorBtn.style.borderBottomColor = 'currentColor';
+                saveEditorContent();
+                return;
+            }
+            return;
+        }
         const safeColor = String(color || '').trim();
         if (!safeColor) return;
+        if (tiptapInstance || (editor && editor.__tiptapInstance)) {
+            const inst = tiptapInstance || editor.__tiptapInstance;
+            inst.setColor(safeColor);
+            const previous = editor.__htmlToolFontColor || '#2DC26B';
+            editor.__htmlToolFontColor = safeColor;
+            if (previous && previous !== safeColor) editor.__htmlToolPrevFontColor = previous;
+            const fontColorBtn = toolbar.querySelector('[data-action="md-fontcolor-toggle"] span');
+            if (fontColorBtn) fontColorBtn.style.borderBottomColor = safeColor;
+            const ownerId = String(nodeId || editor.id || 'description-editor');
+            const pop = (typeof CSS !== 'undefined' && CSS.escape)
+                ? document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(ownerId)}"]`)
+                : null;
+            const recentChip = pop ? pop.querySelector('.md-fontcolor-recent-chip') : null;
+            if (recentChip) {
+                const recent = editor.__htmlToolPrevFontColor || '#2DC26B';
+                recentChip.dataset.color = recent;
+                recentChip.style.backgroundColor = recent;
+            }
+            saveEditorContent();
+            return;
+        }
         const wrapper = document.createElement('font');
         wrapper.setAttribute('color', safeColor);
         if (insertHtmlToolElement(wrapper)) {
@@ -22425,6 +18912,11 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
     const insertAlign = (alignType) => {
         const safeAlign = /^(left|center|right|justify)$/.test(String(alignType || '')) ? String(alignType) : 'left';
+        if (editor.__tiptapInstance) {
+            editor.__tiptapInstance.setTextAlign(safeAlign);
+            saveEditorContent();
+            return;
+        }
         const wrapper = safeAlign === 'center' ? document.createElement('center') : document.createElement('p');
         if (safeAlign !== 'center') wrapper.setAttribute('align', safeAlign);
         insertHtmlToolElement(wrapper);
@@ -22582,7 +19074,10 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
                 if (popoverAnchor) {
                     const targetX = anchorRect.left + anchorRect.width / 2;
-                    const targetY = anchorRect.top;
+                    const popHeight = pop.offsetHeight || 38;
+                    const canFitAbove = (anchorRect.top - popHeight - 8) >= 10;
+                    const shouldFlipDown = isMaximized || !canFitAbove;
+                    const targetY = shouldFlipDown ? anchorRect.bottom : anchorRect.top;
                     const scaleX = toolbar.offsetWidth ? (toolbarRect.width / toolbar.offsetWidth) : 1;
                     const scaleY = toolbar.offsetHeight ? (toolbarRect.height / toolbar.offsetHeight) : 1;
                     const relX = (targetX - toolbarRect.left) / (scaleX || 1);
@@ -22593,7 +19088,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                     pop.style.bottom = 'auto';
                     pop.style.zIndex = '2147483647';
                     pop.style.pointerEvents = 'auto';
-                    pop.style.transform = 'translate(-50%, calc(-100% - 2px))';
+                    pop.style.transform = shouldFlipDown ? 'translate(-50%, 6px)' : 'translate(-50%, calc(-100% - 2px))';
                 } else {
                     // 目标位置：Editor 右上角 (实现右对齐)
                     // 绝对坐标 (Viewport based)
@@ -22636,6 +19131,27 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     };
 
     const doInsert = (formatType) => {
+        if (tiptapInstance || (editor && editor.__tiptapInstance)) {
+            const inst = tiptapInstance || editor.__tiptapInstance;
+            switch (formatType) {
+                case 'bold': inst.toggleBold(); break;
+                case 'italic': inst.toggleItalic(); break;
+                case 'underline': inst.toggleUnderline(); break;
+                case 'highlight': inst.toggleHighlight(); break;
+                case 'strike': inst.toggleStrike(); break;
+                case 'code': inst.toggleCode(); break;
+                case 'quote': inst.toggleBlockquote(); break;
+                case 'h1': inst.toggleHeading(1); break;
+                case 'h2': inst.toggleHeading(2); break;
+                case 'h3': inst.toggleHeading(3); break;
+                case 'ul': inst.toggleBulletList(); break;
+                case 'ol': inst.toggleOrderedList(); break;
+                case 'task': inst.toggleTaskList(); break;
+                default: break;
+            }
+            saveEditorContent();
+            return;
+        }
         const sel = window.getSelection();
         if (!sel.rangeCount) {
             editor.focus();
@@ -22777,9 +19293,9 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     };
 
     toolbar.addEventListener('mousedown', (e) => {
-        // Prevent editor blur when clicking toolbar buttons (keep editing state)
-        const actionEl = e.target.closest('button, [data-action], .md-color-chip');
-        if (actionEl && toolbar.contains(actionEl)) {
+        // Prevent editor blur when clicking toolbar buttons (keep editing state & preserve selection)
+        const isTextInput = e.target && e.target.matches && e.target.matches('input[type="text"], input[type="number"]');
+        if (!isTextInput) {
             markExpandedSourceToolbarInteraction();
             e.preventDefault();
         }
@@ -22863,62 +19379,9 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         }
     });
 
-    // 实时渲染：监听输入事件（带防抖）
-    let renderDebounceTimer = null;
-    const RENDER_DEBOUNCE_DELAY = 250;
-    const liveRender = () => {
-        if (!__CANVAS_ENABLE_EDITOR_LIVE_DOM_REWRITE) {
-            saveEditorContent();
-            return false;
-        }
-        let changed = false;
-        for (let i = 0; i < 20; i++) {
-            if (!__tryConvertInlinePatternsInTextNode(editor)) break;
-            changed = true;
-        }
-        for (let i = 0; i < 10; i++) {
-            if (!__tryConvertBlockPatternsAtCaret(editor)) break;
-            changed = true;
-        }
-        try { __applyHeadingCollapse(editor); } catch (_) { }
+    editor.addEventListener('input', () => {
         saveEditorContent();
-        return changed;
-    };
-
-    editor.addEventListener('input', (e) => {
-        if (typeof isEditing === 'function' && !isEditing()) return;
-        if (e && e.isComposing) return;
-        if (renderDebounceTimer) clearTimeout(renderDebounceTimer);
-
-        const inputType = (e && typeof e.inputType === 'string') ? e.inputType : '';
-        const data = (e && typeof e.data === 'string') ? e.data : '';
-        const shouldRenderImmediately = (
-            inputType === 'insertFromPaste' ||
-            inputType === 'insertFromDrop' ||
-            /[*~=`=<>/\\\]\-#>]/.test(data)
-        );
-        if (shouldRenderImmediately) {
-            // 如果是粘贴或拖放，进行全量扫描以确保所有内容（包括多行）都被渲染
-            if (inputType === 'insertFromPaste' || inputType === 'insertFromDrop') {
-                try { __fullScanRenderDescriptionEditor(editor); } catch (_) { }
-            }
-            liveRender();
-            renderDebounceTimer = null;
-            return;
-        }
-
-        renderDebounceTimer = setTimeout(() => {
-            liveRender();
-            renderDebounceTimer = null;
-        }, RENDER_DEBOUNCE_DELAY);
     });
-
-    editor.addEventListener('compositionend', () => {
-        if (typeof isEditing === 'function' && !isEditing()) return;
-        try { liveRender(); } catch (_) { }
-    });
-
-
 
     editor.addEventListener('click', (e) => {
         const target = e.target;
@@ -22931,18 +19394,16 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
     return {
         closeAllPopovers,
+        mountTiptap,
+        flushTiptap,
+        cancelTiptap,
+        isTiptapActive: () => !!(tiptapInstance || (editor && editor.__tiptapInstance)),
         flush: () => {
-            try { reRenderExpanded(); } catch (_) { }
-            try { __finalizeInlinePatternsInEditor(editor); } catch (_) { }
+            saveEditorContent();
         },
-        recordSnapshot: () => {
-            if (undoManager) undoManager.recordNow('manual');
-        },
-        clearUndoHistory: () => {
-            if (undoManager && typeof undoManager.reset === 'function') {
-                undoManager.reset();
-            }
-        }
+        recordSnapshot: () => {},
+        clearUndoHistory: () => {},
+        isFontColorPopoverActive
     };
 }
 
@@ -23635,7 +20096,6 @@ function __renderTempNodeImpl(section, options = {}) {
 
     const descriptionText = document.createElement('div');
     descriptionText.className = 'temp-node-description md-wysiwyg-editor';
-    descriptionText.style.cursor = 'pointer';
     descriptionText.contentEditable = 'false';
     descriptionText.spellcheck = false;
 
@@ -23726,7 +20186,7 @@ function __renderTempNodeImpl(section, options = {}) {
     descriptionText.addEventListener('dblclick', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        enterEditingDescription();
+        enterEditingDescription(e);
     });
 
     // 单击选中说明区；若已选中，再次单击进入编辑
@@ -23738,7 +20198,7 @@ function __renderTempNodeImpl(section, options = {}) {
         e.stopPropagation();
         if (alreadySelected) {
             e.preventDefault();
-            enterEditingDescription();
+            enterEditingDescription(e);
             return;
         }
         __selectCanvasDescriptionContainer(descriptionContainer);
@@ -23810,20 +20270,30 @@ function __renderTempNodeImpl(section, options = {}) {
     };
 
     const syncDescDraft = ({ normalizeEditorHtml = false } = {}) => {
+        if (descriptionText.__tiptapInstance) {
+            const tiptapMd = descriptionText.__tiptapInstance.getMarkdown();
+            const cleanSource = __normalizeCanvasMarkdownSource(tiptapMd);
+            const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
+            section.descriptionMd = cleanSource;
+            section.description = renderedHtml;
+            updateDescMeta();
+            return cleanSource;
+        }
         const normalizedHtml = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(descriptionText));
         const normalizedSource = __resolveMarkdownSourceFromEditorHtml(
             normalizedHtml,
             section.descriptionMd,
             { sourceMode: 'description' }
         );
-        const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(normalizedSource));
-        section.descriptionMd = normalizedSource;
+        const cleanSource = __normalizeCanvasMarkdownSource(normalizedSource);
+        const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
+        section.descriptionMd = cleanSource;
         section.description = renderedHtml;
         if (normalizeEditorHtml) {
             descriptionText.innerHTML = renderedHtml;
         }
         updateDescMeta();
-        return normalizedSource;
+        return cleanSource;
     };
 
     const persistDesc = ({ normalizeEditorHtml = false } = {}) => {
@@ -23840,19 +20310,49 @@ function __renderTempNodeImpl(section, options = {}) {
         const heightPopover = document.getElementById(DESC_HEIGHT_SETTINGS_POPOVER_ID);
         if (heightPopover && typeof heightPopover.__cleanup === 'function') heightPopover.__cleanup();
 
+        const savedScrollTop = descriptionText.scrollTop;
+        const savedScrollLeft = descriptionText.scrollLeft;
+
         if (commit) {
-            try {
-                if (descEditorApi && typeof descEditorApi.flush === 'function') descEditorApi.flush();
-            } catch (_) { }
-            persistDesc({ normalizeEditorHtml: true });
+            if (descEditorApi && typeof descEditorApi.flushTiptap === 'function' && descEditorApi.isTiptapActive()) {
+                const res = descEditorApi.flushTiptap();
+                if (res) {
+                    const cleanSource = __normalizeCanvasMarkdownSource(res.md);
+                    const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
+                    section.descriptionMd = cleanSource;
+                    section.description = renderedHtml;
+                    descriptionText.innerHTML = renderedHtml;
+                    descriptionText.scrollTop = savedScrollTop;
+                    descriptionText.scrollLeft = savedScrollLeft;
+                    saveTempSectionsPatch(section);
+                    updateDescMeta();
+                }
+            } else {
+                try {
+                    if (descEditorApi && typeof descEditorApi.flush === 'function') descEditorApi.flush();
+                } catch (_) { }
+                persistDesc({ normalizeEditorHtml: true });
+            }
         } else {
+            if (descEditorApi && typeof descEditorApi.cancelTiptap === 'function') {
+                descEditorApi.cancelTiptap();
+            }
             section.descriptionMd = beforeEditStored;
             const restored = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(beforeEditStored));
             section.description = restored;
             descriptionText.innerHTML = restored;
+            descriptionText.scrollTop = savedScrollTop;
+            descriptionText.scrollLeft = savedScrollLeft;
             saveTempSectionsPatch(section);
             updateDescMeta();
         }
+
+        descriptionText.scrollTop = savedScrollTop;
+        descriptionText.scrollLeft = savedScrollLeft;
+        requestAnimationFrame(() => {
+            if (descriptionText.scrollTop !== savedScrollTop) descriptionText.scrollTop = savedScrollTop;
+            if (descriptionText.scrollLeft !== savedScrollLeft) descriptionText.scrollLeft = savedScrollLeft;
+        });
 
         if (descriptionControls) {
             descriptionControls.style.opacity = '0';
@@ -23875,16 +20375,33 @@ function __renderTempNodeImpl(section, options = {}) {
         } catch (_) { }
     };
 
-    const enterEditingDescription = () => {
+    const enterEditingDescription = (eventOrCoords = null) => {
         if (isEditingDesc) return;
         isEditingDesc = true;
         beforeEditStored = __normalizeTempSectionDescriptionMarkdown(section);
         __clearCanvasDescriptionSelection();
         descriptionContainer.classList.add('editing');
-        descriptionText.contentEditable = 'true';
-        descriptionText.focus();
-        __placeCaretAtEnd(descriptionText);
+
+        const savedScrollTop = descriptionText.scrollTop;
+        const savedScrollLeft = descriptionText.scrollLeft;
+
+        let tiptapMounted = false;
+        if (descEditorApi && typeof descEditorApi.mountTiptap === 'function') {
+            tiptapMounted = !!descEditorApi.mountTiptap(beforeEditStored, eventOrCoords);
+        }
+        if (!tiptapMounted) {
+            descriptionText.contentEditable = 'true';
+            descriptionText.focus();
+            __placeCaretAtEnd(descriptionText);
+        }
         applyDescHeightSettings();
+
+        descriptionText.scrollTop = savedScrollTop;
+        descriptionText.scrollLeft = savedScrollLeft;
+        requestAnimationFrame(() => {
+            if (descriptionText.scrollTop !== savedScrollTop) descriptionText.scrollTop = savedScrollTop;
+            if (descriptionText.scrollLeft !== savedScrollLeft) descriptionText.scrollLeft = savedScrollLeft;
+        });
         if (descEditorApi && typeof descEditorApi.recordSnapshot === 'function') {
             // 确保初始状态被记录，以便可以撤销回初始状态
             //由于 reset 会清空栈，我们需要一个新的起点
@@ -23978,9 +20495,15 @@ function __renderTempNodeImpl(section, options = {}) {
             if (!isEditingDesc) return;
             if (document.getElementById(DESC_CLEAR_CONFIRM_POPOVER_ID)) return;
             if (document.getElementById(DESC_HEIGHT_SETTINGS_POPOVER_ID)) return;
-            if (descriptionContainer && descriptionContainer.contains(document.activeElement)) return;
+            const activeEl = document.activeElement;
+            if (activeEl && (
+                activeEl.closest('.md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .temp-node-description-controls, .md-rgb-picker') ||
+                (descriptionContainer && descriptionContainer.contains(activeEl))
+            )) return;
+            if (descEditorApi && typeof descEditorApi.isFontColorPopoverActive === 'function' && descEditorApi.isFontColorPopoverActive()) return;
+            if (document.querySelector('.md-format-popover.open, .md-color-popover.open, .md-fontcolor-popover.open, .md-heading-popover.open, .md-list-popover.open, .md-align-popover.open')) return;
             exitEditingDescription({ commit: true });
-        }, 0);
+        }, 100);
     });
 
     // 复制时转换为 Markdown 源码格式（而非渲染后的富文本）
@@ -24000,11 +20523,15 @@ function __renderTempNodeImpl(section, options = {}) {
         // 智能优化：选中整行自动补充 Markdown 符号
         let finalSource = '';
         if (isAll) {
-            finalSource = isEditingDesc
-                ? __normalizeCanvasMarkdownSource(__htmlToMarkdown(htmlSource)).trim()
-                : __normalizeTempSectionDescriptionMarkdown(section);
-            if (!String(finalSource || '').trim() && htmlSource) {
-                finalSource = __htmlToMarkdown(htmlSource);
+            if (descriptionText.__tiptapInstance && typeof descriptionText.__tiptapInstance.getMarkdown === 'function') {
+                finalSource = descriptionText.__tiptapInstance.getMarkdown();
+            } else {
+                finalSource = isEditingDesc
+                    ? __normalizeCanvasMarkdownSource(__htmlToMarkdown(htmlSource)).trim()
+                    : __normalizeTempSectionDescriptionMarkdown(section);
+                if (!String(finalSource || '').trim() && htmlSource) {
+                    finalSource = __htmlToMarkdown(htmlSource);
+                }
             }
         } else {
             finalSource = __htmlToMarkdown(htmlSource);
@@ -27540,7 +24067,6 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     tipText.classList.add('md-wysiwyg-editor');
     tipText.contentEditable = 'false';
     tipText.spellcheck = false;
-    tipText.style.cursor = 'pointer';
 
     let collapsedBar = tipContainer.querySelector('.permanent-section-tip-collapsed');
     if (!collapsedBar) {
@@ -27715,18 +24241,29 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     let beforeEditStored = savedTipSource;
 
     const syncTipDraft = ({ normalizeEditorHtml = false } = {}) => {
+        if (tipText.__tiptapInstance) {
+            const tiptapMd = tipText.__tiptapInstance.getMarkdown();
+            const cleanSource = __normalizePermanentViewDescriptionMarkdown(tiptapMd);
+            const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
+            if (normalizeEditorHtml) {
+                tipText.innerHTML = renderedHtml;
+            }
+            updateTipMeta();
+            return cleanSource;
+        }
         const normalizedHtml = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(tipText));
         const normalizedSource = __resolveMarkdownSourceFromEditorHtml(
             normalizedHtml,
             readStoredTipSource(),
             { sourceMode: 'description' }
         );
-        const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(normalizedSource));
+        const cleanSource = __normalizePermanentViewDescriptionMarkdown(normalizedSource);
+        const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
         if (normalizeEditorHtml) {
             tipText.innerHTML = renderedHtml;
         }
         updateTipMeta();
-        return normalizedSource;
+        return cleanSource;
     };
 
     const persistTip = ({ normalizeEditorHtml = false } = {}) => {
@@ -27744,17 +24281,46 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         const heightPopover = document.getElementById(DESC_HEIGHT_SETTINGS_POPOVER_ID);
         if (heightPopover && typeof heightPopover.__cleanup === 'function') heightPopover.__cleanup();
 
+        const savedScrollTop = tipText.scrollTop;
+        const savedScrollLeft = tipText.scrollLeft;
+
         if (commit) {
-            try {
-                if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.flush === 'function') tipEditorApi.flush();
-            } catch (_) { }
-            persistTip({ normalizeEditorHtml: true });
+            if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.flushTiptap === 'function' && tipEditorApi.isTiptapActive()) {
+                const res = tipEditorApi.flushTiptap();
+                if (res) {
+                    const cleanSource = __normalizePermanentViewDescriptionMarkdown(res.md);
+                    const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
+                    tipText.innerHTML = renderedHtml;
+                    tipText.scrollTop = savedScrollTop;
+                    tipText.scrollLeft = savedScrollLeft;
+                    const key = getStorageKey();
+                    __persistPermanentTipStorageValue(key, cleanSource);
+                    updateTipMeta();
+                }
+            } else {
+                try {
+                    if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.flush === 'function') tipEditorApi.flush();
+                } catch (_) { }
+                persistTip({ normalizeEditorHtml: true });
+            }
         } else {
+            if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.cancelTiptap === 'function') {
+                tipEditorApi.cancelTiptap();
+            }
             const restored = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(beforeEditStored));
             tipText.innerHTML = restored;
+            tipText.scrollTop = savedScrollTop;
+            tipText.scrollLeft = savedScrollLeft;
             __persistPermanentTipStorageValue(getStorageKey(), beforeEditStored);
             updateTipMeta();
         }
+
+        tipText.scrollTop = savedScrollTop;
+        tipText.scrollLeft = savedScrollLeft;
+        requestAnimationFrame(() => {
+            if (tipText.scrollTop !== savedScrollTop) tipText.scrollTop = savedScrollTop;
+            if (tipText.scrollLeft !== savedScrollLeft) tipText.scrollLeft = savedScrollLeft;
+        });
 
         if (tipControls) {
             tipControls.style.opacity = '0';
@@ -27777,17 +24343,34 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         } catch (_) { }
     };
 
-    const enterEditingTip = () => {
+    const enterEditingTip = (eventOrCoords = null) => {
         if (isEditingTip) return;
         isEditingTip = true;
         beforeEditStored = readStoredTipSource();
 
         __clearCanvasDescriptionSelection();
         tipContainer.classList.add('editing');
-        tipText.contentEditable = 'true';
-        tipText.focus();
-        __placeCaretAtEnd(tipText);
+
+        const savedScrollTop = tipText.scrollTop;
+        const savedScrollLeft = tipText.scrollLeft;
+
+        let tiptapMounted = false;
+        if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.mountTiptap === 'function') {
+            tiptapMounted = !!tipEditorApi.mountTiptap(beforeEditStored, eventOrCoords);
+        }
+        if (!tiptapMounted) {
+            tipText.contentEditable = 'true';
+            tipText.focus();
+            __placeCaretAtEnd(tipText);
+        }
         applyTipHeightSettings();
+
+        tipText.scrollTop = savedScrollTop;
+        tipText.scrollLeft = savedScrollLeft;
+        requestAnimationFrame(() => {
+            if (tipText.scrollTop !== savedScrollTop) tipText.scrollTop = savedScrollTop;
+            if (tipText.scrollLeft !== savedScrollLeft) tipText.scrollLeft = savedScrollLeft;
+        });
 
         if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.recordSnapshot === 'function') {
             tipEditorApi.recordSnapshot('init');
@@ -27810,7 +24393,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     tipText.addEventListener('dblclick', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        enterEditingTip();
+        enterEditingTip(e);
     });
 
     // 单击选中说明区；若已选中，再次单击进入编辑
@@ -27822,7 +24405,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         e.stopPropagation();
         if (alreadySelected) {
             e.preventDefault();
-            enterEditingTip();
+            enterEditingTip(e);
             return;
         }
         __selectCanvasDescriptionContainer(tipContainer);
@@ -27881,7 +24464,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             exitEditingTip({ commit: true });
         } else if (e.key === 'Escape') {
             e.preventDefault();
-            const hasPopover = document.querySelector('.md-toolbar-popover.open, .desc-clear-confirm-popover, .desc-height-settings-popover');
+            const hasPopover = document.querySelector('.md-toolbar-popover.open, .md-format-popover.open, .md-color-popover.open, .md-fontcolor-popover.open, .md-heading-popover.open, .md-list-popover.open, .md-align-popover.open, .desc-clear-confirm-popover, .desc-height-settings-popover');
             if (hasPopover) return;
             exitEditingTip({ commit: true });
         }
@@ -27890,7 +24473,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     document.addEventListener('mousedown', (e) => {
         if (!isEditingTip) return;
         if (tipContainer.contains(e.target)) return;
-        if (e.target.closest('.md-toolbar-popover')) return;
+        if (e.target.closest('.md-toolbar-popover, .md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .md-rgb-picker, .temp-node-description-controls')) return;
         if (e.target.closest('.desc-clear-confirm-popover')) return;
         if (e.target.closest('.desc-height-settings-popover')) return;
         exitEditingTip({ commit: true });
@@ -27912,11 +24495,15 @@ function bindPermanentSectionTipBehavior(sectionEl) {
 
         let finalSource = '';
         if (isAll) {
-            finalSource = isEditingTip
-                ? __normalizePermanentViewDescriptionMarkdown(__htmlToMarkdown(htmlSource))
-                : readStoredTipSource();
-            if (!String(finalSource || '').trim() && htmlSource) {
-                finalSource = __htmlToMarkdown(htmlSource);
+            if (tipText.__tiptapInstance && typeof tipText.__tiptapInstance.getMarkdown === 'function') {
+                finalSource = tipText.__tiptapInstance.getMarkdown();
+            } else {
+                finalSource = isEditingTip
+                    ? __normalizePermanentViewDescriptionMarkdown(__htmlToMarkdown(htmlSource))
+                    : readStoredTipSource();
+                if (!String(finalSource || '').trim() && htmlSource) {
+                    finalSource = __htmlToMarkdown(htmlSource);
+                }
             }
         } else {
             finalSource = __htmlToMarkdown(htmlSource);

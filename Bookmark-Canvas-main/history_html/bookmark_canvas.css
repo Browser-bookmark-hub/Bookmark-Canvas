@@ -307,6 +307,7 @@
     padding-left: 0;
     padding-right: 12px;
     box-sizing: border-box;
+    cursor: pointer;
 }
 
 .permanent-section-tip-container.desc-display-fixed:not(.editing) .permanent-section-tip {
@@ -356,12 +357,39 @@
     margin: 2px 0;
 }
 
-.permanent-section-tip code {
+.permanent-section-tip pre {
+    background-color: rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin: 4px 0;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre;
+}
+
+[data-theme="dark"] .permanent-section-tip pre {
+    background-color: rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #e6edf3;
+}
+
+.permanent-section-tip pre code {
+    background: transparent !important;
+    padding: 0 !important;
+    border: none !important;
+    font-size: inherit !important;
+    display: block;
+}
+
+.permanent-section-tip :not(pre) > code {
     background: rgba(0, 0, 0, 0.08);
-    padding: 2px 4px;
-    border-radius: 2px;
-    font-family: 'Courier New', monospace;
-    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
 }
 
 .permanent-section-tip blockquote {
@@ -560,6 +588,8 @@
     padding-left: 8px;
     padding-right: 8px;
     box-sizing: border-box;
+    cursor: text !important;
+    user-select: text;
 }
 
 .permanent-section-tip-container.editing.desc-edit-fixed .permanent-section-tip {
@@ -1733,6 +1763,7 @@
     word-wrap: break-word;
     padding-right: 8px;
     box-sizing: border-box;
+    cursor: pointer;
 }
 
 .temp-node-description-container.desc-display-fixed:not(.editing) .temp-node-description {
@@ -1777,12 +1808,39 @@
     margin: 2px 0;
 }
 
-.temp-node-description code {
+.temp-node-description pre {
+    background-color: rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin: 4px 0;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre;
+}
+
+[data-theme="dark"] .temp-node-description pre {
+    background-color: rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #e6edf3;
+}
+
+.temp-node-description pre code {
+    background: transparent !important;
+    padding: 0 !important;
+    border: none !important;
+    font-size: inherit !important;
+    display: block;
+}
+
+.temp-node-description :not(pre) > code {
     background: rgba(0, 0, 0, 0.08);
-    padding: 2px 4px;
-    border-radius: 2px;
-    font-family: 'Courier New', monospace;
-    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
 }
 
 .temp-node-description blockquote {
@@ -1893,6 +1951,8 @@
     min-height: 40px;
     max-height: none;
     overflow: visible;
+    cursor: text !important;
+    user-select: text;
 }
 
 .temp-node-description-container.editing.desc-edit-fixed .temp-node-description {
@@ -4099,6 +4159,25 @@ body.canvas-popover-active .permanent-section-action-btn:hover::after,
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
+.md-color-chip-default {
+    background: transparent !important;
+    border: 1px dashed var(--border-color, #94a3b8) !important;
+    color: var(--text-secondary, #64748b) !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    padding: 0;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.md-color-chip-default:hover {
+    color: #ef4444 !important;
+    border-color: #ef4444 !important;
+    transform: scale(1.15);
+}
+
 /* 彩色圆盘按钮 */
 .md-color-picker-btn {
     display: flex;
@@ -5770,33 +5849,80 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     padding-left: 16px;
 }
 
-.md-canvas-text code,
-.md-wysiwyg-editor code {
-    background: rgba(0, 0, 0, 0.06);
-    padding: 2px 4px;
-    border-radius: 3px;
-    font-family: monospace;
-    font-size: 0.9em;
+/* 围栏代码块容器 (<pre>) - 对标 GitHub / Obsidian 高品质呈现 */
+.md-canvas-text pre,
+.md-wysiwyg-editor pre {
+    background-color: #f6f8fa;
+    color: #24292f;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 8px 0;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.88em;
+    line-height: 1.55;
+    tab-size: 4;
+    -moz-tab-size: 4;
+    white-space: pre;
+    word-break: normal;
+    word-wrap: normal;
 }
 
-[data-theme="dark"] .md-canvas-text code,
-[data-theme="dark"] .md-wysiwyg-editor code {
-    background: rgba(255, 255, 255, 0.1);
+[data-theme="dark"] .md-canvas-text pre,
+[data-theme="dark"] .md-wysiwyg-editor pre {
+    background-color: #161b22;
+    color: #e6edf3;
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* 围栏代码块内部的 code 标签 - 彻底剥离背景与内边距 */
+.md-canvas-text pre code,
+.md-wysiwyg-editor pre code {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    color: inherit !important;
+    white-space: pre !important;
+    display: block;
+}
+
+/* 行内代码（Inline Code） - 方案 A：文字继承正文色，依托精致底框和等宽字体，杜绝与蓝色超链接混淆 */
+.md-canvas-text :not(pre) > code,
+.md-wysiwyg-editor :not(pre) > code {
+    background-color: rgba(0, 0, 0, 0.06);
+    color: inherit;
+    padding: 0.16em 0.38em;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.88em;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] .md-canvas-text :not(pre) > code,
+[data-theme="dark"] .md-wysiwyg-editor :not(pre) > code {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: inherit;
+    border-color: rgba(255, 255, 255, 0.08);
 }
 
 .md-canvas-text mark,
 .md-wysiwyg-editor mark {
-    background: #fcd34d;
-    color: #000000;
-    padding: 0 2px;
+    background: #fef08a;
+    color: #1e293b;
+    padding: 0.1em 0.25em;
     border-radius: 2px;
 }
 
 /* 深色模式下的高亮颜色 */
 [data-theme="dark"] .md-canvas-text mark,
 [data-theme="dark"] .md-wysiwyg-editor mark {
-    background: #f59e0b;
-    color: #000000;
+    background: #b45309;
+    color: #fef3c7;
 }
 
 .md-canvas-text u,
@@ -6522,3 +6648,209 @@ body.header-dock-bottom:not(.header-compact) .canvas-fullscreen-guide-toast {
         line-height: 1.3;
     }
 }
+
+/* ==========================================================================
+   Tiptap / ProseMirror Engine Styles (Bookmark Canvas)
+   ========================================================================== */
+.tiptap.ProseMirror {
+    outline: none !important;
+    min-height: 100%;
+    width: 100%;
+    box-sizing: border-box;
+    font-size: inherit;
+    font-family: inherit;
+    line-height: inherit;
+    color: inherit;
+    word-break: break-word;
+    white-space: pre-wrap;
+    cursor: inherit;
+}
+
+.md-canvas-node.editing .tiptap.ProseMirror,
+.md-canvas-node[data-editing="true"] .tiptap.ProseMirror,
+.temp-node-description-container.editing .tiptap.ProseMirror,
+.permanent-section-tip-container.editing .tiptap.ProseMirror {
+    cursor: text !important;
+    user-select: text;
+}
+
+.tiptap.ProseMirror p {
+    margin: 4px 0;
+}
+
+.tiptap.ProseMirror p:last-child {
+    margin-bottom: 0;
+}
+
+/* 临时栏目与永久栏目说明框内的段落间距与非编辑态严格 1:1 对齐 */
+.temp-node-description .tiptap.ProseMirror,
+.permanent-section-tip .tiptap.ProseMirror {
+    line-height: var(--desc-line-height, 1.4);
+}
+
+.temp-node-description .tiptap.ProseMirror p,
+.permanent-section-tip .tiptap.ProseMirror p {
+    margin: 0;
+    padding: 0;
+}
+
+.tiptap.ProseMirror h1,
+.tiptap.ProseMirror h2,
+.tiptap.ProseMirror h3,
+.tiptap.ProseMirror h4,
+.tiptap.ProseMirror h5,
+.tiptap.ProseMirror h6 {
+    margin: 0.6em 0 0.3em 0;
+    line-height: 1.3;
+    font-weight: 600;
+}
+
+.tiptap.ProseMirror h1:first-child,
+.tiptap.ProseMirror h2:first-child,
+.tiptap.ProseMirror h3:first-child {
+    margin-top: 0;
+}
+
+.tiptap.ProseMirror ul,
+.tiptap.ProseMirror ol {
+    margin: 0.4em 0;
+    padding-left: 1.4em;
+}
+
+.tiptap.ProseMirror blockquote {
+    margin: 0.5em 0;
+    padding-left: 0.8em;
+    border-left: 3px solid #3b82f6;
+    color: var(--text-secondary, #64748b);
+    font-style: italic;
+}
+
+/* 围栏代码块容器 (<pre>) - 对标 GitHub / Obsidian 高品质呈现 */
+.tiptap.ProseMirror pre {
+    background-color: #f6f8fa;
+    color: #24292f;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 8px 0;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.88em;
+    line-height: 1.55;
+    tab-size: 4;
+    -moz-tab-size: 4;
+    white-space: pre;
+    word-break: normal;
+    word-wrap: normal;
+}
+
+[data-theme="dark"] .tiptap.ProseMirror pre {
+    background-color: #161b22;
+    color: #e6edf3;
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* 围栏代码块内部的 code 标签 - 彻底剥离背景与内边距 */
+.tiptap.ProseMirror pre code {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    color: inherit !important;
+    white-space: pre !important;
+    display: block;
+}
+
+/* 代码块横向极细滚动条 */
+.tiptap.ProseMirror pre::-webkit-scrollbar,
+.md-canvas-text pre::-webkit-scrollbar {
+    height: 6px;
+}
+
+.tiptap.ProseMirror pre::-webkit-scrollbar-track,
+.md-canvas-text pre::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tiptap.ProseMirror pre::-webkit-scrollbar-thumb,
+.md-canvas-text pre::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 3px;
+}
+
+[data-theme="dark"] .tiptap.ProseMirror pre::-webkit-scrollbar-thumb,
+[data-theme="dark"] .md-canvas-text pre::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.tiptap.ProseMirror pre::-webkit-scrollbar-thumb:hover,
+.md-canvas-text pre::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.32);
+}
+
+[data-theme="dark"] .tiptap.ProseMirror pre::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] .md-canvas-text pre::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.38);
+}
+
+/* 行内代码（Inline Code） - 方案 A：文字继承正文色，依托精致底框和等宽字体，杜绝与蓝色超链接混淆 */
+.tiptap.ProseMirror :not(pre) > code {
+    background-color: rgba(0, 0, 0, 0.06);
+    color: inherit;
+    padding: 0.16em 0.38em;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.88em;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] .tiptap.ProseMirror :not(pre) > code {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: inherit;
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.tiptap.ProseMirror mark {
+    background-color: #fef08a;
+    color: #1e293b;
+    border-radius: 2px;
+    padding: 0.1em 0.25em;
+}
+
+[data-theme="dark"] .tiptap.ProseMirror mark {
+    background-color: #b45309;
+    color: #fef3c7;
+}
+
+.tiptap.ProseMirror ul[data-type="taskList"] {
+    list-style: none;
+    padding-left: 0.2em;
+}
+
+.tiptap.ProseMirror ul[data-type="taskList"] li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4em;
+    margin-bottom: 0.2em;
+}
+
+.tiptap.ProseMirror ul[data-type="taskList"] li > label {
+    flex-shrink: 0;
+    margin-top: 0.2em;
+    user-select: none;
+    cursor: pointer;
+}
+
+.tiptap.ProseMirror ul[data-type="taskList"] li > div {
+    flex-grow: 1;
+}
+
+.tiptap.ProseMirror hr {
+    border: none;
+    border-top: 1px solid var(--border-color, #e2e8f0);
+    margin: 0.8em 0;
+}
+

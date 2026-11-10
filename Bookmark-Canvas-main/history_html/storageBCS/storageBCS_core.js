@@ -7474,7 +7474,7 @@ function __normalizeTempSectionProtocolRootId(section) {
 
 function __normalizeTempSectionDescriptionMarkdown(section) {
     if (!section || typeof section !== 'object') return '';
-    return String(section.descriptionMd == null ? '' : section.descriptionMd);
+    return String(section.descriptionMd == null ? '' : section.descriptionMd).replace(/\u200B/g, '');
 }
 
 function __getDefaultTempSectionProtocolTitle() {
