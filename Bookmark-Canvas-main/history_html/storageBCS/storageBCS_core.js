@@ -1223,7 +1223,7 @@ function __buildPermanentMainStorageContentPayload(content, treeRoot, options = 
         sectionType: 'permanent',
         slot,
         title: String(content && content.title || __getPermanentSectionDisplayTitle(__getLang().isEn)),
-        descriptionMd: String((content && content.descriptionMd != null) ? content.descriptionMd : ''),
+        descriptionMd: String((content && content.descriptionMd != null) ? content.descriptionMd : '').replace(/\u200B/g, ''),
         version: __normalizePermanentStorageVersion(options && options.version)
             || __normalizePermanentStorageVersion(content && content.version)
             || __makePermanentStorageVersion(),
@@ -1541,7 +1541,7 @@ function __buildPermanentMainSyncPayload(contentInput, options = {}) {
         sectionType: 'permanent',
         slot: String(content.slot || 'A'),
         title: String(content.title || __getPermanentSectionDisplayTitle(__getLang().isEn)),
-        descriptionMd: String(content.descriptionMd == null ? '' : content.descriptionMd),
+        descriptionMd: String(content.descriptionMd == null ? '' : content.descriptionMd).replace(/\u200B/g, ''),
         fileRole: 'primary',
         fileNote: String(content.fileNote || ''),
         ...(Array.isArray(exportIdentityMap) && exportIdentityMap.length
@@ -3336,7 +3336,7 @@ function __buildBookmarkTreeSnapshotFromPermanentJsonProtocol(protocolInput) {
 function __resolvePermanentSectionDescriptionMarkdown(copyId = null, descriptionOverride = null, options = {}) {
     if (descriptionOverride !== null) {
         if (options && options.preserveRawSource === true) {
-            return String(descriptionOverride == null ? '' : descriptionOverride);
+            return String(descriptionOverride == null ? '' : descriptionOverride).replace(/\u200B/g, '');
         }
         return __normalizePermanentViewDescriptionMarkdown(descriptionOverride);
     }
@@ -3529,9 +3529,11 @@ function __htmlToMarkdown(html, options = {}) {
     const processNode = (node) => {
         if (!node) return '';
         if (node.nodeType === Node.TEXT_NODE) {
-            return (node.textContent || '')
+            const text = (node.textContent || '')
                 .replace(/\u200B/g, '')
                 .replace(/\u00A0/g, ' ');
+            if (node.parentElement && node.parentElement.closest('pre, code')) return text;
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return '';
 
@@ -3546,9 +3548,13 @@ function __htmlToMarkdown(html, options = {}) {
             case 'div': {
                 const content = childContent();
                 if (tag === 'p') {
-                    const align = String(node.getAttribute('align') || '').trim().toLowerCase();
-                    if (/^(left|center|right|justify)$/.test(align)) {
-                        return `<p align="${align}">${content}</p>${paragraphBreaks ? paragraphSeparator : '\n'}`;
+                    const styleAlign = String((node.style && node.style.textAlign) || '').trim().toLowerCase();
+                    const attrAlign = String(node.getAttribute('align') || '').trim().toLowerCase();
+                    const align = /^(left|center|right|justify)$/.test(styleAlign)
+                        ? styleAlign
+                        : (/^(left|center|right|justify)$/.test(attrAlign) ? attrAlign : '');
+                    if (align && align !== 'left') {
+                        return `<p style="text-align: ${align}">${childHtml()}</p>${paragraphBreaks ? paragraphSeparator : '\n'}`;
                     }
                 }
                 const isVisuallyEmpty = !String(content || '').replace(/[\s\u00A0]+/g, '');
@@ -3563,9 +3569,9 @@ function __htmlToMarkdown(html, options = {}) {
                 return trimmedContent ? (trimmedContent + paragraphSeparator) : paragraphSeparator;
             }
             case 'details':
-                return `<details>${childContent()}</details>\n`;
+                return `<details${node.hasAttribute('open') ? ' open' : ''}>${childHtml()}</details>\n`;
             case 'summary':
-                return `<summary>${childContent()}</summary>\n`;
+                return `<summary>${childHtml()}</summary>\n`;
             case 'input': {
                 if (node.type === 'checkbox') {
                     const isChecked = node.hasAttribute('checked') || node.checked;
@@ -3585,12 +3591,62 @@ function __htmlToMarkdown(html, options = {}) {
             case 's':
             case 'strike':
                 return `~~${childContent()}~~`;
-            case 'mark':
+            case 'mark': {
+                const bg = String((node.style && node.style.backgroundColor) || '').trim();
+                if (bg && !/["'<>\\;]|javascript:|expression\s*\(|url\s*\(/i.test(bg)) {
+                    return `<mark style="background-color: ${bg}">${childContent()}</mark>`;
+                }
                 return `==${childContent()}==`;
-            case 'code':
+            }
+            case 'code': {
+                if (node.parentElement && node.parentElement.tagName.toLowerCase() === 'pre') {
+                    return (node.textContent || '').replace(/\u200B/g, '');
+                }
                 return `\`${childContent()}\``;
-            case 'pre':
-                return '```\n' + childContent() + '\n```\n';
+            }
+            case 'pre': {
+                const codeChild = node.querySelector('code');
+                const rawText = codeChild ? (codeChild.textContent || '') : (node.textContent || '');
+                const langMatch = codeChild && codeChild.className ? codeChild.className.match(/(?:^|\s)language-([\w-]+)/) : null;
+                const lang = langMatch ? langMatch[1] : '';
+                return '```' + lang + '\n' + rawText.replace(/\u200B/g, '').replace(/\r\n?/g, '\n').trimEnd() + '\n```\n';
+            }
+            case 'table': {
+                const rows = Array.from(node.querySelectorAll('tr')).filter(row => row.closest('table') === node);
+                if (!rows.length) return '';
+                const needsHtml = rows.some((row, rowIndex) => Array.from(row.children).some(cell =>
+                    cell.tagName !== (rowIndex === 0 ? 'TH' : 'TD') ||
+                    cell.colSpan > 1 || cell.rowSpan > 1 || cell.hasAttribute('colwidth') ||
+                    cell.hasAttribute('align') || cell.style.textAlign ||
+                    cell.querySelector('table, ul, ol, blockquote, pre, details, br, [style*="text-align"]') ||
+                    cell.querySelectorAll('p').length > 1
+                ));
+                if (needsHtml) return node.outerHTML + '\n\n';
+                const matrix = rows.map((r) => Array.from(r.children).map((c) =>
+                    processNode(c).replace(/[\r\n]+/g, ' ').trim().replace(/\|/g, '\\|')
+                ));
+                const maxCols = Math.max(...matrix.map((r) => r.length), 0);
+                if (maxCols === 0) return '';
+                const lines = [];
+                const firstRow = matrix[0] || [];
+                const headerCells = [];
+                for (let i = 0; i < maxCols; i++) headerCells.push(firstRow[i] || '');
+                lines.push('| ' + headerCells.join(' | ') + ' |');
+                lines.push('| ' + Array(maxCols).fill('---').join(' | ') + ' |');
+                for (let r = 1; r < matrix.length; r++) {
+                    const rowCells = [];
+                    for (let c = 0; c < maxCols; c++) rowCells.push(matrix[r][c] || '');
+                    lines.push('| ' + rowCells.join(' | ') + ' |');
+                }
+                return lines.join('\n') + '\n\n';
+            }
+            case 'thead':
+            case 'tbody':
+            case 'tfoot':
+            case 'tr':
+            case 'th':
+            case 'td':
+                return childContent();
             case 'sup':
                 return childContent();
             case 'sub':
@@ -3601,17 +3657,22 @@ function __htmlToMarkdown(html, options = {}) {
                 return `[${text}](${href})`;
             }
             case 'h1':
-                return `# ${childContent()}\n`;
             case 'h2':
-                return `## ${childContent()}\n`;
             case 'h3':
-                return `### ${childContent()}\n`;
             case 'h4':
-                return `#### ${childContent()}\n`;
             case 'h5':
-                return `##### ${childContent()}\n`;
-            case 'h6':
-                return `###### ${childContent()}\n`;
+            case 'h6': {
+                const level = Number(tag.slice(1)) || 1;
+                const styleAlign = String((node.style && node.style.textAlign) || '').trim().toLowerCase();
+                const attrAlign = String(node.getAttribute('align') || '').trim().toLowerCase();
+                const align = /^(center|right|justify)$/.test(styleAlign)
+                    ? styleAlign
+                    : (/^(center|right|justify)$/.test(attrAlign) ? attrAlign : '');
+                if (align) {
+                    return `<h${level} style="text-align: ${align}">${childHtml()}</h${level}>\n`;
+                }
+                return `${'#'.repeat(level)} ${childContent()}\n`;
+            }
             case 'blockquote':
                 return childContent().split('\n').map(line => `> ${line}`).join('\n') + '\n';
             case 'ul':
@@ -4709,8 +4770,10 @@ function __detectCanvasMarkdownExportFormatFromContent(fileText) {
 function __resetCanvasDomAndStateForImport() {
     const container = document.getElementById('canvasContent');
     if (container) {
-        container.querySelectorAll('.temp-canvas-node').forEach(el => el.remove());
-        container.querySelectorAll('.md-canvas-node').forEach(el => el.remove());
+        container.querySelectorAll('.temp-canvas-node, .md-canvas-node').forEach(el => {
+            try { if (typeof __cleanupCanvasNodeTiptapInstances === 'function') __cleanupCanvasNodeTiptapInstances(el); } catch (_) { }
+            try { el.remove(); } catch (_) { }
+        });
     }
     CanvasState.tempSections = [];
     CanvasState.mdNodes = [];

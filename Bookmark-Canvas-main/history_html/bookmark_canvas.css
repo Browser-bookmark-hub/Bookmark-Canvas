@@ -266,7 +266,7 @@
     width: calc(100% + 36px);
     margin-left: -18px;
     margin-right: -18px;
-    padding: 8px 0 8px 16px;
+    padding: 8px 0 8px 6px;
     box-sizing: border-box;
     background: var(--canvas-tip-bg);
     border-top: 1px solid var(--canvas-tip-border);
@@ -304,14 +304,17 @@
     opacity: 0.95;
     line-height: var(--desc-line-height, 1.4);
     flex: 1;
-    padding-left: 0;
-    padding-right: 12px;
+    padding: 4px 8px 4px 14px;
+    border: 1px solid transparent;
+    border-radius: 4px;
     box-sizing: border-box;
     cursor: pointer;
+    min-height: 24px;
+    word-wrap: break-word;
 }
 
 .permanent-section-tip-container.desc-display-fixed:not(.editing) .permanent-section-tip {
-    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 3) * 1em);
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 3) * 1em + 10px);
     overflow-y: auto;
     overflow-x: hidden;
 }
@@ -350,7 +353,7 @@
 .permanent-section-tip ul,
 .permanent-section-tip ol {
     margin: 2px 0;
-    padding-left: 16px;
+    padding-left: 18px;
 }
 
 .permanent-section-tip li {
@@ -465,8 +468,8 @@
     border-bottom-color: rgba(37, 99, 235, 0.6);
 }
 
-/* 任务列表样式（永久栏目说明） */
-.permanent-section-tip input[type="checkbox"] {
+/* 任务列表样式（兼容旧版类名 .md-task-item 之外，同时对齐 TipTap 静态 DOM 与实时 NodeView DOM） */
+.permanent-section-tip input[type="checkbox"]:not(ul[data-type="taskList"] input[type="checkbox"]) {
     margin-right: 6px;
     cursor: pointer;
 }
@@ -573,7 +576,7 @@
 }
 
 .permanent-section-tip-container.editing .permanent-section-tip {
-    padding: 8px;
+    padding: 4px 8px 4px 14px;
     border: 1px solid var(--border-color);
     border-radius: 4px;
     background: transparent;
@@ -581,12 +584,9 @@
     font-size: 15px;
     font-family: inherit;
     line-height: var(--desc-line-height, 1.4);
-    min-height: 50px;
+    min-height: 24px;
     max-height: none;
     overflow: visible;
-    transition: all 0.2s ease;
-    padding-left: 8px;
-    padding-right: 8px;
     box-sizing: border-box;
     cursor: text !important;
     user-select: text;
@@ -646,7 +646,7 @@
     color: rgba(255, 255, 255, 0.5);
 }
 
-[data-theme="dark"] .permanent-section-tip code {
+[data-theme="dark"] .permanent-section-tip :not(pre) > code {
     background: rgba(255, 255, 255, 0.15);
 }
 
@@ -1716,7 +1716,7 @@
 }
 
 .temp-node-description-container {
-    padding: 8px 0 8px 16px;
+    padding: 8px 0 8px 6px;
     /* Right padding reduced to 8px to allow growth */
     background: var(--canvas-tip-bg);
     border-top: 1px solid var(--canvas-tip-border);
@@ -1756,18 +1756,20 @@
     flex: 1;
     /* Match Permanent Section layout */
     margin: 0;
-    padding: 0;
+    padding: 4px 8px 4px 14px;
+    border: 1px solid transparent;
+    border-radius: 4px;
     font-size: 15px;
     color: rgba(0, 0, 0, 0.65);
-    line-height: 1.4;
+    line-height: var(--desc-line-height, 1.4);
     word-wrap: break-word;
-    padding-right: 8px;
     box-sizing: border-box;
     cursor: pointer;
+    min-height: 24px;
 }
 
 .temp-node-description-container.desc-display-fixed:not(.editing) .temp-node-description {
-    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 3) * 1em);
+    max-height: calc(var(--desc-line-height, 1.4) * var(--desc-display-rows, 3) * 1em + 10px);
     overflow-y: auto;
     overflow-x: hidden;
 }
@@ -1801,7 +1803,7 @@
 .temp-node-description ul,
 .temp-node-description ol {
     margin: 2px 0;
-    padding-left: 16px;
+    padding-left: 18px;
 }
 
 .temp-node-description li {
@@ -1931,7 +1933,7 @@
 }
 
 /* 任务列表样式（临时栏目描述） */
-.temp-node-description input[type="checkbox"] {
+.temp-node-description input[type="checkbox"]:not(ul[data-type="taskList"] input[type="checkbox"]) {
     margin-right: 6px;
     cursor: pointer;
 }
@@ -1939,16 +1941,16 @@
 .temp-node-description-container.editing .temp-node-description {
     width: 100%;
     box-sizing: border-box;
-    padding: 8px;
+    padding: 4px 8px 4px 14px;
     margin: 0;
     border: 1px solid rgba(0, 0, 0, 0.15);
-    border-radius: 3px;
+    border-radius: 4px;
     background: transparent;
     color: rgba(0, 0, 0, 0.7);
     font-size: 15px;
     font-family: inherit;
-    line-height: 1.4;
-    min-height: 40px;
+    line-height: var(--desc-line-height, 1.4);
+    min-height: 24px;
     max-height: none;
     overflow: visible;
     cursor: text !important;
@@ -2079,7 +2081,7 @@
     color: rgba(255, 255, 255, 0.65);
 }
 
-[data-theme="dark"] .temp-node-description code {
+[data-theme="dark"] .temp-node-description :not(pre) > code {
     background: rgba(255, 255, 255, 0.15);
 }
 
@@ -2894,7 +2896,8 @@ body.canvas-node-maximized-active #canvasContent>.canvas-node-maximized {
 }
 
 .md-node-toolbar .canvas-layout-zoom-controls {
-    margin-right: 6px;
+    gap: 3px;
+    margin-right: 4px;
 }
 
 .permanent-section-actions .canvas-layout-zoom-value {
@@ -2910,6 +2913,8 @@ body.canvas-node-maximized-active #canvasContent>.canvas-node-maximized {
 }
 
 .md-node-toolbar .canvas-layout-zoom-value {
+    width: 30px;
+    max-width: 30px;
     color: #57606a;
     background: rgba(255, 255, 255, 0.6);
     border: 1px solid rgba(27, 31, 36, 0.2);
@@ -2966,6 +2971,11 @@ body.canvas-node-maximized-active #canvasContent>.canvas-node-maximized {
     transform: none;
 }
 
+.md-canvas-node.canvas-node-maximized {
+    container-type: inline-size;
+    container-name: canvas-md-card;
+}
+
 .md-canvas-node.canvas-node-maximized .md-node-toolbar {
     top: auto;
     bottom: 16px;
@@ -2974,6 +2984,11 @@ body.canvas-node-maximized-active #canvasContent>.canvas-node-maximized {
     opacity: 1 !important;
     visibility: visible !important;
     pointer-events: auto !important;
+    box-sizing: border-box;
+    width: max-content;
+    max-width: calc(100% - 16px);
+    flex-wrap: wrap;
+    justify-content: center;
 }
 
 /* Hide canvas scrollbars + floating zoom tools while a node is maximized */
@@ -3261,7 +3276,7 @@ body.canvas-node-maximized-active .canvas-edge-label {
     outline: none;
     border: none;
     background: transparent;
-    padding: 8px;
+    padding: 8px 8px 8px 16px;
     box-sizing: border-box;
     overflow: auto;
     min-height: 0;
@@ -3332,8 +3347,8 @@ body.canvas-node-maximized-active .canvas-edge-label {
     min-height: 32px;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px;
+    gap: 3px;
+    padding: 3px;
     border: 1px solid var(--border-color);
     border-radius: 8px;
     background: var(--bg-elevated);
@@ -3380,8 +3395,11 @@ body.canvas-node-maximized-active .canvas-edge-label {
 }
 
 .md-node-toolbar-btn {
-    width: 28px;
-    height: 28px;
+    box-sizing: border-box;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3408,6 +3426,33 @@ body.canvas-node-maximized-active .canvas-edge-label {
     border-color: #2563eb;
     background: rgba(37, 99, 235, 0.12);
     color: #2563eb;
+}
+
+/* Fit the outer action toolbar to the actual fullscreen card, not the whole window. */
+@container canvas-md-card (max-width: 400px) {
+    .md-node-toolbar {
+        gap: 1px;
+        padding: 2px;
+    }
+
+    .md-node-toolbar .md-node-toolbar-btn {
+        width: 22px;
+        height: 22px;
+        font-size: 11px;
+    }
+
+    .md-node-toolbar .canvas-layout-zoom-controls {
+        gap: 0;
+        margin-right: 0;
+    }
+
+    .md-node-toolbar .canvas-layout-zoom-value {
+        width: 28px;
+        max-width: 28px;
+        height: 22px;
+        padding: 0;
+        font-size: 10px;
+    }
 }
 
 /* 置顶按钮分级视觉：.pinned（全置顶：画布置顶 + 目录置顶）、.pinned-half（单置顶：满足其一） */
@@ -3536,19 +3581,31 @@ body.canvas-node-maximized-active .canvas-edge-label {
     background: #ffffff;
     border: 1px solid rgba(27, 31, 36, 0.25);
     border-radius: 6px;
-    padding: 4px 6px;
+    padding: 4px 5px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-    z-index: 12100;
     display: none;
     white-space: nowrap;
+    box-sizing: border-box;
+    width: max-content;
+    color: #24292f;
+    z-index: 2147483646;
+    overflow: visible;
 }
 
 .md-format-popover.open {
     display: block;
 }
 
+.md-format-popover::backdrop,
+.md-fontcolor-popover::backdrop,
+.md-editing-help-popover::backdrop {
+    background: transparent;
+    pointer-events: none;
+}
+
 [data-theme="dark"] .md-format-popover {
     background: #2d2d2d;
+    color: #e4e6eb;
     border-color: rgba(255, 255, 255, 0.15);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
@@ -3556,7 +3613,128 @@ body.canvas-node-maximized-active .canvas-edge-label {
 .md-format-row {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
+}
+
+/* Shared, read-only editing help lives outside scaled/clipped cards. */
+.md-editing-help-popover {
+    box-sizing: border-box;
+    width: 340px;
+    max-width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+    overflow: auto;
+    padding: 12px 16px;
+    border: 1px solid rgba(27, 31, 36, 0.25);
+    border-radius: 8px;
+    background: #fff;
+    color: #24292f;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: normal;
+    text-align: left;
+    user-select: text;
+}
+
+.md-editing-help-popover h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+}
+
+.md-editing-help-shortcuts {
+    display: grid;
+    grid-template-columns: minmax(0, 72px) max-content minmax(0, 1fr);
+    align-items: start;
+    gap: 7px 6px;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+    text-align: left;
+}
+
+.md-editing-help-shortcuts li {
+    display: contents;
+}
+
+.md-editing-help-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.md-editing-help-syntax-slot {
+    display: flex;
+    align-items: flex-start;
+    align-content: flex-start;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    min-width: 0;
+}
+
+.md-editing-help-shortcuts kbd,
+.md-editing-help-syntax {
+    display: inline-block;
+    padding: 1px 4px;
+    border: 1px solid rgba(127, 127, 127, 0.3);
+    border-radius: 4px;
+    background: rgba(127, 127, 127, 0.1);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+    line-height: 1.6;
+    white-space: nowrap;
+    justify-self: start;
+}
+
+.md-editing-help-syntax {
+    border-color: transparent;
+    background: rgba(127, 127, 127, 0.06);
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.md-editing-help-condition {
+    font-size: 11px;
+}
+
+.md-editing-help-shortcuts .md-editing-help-plain-typing {
+    color: #a16207;
+    font-weight: 600;
+}
+
+[data-theme="dark"] .md-editing-help-shortcuts .md-editing-help-plain-typing {
+    color: #facc15;
+}
+
+.md-format-help-btn:focus-visible,
+.md-editing-help-popover:focus-visible {
+    outline: 2px solid #0969da;
+    outline-offset: 2px;
+}
+
+[data-theme="dark"] .md-editing-help-popover {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: #2d2d2d;
+    color: #e4e6eb;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.md-format-help-btn[aria-expanded="true"] {
+    background: rgba(9, 105, 218, 0.12);
+}
+
+@media (max-width: 560px) {
+    .md-format-popover {
+        box-sizing: border-box;
+        max-width: calc(100vw - 20px);
+        width: max-content;
+    }
+
+    .md-format-row {
+        flex-wrap: wrap;
+    }
 }
 
 .md-format-size-value {
@@ -3575,7 +3753,7 @@ body.canvas-node-maximized-active .canvas-edge-label {
     width: 1px;
     height: 16px;
     background: rgba(0, 0, 0, 0.15);
-    margin: 0 3px;
+    margin: 0 2px;
 }
 
 [data-theme="dark"] .md-format-sep {
@@ -3583,8 +3761,11 @@ body.canvas-node-maximized-active .canvas-edge-label {
 }
 
 .md-format-btn {
-    width: 24px;
-    height: 24px;
+    box-sizing: border-box;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3593,7 +3774,8 @@ body.canvas-node-maximized-active .canvas-edge-label {
     background: transparent;
     color: #24292f;
     cursor: pointer;
-    transition: all 0.12s ease;
+    /* Density changes are measured synchronously; never animate button geometry. */
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.12s ease;
     font-size: 12px;
     font-weight: 600;
 }
@@ -3619,8 +3801,32 @@ body.canvas-node-maximized-active .canvas-edge-label {
 }
 
 .md-format-btn.md-format-btn-sm {
+    width: 18px;
+    height: 18px;
+    font-size: 10px;
+}
+
+/* Trim spacing before scaling so help/close do not form a one-button second row. */
+.md-format-popover[data-density="compact"] {
+    padding: 3px 4px;
+}
+
+.md-format-popover[data-density="compact"] .md-format-row {
+    gap: 1px;
+}
+
+.md-format-popover[data-density="compact"] .md-format-btn:not(.md-format-btn-sm) {
     width: 20px;
     height: 20px;
+    font-size: 11px;
+}
+
+.md-format-popover[data-density="compact"] .md-format-sep {
+    margin: 0 1px;
+}
+
+.md-format-popover[data-density="compact"] .md-format-size-value {
+    min-width: 18px;
     font-size: 10px;
 }
 
@@ -3832,6 +4038,25 @@ body.canvas-node-maximized-active .canvas-edge-label {
     color: #e4e6eb;
 }
 
+/* Persistent format state, independent of hover/press and popover visibility. */
+.md-format-btn[data-format-active="true"],
+.md-heading-option[data-format-active="true"],
+.md-list-option[data-format-active="true"],
+.md-align-option[data-format-active="true"] {
+    background: rgba(9, 105, 218, 0.15);
+    border-color: #0969da;
+    color: #0969da;
+}
+
+[data-theme="dark"] .md-format-btn[data-format-active="true"],
+[data-theme="dark"] .md-heading-option[data-format-active="true"],
+[data-theme="dark"] .md-list-option[data-format-active="true"],
+[data-theme="dark"] .md-align-option[data-format-active="true"] {
+    background: rgba(88, 166, 255, 0.2);
+    border-color: #58a6ff;
+    color: #58a6ff;
+}
+
 [data-theme="dark"] .md-list-option:hover {
     background: rgba(88, 166, 255, 0.15);
     border-color: rgba(88, 166, 255, 0.3);
@@ -3848,16 +4073,39 @@ body.canvas-node-maximized-active .canvas-edge-label {
     border-color: rgba(88, 166, 255, 0.4);
 }
 
-/* 任务列表样式 */
-.md-task-item {
+/* 任务列表样式（静态 renderStaticHTML 含 data-type="taskItem"，实时 TipTap TaskItem NodeView 无该属性，统一按 > li 匹配） */
+.md-task-item,
+ul[data-type="taskList"] > li {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
     padding: 2px 0;
+    margin: 0;
+    list-style: none;
 }
 
-.md-task-item input[type="checkbox"] {
+ul[data-type="taskList"] {
+    list-style: none;
+    padding-left: 0;
+}
+
+ul[data-type="taskList"] > li > label {
+    flex: 0 0 auto;
     margin: 0;
+    user-select: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+}
+
+ul[data-type="taskList"] > li > div {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.md-task-item input[type="checkbox"],
+ul[data-type="taskList"] > li > label input[type="checkbox"] {
+    margin: 3px 0 0 0;
     width: 14px;
     height: 14px;
     cursor: pointer;
@@ -3866,13 +4114,17 @@ body.canvas-node-maximized-active .canvas-edge-label {
 
 /* 任务勾选后文本加删除线 */
 .md-task-item.checked,
-.md-task-item:has(input:checked) {
+.md-task-item:has(input:checked),
+ul[data-type="taskList"] > li[data-checked="true"] > div,
+ul[data-type="taskList"] > li:has(input:checked) > div {
     text-decoration: line-through;
     color: #8b949e;
 }
 
 [data-theme="dark"] .md-task-item.checked,
-[data-theme="dark"] .md-task-item:has(input:checked) {
+[data-theme="dark"] .md-task-item:has(input:checked),
+[data-theme="dark"] ul[data-type="taskList"] > li[data-checked="true"] > div,
+[data-theme="dark"] ul[data-type="taskList"] > li:has(input:checked) > div {
     color: #6e7681;
 }
 
@@ -3912,15 +4164,15 @@ body.canvas-node-maximized-active .canvas-edge-label {
     border-top-color: rgba(255, 255, 255, 0.3);
 }
 
-/* 列表样式 */
+/* 列表样式（与观察态 .md-canvas-text / .tiptap.ProseMirror 保持 18px 一致） */
 .md-canvas-editor ul,
 .md-canvas-editor ol {
-    margin: 8px 0;
-    padding-left: 24px;
+    margin: 4px 0;
+    padding-left: 18px;
 }
 
 .md-canvas-editor li {
-    margin: 4px 0;
+    margin: 2px 0;
 }
 
 [data-theme="dark"] .md-node-toolbar-btn {
@@ -5698,7 +5950,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
 .permanent-section-tip h5[data-md-collapsible="true"],
 .permanent-section-tip h6[data-md-collapsible="true"] {
     position: relative;
-    padding-left: 18px;
+    padding-left: 0;
     padding-right: 20px;
 }
 
@@ -5722,7 +5974,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
 .permanent-section-tip h6[data-md-collapsible="true"]::before {
     content: '>';
     position: absolute;
-    left: 0;
+    left: -12px;
     top: 50%;
     font-size: 0.9em;
     line-height: 1;
@@ -5846,7 +6098,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
 .md-canvas-text ol,
 .md-wysiwyg-editor ol {
     margin: 4px 0;
-    padding-left: 16px;
+    padding-left: 18px;
 }
 
 /* 围栏代码块容器 (<pre>) - 对标 GitHub / Obsidian 高品质呈现 */
@@ -6008,7 +6260,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
 }
 
 /* 任务列表样式 */
-.md-canvas-text input[type="checkbox"] {
+.md-canvas-text input[type="checkbox"]:not(ul[data-type="taskList"] input[type="checkbox"]) {
     margin-right: 6px;
     cursor: pointer;
 }
@@ -6692,6 +6944,25 @@ body.header-dock-bottom:not(.header-compact) .canvas-fullscreen-guide-toast {
 .permanent-section-tip .tiptap.ProseMirror p {
     margin: 0;
     padding: 0;
+    line-height: inherit;
+}
+
+.temp-node-description .tiptap.ProseMirror h1,
+.temp-node-description .tiptap.ProseMirror h2,
+.temp-node-description .tiptap.ProseMirror h3,
+.temp-node-description .tiptap.ProseMirror h4,
+.temp-node-description .tiptap.ProseMirror h5,
+.temp-node-description .tiptap.ProseMirror h6,
+.permanent-section-tip .tiptap.ProseMirror h1,
+.permanent-section-tip .tiptap.ProseMirror h2,
+.permanent-section-tip .tiptap.ProseMirror h3,
+.permanent-section-tip .tiptap.ProseMirror h4,
+.permanent-section-tip .tiptap.ProseMirror h5,
+.permanent-section-tip .tiptap.ProseMirror h6 {
+    margin: 4px 0;
+    line-height: 1.35;
+    font-size: 15px;
+    font-weight: 600;
 }
 
 .tiptap.ProseMirror h1,
@@ -6714,7 +6985,15 @@ body.header-dock-bottom:not(.header-compact) .canvas-fullscreen-guide-toast {
 .tiptap.ProseMirror ul,
 .tiptap.ProseMirror ol {
     margin: 0.4em 0;
-    padding-left: 1.4em;
+    padding-left: 18px;
+}
+
+.temp-node-description .tiptap.ProseMirror ul,
+.temp-node-description .tiptap.ProseMirror ol,
+.permanent-section-tip .tiptap.ProseMirror ul,
+.permanent-section-tip .tiptap.ProseMirror ol {
+    margin: 2px 0;
+    padding-left: 18px;
 }
 
 .tiptap.ProseMirror blockquote {
@@ -6827,25 +7106,62 @@ body.header-dock-bottom:not(.header-compact) .canvas-fullscreen-guide-toast {
 
 .tiptap.ProseMirror ul[data-type="taskList"] {
     list-style: none;
-    padding-left: 0.2em;
+    padding-left: 0 !important;
 }
 
-.tiptap.ProseMirror ul[data-type="taskList"] li {
+.tiptap.ProseMirror ul[data-type="taskList"] > li {
     display: flex;
     align-items: flex-start;
-    gap: 0.4em;
-    margin-bottom: 0.2em;
+    gap: 6px;
+    padding: 2px 0;
+    margin: 0;
+    list-style: none;
 }
 
-.tiptap.ProseMirror ul[data-type="taskList"] li > label {
-    flex-shrink: 0;
-    margin-top: 0.2em;
+.tiptap.ProseMirror ul[data-type="taskList"] > li > label {
+    flex: 0 0 auto;
+    margin: 0;
     user-select: none;
     cursor: pointer;
+    display: flex;
+    align-items: center;
 }
 
-.tiptap.ProseMirror ul[data-type="taskList"] li > div {
-    flex-grow: 1;
+.tiptap.ProseMirror ul[data-type="taskList"] > li > label > input[type="checkbox"] {
+    margin: 3px 0 0 0;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.tiptap.ProseMirror ul[data-type="taskList"] > li > div {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.tiptap.ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > div {
+    text-decoration: line-through;
+    opacity: 0.62;
+}
+
+/* 静态观察态空段落与实时 ProseMirror trailingBreak 等高对齐 */
+.tiptap.ProseMirror p:empty::before {
+    content: '\200b';
+}
+
+/* TipTap 编辑态空文档占位符 */
+.tiptap.ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: rgba(0, 0, 0, 0.4);
+    font-style: italic;
+    pointer-events: none;
+    height: 0;
+}
+
+[data-theme="dark"] .tiptap.ProseMirror p.is-editor-empty:first-child::before {
+    color: rgba(255, 255, 255, 0.5);
 }
 
 .tiptap.ProseMirror hr {
@@ -6853,4 +7169,3 @@ body.header-dock-bottom:not(.header-compact) .canvas-fullscreen-guide-toast {
     border-top: 1px solid var(--border-color, #e2e8f0);
     margin: 0.8em 0;
 }
-

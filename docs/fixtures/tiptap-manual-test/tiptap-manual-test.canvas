@@ -1,0 +1,59 @@
+{
+  "nodes": [
+    {
+      "id": "md-node-qa-entities",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 480,
+      "height": 560,
+      "text": "# QA-实体与代码\n\n下面正文预期显示字面 `&copy;`、`<span>`、`&lt;tag&gt;`：\n\nLiteral &amp;copy; and &lt;span&gt; and &amp;lt;tag&amp;gt; and A &amp; B\n\n行内代码：`&lt;span&gt;`\n\n```html\n&lt;span&gt;\n## ## literal\n<div>&amp;copy;</div>\n```\n\n````md\n```\n## ## literal\n- [ ] 这不是待办\n````\n\n普通文字：请在这里追加 QA-日期时间，再保存刷新。"
+    },
+    {
+      "id": "md-node-qa-tasks",
+      "type": "text",
+      "x": 520,
+      "y": 0,
+      "width": 480,
+      "height": 560,
+      "text": "# QA-待办定位\n\n> - [ ] 引用任务 A：只勾我，普通任务 D 不应变化\n\n- [ ] 父任务 B\n  - [x] 子任务 C\n\n- 普通列表项：不应有复选框\n- [ ] 普通任务 D\n\n1. [ ] 有序任务 E\n\n```md\n- [ ] 代码里的假任务：不能变成可点击待办\n```"
+    },
+    {
+      "id": "md-node-qa-tables",
+      "type": "text",
+      "x": 1040,
+      "y": 0,
+      "width": 480,
+      "height": 560,
+      "text": "# QA-表格\n\n第一张表必须一直是两列，第二列的 z 不得丢失。\n\n| 第一列 | 第二列 |\n| --- | --- |\n| x \\| y | z |\n| `a \\| b` | code-safe |\n| **加粗 \\| 保留** | bold-safe |\n\n<table><tbody><tr><th>复杂表第一列</th><th>第二列</th></tr><tr><td><p>第一段</p><p>第二段</p></td><td><p>多段落不能压平</p></td></tr><tr><td colspan=\"2\"><p>合并单元格：修改一个字后仍应合并</p></td></tr></tbody></table>"
+    },
+    {
+      "id": "md-node-qa-details",
+      "type": "text",
+      "x": 0,
+      "y": 620,
+      "width": 480,
+      "height": 560,
+      "text": "# QA-折叠与旧格式\n\n<details open><summary><strong>外层摘要：加粗应保留</strong></summary><p>正文 <mark>高亮</mark> 与 <u>下划线</u>。</p><details><summary>内层折叠</summary><p>内层正文：不能消失。</p></details></details>\n\n<p style=\"text-align: center\"><strong>居中加粗</strong> <mark>居中高亮</mark></p>\n\n<font color=\"#2dc26b\">旧版绿色文字</font>\n\n<center>旧版居中文字</center>\n\n普通文字：首次仅进入编辑后退出，第二次在正文改一个词。"
+    },
+    {
+      "id": "md-node-qa-mixed",
+      "type": "text",
+      "x": 520,
+      "y": 620,
+      "width": 480,
+      "height": 560,
+      "text": "# QA-链接与混合待办\n\nhttps://example.com\n\nwww.example.com\n\n[测试链接](https://example.com)\n\n<ul data-type=\"taskList\"><li data-type=\"taskItem\" data-checked=\"false\"><p>HTML 任务 A：只勾我，下面 B 不应变化</p></li></ul>\n\n- [ ] Markdown 任务 B\n\n**注意：**请先备份。\n\n==高亮== _斜体_ <u>下划线</u> ~~删除线~~"
+    },
+    {
+      "id": "a1b2c3d4e5f60718",
+      "type": "text",
+      "x": 1040,
+      "y": 620,
+      "width": 480,
+      "height": 560,
+      "text": "# QA-原生文字节点\n\n这张卡通过非 md-node- ID 导入，用于检查原生文字节点兼容。\n\n修改这行：QA-native。\n\n- [ ] 原生节点任务\n\n导出后，对应 .canvas 节点应仍为 type: text，并保留内容和原有 ID。"
+    }
+  ],
+  "edges": []
+}

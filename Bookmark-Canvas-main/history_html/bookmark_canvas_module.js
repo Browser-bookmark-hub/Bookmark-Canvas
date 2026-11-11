@@ -914,7 +914,7 @@ function __setupDescAutoScroll(editorEl, isEditing) {
             rafId = null;
             return;
         }
-        if (typeof isEditing === 'function' && !isEditing()) {
+        if (!editorEl.isConnected || (typeof isEditing === 'function' && !isEditing())) {
             active = false;
             rafId = null;
             return;
@@ -970,7 +970,7 @@ function __setupDescAutoScroll(editorEl, isEditing) {
     editorEl.addEventListener('mouseenter', start);
     editorEl.addEventListener('mousemove', move);
     editorEl.addEventListener('mouseleave', stop);
-    editorEl.addEventListener('blur', stop);
+    editorEl.addEventListener('blur', stop, true);
 }
 
 let __canvasDescSelectionClearBound = false;
@@ -995,6 +995,20 @@ function __bindCanvasDescriptionSelectionClear() {
     __canvasDescSelectionClearBound = true;
     document.addEventListener('mousedown', (event) => {
         const target = event && event.target;
+        const isToolbar = target && target.closest && target.closest('.md-toolbar-popover, .md-format-popover, .md-editing-help-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .md-rgb-picker, .desc-clear-confirm-popover, .desc-height-settings-popover');
+        if (!isToolbar) {
+            document.querySelectorAll('.temp-node-description-container.editing').forEach((container) => {
+                if (target && container.contains(target)) return;
+                const card = container.closest('.temp-canvas-node');
+                const editor = container.querySelector('.temp-node-description');
+                const instance = editor && editor.__tiptapInstance;
+                // Wait for the native focus/composition transaction before committing.
+                setTimeout(() => {
+                    if (!container.isConnected || !editor || editor.__tiptapInstance !== instance) return;
+                    if (card && typeof card.__commitDescriptionEdit === 'function') card.__commitDescriptionEdit();
+                }, 0);
+            });
+        }
         if (target && target.closest && target.closest('.temp-node-description-container, .permanent-section-tip-container')) {
             return;
         }
@@ -6283,20 +6297,39 @@ function saveTempSectionsPatch(sectionInputs, options = {}) {
 }
 
 function __buildCanvasManifestPatchState(timestamp, options = {}) {
+    const dirtyNodeId = options && options.dirtyNodeId ? String(options.dirtyNodeId) : null;
     try {
-        __updateAllMdNodeLowDetailOverlays();
+        if (dirtyNodeId) {
+            const el = document.getElementById(dirtyNodeId);
+            const node = (CanvasState.mdNodes || []).find(n => n && n.id === dirtyNodeId);
+            if (el && node) {
+                __ensureMdNodeLowDetailOverlay(el, node);
+            }
+        } else {
+            __updateAllMdNodeLowDetailOverlays();
+        }
     } catch (_) { }
 
     const skipValidation = !!(options && options.skipValidation === true);
     try {
-        (CanvasState.mdNodes || []).forEach((node) => {
-            if (!skipValidation) {
+        if (dirtyNodeId) {
+            const node = (CanvasState.mdNodes || []).find(n => n && n.id === dirtyNodeId);
+            if (node && !skipValidation) {
                 const refreshCachesFromMarkdown = !(typeof node.html === 'string' && node.html.trim());
                 __ensureMdNodeMarkdownProtocol(node, {
                     refreshCachesFromMarkdown
                 });
             }
-        });
+        } else {
+            (CanvasState.mdNodes || []).forEach((node) => {
+                if (!skipValidation) {
+                    const refreshCachesFromMarkdown = !(typeof node.html === 'string' && node.html.trim());
+                    __ensureMdNodeMarkdownProtocol(node, {
+                        refreshCachesFromMarkdown
+                    });
+                }
+            });
+        }
     } catch (_) { }
 
     return {
@@ -6331,6 +6364,9 @@ function __mergeCanvasManifestSaveOptions(previous, next) {
     };
     if (hasPrevious && !(prev.skipValidation === true && incoming.skipValidation === true)) {
         delete merged.skipValidation;
+    }
+    if (prev.dirtyNodeId && incoming.dirtyNodeId && prev.dirtyNodeId !== incoming.dirtyNodeId) {
+        delete merged.dirtyNodeId;
     }
     delete merged.timestamp;
     delete merged.immediate;
@@ -9182,6 +9218,7 @@ function setupCanvasZoomAndPan() {
         }
 
         if (e.repeat || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.target?.closest?.('[data-action="md-editing-help"], .md-editing-help-popover')) return;
         // 在 contenteditable 元素内编辑时不拦截键盘事件（允许输入空格等，使用可选链防御 e.target 为 document 的情况）
         if (e.target.isContentEditable || e.target?.closest?.('[contenteditable="true"]')) return;
 
@@ -11116,6 +11153,7 @@ function __applyPermanentLayoutFromCanvasNodes(nodesInput, options = {}) {
 
     if (options.removeMissingCopies !== false) {
         existingElsById.forEach((el) => {
+            try { __cleanupCanvasNodeTiptapInstances(el); } catch (_) { }
             try { el.remove(); } catch (_) { }
         });
     }
@@ -11318,8 +11356,191 @@ function __setCanvasDescriptionToolbarTopLayer({ cardEl, containerEl, controlsEl
     });
 }
 
+/** Keep the DOM owner/event chain while escaping card clipping and sidebar stacking contexts. */
+function __setCanvasPopoverTopLayer(pop, open) {
+    if (!pop || typeof pop.showPopover !== 'function') return false;
+    try {
+        if (open) {
+            pop.setAttribute('popover', 'manual');
+            pop.style.margin = '0';
+            pop.style.inset = 'auto';
+            if (!pop.matches(':popover-open')) pop.showPopover();
+        } else if (pop.matches(':popover-open')) {
+            pop.hidePopover();
+        }
+        return pop.matches(':popover-open');
+    } catch (_) { }
+    return false;
+}
+
+/** Share measured, viewport-clamped layout for blank-card and description format toolbars. */
+function __bindCanvasFormatPopoverLayout(pop, { editor, toolbar, anchor = toolbar }) {
+    const owner = editor.closest('.md-canvas-node, .temp-canvas-node, .permanent-bookmark-section');
+    const workspace = document.getElementById('canvasWorkspace');
+    let frame = null;
+    let resizeObserver = null;
+    let mutationObserver = null;
+    let active = false;
+    let topLayer = false;
+    const update = () => {
+        if (!active || !pop.classList.contains('open') || !editor.isConnected) return;
+        topLayer = __setCanvasPopoverTopLayer(pop, true);
+        const viewport = window.visualViewport;
+        const viewportLeft = viewport?.offsetLeft || 0;
+        const viewportTop = viewport?.offsetTop || 0;
+        let leftBound = viewportLeft;
+        let rightBound = viewportLeft + (viewport?.width || window.innerWidth);
+        let topBound = viewportTop;
+        let bottomBound = viewportTop + (viewport?.height || window.innerHeight);
+        const area = workspace?.getBoundingClientRect();
+        if (area && area.width > 0 && area.height > 0) {
+            leftBound = Math.max(leftBound, area.left);
+            rightBound = Math.min(rightBound, area.right);
+            topBound = Math.max(topBound, area.top);
+            bottomBound = Math.min(bottomBound, area.bottom);
+        }
+        const padding = 8;
+        const availableWidth = Math.max(1, rightBound - leftBound - padding * 2);
+        const row = pop.querySelector('.md-format-row');
+        pop.style.position = topLayer ? 'fixed' : 'absolute';
+        pop.style.margin = '0';
+        pop.style.inset = 'auto';
+        pop.style.transformOrigin = 'top left';
+        pop.style.transform = 'none';
+        pop.style.zoom = '1';
+        pop.style.maxWidth = 'none';
+        pop.dataset.density = 'normal';
+        if (row) row.style.flexWrap = 'nowrap';
+        let naturalWidth = pop.offsetWidth || row?.scrollWidth || 500;
+        // A top-layer popover still inherits ancestor CSS zoom in Chromium.
+        // Cancel that zoom so measurements and fixed coordinates stay in viewport pixels.
+        const inheritedZoom = pop.getBoundingClientRect().width / naturalWidth;
+        if (inheritedZoom > 0 && Math.abs(inheritedZoom - 1) > 0.01) {
+            pop.style.zoom = String(1 / inheritedZoom);
+        }
+        if (naturalWidth > availableWidth) {
+            pop.dataset.density = 'compact';
+            naturalWidth = pop.offsetWidth || row?.scrollWidth || naturalWidth;
+        }
+        const scale = Math.max(0.8, Math.min(1, availableWidth / naturalWidth));
+        pop.style.maxWidth = `${availableWidth / scale}px`;
+        if (row) row.style.flexWrap = naturalWidth * scale > availableWidth ? 'wrap' : 'nowrap';
+        const width = Math.min(pop.offsetWidth || naturalWidth, availableWidth / scale) * scale;
+        const height = (pop.offsetHeight || 36) * scale;
+        const rect = anchor.getBoundingClientRect();
+        const above = rect.top - height - 6;
+        const below = rect.bottom + 6;
+        const preferBelow = owner?.classList.contains('canvas-node-maximized') && !owner.classList.contains('md-canvas-node');
+        const fitsAbove = above >= topBound + padding;
+        const fitsBelow = below + height <= bottomBound - padding;
+        const top = preferBelow && fitsBelow ? below : fitsAbove ? above : fitsBelow ? below : topBound + padding;
+        const left = Math.max(leftBound + padding, Math.min(rect.left + rect.width / 2 - width / 2, rightBound - width - padding));
+        let placedLeft = left;
+        let placedTop = Math.max(topBound + padding, Math.min(top, bottomBound - height - padding));
+        if (!topLayer) {
+            // Older Chromium retains the original DOM-local positioning path.
+            const parent = pop.offsetParent || toolbar;
+            const parentRect = parent.getBoundingClientRect();
+            const parentScale = parent.offsetWidth && parentRect.width ? parentRect.width / parent.offsetWidth : 1;
+            placedLeft = (placedLeft - parentRect.left) / parentScale;
+            placedTop = (placedTop - parentRect.top) / parentScale;
+        }
+        pop.style.left = `${placedLeft}px`;
+        pop.style.top = `${placedTop}px`;
+        pop.style.transform = `scale(${scale})`;
+        pop.querySelectorAll('.md-heading-popover.open, .md-list-popover.open, .md-align-popover.open').forEach(menu => {
+            if (menu.__formatAnchor) __positionCanvasFormatSubmenu(menu, menu.__formatAnchor, pop);
+        });
+        const colorButton = pop.querySelector('[data-action="md-fontcolor-toggle"]');
+        document.querySelectorAll('.md-fontcolor-popover.open').forEach(palette => {
+            if (palette.__editorOwner === editor && colorButton) __positionCanvasFloatingPopoverAboveButton(palette, colorButton);
+        });
+        pop.__editingHelp?.position?.();
+    };
+    const schedule = () => {
+        if (!active || frame !== null) return;
+        frame = requestAnimationFrame(() => {
+            frame = null;
+            update();
+        });
+    };
+    const close = () => {
+        active = false;
+        if (frame !== null) cancelAnimationFrame(frame);
+        frame = null;
+        resizeObserver?.disconnect();
+        mutationObserver?.disconnect();
+        resizeObserver = null;
+        mutationObserver = null;
+        window.removeEventListener('resize', schedule);
+        window.removeEventListener('canvas-maximized-state-change', schedule);
+        document.removeEventListener('fullscreenchange', schedule);
+        document.removeEventListener('scroll', schedule, true);
+        window.visualViewport?.removeEventListener('resize', schedule);
+        window.visualViewport?.removeEventListener('scroll', schedule);
+        __setCanvasPopoverTopLayer(pop, false);
+    };
+    const open = () => {
+        topLayer = __setCanvasPopoverTopLayer(pop, true);
+        if (!active) {
+            active = true;
+            window.addEventListener('resize', schedule);
+            window.addEventListener('canvas-maximized-state-change', schedule);
+            document.addEventListener('fullscreenchange', schedule);
+            document.addEventListener('scroll', schedule, true);
+            window.visualViewport?.addEventListener('resize', schedule);
+            window.visualViewport?.addEventListener('scroll', schedule);
+            if (typeof ResizeObserver !== 'undefined') {
+                resizeObserver = new ResizeObserver(schedule);
+                new Set([workspace, owner, toolbar, anchor]).forEach(el => { if (el) resizeObserver.observe(el); });
+            }
+            mutationObserver = new MutationObserver(mutations => {
+                if (!editor.isConnected || !pop.isConnected || !pop.classList.contains('open')) close();
+                else if (mutations.some(mutation => mutation.type === 'attributes')) schedule();
+            });
+            if (owner) mutationObserver.observe(owner, { attributes: true, attributeFilter: ['class', 'style'] });
+            let ancestor = owner?.parentElement;
+            while (ancestor && ancestor !== document.body) {
+                mutationObserver.observe(ancestor, { attributes: true, attributeFilter: ['class', 'style'] });
+                ancestor = ancestor.parentElement;
+            }
+            mutationObserver.observe(pop, { attributes: true, attributeFilter: ['class'] });
+            mutationObserver.observe(document.body, { childList: true, subtree: true });
+        }
+        update();
+    };
+    pop.__formatLayout = { open, close, update };
+}
+
+function __positionCanvasFormatSubmenu(pop, btn, formatPop) {
+    if (!pop || !btn || !formatPop) return;
+    const wasOpen = pop.classList.contains('open');
+    pop.classList.add('open');
+    const rect = btn.getBoundingClientRect();
+    const parent = formatPop.getBoundingClientRect();
+    const scale = parent.width && formatPop.offsetWidth ? parent.width / formatPop.offsetWidth : 1;
+    const width = pop.offsetWidth || 120;
+    const height = pop.offsetHeight || 40;
+    const area = document.getElementById('canvasWorkspace')?.getBoundingClientRect();
+    const leftBound = area?.width > 0 ? Math.max(0, area.left) : 0;
+    const rightBound = area?.width > 0 ? Math.min(window.innerWidth, area.right) : window.innerWidth;
+    const topBound = area?.height > 0 ? Math.max(0, area.top) : 0;
+    const bottomBound = area?.height > 0 ? Math.min(window.innerHeight, area.bottom) : window.innerHeight;
+    const center = Math.max(leftBound + 8 + width * scale / 2, Math.min(rect.left + rect.width / 2, rightBound - 8 - width * scale / 2));
+    const above = parent.top - height * scale - 4;
+    const below = parent.bottom + 4;
+    const top = above >= topBound + 8 ? above : Math.min(below, bottomBound - height * scale - 8);
+    pop.style.left = `${(center - parent.left) / scale}px`;
+    pop.style.bottom = 'auto';
+    pop.style.top = `${(Math.max(topBound + 8, top) - parent.top) / scale}px`;
+    pop.style.transform = 'translateX(-50%)';
+    pop.__formatAnchor = btn;
+    if (!wasOpen) pop.classList.remove('open');
+}
+
 function __positionCanvasFloatingPopoverAboveButton(pop, btn) {
     if (!pop || !btn || !btn.getBoundingClientRect) return;
+    if (pop.classList.contains('open')) __setCanvasPopoverTopLayer(pop, true);
     const rect = btn.getBoundingClientRect();
     const popRect = pop.getBoundingClientRect ? pop.getBoundingClientRect() : null;
     const popHeight = (popRect && popRect.height) || pop.offsetHeight || 40;
@@ -11357,10 +11578,11 @@ function __looksLikeEscapedHtmlTagContent(value) {
 }
 
 function __normalizePermanentViewDescriptionMarkdown(source) {
-    const raw = String(source == null ? '' : source);
+    const raw = String(source == null ? '' : source).replace(/\u200B/g, '');
     if (!raw.trim()) return '';
     const looksLikeHtml = __looksLikeHtmlTagContent(raw);
-    if (looksLikeHtml) {
+    const hasMarkdownStructure = /(?:^|\n)\s*(?:#{1,6}\s+|>\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+\.\s+|```|<p(?:\s+style="text-align:\s*(?:left|center|right|justify)[^"]*")?>|<h[1-6]\s+style="text-align:\s*(?:left|center|right|justify))/im.test(raw);
+    if (looksLikeHtml && !hasMarkdownStructure) {
         return __normalizeCanvasMarkdownSource(
             __repairLegacyCanvasMarkdownSource(
                 __htmlToMarkdown(__normalizeCanvasRichHtml(raw))
@@ -11850,8 +12072,9 @@ function __applyPermanentViewShellToSectionElement(sectionEl, shell) {
     }
 
     const tipText = sectionEl.querySelector('.permanent-section-tip');
-    if (tipText) {
-        tipText.innerHTML = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(shell.descriptionMd || ''));
+    if (tipText && !tipText.__tiptapInstance) {
+        tipText.innerHTML = __buildTiptapObservationDom(shell.descriptionMd || '');
+        try { __applyHeadingCollapse(tipText); } catch (_) { }
     }
 }
 
@@ -12682,6 +12905,16 @@ function __createPermanentSectionCopyFromStorage(copyData, options = {}) {
 
 function removePermanentSectionCopy(sectionEl) {
     if (!sectionEl || !__isPermanentSectionCopy(sectionEl)) return;
+    if (sectionEl.__permanentTipDocMouseDown) {
+        try { document.removeEventListener('mousedown', sectionEl.__permanentTipDocMouseDown, true); } catch (_) { }
+        sectionEl.__permanentTipDocMouseDown = null;
+    }
+    const tipText = sectionEl.querySelector('.permanent-section-tip-text') || sectionEl.querySelector('.permanent-section-tip');
+    if (tipText && tipText.__tiptapInstance && typeof tipText.__tiptapInstance.destroy === 'function') {
+        try { tipText.__tiptapInstance.destroy(); } catch (_) { }
+        tipText.__tiptapInstance = null;
+    }
+    try { __cleanupCanvasNodeTiptapInstances(sectionEl); } catch (_) { }
     const copyId = __getPermanentSectionCopyId(sectionEl);
     const canvasNodeId = __getPermanentSectionCanvasNodeId(sectionEl);
 
@@ -13933,6 +14166,9 @@ function clearMdSelection() {
         if (CanvasState.selectedMdNodeId) {
             const prev = document.getElementById(CanvasState.selectedMdNodeId);
             if (prev) {
+                if (typeof prev.__exitEditMode === 'function') {
+                    try { prev.__exitEditMode(); } catch (_) { }
+                }
                 prev.classList.remove('selected', 'editing');
                 prev.removeAttribute('data-editing');
             }
@@ -14237,18 +14473,55 @@ function __updateAllMdNodeLowDetailOverlays() {
     });
 }
 
+function __cleanupCanvasNodeTiptapInstances(rootEl, options = {}) {
+    if (!rootEl) return;
+    rootEl.querySelectorAll('.md-format-popover').forEach(pop => {
+        if (pop.__editingHelp) pop.__editingHelp.close();
+        if (pop.__formatLayout) pop.__formatLayout.close();
+        pop.classList.remove('open');
+    });
+    document.querySelectorAll('.md-fontcolor-popover').forEach(pop => {
+        if (!pop.__editorOwner || !rootEl.contains(pop.__editorOwner)) return;
+        __setCanvasPopoverTopLayer(pop, false);
+        if (pop.__fontColorDocHandler) document.removeEventListener('mousedown', pop.__fontColorDocHandler, true);
+        pop.remove();
+    });
+    try {
+        if (rootEl.__permanentTipDocMouseDown) {
+            document.removeEventListener('mousedown', rootEl.__permanentTipDocMouseDown, true);
+            rootEl.__permanentTipDocMouseDown = null;
+        }
+    } catch (_) { }
+    try {
+        if (options.commit === true && typeof rootEl.__commitDescriptionEdit === 'function') rootEl.__commitDescriptionEdit();
+    } catch (_) { }
+    rootEl.__commitDescriptionEdit = null;
+    try {
+        if (rootEl.__tiptapInstance && typeof rootEl.__tiptapInstance.destroy === 'function') {
+            rootEl.__tiptapInstance.destroy();
+        }
+        rootEl.__tiptapInstance = null;
+    } catch (_) { }
+    try {
+        if (typeof rootEl.querySelectorAll === 'function') {
+            rootEl.querySelectorAll('.md-canvas-editor, .temp-node-description, .permanent-section-tip, .permanent-section-tip-text').forEach((child) => {
+                if (child && child.__tiptapInstance) {
+                    try {
+                        if (typeof child.__tiptapInstance.destroy === 'function') {
+                            child.__tiptapInstance.destroy();
+                        }
+                    } catch (_) { }
+                    child.__tiptapInstance = null;
+                }
+            });
+        }
+    } catch (_) { }
+}
+
 function __cleanupMdNodeElementLifecycle(el) {
     if (!el) return;
     try {
-        if (el.__tiptapInstance && typeof el.__tiptapInstance.destroy === 'function') {
-            el.__tiptapInstance.destroy();
-            el.__tiptapInstance = null;
-        }
-        const innerEditor = el.querySelector && el.querySelector('.md-canvas-editor');
-        if (innerEditor && innerEditor.__tiptapInstance && typeof innerEditor.__tiptapInstance.destroy === 'function') {
-            innerEditor.__tiptapInstance.destroy();
-            innerEditor.__tiptapInstance = null;
-        }
+        __cleanupCanvasNodeTiptapInstances(el);
     } catch (_) { }
     try {
         if (el.__mdNodeSelectionChangeHandler) {
@@ -14323,7 +14596,25 @@ function __unloadMdNodeContentInPlace(node) {
     let el = document.getElementById(node.id);
     if (!el) return false;
     if (__shouldKeepLazyCardDomLoaded(el)) return false;
+    try {
+        const innerEditor = el.querySelector && el.querySelector('.md-canvas-editor');
+        const activeInst = (innerEditor && innerEditor.__tiptapInstance) || el.__tiptapInstance;
+        if (activeInst && !activeInst.isDestroyed && innerEditor) {
+            const md = activeInst.getMarkdown();
+            const html = activeInst.getHTML();
+            if (typeof md === 'string') {
+                __syncMdNodeFromEditor(node, innerEditor, md, html);
+            }
+        }
+    } catch (_) { }
     el.classList.add('low-detail-active');
+    try { __cleanupMdNodeElementLifecycle(el); } catch (_) { }
+    try {
+        const innerEditor = el.querySelector && el.querySelector('.md-canvas-editor');
+        if (innerEditor && !innerEditor.querySelector('.tiptap.ProseMirror')) {
+            if (el.dataset) el.dataset.mdContentUnloaded = 'true';
+        }
+    } catch (_) { }
     try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) { }
     __setCanvasViewportLazyShellClass(el, false);
     return true;
@@ -14333,13 +14624,19 @@ function __ensureMdNodeContentLoadedInPlace(node, options = {}) {
     if (!node || !node.id || node.subtype === 'card-group') return false;
     const opts = (options && typeof options === 'object') ? options : {};
     let el = document.getElementById(node.id);
-    if (!el) {
-        renderMdNode(node);
+    const needsRebuild = !el ||
+        (el.dataset && el.dataset.mdContentUnloaded === 'true') ||
+        !el.querySelector('.md-canvas-editor');
+    if (needsRebuild) {
+        renderMdNode(node, { preserveLowDetail: !!(CanvasState.lowDetailActive && !opts.force) });
         el = document.getElementById(node.id);
     }
     if (el) {
         if (!CanvasState.lowDetailActive || opts.force) {
             el.classList.remove('low-detail-active');
+        }
+        if (el.dataset) {
+            el.dataset.mdContentUnloaded = 'false';
         }
         __setCanvasViewportLazyShellClass(el, false);
     }
@@ -14669,11 +14966,14 @@ function __renderMdNodeImpl(node, options = {}) {
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn md-format-list-btn" data-action="md-list-toggle" title="${listTitle}"><i class="fas fa-list"></i></button>
                 <button class="md-format-btn" data-action="md-insert-quote" title="${quoteTitle}"><i class="fas fa-quote-left"></i></button>
+                <button type="button" class="md-format-btn md-format-help-btn" data-action="md-editing-help" title="${lang === 'en' ? 'Editing help' : '编辑说明'}" aria-label="${lang === 'en' ? 'Editing help' : '编辑说明'}" aria-expanded="false"><i class="far fa-question-circle" aria-hidden="true"></i></button>
                 <button class="md-format-btn md-format-close-btn" data-action="md-format-close" title="${(typeof lang !== 'undefined' && lang === 'en') ? 'Close toolbar' : '关闭工具窗'}"><i class="fas fa-times"></i></button>
             </div>
         `;
 
         toolbar.appendChild(pop);
+        __bindCanvasFormatPopoverLayout(pop, { editor, toolbar });
+        __bindFormatEditingHelp(pop, { editor, toolbar, getLiveTiptap, onOutside: () => exitEditMode() });
         preventCanvasEventsPropagation(pop);
         pop.addEventListener('mousedown', (e) => {
             markToolbarInteraction();
@@ -14691,9 +14991,8 @@ function __renderMdNodeImpl(node, options = {}) {
         return pop;
     };
 
-    // 打开格式工具栏（全屏模式下除外）
+    // 全屏仍可手动打开；是否自动打开由编辑入口决定。
     const openFormatPopover = () => {
-        if (el.classList.contains('canvas-node-maximized')) return;
         const pop = createFormatPopover();
         if (!pop.classList.contains('open')) {
             pop.classList.add('open');
@@ -14702,7 +15001,9 @@ function __renderMdNodeImpl(node, options = {}) {
             updateCanvasPopoverState(true);
             const sizeValue = pop.querySelector('.md-format-size-value');
             if (sizeValue) sizeValue.textContent = node.fontSize + 'px';
+            try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
         }
+        pop.__formatLayout.open();
     };
 
     // 切换格式工具栏显示
@@ -14722,12 +15023,15 @@ function __renderMdNodeImpl(node, options = {}) {
 
     // 关闭格式工具栏及其所有二级弹层（彻底复位，杜绝重复进出死锁）
     const closeFormatPopover = () => {
+        const help = toolbar.querySelector('.md-format-popover')?.__editingHelp;
+        if (help) help.close();
         closeFontColorPopover();
         try { closeAlignPopover(); } catch (_) { }
         try { closeHeadingPopover(); } catch (_) { }
         try { closeListPopover(); } catch (_) { }
         const pop = toolbar.querySelector('.md-format-popover');
         if (pop) {
+            pop.__formatLayout?.close();
             pop.classList.remove('open');
             updateCanvasPopoverState(false);
         }
@@ -14738,26 +15042,7 @@ function __renderMdNodeImpl(node, options = {}) {
 
     // 定位弹层到按钮正上方居中（带视口边界钳制与翻转）
     const positionPopoverAboveBtn = (pop, btn) => {
-        const formatPop = toolbar.querySelector('.md-format-popover');
-        if (!formatPop) return;
-        const btnRect = btn.getBoundingClientRect();
-        const formatRect = formatPop.getBoundingClientRect();
-        // 计算按钮中心相对于格式弹层的位置
-        const btnCenterX = btnRect.left + btnRect.width / 2 - formatRect.left;
-        const popRect = pop.getBoundingClientRect ? pop.getBoundingClientRect() : null;
-        const popHeight = (popRect && popRect.height) || 40;
-        const flipBelow = (formatRect.top - popHeight - 6) < 10;
-        if (flipBelow) {
-            pop.style.top = 'calc(100% + 4px)';
-            pop.style.bottom = 'auto';
-            pop.style.left = btnCenterX + 'px';
-            pop.style.transform = 'translateX(-50%) translateY(0)';
-        } else {
-            pop.style.top = '-4px';
-            pop.style.bottom = 'auto';
-            pop.style.left = btnCenterX + 'px';
-            pop.style.transform = 'translateX(-50%) translateY(-100%)';
-        }
+        __positionCanvasFormatSubmenu(pop, btn, toolbar.querySelector('.md-format-popover'));
     };
 
     const HTML_TOOL_COLORS = ['#888888', '#66bbff', '#fb464c', '#e9973f', '#e0de71', '#44cf6e', '#53dfdd', '#a882ff'];
@@ -14808,6 +15093,7 @@ function __renderMdNodeImpl(node, options = {}) {
             pop = document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(String(node.id || 'blank-md-node'))}"]`);
         }
         if (pop) {
+            __setCanvasPopoverTopLayer(pop, false);
             pop.classList.remove('open');
             if (pop.__fontColorDocHandler) {
                 document.removeEventListener('mousedown', pop.__fontColorDocHandler, true);
@@ -14828,6 +15114,7 @@ function __renderMdNodeImpl(node, options = {}) {
         if (pop) return pop;
         pop = document.createElement('div');
         pop.className = 'md-fontcolor-popover md-color-popover';
+        pop.__editorOwner = editor;
         pop.dataset.ownerToolbar = ownerId;
         preventCanvasEventsPropagation(pop);
         const defaultTitle = lang === 'en' ? 'Default font color (Remove color)' : '默认字体颜色（清除颜色）';
@@ -14875,7 +15162,7 @@ function __renderMdNodeImpl(node, options = {}) {
         };
         syncRecentChip();
         pop.addEventListener('mousedown', (e) => {
-            markExpandedSourceToolbarInteraction();
+            markToolbarInteraction();
             if (e.target.closest('.md-color-chip, [data-action], .md-color-input')) e.preventDefault();
         }, true);
         pop.addEventListener('click', (e) => {
@@ -14926,12 +15213,13 @@ function __renderMdNodeImpl(node, options = {}) {
         closeHeadingPopover();
         closeListPopover();
         if (isOpen) {
+            __setCanvasPopoverTopLayer(pop, false);
             pop.classList.remove('open');
             btn.classList.remove('active');
             updateCanvasPopoverState(false);
         } else {
-            __positionCanvasFloatingPopoverAboveButton(pop, btn);
             pop.classList.add('open');
+            __positionCanvasFloatingPopoverAboveButton(pop, btn);
             btn.classList.add('active');
             updateCanvasPopoverState(true);
             if (pop.__fontColorDocHandler) {
@@ -14949,20 +15237,24 @@ function __renderMdNodeImpl(node, options = {}) {
 
     const insertFontColor = (color) => {
         if (!color || color === 'default' || color === 'reset') {
-            const inst = tiptapInstance || (editor && editor.__tiptapInstance);
+            const inst = getLiveTiptap();
             if (inst) {
+                hasDirtyEdit = true;
                 inst.unsetColor();
                 const fontColorBtn = toolbar.querySelector('[data-action="md-fontcolor-toggle"] span');
                 if (fontColorBtn) fontColorBtn.style.borderBottomColor = 'currentColor';
                 saveEditorContent();
+                __syncFormatToolbarActiveStates(toolbar, inst);
                 return;
             }
             return;
         }
         const safeColor = String(color || '').trim();
         if (!safeColor) return;
-        if (editor.__tiptapInstance) {
-            editor.__tiptapInstance.setColor(safeColor);
+        const activeInst = getLiveTiptap();
+        if (activeInst) {
+            hasDirtyEdit = true;
+            activeInst.setColor(safeColor);
             if (currentFontColor && currentFontColor !== safeColor) previousFontColor = currentFontColor;
             currentFontColor = safeColor;
             editor.__htmlToolFontColor = safeColor;
@@ -14977,8 +15269,10 @@ function __renderMdNodeImpl(node, options = {}) {
             const fontColorBtn = toolbar.querySelector('[data-action="md-fontcolor-toggle"] span');
             if (fontColorBtn) fontColorBtn.style.borderBottomColor = safeColor;
             saveEditorContent();
+            __syncFormatToolbarActiveStates(toolbar, activeInst);
             return;
         }
+        hasDirtyEdit = true;
         const wrapper = document.createElement('font');
         wrapper.setAttribute('color', safeColor);
         if (insertHtmlToolElement(wrapper)) {
@@ -15022,6 +15316,7 @@ function __renderMdNodeImpl(node, options = {}) {
         `;
         const formatPop = toolbar.querySelector('.md-format-popover');
         if (formatPop) formatPop.appendChild(pop);
+        try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
         return pop;
     };
 
@@ -15046,11 +15341,15 @@ function __renderMdNodeImpl(node, options = {}) {
 
     const insertAlign = (alignType) => {
         const safeAlign = /^(left|center|right|justify)$/.test(String(alignType || '')) ? String(alignType) : 'left';
-        if (editor.__tiptapInstance) {
-            editor.__tiptapInstance.setTextAlign(safeAlign);
+        const activeInst = getLiveTiptap();
+        if (activeInst) {
+            hasDirtyEdit = true;
+            activeInst.setTextAlign(safeAlign);
             saveEditorContent();
+            __syncFormatToolbarActiveStates(toolbar, activeInst);
             return;
         }
+        hasDirtyEdit = true;
         const wrapper = safeAlign === 'center' ? document.createElement('center') : document.createElement('p');
         if (safeAlign !== 'center') wrapper.setAttribute('align', safeAlign);
         insertHtmlToolElement(wrapper);
@@ -15079,6 +15378,7 @@ function __renderMdNodeImpl(node, options = {}) {
         if (formatPop) {
             formatPop.appendChild(pop);
         }
+        try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
         return pop;
     };
 
@@ -15147,6 +15447,7 @@ function __renderMdNodeImpl(node, options = {}) {
         if (formatPop) {
             formatPop.appendChild(pop);
         }
+        try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
         return pop;
     };
 
@@ -15206,28 +15507,30 @@ function __renderMdNodeImpl(node, options = {}) {
     };
 
     const doInsert = (formatType) => {
-        if (editor && editor.__tiptapInstance) {
-            const inst = editor.__tiptapInstance;
+        const activeInst = getLiveTiptap();
+        if (activeInst) {
+            hasDirtyEdit = true;
             switch (formatType) {
-                case 'bold': inst.toggleBold(); break;
-                case 'italic': inst.toggleItalic(); break;
-                case 'underline': inst.toggleUnderline(); break;
-                case 'highlight': inst.toggleHighlight(); break;
-                case 'strike': inst.toggleStrike(); break;
-                case 'code': inst.toggleCode(); break;
-                case 'quote': inst.toggleBlockquote(); break;
-                case 'h1': inst.toggleHeading(1); break;
-                case 'h2': inst.toggleHeading(2); break;
-                case 'h3': inst.toggleHeading(3); break;
-                case 'h4': inst.toggleHeading(4); break;
-                case 'h5': inst.toggleHeading(5); break;
-                case 'h6': inst.toggleHeading(6); break;
-                case 'ul': inst.toggleBulletList(); break;
-                case 'ol': inst.toggleOrderedList(); break;
-                case 'task': inst.toggleTaskList(); break;
+                case 'bold': activeInst.toggleBold(); break;
+                case 'italic': activeInst.toggleItalic(); break;
+                case 'underline': activeInst.toggleUnderline(); break;
+                case 'highlight': activeInst.toggleHighlight(); break;
+                case 'strike': activeInst.toggleStrike(); break;
+                case 'code': activeInst.toggleCode(); break;
+                case 'quote': activeInst.toggleBlockquote(); break;
+                case 'h1': activeInst.toggleHeading(1); break;
+                case 'h2': activeInst.toggleHeading(2); break;
+                case 'h3': activeInst.toggleHeading(3); break;
+                case 'h4': activeInst.toggleHeading(4); break;
+                case 'h5': activeInst.toggleHeading(5); break;
+                case 'h6': activeInst.toggleHeading(6); break;
+                case 'ul': activeInst.toggleBulletList(); break;
+                case 'ol': activeInst.toggleOrderedList(); break;
+                case 'task': activeInst.toggleTaskList(); break;
                 default: break;
             }
             saveEditorContent();
+            __syncFormatToolbarActiveStates(toolbar, activeInst);
             return;
         }
         // 获取当前选区
@@ -15393,16 +15696,16 @@ function __renderMdNodeImpl(node, options = {}) {
         editor.focus();
     };
 
-    // 编辑器（现代化的 Tiptap 2 WYSIWYG 编辑器）
+    // 编辑器（现代化的 Tiptap 3 按需挂载 WYSIWYG 编辑器）
     const editor = document.createElement('div');
     editor.className = 'md-canvas-editor md-wysiwyg-editor md-canvas-text';
     editor.spellcheck = false;
 
     // 保存编辑器内容并触发防抖持久化
-    function saveEditorContent(force = false) {
-        const changed = __syncMdNodeFromEditor(node, editor);
+    function saveEditorContent(force = false, cachedMd = null, cachedHtml = null) {
+        const changed = __syncMdNodeFromEditor(node, editor, cachedMd, cachedHtml);
         if (changed || force) {
-            saveCanvasManifestOnly();
+            saveCanvasManifestOnly({ dirtyNodeId: node.id });
         }
     }
 
@@ -15445,36 +15748,42 @@ function __renderMdNodeImpl(node, options = {}) {
     editor.setAttribute('data-placeholder', mdPlaceholder);
     editor.setAttribute('aria-label', mdPlaceholder);
 
-    // 初始化编辑器内容：
-    // - 文本节点统一按 text body 渲染（官方 text node 对齐）。
+    // 初始化观察态内容：使用与 TipTap 3 同构的静态 Schema HTML（zero EditorView 开销），进入编辑态再按需挂载
     const isCanvasNativeText = __isCanvasNativeTextNode(node);
     const rawMarkdownSource = __deriveMdNodeMarkdownSource(node);
     const initialMdSource = rawMarkdownSource || (typeof node.text === 'string' ? node.text : '');
 
-    // 优先采用工业级 Tiptap 2 + ProseMirror 现代化无头架构驱动
     let tiptapInstance = null;
-    if (typeof window !== 'undefined' && window.CanvasTiptapEngine && typeof window.CanvasTiptapEngine.create === 'function') {
-        try {
-            tiptapInstance = window.CanvasTiptapEngine.create(editor, {
-                initialMarkdown: initialMdSource,
-                editable: true,
-                onUpdate: (md, html) => {
-                    saveEditorContent(true);
-                }
-            });
-            editor.__tiptapInstance = tiptapInstance;
-            el.__tiptapInstance = tiptapInstance;
-        } catch (err) {
-            console.warn('[MdNode] Tiptap init fallback:', err);
+    let hasDirtyEdit = false;
+    const getLiveTiptap = () => {
+        const cand = (editor && editor.__tiptapInstance) || tiptapInstance;
+        if (!cand || cand.isDestroyed) {
             tiptapInstance = null;
+            if (editor && editor.__tiptapInstance && editor.__tiptapInstance.isDestroyed) {
+                editor.__tiptapInstance = null;
+            }
+            if (el && el.__tiptapInstance && el.__tiptapInstance.isDestroyed) {
+                el.__tiptapInstance = null;
+            }
+            return null;
         }
-    }
+        return cand;
+    };
+    editor.innerHTML = __buildTiptapObservationDom(initialMdSource, !initialMdSource.trim() ? node.html : null);
+    try { __applyHeadingCollapse(editor); } catch (_) { }
 
+    editor.blur = () => {
+        const inst = getLiveTiptap();
+        if (inst && typeof inst.blur === 'function') {
+            inst.blur();
+        }
+    };
 
-    // 保存选区函数（用于工具栏点击时恢复）
+    // 保存选区函数（仅用于无 TipTap 兜底模式点击工具栏时恢复）
     const saveSelection = () => {
+        if (editor.__tiptapInstance) return;
         const sel = window.getSelection();
-        if (sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+        if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
             savedSelection = {
                 range: sel.getRangeAt(0).cloneRange(),
                 text: sel.toString()
@@ -15482,7 +15791,6 @@ function __renderMdNodeImpl(node, options = {}) {
         }
     };
 
-    // 监听mouseup/keyup保存选区（在点击工具栏前保存）
     editor.addEventListener('mouseup', saveSelection);
     editor.addEventListener('keyup', saveSelection);
 
@@ -15541,56 +15849,42 @@ function __renderMdNodeImpl(node, options = {}) {
             handle.style.pointerEvents = 'auto';
             handle.style.opacity = '';
         });
-
-        // 保存内容
-        saveEditorContent();
     };
 
     editor.addEventListener('input', () => {
-        saveEditorContent();
+        if (!editor.__tiptapInstance) {
+            hasDirtyEdit = true;
+            saveEditorContent();
+        }
     });
 
-    // 编辑器获得焦点时进入编辑状态
+    // 无 TipTap 兜底模式下的 focus/blur 处理（TipTap 模式下由 ProseMirror onFocus/onBlur 接管）
     editor.addEventListener('focus', () => {
-        enterEdit();
+        if (!editor.__tiptapInstance && !isInEditMode) enterEditMode();
     });
 
-    // 编辑器失去焦点时退出编辑状态
     editor.addEventListener('blur', () => {
+        if (editor.__tiptapInstance) return;
+        if (ctrlPausedEdit) return;
         if (el.classList.contains('canvas-node-maximized') || fullscreenEditLock) {
             return;
         }
         setTimeout(() => {
             if (suppressBlurExit) return;
             if (document.activeElement && el.contains(document.activeElement)) return;
-            exitEdit();
-        }, 0);
+            if (document.activeElement?.closest('.md-editing-help-popover')?.__editorOwner === editor) return;
+            exitEditMode();
+        }, 100);
     });
 
-    // 快捷键处理 (ESC / Undo / Redo)
+    // 快捷键处理 (ESC / Undo / Redo 由 Tiptap ProseMirror 内部原生接管，杜绝双重撤销与 IME 截断)
     editor.addEventListener('keydown', (e) => {
+        if (e.isComposing || e.defaultPrevented) return;
         if (e.key === 'Escape') {
             e.preventDefault();
             editor.blur();
+            exitEditMode();
             return;
-        }
-        if ((e.ctrlKey || e.metaKey) && !e.altKey) {
-            const key = (e.key || '').toLowerCase();
-            if (key === 'z') {
-                e.preventDefault();
-                if (editor.__tiptapInstance) {
-                    if (e.shiftKey) editor.__tiptapInstance.redo();
-                    else editor.__tiptapInstance.undo();
-                }
-                return;
-            }
-            if (key === 'y') {
-                e.preventDefault();
-                if (editor.__tiptapInstance) {
-                    editor.__tiptapInstance.redo();
-                }
-                return;
-            }
         }
     });
 
@@ -15628,9 +15922,33 @@ function __renderMdNodeImpl(node, options = {}) {
             : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
         if (!target) return;
 
-        // 任务checkbox点击 - 切换选中状态
-        if (target.classList && target.classList.contains('md-task-checkbox')) {
-            saveEditorContent();
+        // 任务checkbox点击 - 切换选中状态并同步持久化（支持静态观察态直接勾选与兜底模式）
+        const taskCheckbox = target.matches('ul[data-type="taskList"] input[type="checkbox"], li[data-type="taskItem"] input[type="checkbox"], input.md-task-checkbox')
+            ? target
+            : null;
+        if (taskCheckbox) {
+            if (editor.__tiptapInstance) {
+                hasDirtyEdit = true;
+                return;
+            }
+            e.stopPropagation();
+            const allCheckboxes = Array.from(editor.querySelectorAll('ul[data-type="taskList"] input[type="checkbox"], li[data-type="taskItem"] input[type="checkbox"], input.md-task-checkbox'));
+            const cbIdx = allCheckboxes.indexOf(taskCheckbox);
+            const nextChecked = !!taskCheckbox.checked;
+            if (nextChecked) taskCheckbox.setAttribute('checked', 'checked');
+            else taskCheckbox.removeAttribute('checked');
+            const taskLi = taskCheckbox.closest('li[data-type="taskItem"]');
+            if (taskLi) taskLi.setAttribute('data-checked', nextChecked ? 'true' : 'false');
+            if (cbIdx >= 0) {
+                const prevSource = __deriveMdNodeMarkdownSource(node) || (typeof node.text === 'string' ? node.text : '');
+                const nextSource = __toggleMarkdownTaskAtIndex(prevSource, cbIdx, nextChecked);
+                if (nextSource !== prevSource) {
+                    const cleanHtml = __getCleanHtmlForStorage(editor);
+                    saveEditorContent(true, nextSource, cleanHtml);
+                    return;
+                }
+            }
+            saveEditorContent(true);
             return;
         }
 
@@ -15704,7 +16022,7 @@ function __renderMdNodeImpl(node, options = {}) {
                             const index = Array.from(parent.children).indexOf(blockEl) + 1;
                             finalSource = `${index}. ${finalSource}`;
                         } else {
-                            if (blockEl.classList.contains('md-task-item')) {
+                            if (blockEl.classList.contains('md-task-item') || blockEl.getAttribute('data-type') === 'taskItem') {
                                 const cb = blockEl.querySelector('input[type="checkbox"]');
                                 const mark = cb && cb.checked ? '[x]' : '[ ]';
                                 finalSource = `- ${mark} ${finalSource}`;
@@ -15805,6 +16123,7 @@ function __renderMdNodeImpl(node, options = {}) {
                             if (dataUrl) {
                                 const alt = (file.name || 'image').replace(/[\r\n]/g, ' ').trim();
                                 const textToInsert = `![${alt}](${dataUrl})`;
+                                hasDirtyEdit = true;
                                 if (editor.__tiptapInstance) {
                                     editor.__tiptapInstance.insertContent(textToInsert);
                                 } else {
@@ -15866,9 +16185,18 @@ function __renderMdNodeImpl(node, options = {}) {
         return true;
     };
 
-    const enterEditMode = (eventOrCoords = null) => {
+    const enterEditMode = (eventOrCoords = null, { openToolbar = true } = {}) => {
+        if (el.dataset && el.dataset.mdContentUnloaded === 'true') {
+            try { __ensureMdNodeContentLoadedInPlace(node, { force: true }); } catch (_) { }
+            const rebuiltEl = document.getElementById(node.id);
+            if (rebuiltEl && rebuiltEl !== el && typeof rebuiltEl.__enterEditMode === 'function') {
+                rebuiltEl.__enterEditMode(eventOrCoords, { openToolbar });
+                return;
+            }
+        }
         isInEditMode = true;
         ctrlPausedEdit = false;
+        hasDirtyEdit = false;
         if (!node.isEditing) {
             enterEdit();
         }
@@ -15876,33 +16204,79 @@ function __renderMdNodeImpl(node, options = {}) {
         el.setAttribute('data-editing', 'true');
 
         // 用户要求：除卡片全屏外，进入编辑状态时格式工具栏一直出现
-        if (!el.classList.contains('canvas-node-maximized')) {
+        if (openToolbar && !el.classList.contains('canvas-node-maximized')) {
             openFormatPopover();
         }
 
         const savedScrollTop = editor.scrollTop;
         const savedScrollLeft = editor.scrollLeft;
-
-        let focused = false;
-        if (eventOrCoords && editor.__tiptapInstance && typeof editor.__tiptapInstance.focusAtCoords === 'function') {
-            const coords = (typeof eventOrCoords.clientX === 'number')
-                ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
-                : eventOrCoords;
-            focused = editor.__tiptapInstance.focusAtCoords(coords, { scrollIntoView: false });
+        let inst = getLiveTiptap();
+        if (!inst && typeof window !== 'undefined' && window.CanvasTiptapEngine && typeof window.CanvasTiptapEngine.create === 'function') {
+            try {
+                const mountSource = __deriveMdNodeMarkdownSource(node) || (typeof node.text === 'string' ? node.text : '');
+                editor.innerHTML = '';
+                inst = window.CanvasTiptapEngine.create(editor, {
+                    initialMarkdown: mountSource,
+                    editable: true,
+                    placeholder: mdPlaceholder,
+                    onUpdate: (md, html) => {
+                        hasDirtyEdit = true;
+                        saveEditorContent(true, md, html);
+                    },
+                    onFocus: () => {
+                        if (!isInEditMode) enterEditMode();
+                    },
+                    onBlur: () => {
+                        if (ctrlPausedEdit) return;
+                        if (el.classList.contains('canvas-node-maximized') || fullscreenEditLock) {
+                            return;
+                        }
+                        setTimeout(() => {
+                            if (suppressBlurExit || ctrlPausedEdit) return;
+                            if (document.activeElement && el.contains(document.activeElement)) return;
+                            if (document.activeElement?.closest('.md-editing-help-popover')?.__editorOwner === editor) return;
+                            exitEditMode();
+                        }, 80);
+                    },
+                    onStateUpdate: () => {
+                        try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
+                    }
+                });
+                tiptapInstance = inst;
+                editor.__tiptapInstance = inst;
+                el.__tiptapInstance = inst;
+                editor.scrollTop = savedScrollTop;
+                editor.scrollLeft = savedScrollLeft;
+            } catch (err) {
+                console.warn('[MdNode] Tiptap lazy mount fallback:', err);
+                inst = null;
+                tiptapInstance = null;
+                editor.__tiptapInstance = null;
+                el.__tiptapInstance = null;
+                editor.innerHTML = __buildTiptapObservationDom(__deriveMdNodeMarkdownSource(node) || (typeof node.text === 'string' ? node.text : ''));
+            }
         }
-        if (!focused) {
+
+        if (inst) {
+            inst.setEditable(true, false);
+            if (eventOrCoords && typeof inst.focusAtCoords === 'function') {
+                const coords = (typeof eventOrCoords.clientX === 'number')
+                    ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
+                    : eventOrCoords;
+                inst.focusAtCoords(coords, { scrollIntoView: false });
+            } else {
+                inst.focus(null, { scrollIntoView: false });
+            }
+            try { __syncFormatToolbarActiveStates(toolbar, inst); } catch (_) { }
+        } else {
+            editor.contentEditable = 'true';
             editor.focus();
         }
-
-        editor.scrollTop = savedScrollTop;
-        editor.scrollLeft = savedScrollLeft;
-        requestAnimationFrame(() => {
-            if (editor.scrollTop !== savedScrollTop) editor.scrollTop = savedScrollTop;
-            if (editor.scrollLeft !== savedScrollLeft) editor.scrollLeft = savedScrollLeft;
-        });
     };
 
     const exitEditMode = () => {
+        const wasUnloaded = !!(el.dataset && el.dataset.mdContentUnloaded === 'true');
+        const wasEditingState = !!(isInEditMode || node.isEditing || el.classList.contains('editing') || el.getAttribute('data-editing') === 'true');
         isInEditMode = false;
         ctrlPausedEdit = false;
         if (node.isEditing) {
@@ -15913,7 +16287,63 @@ function __renderMdNodeImpl(node, options = {}) {
 
         // 退出编辑模式时收起格式工具栏及其所有二级弹层
         closeFormatPopover();
+
+        const inst = getLiveTiptap();
+        if (wasUnloaded && !inst) {
+            hasDirtyEdit = false;
+            return;
+        }
+        if (inst) {
+            const savedScrollTop = editor.scrollTop;
+            const savedScrollLeft = editor.scrollLeft;
+            let finalMd = null;
+            let finalHtml = '';
+            try {
+                finalMd = inst.getMarkdown();
+                finalHtml = inst.getHTML();
+            } catch (_) {
+                finalMd = null;
+            }
+            const isChanged = typeof finalMd === 'string' && (hasDirtyEdit || finalMd !== (node.text || ''));
+            if (isChanged) {
+                saveEditorContent(true, finalMd, finalHtml);
+            }
+            try { inst.destroy(); } catch (_) { }
+            tiptapInstance = null;
+            editor.__tiptapInstance = null;
+            el.__tiptapInstance = null;
+            hasDirtyEdit = false;
+
+            if (!wasUnloaded) {
+                const renderSource = (typeof finalMd === 'string')
+                    ? finalMd
+                    : (__deriveMdNodeMarkdownSource(node) || (typeof node.text === 'string' ? node.text : ''));
+                editor.innerHTML = __buildTiptapObservationDom(
+                    renderSource,
+                    typeof finalMd === 'string' ? finalHtml : null,
+                    typeof finalMd === 'string'
+                );
+                try { __applyHeadingCollapse(editor); } catch (_) { }
+                editor.scrollTop = savedScrollTop;
+                editor.scrollLeft = savedScrollLeft;
+                requestAnimationFrame(() => {
+                    if (editor.scrollTop !== savedScrollTop) editor.scrollTop = savedScrollTop;
+                    if (editor.scrollLeft !== savedScrollLeft) editor.scrollLeft = savedScrollLeft;
+                });
+            }
+            return;
+        }
+        if (editor.contentEditable === 'true') {
+            editor.contentEditable = 'false';
+        }
+        if (wasEditingState && hasDirtyEdit) {
+            saveEditorContent(true);
+        }
+        hasDirtyEdit = false;
     };
+
+    el.__enterEditMode = (eventOrCoords, editOptions) => enterEditMode(eventOrCoords, editOptions);
+    el.__exitEditMode = () => exitEditMode();
 
     // Ctrl键暂停编辑（允许拖动/调整大小）
     const pauseEditForCtrl = () => {
@@ -15932,21 +16362,6 @@ function __renderMdNodeImpl(node, options = {}) {
             // 不自动恢复编辑，保持选中状态，用户可双击继续编辑
         }
     };
-
-    // 监听编辑器失焦，退出编辑模式
-    editor.addEventListener('blur', () => {
-        // 如果是Ctrl暂停的，不退出编辑模式
-        if (ctrlPausedEdit) return;
-        if (el.classList.contains('canvas-node-maximized') || fullscreenEditLock) return;
-        // 延迟检查，避免点击工具栏时误退出
-        setTimeout(() => {
-            if (suppressBlurExit) return;
-            if (document.activeElement !== editor && !el.contains(document.activeElement)) {
-                try { saveEditorContent(); } catch (_) { }
-                exitEditMode();
-            }
-        }, 100);
-    });
 
     el.addEventListener('mousedown', (e) => {
         const target = (e.target && e.target.nodeType === Node.ELEMENT_NODE)
@@ -15971,12 +16386,14 @@ function __renderMdNodeImpl(node, options = {}) {
             el.classList.contains('editing') ||
             el.dataset.editing === 'true'
         )) return;
-        // 忽略在resize、连接点/连接点显示区、小工具栏按钮、链接上的按下
+        // 忽略在resize、连接点/连接点显示区、小工具栏按钮、链接、静态复选框上的按下
         if (target.closest('.resize-handle') ||
             target.closest('.canvas-node-anchor') ||
             target.closest('.canvas-anchor-zone') ||
             target.closest('.md-node-toolbar-btn') ||
             target.closest('.canvas-layout-zoom-controls') ||
+            target.closest('input[type="checkbox"]') ||
+            target.closest('ul[data-type="taskList"] li > label') ||
             target.closest('a')) return;
 
         // 按住Ctrl键时，暂停编辑模式，允许拖动和调整大小
@@ -16091,6 +16508,9 @@ function __renderMdNodeImpl(node, options = {}) {
             target.closest('.md-color-picker-btn') ||
             target.closest('.md-heading-option') ||
             target.closest('.md-list-option') ||
+            target.closest('.md-align-option') ||
+            target.closest('input[type="checkbox"]') ||
+            target.closest('ul[data-type="taskList"] li > label') ||
             target.closest('a')) {
             return;
         }
@@ -16183,7 +16603,6 @@ function __renderMdNodeImpl(node, options = {}) {
             if (!action) return false;
             if (action.startsWith('md-insert-')) return true;
             if (action === 'md-format-toggle') return true;
-            if (action === 'md-format-close') return true;
             if (action === 'md-heading-toggle' || action === 'md-heading-apply') return true;
             if (action === 'md-list-toggle' || action === 'md-list-apply') return true;
             if (action === 'md-fontcolor-toggle' || action === 'md-fontcolor-apply') return true;
@@ -16194,7 +16613,9 @@ function __renderMdNodeImpl(node, options = {}) {
         if (shouldEnterEditForAction && !ctrlPausedEdit) {
             if (!isInEditMode || !node.isEditing) {
                 try { selectMdNode(node.id); } catch (_) { }
-                enterEditMode();
+                // The explicit toggle below owns this click; don't auto-open and
+                // immediately toggle the same popover closed on first activation.
+                enterEditMode(null, { openToolbar: action !== 'md-format-toggle' });
             }
         }
 
@@ -16985,9 +17406,7 @@ function removeMdNode(id, deleteChildren = false, options = {}) {
 
     const el = document.getElementById(id);
     if (el) {
-        if (el.__tiptapInstance && typeof el.__tiptapInstance.destroy === 'function') {
-            try { el.__tiptapInstance.destroy(); } catch (_) { }
-        }
+        try { __cleanupMdNodeElementLifecycle(el); } catch (_) { }
         el.remove();
     }
     CanvasState.mdNodes = CanvasState.mdNodes.filter(n => n.id !== id);
@@ -17029,10 +17448,12 @@ function __sanitizeCanvasRichTextHtml(html) {
         'br',
         'center',
         'code',
+        'pre',
         'blockquote',
         'ul',
         'ol',
         'li',
+        'label',
         'hr',
         'h1',
         'h2',
@@ -17045,7 +17466,15 @@ function __sanitizeCanvasRichTextHtml(html) {
         'img',
         'button',
         'details',
-        'summary'
+        'summary',
+        'table',
+        'thead',
+        'tbody',
+        'tr',
+        'th',
+        'td',
+        'colgroup',
+        'col'
     ]);
 
     const allowedAttrs = new Set([
@@ -17057,6 +17486,8 @@ function __sanitizeCanvasRichTextHtml(html) {
         'data-wikilink',
         'data-md-collapsible',
         'data-md-collapsed',
+        'data-type',
+        'data-checked',
         'type',
         'checked',
         'disabled',
@@ -17070,7 +17501,10 @@ function __sanitizeCanvasRichTextHtml(html) {
         'align',
         'style',
         'width',
-        'height'
+        'height',
+        'colspan',
+        'rowspan',
+        'colwidth'
     ]);
 
     const normalizeExternalHref = (href) => {
@@ -17086,26 +17520,34 @@ function __sanitizeCanvasRichTextHtml(html) {
         const h0 = String(href || '').trim();
         const h = normalizeExternalHref(h0);
         if (!h) return null;
+        if (h.toLowerCase().startsWith('chrome-extension:')) {
+            try {
+                const u = new URL(h);
+                if (u.protocol === 'chrome-extension:') return h;
+            } catch (_) { }
+            return null;
+        }
         try {
             if (typeof ObsidianMarkdown !== 'undefined' && typeof ObsidianMarkdown.sanitizeHref === 'function') {
                 const res = ObsidianMarkdown.sanitizeHref(h);
-                if (!res) return null;
-                const u = new URL(res, 'https://dummy.local');
-                if (u.origin === 'https://dummy.local') {
-                    const lower = res.toLowerCase();
-                    const hasValidPrefix = lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('obsidian:') || lower.startsWith('#');
-                    if (!hasValidPrefix) return null;
+                if (res) {
+                    const u = new URL(res, 'https://dummy.local');
+                    if (u.origin === 'https://dummy.local') {
+                        const lower = res.toLowerCase();
+                        const hasValidPrefix = lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('obsidian:') || lower.startsWith('#');
+                        if (!hasValidPrefix) return null;
+                    }
+                    return res;
                 }
-                return res;
             }
         } catch (_) { }
         if (h.startsWith('#')) return h;
         try {
             const u = new URL(h, 'https://dummy.local');
-            let ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:';
+            let ok = u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:' || u.protocol === 'obsidian:' || u.protocol === 'chrome-extension:';
             if (ok && u.origin === 'https://dummy.local') {
                 const lower = h.toLowerCase();
-                const hasValidPrefix = lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('obsidian:');
+                const hasValidPrefix = lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('obsidian:') || lower.startsWith('chrome-extension:');
                 if (!hasValidPrefix) ok = false;
             }
             return ok ? h : null;
@@ -17559,10 +18001,236 @@ function __applyCanvasHighlightSyntax(rootEl) {
     } catch (_) { }
 }
 
+function __buildTiptapObservationInnerHtml(rawSource, preRenderedHtml = null, fromTiptapInstance = false) {
+    if (fromTiptapInstance && typeof preRenderedHtml === 'string' && preRenderedHtml.trim()) {
+        const sanitizedPre = __sanitizeCanvasRichTextHtml(preRenderedHtml);
+        if (sanitizedPre) return sanitizedPre;
+    }
+    const val = String(rawSource == null ? '' : rawSource);
+    if (val.trim()) {
+        if (typeof window !== 'undefined' && window.CanvasTiptapEngine && typeof window.CanvasTiptapEngine.renderStaticHTML === 'function') {
+            const staticHtml = window.CanvasTiptapEngine.renderStaticHTML(val);
+            if (typeof staticHtml === 'string') {
+                return __sanitizeCanvasRichTextHtml(staticHtml);
+            }
+        }
+        return __normalizeCanvasRichHtml(__renderMarkdownSourceToCanvasHtml(val, { forceLinePreserve: true }));
+    }
+    if (typeof preRenderedHtml === 'string' && preRenderedHtml.trim()) {
+        return __sanitizeCanvasRichTextHtml(preRenderedHtml);
+    }
+    return '';
+}
+
+function __buildTiptapObservationDom(rawSource, preRenderedHtml = null, fromTiptapInstance = false) {
+    const innerHtml = __buildTiptapObservationInnerHtml(rawSource, preRenderedHtml, fromTiptapInstance);
+    if (!innerHtml) return '';
+    return `<div class="tiptap ProseMirror">${innerHtml}</div>`;
+}
+
+function __toggleMarkdownTaskAtIndex(markdown, targetIndex, nextChecked) {
+    const raw = String(markdown == null ? '' : markdown).replace(/\r\n?/g, '\n');
+    const engine = typeof window !== 'undefined' ? window.CanvasTiptapEngine : null;
+    if (engine && typeof engine.toggleMarkdownTaskAtIndex === 'function') {
+        return engine.toggleMarkdownTaskAtIndex(raw, targetIndex, nextChecked);
+    }
+    // Without the parser, leave source intact rather than guessing a different task.
+    return raw;
+}
+
+/** Bind read-only help without changing the editor's selection or next-input marks. */
+function __bindFormatEditingHelp(formatPop, { editor, toolbar, getLiveTiptap, onOutside }) {
+    const button = formatPop.querySelector('[data-action="md-editing-help"]');
+    if (!button || formatPop.__editingHelp) return;
+    const isEn = typeof currentLang !== 'undefined' && currentLang === 'en';
+    const title = isEn ? 'Editing help' : '编辑说明';
+    const items = isEn ? [
+        ['Bold', 'Ctrl/Cmd+B', '**text**'],
+        ['Italic', 'Ctrl/Cmd+I', '*text*'],
+        ['Underline', 'Ctrl/Cmd+U', '<u>text</u>'],
+        ['Highlight', 'Ctrl/Cmd+Shift+H', '==text=='],
+        ['Inline code', 'Ctrl/Cmd+E', '`text`'],
+    ] : [
+        ['加粗', 'Ctrl/Cmd+B', '**文字**'],
+        ['斜体', 'Ctrl/Cmd+I', '*文字*'],
+        ['下划线', 'Ctrl/Cmd+U', '<u>文字</u>'],
+        ['高亮', 'Ctrl/Cmd+Shift+H', '==文字=='],
+        ['行内代码', 'Ctrl/Cmd+E', '`文字`'],
+    ];
+    __bindFormatEditingHelp.nextId = (__bindFormatEditingHelp.nextId || 0) + 1;
+    const id = `md-editing-help-${__bindFormatEditingHelp.nextId}`;
+    button.setAttribute('aria-controls', id);
+    let panel = null;
+    let observer = null;
+    let keyboardOpened = false;
+    const position = () => {
+        if (panel) __positionCanvasFloatingPopoverAboveButton(panel, button);
+    };
+    const close = ({ restoreFocus = false } = {}) => {
+        if (!panel) return;
+        const returnToButton = keyboardOpened || panel.contains(document.activeElement);
+        panel.remove();
+        panel = null;
+        button.setAttribute('aria-expanded', 'false');
+        if (observer) observer.disconnect();
+        observer = null;
+        document.removeEventListener('mousedown', onDocDown, true);
+        document.removeEventListener('keydown', onKeyDown, true);
+        document.removeEventListener('focusin', onFocusIn, true);
+        document.removeEventListener('scroll', position, true);
+        window.removeEventListener('resize', position);
+        updateCanvasPopoverState(false);
+        if (restoreFocus && editor.isConnected) {
+            if (returnToButton) button.focus({ preventScroll: true });
+            else {
+                const instance = getLiveTiptap();
+                if (instance) instance.focus(null, { scrollIntoView: false });
+                else editor.focus({ preventScroll: true });
+            }
+        }
+    };
+    const ownsTarget = target => target && (panel?.contains(target) || toolbar.contains(target) || editor.contains(target));
+    const onDocDown = event => {
+        if (panel?.contains(event.target) || button.contains(event.target)) return;
+        const leavingHelp = panel?.contains(document.activeElement) && !ownsTarget(event.target);
+        close();
+        if (leavingHelp && typeof onOutside === 'function') onOutside();
+    };
+    const onFocusIn = event => {
+        if (ownsTarget(event.target)) return;
+        close();
+        if (typeof onOutside === 'function') onOutside();
+    };
+    const onKeyDown = event => {
+        const raw = getLiveTiptap()?.rawEditor;
+        if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || raw?.view.composing || !ownsTarget(event.target)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        close({ restoreFocus: true });
+    };
+    button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (panel) return close({ restoreFocus: true });
+        keyboardOpened = event.detail === 0 && document.activeElement === button;
+        panel = document.createElement('div');
+        panel.id = id;
+        panel.className = 'md-editing-help-popover open';
+        panel.__editorOwner = editor;
+        panel.tabIndex = 0;
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-modal', 'false');
+        panel.setAttribute('aria-labelledby', `${id}-title`);
+        const heading = document.createElement('h3');
+        heading.id = `${id}-title`;
+        heading.textContent = title;
+        const list = document.createElement('ul');
+        list.className = 'md-editing-help-shortcuts';
+        list.setAttribute('aria-labelledby', heading.id);
+        items.forEach(([label, shortcut, syntax]) => {
+            const row = document.createElement('li');
+            const action = document.createElement('span');
+            action.className = 'md-editing-help-label';
+            action.textContent = label;
+            const key = document.createElement('kbd');
+            key.textContent = shortcut;
+            const syntaxSlot = document.createElement('span');
+            syntaxSlot.className = 'md-editing-help-syntax-slot';
+            const code = document.createElement('code');
+            code.className = 'md-editing-help-syntax';
+            code.setAttribute('aria-label', `${isEn ? 'Syntax' : '语法'}: ${syntax}`);
+            code.title = isEn ? 'Markdown / HTML syntax' : 'Markdown / HTML 语法';
+            code.textContent = syntax;
+            syntaxSlot.appendChild(code);
+            row.append(action, key, syntaxSlot);
+            list.appendChild(row);
+        });
+        const plain = document.createElement('li');
+        plain.className = 'md-editing-help-plain-row';
+        const label = document.createElement('span');
+        label.className = 'md-editing-help-label md-editing-help-plain-typing';
+        label.textContent = isEn ? 'Plain typing' : '恢复普通输入';
+        const syntaxSlot = document.createElement('span');
+        syntaxSlot.className = 'md-editing-help-syntax-slot';
+        const arrow = document.createElement('kbd');
+        arrow.textContent = '→';
+        arrow.setAttribute('aria-label', isEn ? 'Right Arrow key at the end of a formatted span' : '格式片段末尾按右方向键');
+        const condition = document.createElement('span');
+        condition.className = 'md-editing-help-condition';
+        condition.textContent = isEn ? 'at end' : '片段末尾';
+        condition.title = isEn ? 'At the end of a formatted span' : '在格式片段末尾';
+        const shortcut = document.createElement('kbd');
+        shortcut.textContent = 'Ctrl/Cmd+\\';
+        syntaxSlot.append(arrow, condition);
+        plain.append(label, shortcut, syntaxSlot);
+        list.appendChild(plain);
+        panel.append(heading, list);
+        preventCanvasEventsPropagation(panel);
+        panel.addEventListener('click', e => e.stopPropagation());
+        getOverlayContainer().appendChild(panel);
+        button.setAttribute('aria-expanded', 'true');
+        position();
+        updateCanvasPopoverState(true);
+        document.addEventListener('mousedown', onDocDown, true);
+        document.addEventListener('keydown', onKeyDown, true);
+        document.addEventListener('focusin', onFocusIn, true);
+        document.addEventListener('scroll', position, true);
+        window.addEventListener('resize', position);
+        observer = new MutationObserver(() => {
+            if (!editor.isConnected || !formatPop.isConnected || !formatPop.classList.contains('open')) close();
+        });
+        observer.observe(formatPop, { attributes: true, attributeFilter: ['class'] });
+        observer.observe(document.body, { childList: true, subtree: true });
+        if (keyboardOpened) panel.focus({ preventScroll: true });
+    });
+    formatPop.__editingHelp = { close, position };
+}
+
+function __syncFormatToolbarActiveStates(toolbar, tiptapInst) {
+    if (!toolbar || !tiptapInst || tiptapInst.isDestroyed || typeof tiptapInst.isActive !== 'function') return;
+    const setBtn = (selector, active) => {
+        toolbar.querySelectorAll(selector).forEach(el => {
+            // Menu `.active` means the popover is open, not that a text format
+            // is applied. Keep its visual state separate from the editor state.
+            if (!String(el.dataset.action || '').endsWith('-toggle')) {
+                el.classList.toggle('active', !!active);
+            }
+            el.dataset.formatActive = active ? 'true' : 'false';
+            el.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+    };
+    setBtn('[data-action="md-insert-bold"]', tiptapInst.isActive('bold'));
+    setBtn('[data-action="md-insert-italic"]', tiptapInst.isActive('italic'));
+    setBtn('[data-action="md-insert-underline"]', tiptapInst.isActive('underline'));
+    setBtn('[data-action="md-insert-highlight"]', tiptapInst.isActive('highlight'));
+    setBtn('[data-action="md-insert-strike"]', tiptapInst.isActive('strike'));
+    setBtn('[data-action="md-insert-code"]', tiptapInst.isActive('code'));
+    setBtn('[data-action="md-insert-quote"]', tiptapInst.isActive('blockquote'));
+    setBtn('[data-action="md-heading-toggle"]', tiptapInst.isActive('heading'));
+    for (let level = 1; level <= 6; level++) {
+        setBtn(`[data-action="md-heading-apply"][data-level="h${level}"]`, tiptapInst.isActive('heading', { level }));
+    }
+    setBtn('[data-action="md-list-toggle"]', tiptapInst.isActive('bulletList') || tiptapInst.isActive('orderedList') || tiptapInst.isActive('taskList'));
+    setBtn('[data-action="md-list-apply"][data-type="ul"]', tiptapInst.isActive('bulletList'));
+    setBtn('[data-action="md-list-apply"][data-type="ol"]', tiptapInst.isActive('orderedList'));
+    setBtn('[data-action="md-list-apply"][data-type="task"]', tiptapInst.isActive('taskList'));
+    ['left', 'center', 'right', 'justify'].forEach((align) => {
+        setBtn(`[data-action="md-align-apply"][data-align="${align}"]`, tiptapInst.isActive({ textAlign: align }));
+    });
+    setBtn('[data-action="md-align-toggle"]', ['center', 'right', 'justify'].some(align => tiptapInst.isActive({ textAlign: align })));
+    const rawEditor = tiptapInst.rawEditor;
+    const color = rawEditor && rawEditor.getAttributes('textStyle').color;
+    setBtn('[data-action="md-fontcolor-toggle"]', !!color && tiptapInst.isActive('textStyle', { color }));
+}
+
 function __coerceDescriptionSourceToHtml(raw) {
     const val = String(raw || '');
     if (!val.trim()) return '';
     const normalized = __repairLegacyCanvasMarkdownSource(val);
+    if (typeof window !== 'undefined' && window.CanvasTiptapEngine && typeof window.CanvasTiptapEngine.renderStaticHTML === 'function') {
+        const innerHtml = __buildTiptapObservationInnerHtml(normalized);
+        if (innerHtml) return innerHtml;
+    }
     const looksLikeHtml = /<\s*(?:a|p|div|span|br|strong|em|b|i|u|del|s|mark|code|blockquote|ul|ol|li|hr|h[1-6]|font|center|input)\b/i.test(normalized);
     const looksLikeMarkdown = /(^|\n)\s*(#{1,6}\s+|>\s+|[-*]\s+(?:\[[ xX]\]\s+)?|\d+\.\s+|```)/m.test(normalized);
     if (looksLikeHtml && !looksLikeMarkdown) return normalized;
@@ -17605,13 +18273,15 @@ function __normalizeCanvasRichHtml(rawHtml) {
 function __getCleanHtmlForStorage(editorEl) {
     if (!editorEl) return '';
     const clone = editorEl.cloneNode(true);
-    clone.querySelectorAll('.md-heading-hidden').forEach(el => {
+    const innerPm = clone.querySelector(':scope > .tiptap.ProseMirror');
+    const targetRoot = innerPm || clone;
+    targetRoot.querySelectorAll('.md-heading-hidden').forEach(el => {
         try { el.classList.remove('md-heading-hidden'); } catch (_) { }
     });
-    clone.querySelectorAll('br[data-md-auto-br]').forEach(el => {
+    targetRoot.querySelectorAll('br[data-md-auto-br]').forEach(el => {
         try { el.remove(); } catch (_) { }
     });
-    return clone.innerHTML;
+    return targetRoot.innerHTML;
 }
 
 function __extractCanvasNativeMarkdownFromEditor(editorEl) {
@@ -17787,7 +18457,7 @@ function __resolveMarkdownSourceFromEditorHtml(cleanHtml, currentSource, options
     if (normalizedCurrentSource.trim()) {
         const currentRenderedHtml = sourceMode === 'description'
             ? __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(normalizedCurrentSource))
-            : __normalizeCanvasRichHtml(__renderMarkdownSourceToCanvasHtml(normalizedCurrentSource, renderOptions));
+            : __normalizeCanvasRichHtml(__buildTiptapObservationInnerHtml(normalizedCurrentSource));
         if (currentRenderedHtml === normalizedHtml) {
             return normalizedCurrentSource;
         }
@@ -17806,54 +18476,99 @@ function __repairLegacyCanvasMarkdownSource(value) {
     let normalized = __normalizeCanvasMarkdownSource(value);
     if (!normalized.trim()) return normalized;
 
-    // Recover escaped rich-text snippets (&lt;br&gt;, &lt;strong&gt;, ...) even in nested/double-escaped payloads.
-    // Limit decode rounds to avoid pathological cases.
-    if (/&(?:[a-z][a-z0-9]+|#x[0-9a-f]+|#\d+);/i.test(normalized)) {
-        for (let i = 0; i < 3; i++) {
-            const prev = normalized;
-            try {
-                const textarea = document.createElement('textarea');
-                textarea.name = 'html-decode-helper';
-                textarea.innerHTML = normalized;
-                normalized = textarea.value || normalized;
-            } catch (_) {
-                break;
-            }
-            if (normalized === prev) break;
-            if (!/&(?:[a-z][a-z0-9]+|#x[0-9a-f]+|#\d+);/i.test(normalized)) break;
+    // Entity-escaped text is valid Markdown, not evidence of corrupt legacy HTML.
+    // Never decode it globally, and protect code before applying legacy repairs.
+    const maskedSpans = [];
+    const maskSpan = (segment) => {
+        const token = `\uFFF0BCS_REPAIR_${maskedSpans.length}\uFFF1`;
+        maskedSpans.push(segment);
+        return token;
+    };
+    const unmaskAll = (text) => {
+        let out = text;
+        // Unmask in reverse/recursive order in case nested masks were created.
+        for (let pass = 0; pass < 3 && /\uFFF0BCS_REPAIR_\d+\uFFF1/.test(out); pass++) {
+            out = out.replace(/\uFFF0BCS_REPAIR_(\d+)\uFFF1/g, (_, idx) => {
+                const i = Number(idx);
+                return Number.isInteger(i) && i >= 0 && i < maskedSpans.length ? maskedSpans[i] : '';
+            });
         }
-    }
-    normalized = normalized.replace(/\u00A0/g, ' ');
+        return out;
+    };
 
-    // Recover legacy single-line markdown where line breaks were serialized as <br>.
-    if (/<br\s*\/?>/i.test(normalized)) {
-        normalized = normalized.replace(/<br\s*\/?>/gi, '\n');
-    }
+    let fence = null;
+    let codeLines = [];
+    const lines = normalized.split('\n');
+    const protectedLines = [];
+    lines.forEach((line) => {
+        const marker = line.match(/^(?:[ \t]*>[ \t]?)*[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/);
+        if (fence) {
+            codeLines.push(line);
+            if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) {
+                protectedLines.push(maskSpan(codeLines.join('\n')));
+                fence = null;
+                codeLines = [];
+            }
+        } else if (marker) {
+            fence = { char: marker[1][0], length: marker[1].length };
+            codeLines = [line];
+        } else {
+            protectedLines.push(/^(?: {4}|\t)/.test(line) ? maskSpan(line) : line);
+        }
+    });
+    if (codeLines.length) protectedLines.push(maskSpan(codeLines.join('\n')));
+    normalized = protectedLines.join('\n');
+    normalized = normalized.replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (match) => maskSpan(match));
 
     // Recover payloads that were accidentally wrapped as HTML headings/paragraphs
-    // while still carrying markdown syntax inside (e.g. <h2>## Title<br>1. ...</h2>).
-    const looksLikeWrappedMarkdown =
-        /<h[1-6][^>]*>\s*#{1,6}\s+/i.test(normalized)
-        || (/<h[1-6][^>]*>/i.test(normalized) && /(?:<br\s*\/?>|\n)\s*(?:#{1,6}\s+|[-*]\s+|\d+\.\s+)/i.test(normalized))
-        || (/<p[^>]*>/i.test(normalized) && /(?:^|\n)\s*#{1,6}\s+/m.test(normalized));
-    if (looksLikeWrappedMarkdown) {
+    // while still carrying markdown syntax inside (e.g. <h2>## Title<br>1. ...</h2> or <p># Title</p>),
+    // without touching valid empty-line placeholders (<p></p>) or aligned blocks (<p style="text-align: ...">).
+    const unwrapMatchedMarkdownBlock = (match) => {
         try {
-            const converted = __htmlToMarkdown(normalized, {
+            const converted = __htmlToMarkdown(unmaskAll(match), {
                 trimResult: false,
                 compactNewlines: false,
                 paragraphBreaks: false,
                 hardLineBreaks: true
             });
             if (String(converted || '').trim()) {
-                normalized = __normalizeCanvasMarkdownSource(converted);
+                return __normalizeCanvasMarkdownSource(converted).trimEnd();
             }
         } catch (_) { }
+        return match;
+    };
+
+    normalized = normalized.replace(/<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/gi, (match, _level, _attrs, inner) => {
+        const plainInner = String(inner || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+        const hasWrappedMarkdown = /^\s*#{1,6}\s+/m.test(plainInner)
+            || /\n\s*(?:#{1,6}\s+|[-*]\s+|\d+\.\s+)/.test(plainInner);
+        return hasWrappedMarkdown ? unwrapMatchedMarkdownBlock(match) : maskSpan(match);
+    });
+
+    normalized = normalized.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (match, attrs, inner) => {
+        const attrText = String(attrs || '');
+        const plainInner = String(inner || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+        const hasAlignAttr = /\balign\s*=|\bstyle\s*=\s*["'][^"']*text-align\s*:/i.test(attrText);
+        if (!hasAlignAttr && plainInner.trim() && /(?:^|\n)\s*#{1,6}\s+/m.test(plainInner)) {
+            return unwrapMatchedMarkdownBlock(match);
+        }
+        return maskSpan(match);
+    });
+
+    // Preserve tables and <center> blocks when recovering bare <br> line breaks.
+    normalized = normalized.replace(/<table\b[^>]*>[\s\S]*?<\/table>/gi, (match) => maskSpan(match));
+    normalized = normalized.replace(/<center\b[^>]*>[\s\S]*?<\/center>/gi, (match) => maskSpan(match));
+    normalized = normalized.replace(/<details\b[^>]*>[\s\S]*<\/details>/gi, (match) => maskSpan(match));
+
+    // Recover legacy single-line markdown where line breaks were serialized as <br>.
+    if (/<br\s*\/?>/i.test(normalized)) {
+        normalized = normalized.replace(/<br\s*\/?>/gi, '\n');
     }
 
     // Repair duplicated heading markers introduced by broken heading-source expansion ("## ## title").
     normalized = normalized.replace(/^[\u200B\s]*(#{1,6})\s+\1\s+/gm, '$1 ');
     normalized = normalized.replace(/^[\u200B\s]*(#{1,6})(?:\s+#{1,6})+\s+/gm, '$1 ');
-    return normalized;
+    return unmaskAll(normalized);
 }
 
 function __looksLikeMixedMarkdownHtmlCache(rawHtml) {
@@ -18062,24 +18777,45 @@ function __ensureMdNodeMarkdownProtocol(node, options = {}) {
     return node;
 }
 
-function __syncMdNodeFromEditor(node, editor) {
+function __syncMdNodeFromEditor(node, editor, cachedMd = null, cachedHtml = null) {
     if (!node || typeof node !== 'object' || !editor) return false;
+    const hostEl = editor.closest ? editor.closest('.md-canvas-node') : null;
+    if (hostEl && hostEl.dataset && hostEl.dataset.mdContentUnloaded === 'true' && !editor.__tiptapInstance) {
+        return false;
+    }
 
-    if (editor.__tiptapInstance && typeof editor.__tiptapInstance.getMarkdown === 'function') {
-        const tiptapMd = editor.__tiptapInstance.getMarkdown();
-        const tiptapHtml = editor.__tiptapInstance.getHTML();
+    const hasTiptap = !!(editor.__tiptapInstance && typeof editor.__tiptapInstance.getMarkdown === 'function');
+    const hasCachedMd = typeof cachedMd === 'string';
+
+    if (hasTiptap || hasCachedMd) {
+        const tiptapMd = hasCachedMd ? cachedMd : editor.__tiptapInstance.getMarkdown();
+        if (typeof tiptapMd !== 'string') {
+            return false;
+        }
+        const tiptapHtml = cachedHtml !== null
+            ? String(cachedHtml)
+            : (hasTiptap ? editor.__tiptapInstance.getHTML() : __buildTiptapObservationInnerHtml(tiptapMd));
         const changed = (node.text || '') !== tiptapMd || (node.markdownSource || '') !== tiptapMd;
         node.text = tiptapMd;
         node.markdownSource = tiptapMd;
         node.html = tiptapHtml;
-        node.subtype = CANVAS_PLUGIN_MARKDOWN_SUBTYPE;
-        node.source = CANVAS_PLUGIN_MARKDOWN_SOURCE;
-        node.canvasTextKind = 'blank';
+        if (__isCanvasNativeTextNode(node)) {
+            __normalizeCanvasNativeTextNodeFields(node);
+        } else {
+            node.subtype = CANVAS_PLUGIN_MARKDOWN_SUBTYPE;
+            node.source = CANVAS_PLUGIN_MARKDOWN_SOURCE;
+            node.canvasTextKind = 'blank';
+        }
         const el = document.getElementById(node.id);
         if (el) {
             try { __ensureMdNodeLowDetailOverlay(el, node); } catch (_) {}
         }
         return changed;
+    }
+
+    const isEditingNode = !!(node.isEditing || (hostEl && hostEl.classList && hostEl.classList.contains('editing')) || editor.contentEditable === 'true');
+    if (!isEditingNode) {
+        return false;
     }
 
     const isCanvasNativeText = __isCanvasNativeTextNode(node);
@@ -18201,7 +18937,8 @@ function __getHeadingLevel(node) {
 
 function __applyHeadingCollapse(editorEl) {
     if (!editorEl) return;
-    const nodes = Array.from(editorEl.childNodes || []);
+    const targetRoot = (editorEl.querySelector && editorEl.querySelector('.tiptap.ProseMirror')) || editorEl;
+    const nodes = Array.from(targetRoot.childNodes || []);
     const hasContentBetween = (startIndex, level) => {
         for (let i = startIndex + 1; i < nodes.length; i++) {
             const n = nodes[i];
@@ -18254,15 +18991,17 @@ function __applyHeadingCollapse(editorEl) {
 function __handleHeadingCollapseClick(editorEl, e) {
     if (!editorEl || !e || !e.target) return false;
     const heading = e.target.closest('h1, h2, h3, h4, h5, h6');
-    if (!heading || heading.parentNode !== editorEl) return false;
+    if (!heading || !editorEl.contains(heading)) return false;
+    const parent = heading.parentNode;
+    if (parent !== editorEl && !(parent && parent.classList && parent.classList.contains('ProseMirror'))) return false;
     if (heading.getAttribute('data-md-collapsible') !== 'true') return false;
 
     const rect = heading.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const style = window.getComputedStyle(heading);
     const paddingLeft = parseFloat(style.paddingLeft) || 0;
-    const threshold = Math.max(16, Math.min(28, paddingLeft || 22));
-    if (clickX > threshold) return false;
+    const threshold = paddingLeft > 0 ? Math.max(16, Math.min(28, paddingLeft)) : 4;
+    if (clickX < -24 || clickX > threshold) return false;
 
     e.preventDefault();
     e.stopPropagation();
@@ -18279,12 +19018,24 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     if (!editor || !toolbar || !formatToggleBtn) return null;
 
     let tiptapInstance = null;
+    let hasDirtyEdit = false;
+    const getLiveTiptap = () => {
+        const cand = (editor && editor.__tiptapInstance) || tiptapInstance;
+        if (!cand || cand.isDestroyed) {
+            tiptapInstance = null;
+            if (editor && editor.__tiptapInstance && editor.__tiptapInstance.isDestroyed) {
+                editor.__tiptapInstance = null;
+            }
+            return null;
+        }
+        return cand;
+    };
 
     const saveEditorContent = () => {
         try { if (typeof save === 'function') save(); } catch (_) { }
     };
 
-    const mountTiptap = (initialMarkdown, eventOrCoords = null) => {
+    const mountTiptap = (initialMarkdown, eventOrCoords = null, autoFocus = true) => {
         if (typeof window === 'undefined' || !window.CanvasTiptapEngine || typeof window.CanvasTiptapEngine.create !== 'function') {
             return null;
         }
@@ -18292,29 +19043,51 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         const savedScrollTop = editor.scrollTop;
         const savedScrollLeft = editor.scrollLeft;
 
-        if (tiptapInstance) {
-            tiptapInstance.setMarkdown(initialMarkdown || '', false);
+        const liveInst = getLiveTiptap();
+        if (liveInst) {
+            tiptapInstance = liveInst;
+            if (autoFocus) {
+                hasDirtyEdit = false;
+                liveInst.setEditable(true, false);
+            }
+            if (typeof initialMarkdown === 'string') {
+                const currentMd = liveInst.getMarkdown();
+                if (typeof currentMd === 'string' && currentMd !== initialMarkdown) {
+                    liveInst.setMarkdown(initialMarkdown, false);
+                }
+            }
             editor.scrollTop = savedScrollTop;
             editor.scrollLeft = savedScrollLeft;
-            if (eventOrCoords && typeof tiptapInstance.focusAtCoords === 'function') {
-                const coords = (typeof eventOrCoords.clientX === 'number')
-                    ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
-                    : eventOrCoords;
-                tiptapInstance.focusAtCoords(coords, { scrollIntoView: false });
-            } else {
-                tiptapInstance.focus(null, { scrollIntoView: false });
+            if (autoFocus) {
+                if (eventOrCoords && typeof liveInst.focusAtCoords === 'function') {
+                    const coords = (typeof eventOrCoords.clientX === 'number')
+                        ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
+                        : eventOrCoords;
+                    liveInst.focusAtCoords(coords, { scrollIntoView: false });
+                } else {
+                    liveInst.focus(null, { scrollIntoView: false });
+                }
+                try { __syncFormatToolbarActiveStates(toolbar, liveInst); } catch (_) { }
             }
-            return tiptapInstance;
+            return liveInst;
         }
+        let previousHtml = '';
         try {
+            hasDirtyEdit = false;
             editor.contentEditable = 'false';
-            editor.innerHTML = ''; // 彻底清空原有静态只读DOM，确保只有纯净的ProseMirror富文本节点，杜绝双层DOM堆叠
+            previousHtml = editor.innerHTML;
+            editor.innerHTML = ''; // 清空静态只读 DOM，挂载纯净的 ProseMirror 编辑器
             tiptapInstance = window.CanvasTiptapEngine.create(editor, {
                 initialMarkdown: initialMarkdown || '',
-                editable: true,
+                editable: !!autoFocus,
+                placeholder: editor.getAttribute('data-placeholder') || '',
                 onUpdate: (md, html) => {
+                    hasDirtyEdit = true;
                     editor.__tiptapMarkdown = md;
                     saveEditorContent();
+                },
+                onStateUpdate: () => {
+                    try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
                 }
             });
             editor.__tiptapInstance = tiptapInstance;
@@ -18322,13 +19095,16 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             editor.scrollTop = savedScrollTop;
             editor.scrollLeft = savedScrollLeft;
 
-            if (eventOrCoords && typeof tiptapInstance.focusAtCoords === 'function') {
-                const coords = (typeof eventOrCoords.clientX === 'number')
-                    ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
-                    : eventOrCoords;
-                tiptapInstance.focusAtCoords(coords, { scrollIntoView: false });
-            } else {
-                tiptapInstance.focus(null, { scrollIntoView: false });
+            if (autoFocus) {
+                if (eventOrCoords && typeof tiptapInstance.focusAtCoords === 'function') {
+                    const coords = (typeof eventOrCoords.clientX === 'number')
+                        ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
+                        : eventOrCoords;
+                    tiptapInstance.focusAtCoords(coords, { scrollIntoView: false });
+                } else {
+                    tiptapInstance.focus(null, { scrollIntoView: false });
+                }
+                try { __syncFormatToolbarActiveStates(toolbar, tiptapInstance); } catch (_) { }
             }
 
             requestAnimationFrame(() => {
@@ -18338,28 +19114,46 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             return tiptapInstance;
         } catch (e) {
             console.warn('[DescriptionEditor] Tiptap init failed:', e);
+            if (previousHtml) {
+                try { editor.innerHTML = previousHtml; } catch (_) { }
+            }
             editor.contentEditable = 'true';
+            tiptapInstance = null;
+            editor.__tiptapInstance = null;
             return null;
         }
     };
 
     const flushTiptap = () => {
-        if (!tiptapInstance) return null;
-        const md = tiptapInstance.getMarkdown();
-        const html = tiptapInstance.getHTML();
+        const inst = getLiveTiptap();
+        if (!inst) return null;
+        let md = null;
+        let html = '';
         try {
-            tiptapInstance.destroy();
-        } catch (_) { }
-        tiptapInstance = null;
-        editor.__tiptapInstance = null;
-        return { md, html };
+            md = inst.getMarkdown();
+            html = inst.getHTML();
+        } catch (_) {
+            md = null;
+        }
+        return { md, html, dirty: hasDirtyEdit };
     };
 
-    const cancelTiptap = () => {
-        if (!tiptapInstance) return;
-        try {
-            tiptapInstance.destroy();
-        } catch (_) { }
+    const cancelTiptap = (restoreMarkdown = '') => {
+        hasDirtyEdit = false;
+        const inst = getLiveTiptap();
+        if (!inst) return;
+        if (typeof restoreMarkdown === 'string') {
+            inst.setMarkdown(restoreMarkdown, false);
+        }
+    };
+
+    const destroy = () => {
+        closeAllPopovers();
+        hasDirtyEdit = false;
+        const inst = getLiveTiptap();
+        if (inst) {
+            try { inst.destroy(); } catch (_) { }
+        }
         tiptapInstance = null;
         editor.__tiptapInstance = null;
     };
@@ -18454,9 +19248,10 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         } catch (_) { }
     };
 
-    // 保存选区函数（用于工具栏点击时恢复）
+    // 保存选区函数（仅用于无 TipTap 兜底模式点击工具栏时恢复）
     let savedSelection = null;
     const saveSelection = () => {
+        if (getLiveTiptap()) return;
         const sel = window.getSelection();
         if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
             savedSelection = {
@@ -18486,8 +19281,10 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                             if (dataUrl) {
                                 const alt = (file.name || 'image').replace(/[\r\n]/g, ' ').trim();
                                 const textToInsert = `![${alt}](${dataUrl})`;
-                                if (tiptapInstance) {
-                                    tiptapInstance.insertContent(textToInsert);
+                                hasDirtyEdit = true;
+                                const activeInst = getLiveTiptap();
+                                if (activeInst) {
+                                    activeInst.insertContent(textToInsert);
                                 } else {
                                     __insertTextAtSelection(textToInsert);
                                 }
@@ -18565,11 +19362,17 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                 <span class="md-format-sep"></span>
                 <button class="md-format-btn md-format-list-btn" data-action="md-list-toggle" title="${listTitle}"><i class="fas fa-list"></i></button>
                 <button class="md-format-btn" data-action="md-insert-quote" title="${quoteTitle}"><i class="fas fa-quote-left"></i></button>
+                <button type="button" class="md-format-btn md-format-help-btn" data-action="md-editing-help" title="${lang === 'en' ? 'Editing help' : '编辑说明'}" aria-label="${lang === 'en' ? 'Editing help' : '编辑说明'}" aria-expanded="false"><i class="far fa-question-circle" aria-hidden="true"></i></button>
                 <button class="md-format-btn md-format-close-btn" data-action="md-format-close" title="${(typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Close toolbar' : '关闭工具窗'}"><i class="fas fa-times"></i></button>
             </div>
         `;
 
         toolbar.appendChild(pop);
+        __bindCanvasFormatPopoverLayout(pop, { editor, toolbar, anchor: popoverAnchor || editor });
+        __bindFormatEditingHelp(pop, {
+            editor, toolbar, getLiveTiptap,
+            onOutside: () => editor.closest('.temp-canvas-node, .permanent-bookmark-section')?.__commitDescriptionEdit?.()
+        });
         preventCanvasEventsPropagation(pop);
         pop.addEventListener('mousedown', (e) => {
             markExpandedSourceToolbarInteraction();
@@ -18588,9 +19391,12 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     };
 
     const closeFormatPopover = () => {
+        const help = toolbar.querySelector('.md-format-popover')?.__editingHelp;
+        if (help) help.close();
         closeFontColorPopover();
         const pop = toolbar.querySelector('.md-format-popover');
         if (pop) {
+            pop.__formatLayout?.close();
             pop.classList.remove('open');
             updateCanvasPopoverState(false);
         }
@@ -18598,25 +19404,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     };
 
     const positionPopoverAboveBtn = (pop, btn) => {
-        const formatPop = toolbar.querySelector('.md-format-popover');
-        if (!formatPop) return;
-        const btnRect = btn.getBoundingClientRect();
-        const formatRect = formatPop.getBoundingClientRect();
-        const btnCenterX = btnRect.left + btnRect.width / 2 - formatRect.left;
-        const popRect = pop.getBoundingClientRect ? pop.getBoundingClientRect() : null;
-        const popHeight = (popRect && popRect.height) || 40;
-        const flipBelow = (formatRect.top - popHeight - 6) < 10;
-        if (flipBelow) {
-            pop.style.top = 'calc(100% + 4px)';
-            pop.style.bottom = 'auto';
-            pop.style.left = btnCenterX + 'px';
-            pop.style.transform = 'translateX(-50%) translateY(0)';
-        } else {
-            pop.style.top = '-4px';
-            pop.style.bottom = 'auto';
-            pop.style.left = btnCenterX + 'px';
-            pop.style.transform = 'translateX(-50%) translateY(-100%)';
-        }
+        __positionCanvasFormatSubmenu(pop, btn, toolbar.querySelector('.md-format-popover'));
     };
 
     const HTML_TOOL_COLORS = ['#888888', '#66bbff', '#fb464c', '#e9973f', '#e0de71', '#44cf6e', '#53dfdd', '#a882ff'];
@@ -18668,6 +19456,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             pop = document.querySelector(`.md-fontcolor-popover[data-owner-toolbar="${CSS.escape(ownerId)}"]`);
         }
         if (pop) {
+            __setCanvasPopoverTopLayer(pop, false);
             pop.classList.remove('open');
             if (pop.__fontColorDocHandler) {
                 document.removeEventListener('mousedown', pop.__fontColorDocHandler, true);
@@ -18688,6 +19477,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         if (pop) return pop;
         pop = document.createElement('div');
         pop.className = 'md-fontcolor-popover md-color-popover';
+        pop.__editorOwner = editor;
         pop.dataset.ownerToolbar = ownerId;
         preventCanvasEventsPropagation(pop);
         const defaultTitle = getLang() === 'en' ? 'Default font color (Remove color)' : '默认字体颜色（清除颜色）';
@@ -18786,12 +19576,13 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         closeHeadingPopover();
         closeListPopover();
         if (isOpen) {
+            __setCanvasPopoverTopLayer(pop, false);
             pop.classList.remove('open');
             btn.classList.remove('active');
             updateCanvasPopoverState(false);
         } else {
-            __positionCanvasFloatingPopoverAboveButton(pop, btn);
             pop.classList.add('open');
+            __positionCanvasFloatingPopoverAboveButton(pop, btn);
             btn.classList.add('active');
             updateCanvasPopoverState(true);
             if (pop.__fontColorDocHandler) {
@@ -18809,21 +19600,24 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
     const insertFontColor = (color) => {
         if (!color || color === 'default' || color === 'reset') {
-            const inst = tiptapInstance || (editor && editor.__tiptapInstance);
+            const inst = getLiveTiptap();
             if (inst) {
+                hasDirtyEdit = true;
                 inst.unsetColor();
                 const fontColorBtn = toolbar.querySelector('[data-action="md-fontcolor-toggle"] span');
                 if (fontColorBtn) fontColorBtn.style.borderBottomColor = 'currentColor';
                 saveEditorContent();
+                __syncFormatToolbarActiveStates(toolbar, inst);
                 return;
             }
             return;
         }
         const safeColor = String(color || '').trim();
         if (!safeColor) return;
-        if (tiptapInstance || (editor && editor.__tiptapInstance)) {
-            const inst = tiptapInstance || editor.__tiptapInstance;
-            inst.setColor(safeColor);
+        const activeInst = getLiveTiptap();
+        if (activeInst) {
+            hasDirtyEdit = true;
+            activeInst.setColor(safeColor);
             const previous = editor.__htmlToolFontColor || '#2DC26B';
             editor.__htmlToolFontColor = safeColor;
             if (previous && previous !== safeColor) editor.__htmlToolPrevFontColor = previous;
@@ -18840,8 +19634,10 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                 recentChip.style.backgroundColor = recent;
             }
             saveEditorContent();
+            __syncFormatToolbarActiveStates(toolbar, activeInst);
             return;
         }
+        hasDirtyEdit = true;
         const wrapper = document.createElement('font');
         wrapper.setAttribute('color', safeColor);
         if (insertHtmlToolElement(wrapper)) {
@@ -18888,6 +19684,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         `;
         const formatPop = toolbar.querySelector('.md-format-popover');
         if (formatPop) formatPop.appendChild(pop);
+        try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
         return pop;
     };
 
@@ -18912,11 +19709,15 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
     const insertAlign = (alignType) => {
         const safeAlign = /^(left|center|right|justify)$/.test(String(alignType || '')) ? String(alignType) : 'left';
-        if (editor.__tiptapInstance) {
-            editor.__tiptapInstance.setTextAlign(safeAlign);
+        const activeInst = getLiveTiptap();
+        if (activeInst) {
+            hasDirtyEdit = true;
+            activeInst.setTextAlign(safeAlign);
             saveEditorContent();
+            __syncFormatToolbarActiveStates(toolbar, activeInst);
             return;
         }
+        hasDirtyEdit = true;
         const wrapper = safeAlign === 'center' ? document.createElement('center') : document.createElement('p');
         if (safeAlign !== 'center') wrapper.setAttribute('align', safeAlign);
         insertHtmlToolElement(wrapper);
@@ -18943,6 +19744,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         const formatPop = toolbar.querySelector('.md-format-popover');
         if (formatPop) formatPop.appendChild(pop);
+        try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
         return pop;
     };
 
@@ -18977,6 +19779,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
         const formatPop = toolbar.querySelector('.md-format-popover');
         if (formatPop) formatPop.appendChild(pop);
+        try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
         return pop;
     };
 
@@ -19040,85 +19843,23 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         }
     };
 
-    const toggleFormatPopover = () => {
+    const openFormatPopover = () => {
         const pop = createFormatPopover();
-        const isOpen = pop.classList.contains('open');
-        closeAllPopovers();
-        if (!isOpen) {
+        if (!pop.classList.contains('open')) {
+            closeAllPopovers();
             pop.classList.add('open');
             formatToggleBtn.classList.add('active');
             updateCanvasPopoverState(true);
             syncFontSizeValue();
-
-            // -----------------------------------------------------------
-            // 定位优化：普通模式在上方；全屏模式在下方（侧边栏空间更紧张）
-            // -----------------------------------------------------------
-            try {
-                // 确保 toolbar 设置了定位上下文
-                const computedStyle = window.getComputedStyle(toolbar);
-                if (computedStyle.position === 'static') {
-                    toolbar.style.position = 'relative';
-                }
-
-                const anchorEl = popoverAnchor || editor;
-                const anchorRect = anchorEl.getBoundingClientRect();
-                const editorRect = editor.getBoundingClientRect();
-                const toolbarRect = toolbar.getBoundingClientRect();
-
-                const ownerNode = editor.closest
-                    ? editor.closest('.permanent-bookmark-section, .temp-canvas-node')
-                    : null;
-                const isMaximized = (typeof __isNodeMaximized === 'function')
-                    ? __isNodeMaximized(ownerNode)
-                    : !!(ownerNode && ownerNode.classList && ownerNode.classList.contains('canvas-node-maximized'));
-
-                if (popoverAnchor) {
-                    const targetX = anchorRect.left + anchorRect.width / 2;
-                    const popHeight = pop.offsetHeight || 38;
-                    const canFitAbove = (anchorRect.top - popHeight - 8) >= 10;
-                    const shouldFlipDown = isMaximized || !canFitAbove;
-                    const targetY = shouldFlipDown ? anchorRect.bottom : anchorRect.top;
-                    const scaleX = toolbar.offsetWidth ? (toolbarRect.width / toolbar.offsetWidth) : 1;
-                    const scaleY = toolbar.offsetHeight ? (toolbarRect.height / toolbar.offsetHeight) : 1;
-                    const relX = (targetX - toolbarRect.left) / (scaleX || 1);
-                    const relY = (targetY - toolbarRect.top) / (scaleY || 1);
-                    pop.style.position = 'absolute';
-                    pop.style.left = relX + 'px';
-                    pop.style.top = relY + 'px';
-                    pop.style.bottom = 'auto';
-                    pop.style.zIndex = '2147483647';
-                    pop.style.pointerEvents = 'auto';
-                    pop.style.transform = shouldFlipDown ? 'translate(-50%, 6px)' : 'translate(-50%, calc(-100% - 2px))';
-                } else {
-                    // 目标位置：Editor 右上角 (实现右对齐)
-                    // 绝对坐标 (Viewport based)
-                    const targetX = editorRect.right;
-                    const targetY = isMaximized ? editorRect.bottom : editorRect.top;
-
-                    // 计算相对于 toolbar 的坐标 (pop 是 toolbar 的子元素，绝对定位)
-                    const relX = targetX - toolbarRect.left;
-                    const relY = targetY - toolbarRect.top;
-
-                    pop.style.left = relX + 'px';
-                    pop.style.top = relY + 'px';
-                    pop.style.bottom = 'auto';
-
-                    if (isMaximized) {
-                        // 全屏：向下弹出，避免被上方区域挤压/遮挡
-                        pop.style.transform = 'translate(-100%, 6px)';
-                    } else {
-                        // 普通：向上弹出
-                        pop.style.transform = 'translate(-100%, calc(-100% - 6px))';
-                    }
-                }
-            } catch (e) {
-                console.warn('Format popover positioning failed:', e);
-                // Fallback
-                pop.style.left = '';
-                pop.style.top = '';
-                pop.style.transform = '';
-            }
+            try { __syncFormatToolbarActiveStates(toolbar, getLiveTiptap()); } catch (_) { }
         }
+        pop.__formatLayout.open();
+    };
+
+    const toggleFormatPopover = () => {
+        const pop = createFormatPopover();
+        if (pop.classList.contains('open')) closeAllPopovers();
+        else openFormatPopover();
     };
 
     const insertFormat = (formatType) => {
@@ -19131,27 +19872,30 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
     };
 
     const doInsert = (formatType) => {
-        if (tiptapInstance || (editor && editor.__tiptapInstance)) {
-            const inst = tiptapInstance || editor.__tiptapInstance;
+        const activeInst = getLiveTiptap();
+        if (activeInst) {
+            hasDirtyEdit = true;
             switch (formatType) {
-                case 'bold': inst.toggleBold(); break;
-                case 'italic': inst.toggleItalic(); break;
-                case 'underline': inst.toggleUnderline(); break;
-                case 'highlight': inst.toggleHighlight(); break;
-                case 'strike': inst.toggleStrike(); break;
-                case 'code': inst.toggleCode(); break;
-                case 'quote': inst.toggleBlockquote(); break;
-                case 'h1': inst.toggleHeading(1); break;
-                case 'h2': inst.toggleHeading(2); break;
-                case 'h3': inst.toggleHeading(3); break;
-                case 'ul': inst.toggleBulletList(); break;
-                case 'ol': inst.toggleOrderedList(); break;
-                case 'task': inst.toggleTaskList(); break;
+                case 'bold': activeInst.toggleBold(); break;
+                case 'italic': activeInst.toggleItalic(); break;
+                case 'underline': activeInst.toggleUnderline(); break;
+                case 'highlight': activeInst.toggleHighlight(); break;
+                case 'strike': activeInst.toggleStrike(); break;
+                case 'code': activeInst.toggleCode(); break;
+                case 'quote': activeInst.toggleBlockquote(); break;
+                case 'h1': activeInst.toggleHeading(1); break;
+                case 'h2': activeInst.toggleHeading(2); break;
+                case 'h3': activeInst.toggleHeading(3); break;
+                case 'ul': activeInst.toggleBulletList(); break;
+                case 'ol': activeInst.toggleOrderedList(); break;
+                case 'task': activeInst.toggleTaskList(); break;
                 default: break;
             }
             saveEditorContent();
+            __syncFormatToolbarActiveStates(toolbar, activeInst);
             return;
         }
+        hasDirtyEdit = true;
         const sel = window.getSelection();
         if (!sel.rangeCount) {
             editor.focus();
@@ -19336,7 +20080,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
         }
 
         if (action === 'md-format-close') {
-            toggleFormatPopover(toolbar.querySelector('[data-action="md-format-toggle"]'));
+            closeAllPopovers();
             return;
         }
 
@@ -19372,20 +20116,19 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             closeAlignPopover();
             return;
         }
-
-        if (action === 'md-format-close') {
-            closeFormatPopover();
-            return;
-        }
     });
 
     editor.addEventListener('input', () => {
-        saveEditorContent();
+        if (!getLiveTiptap()) {
+            hasDirtyEdit = true;
+            saveEditorContent();
+        }
     });
 
     editor.addEventListener('click', (e) => {
         const target = e.target;
         if (target && target.closest && target.closest('input.md-task-checkbox')) {
+            hasDirtyEdit = true;
             saveEditorContent();
         }
     });
@@ -19394,10 +20137,12 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
 
     return {
         closeAllPopovers,
+        openFormatPopover,
         mountTiptap,
         flushTiptap,
         cancelTiptap,
-        isTiptapActive: () => !!(tiptapInstance || (editor && editor.__tiptapInstance)),
+        destroy,
+        isTiptapActive: () => !!getLiveTiptap(),
         flush: () => {
             saveEditorContent();
         },
@@ -19512,6 +20257,7 @@ function __renderTempNodeImpl(section, options = {}) {
     } else {
         // 更新时清空内容，但保持位置和大小不变
         existingLoadedCounts = scanExpandedFolderCounts(nodeElement);
+        __cleanupCanvasNodeTiptapInstances(nodeElement);
         nodeElement.innerHTML = '';
         nodeElement.classList.remove('low-detail-active', 'card-group-low-detail-child-hidden');
         if (nodeElement.dataset) delete nodeElement.dataset.lowDetailHostGroupId;
@@ -20118,12 +20864,12 @@ function __renderTempNodeImpl(section, options = {}) {
         return lang === 'en' ? 'Click to add description' : '点击添加说明';
     };
 
-    // 初始化内容：descriptionMd 作为主存储，渲染时再转为 HTML
+    // 初始化内容：descriptionMd 作为主存储，使用与 TipTap 3 同构的静态 Schema DOM 展示，进入编辑态再按需挂载
     const initialDescSource = __normalizeTempSectionDescriptionMarkdown(section);
     const initialHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(initialDescSource));
     section.descriptionMd = initialDescSource;
     section.description = initialHtml;
-    descriptionText.innerHTML = initialHtml;
+    descriptionText.innerHTML = __buildTiptapObservationDom(initialDescSource);
     try { __applyHeadingCollapse(descriptionText); } catch (_) { }
     const savedDescFontSize = Number(section && section.descFontSize);
     if (Number.isFinite(savedDescFontSize) && savedDescFontSize > 0) {
@@ -20189,11 +20935,40 @@ function __renderTempNodeImpl(section, options = {}) {
         enterEditingDescription(e);
     });
 
-    // 单击选中说明区；若已选中，再次单击进入编辑
+    // 单击选中说明区；若已选中，再次单击进入编辑（观察态支持直接勾选待办与折叠标题）
     descriptionText.addEventListener('click', (e) => {
         if (e.defaultPrevented) return;
         if (isEditingDesc) return;
-        if (e.target && e.target.closest && e.target.closest('a, input[type="checkbox"]')) return;
+        const rawTarget = e.target;
+        const target = (rawTarget && rawTarget.nodeType === Node.ELEMENT_NODE)
+            ? rawTarget
+            : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
+        if (!target) return;
+        if (__handleHeadingCollapseClick(descriptionText, e)) {
+            return;
+        }
+        if (target.matches('ul[data-type="taskList"] input[type="checkbox"], li[data-type="taskItem"] input[type="checkbox"], input.md-task-checkbox')) {
+            e.stopPropagation();
+            const allCbs = Array.from(descriptionText.querySelectorAll('ul[data-type="taskList"] input[type="checkbox"], li[data-type="taskItem"] input[type="checkbox"], input.md-task-checkbox'));
+            const cbIdx = allCbs.indexOf(target);
+            const nextChecked = !!target.checked;
+            if (nextChecked) target.setAttribute('checked', 'checked');
+            else target.removeAttribute('checked');
+            const taskLi = target.closest('li[data-type="taskItem"]');
+            if (taskLi) taskLi.setAttribute('data-checked', nextChecked ? 'true' : 'false');
+            if (cbIdx >= 0) {
+                const prevSource = __normalizeTempSectionDescriptionMarkdown(section);
+                const nextSource = __toggleMarkdownTaskAtIndex(prevSource, cbIdx, nextChecked);
+                if (nextSource !== prevSource) {
+                    section.descriptionMd = nextSource;
+                    section.description = __normalizeCanvasRichHtml(__getCleanHtmlForStorage(descriptionText));
+                    saveTempSectionsPatch(section);
+                    updateDescMeta();
+                }
+            }
+            return;
+        }
+        if (target.closest('a, input[type="checkbox"], ul[data-type="taskList"] li > label')) return;
         const alreadySelected = descriptionContainer.classList.contains('desc-selected');
         e.stopPropagation();
         if (alreadySelected) {
@@ -20272,6 +21047,9 @@ function __renderTempNodeImpl(section, options = {}) {
     const syncDescDraft = ({ normalizeEditorHtml = false } = {}) => {
         if (descriptionText.__tiptapInstance) {
             const tiptapMd = descriptionText.__tiptapInstance.getMarkdown();
+            if (typeof tiptapMd !== 'string') {
+                return section.descriptionMd || '';
+            }
             const cleanSource = __normalizeCanvasMarkdownSource(tiptapMd);
             const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
             section.descriptionMd = cleanSource;
@@ -20290,7 +21068,8 @@ function __renderTempNodeImpl(section, options = {}) {
         section.descriptionMd = cleanSource;
         section.description = renderedHtml;
         if (normalizeEditorHtml) {
-            descriptionText.innerHTML = renderedHtml;
+            descriptionText.innerHTML = __buildTiptapObservationDom(cleanSource);
+            try { __applyHeadingCollapse(descriptionText); } catch (_) { }
         }
         updateDescMeta();
         return cleanSource;
@@ -20316,17 +21095,25 @@ function __renderTempNodeImpl(section, options = {}) {
         if (commit) {
             if (descEditorApi && typeof descEditorApi.flushTiptap === 'function' && descEditorApi.isTiptapActive()) {
                 const res = descEditorApi.flushTiptap();
-                if (res) {
-                    const cleanSource = __normalizeCanvasMarkdownSource(res.md);
-                    const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
-                    section.descriptionMd = cleanSource;
-                    section.description = renderedHtml;
-                    descriptionText.innerHTML = renderedHtml;
-                    descriptionText.scrollTop = savedScrollTop;
-                    descriptionText.scrollLeft = savedScrollLeft;
+                const hasValidMd = !!(res && typeof res.md === 'string');
+                const finalSource = hasValidMd
+                    ? __normalizeCanvasMarkdownSource(res.md)
+                    : __normalizeCanvasMarkdownSource(beforeEditStored);
+                if (hasValidMd && (res?.dirty || finalSource !== (beforeEditStored || ''))) {
+                    section.descriptionMd = finalSource;
+                    section.description = res.html;
                     saveTempSectionsPatch(section);
-                    updateDescMeta();
                 }
+                if (typeof descEditorApi.destroy === 'function') descEditorApi.destroy();
+                descriptionText.innerHTML = __buildTiptapObservationDom(
+                    finalSource,
+                    hasValidMd ? res.html : null,
+                    hasValidMd
+                );
+                try { __applyHeadingCollapse(descriptionText); } catch (_) { }
+                descriptionText.scrollTop = savedScrollTop;
+                descriptionText.scrollLeft = savedScrollLeft;
+                updateDescMeta();
             } else {
                 try {
                     if (descEditorApi && typeof descEditorApi.flush === 'function') descEditorApi.flush();
@@ -20335,12 +21122,15 @@ function __renderTempNodeImpl(section, options = {}) {
             }
         } else {
             if (descEditorApi && typeof descEditorApi.cancelTiptap === 'function') {
-                descEditorApi.cancelTiptap();
+                descEditorApi.cancelTiptap(beforeEditStored);
             }
+            if (descEditorApi && typeof descEditorApi.destroy === 'function') {
+                descEditorApi.destroy();
+            }
+            descriptionText.innerHTML = __buildTiptapObservationDom(beforeEditStored);
+            try { __applyHeadingCollapse(descriptionText); } catch (_) { }
             section.descriptionMd = beforeEditStored;
-            const restored = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(beforeEditStored));
-            section.description = restored;
-            descriptionText.innerHTML = restored;
+            section.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(beforeEditStored));
             descriptionText.scrollTop = savedScrollTop;
             descriptionText.scrollLeft = savedScrollLeft;
             saveTempSectionsPatch(section);
@@ -20420,19 +21210,35 @@ function __renderTempNodeImpl(section, options = {}) {
             });
         } catch (_) { }
 
+        if (!nodeElement.classList.contains('canvas-node-maximized') && descEditorApi) {
+            descEditorApi.openFormatPopover();
+        }
     };
 
     // editDescBtn listener removed
 
 
     const clearTempDescription = () => {
+        const activeInst = descriptionText.__tiptapInstance;
+        if (activeInst && isEditingDesc) {
+            try { activeInst.setMarkdown('', false); } catch (_) { }
+        } else {
+            if (descEditorApi && typeof descEditorApi.destroy === 'function') {
+                try { descEditorApi.destroy(); } catch (_) { }
+            }
+            descriptionText.innerHTML = '';
+        }
+        beforeEditStored = '';
         section.descriptionMd = '';
         section.description = '';
-        descriptionText.innerHTML = '';
         saveTempSectionsPatch(section);
         if (isEditingDesc) {
             // Keep editing, just clear content
-            descriptionText.focus();
+            if (activeInst && typeof activeInst.focus === 'function') {
+                activeInst.focus(null, { scrollIntoView: false });
+            } else {
+                descriptionText.focus();
+            }
         } else {
             // Should not happen if controls are hidden when not editing, but for safety:
             isEditingDesc = false;
@@ -20479,6 +21285,7 @@ function __renderTempNodeImpl(section, options = {}) {
 
     descriptionText.addEventListener('keydown', (e) => {
         if (!isEditingDesc) return;
+        if (e.isComposing) return;
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             exitEditingDescription({ commit: true });
@@ -20488,20 +21295,20 @@ function __renderTempNodeImpl(section, options = {}) {
         }
     });
 
-    descriptionText.addEventListener('blur', () => {
+    descriptionText.addEventListener('focusout', () => {
         if (!isEditingDesc) return;
+        const instanceAtBlur = descriptionText.__tiptapInstance;
         // Clicking toolbar/popovers should not end editing
         setTimeout(() => {
-            if (!isEditingDesc) return;
+            if (!isEditingDesc || !descriptionText.isConnected || descriptionText.__tiptapInstance !== instanceAtBlur) return;
             if (document.getElementById(DESC_CLEAR_CONFIRM_POPOVER_ID)) return;
             if (document.getElementById(DESC_HEIGHT_SETTINGS_POPOVER_ID)) return;
             const activeEl = document.activeElement;
+            if (activeEl?.closest('.md-editing-help-popover')?.__editorOwner === descriptionText) return;
             if (activeEl && (
                 activeEl.closest('.md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .temp-node-description-controls, .md-rgb-picker') ||
                 (descriptionContainer && descriptionContainer.contains(activeEl))
             )) return;
-            if (descEditorApi && typeof descEditorApi.isFontColorPopoverActive === 'function' && descEditorApi.isFontColorPopoverActive()) return;
-            if (document.querySelector('.md-format-popover.open, .md-color-popover.open, .md-fontcolor-popover.open, .md-heading-popover.open, .md-list-popover.open, .md-align-popover.open')) return;
             exitEditingDescription({ commit: true });
         }, 100);
     });
@@ -20553,7 +21360,7 @@ function __renderTempNodeImpl(section, options = {}) {
                             const index = Array.from(parent.children).indexOf(blockEl) + 1;
                             finalSource = `${index}. ${finalSource}`;
                         } else {
-                            finalSource = (blockEl.classList.contains('md-task-item'))
+                            finalSource = (blockEl.classList.contains('md-task-item') || blockEl.getAttribute('data-type') === 'taskItem')
                                 ? `- ${blockEl.querySelector('input') && blockEl.querySelector('input').checked ? '[x]' : '[ ]'} ${finalSource}`
                                 : `- ${finalSource}`;
                         }
@@ -20617,6 +21424,7 @@ function __renderTempNodeImpl(section, options = {}) {
 
     __bindCanvasDescriptionSelectionClear();
     __setupDescAutoScroll(descriptionText, () => isEditingDesc);
+    nodeElement.__commitDescriptionEdit = () => exitEditingDescription({ commit: true });
 
     const body = document.createElement('div');
     body.className = 'temp-node-body';
@@ -21210,6 +22018,7 @@ function __patchTempSectionDescriptionInPlace(section, nodeElement, options = {}
     }
 
     const isEditing = descriptionContainer.classList.contains('editing') ||
+        !!descriptionText.__tiptapInstance ||
         descriptionText.isContentEditable ||
         descriptionText.getAttribute('contenteditable') === 'true' ||
         descriptionContainer.contains(document.activeElement);
@@ -21220,10 +22029,11 @@ function __patchTempSectionDescriptionInPlace(section, nodeElement, options = {}
 
     const nextSource = __normalizeTempSectionDescriptionMarkdown(section);
     const nextHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(nextSource));
+    const nextObservationDom = __buildTiptapObservationDom(nextSource);
     section.descriptionMd = nextSource;
     section.description = nextHtml;
-    if (descriptionText.innerHTML !== nextHtml) {
-        descriptionText.innerHTML = nextHtml;
+    if (descriptionText.innerHTML !== nextObservationDom) {
+        descriptionText.innerHTML = nextObservationDom;
         try { __applyHeadingCollapse(descriptionText); } catch (_) { }
     }
     __patchTempSectionDescriptionMeta(descriptionText, section);
@@ -23391,6 +24201,7 @@ function removeTempNode(sectionId, options = {}) {
         if (typeof __isNodeMaximized === 'function' && __isNodeMaximized(element)) {
             try { restoreCanvasNodeLayout(element); } catch (_) { }
         }
+        try { __cleanupCanvasNodeTiptapInstances(element); } catch (_) { }
         element.remove();
     }
 
@@ -23523,7 +24334,10 @@ function _doClearCanvas(includeCopies) {
         CanvasState.tempSections.forEach(section => {
             if (section && section.id) {
                 const el = document.getElementById(section.id);
-                if (el) el.remove();
+                if (el) {
+                    try { __cleanupCanvasNodeTiptapInstances(el); } catch (_) { }
+                    el.remove();
+                }
             }
         });
     }
@@ -23533,7 +24347,10 @@ function _doClearCanvas(includeCopies) {
         CanvasState.mdNodes.forEach(node => {
             if (node && node.id) {
                 const el = document.getElementById(node.id);
-                if (el) el.remove();
+                if (el) {
+                    try { __cleanupMdNodeElementLifecycle(el); } catch (_) { }
+                    el.remove();
+                }
             }
         });
     }
@@ -23562,7 +24379,10 @@ function _doClearCanvas(includeCopies) {
     // 6. [新增] 处理永久栏目副本
     if (includeCopies) {
         const copies = document.querySelectorAll('.permanent-bookmark-section.permanent-section-copy');
-        copies.forEach(el => el.remove());
+        copies.forEach(el => {
+            try { __cleanupCanvasNodeTiptapInstances(el); } catch (_) { }
+            el.remove();
+        });
         try {
             if (typeof __writePermanentSectionCopies === 'function') {
                 __writePermanentSectionCopies([]);
@@ -23869,7 +24689,10 @@ function executeClickToClearDeletion() {
         if (section && section.id && selectedIdSet.has(section.id)) {
             removedTempIds.push(section.id);
             const el = document.getElementById(section.id);
-            if (el) el.remove();
+            if (el) {
+                try { __cleanupCanvasNodeTiptapInstances(el); } catch (_) { }
+                el.remove();
+            }
         }
     });
     CanvasState.tempSections = CanvasState.tempSections.filter(s => s && !selectedIdSet.has(s.id));
@@ -23880,7 +24703,10 @@ function executeClickToClearDeletion() {
         if (node && node.id && selectedIdSet.has(node.id)) {
             removedMdIds.push(node.id);
             const el = document.getElementById(node.id);
-            if (el) el.remove();
+            if (el) {
+                try { __cleanupMdNodeElementLifecycle(el); } catch (_) { }
+                el.remove();
+            }
         }
     });
     CanvasState.mdNodes = CanvasState.mdNodes.filter(n => n && !selectedIdSet.has(n.id));
@@ -23893,12 +24719,15 @@ function executeClickToClearDeletion() {
                     if (typeof removePermanentSectionCopy === 'function') {
                         removePermanentSectionCopy(el);
                     } else {
+                        try { __cleanupCanvasNodeTiptapInstances(el); } catch (__) { }
                         el.remove();
                     }
                 } catch (_) {
+                    try { __cleanupCanvasNodeTiptapInstances(el); } catch (__) { }
                     try { el.remove(); } catch (__) { }
                 }
             } else {
+                try { __cleanupCanvasNodeTiptapInstances(el); } catch (_) { }
                 el.remove(); // 理论上可以调用 __removePermanentSection
                 try {
                     if (typeof __removePermanentSection === 'function') {
@@ -24120,8 +24949,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         return __normalizePermanentViewDescriptionMarkdown(raw);
     };
     const savedTipSource = readStoredTipSource();
-    const savedTipHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(savedTipSource));
-    tipText.innerHTML = savedTipHtml;
+    tipText.innerHTML = __buildTiptapObservationDom(savedTipSource);
     try { __applyHeadingCollapse(tipText); } catch (_) { }
     const savedTipFontSize = (() => {
         try {
@@ -24243,11 +25071,10 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     const syncTipDraft = ({ normalizeEditorHtml = false } = {}) => {
         if (tipText.__tiptapInstance) {
             const tiptapMd = tipText.__tiptapInstance.getMarkdown();
-            const cleanSource = __normalizePermanentViewDescriptionMarkdown(tiptapMd);
-            const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
-            if (normalizeEditorHtml) {
-                tipText.innerHTML = renderedHtml;
+            if (typeof tiptapMd !== 'string') {
+                return beforeEditStored || '';
             }
+            const cleanSource = __normalizePermanentViewDescriptionMarkdown(tiptapMd);
             updateTipMeta();
             return cleanSource;
         }
@@ -24258,9 +25085,9 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             { sourceMode: 'description' }
         );
         const cleanSource = __normalizePermanentViewDescriptionMarkdown(normalizedSource);
-        const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
         if (normalizeEditorHtml) {
-            tipText.innerHTML = renderedHtml;
+            tipText.innerHTML = __buildTiptapObservationDom(cleanSource);
+            try { __applyHeadingCollapse(tipText); } catch (_) { }
         }
         updateTipMeta();
         return cleanSource;
@@ -24287,16 +25114,24 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         if (commit) {
             if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.flushTiptap === 'function' && tipEditorApi.isTiptapActive()) {
                 const res = tipEditorApi.flushTiptap();
-                if (res) {
-                    const cleanSource = __normalizePermanentViewDescriptionMarkdown(res.md);
-                    const renderedHtml = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(cleanSource));
-                    tipText.innerHTML = renderedHtml;
-                    tipText.scrollTop = savedScrollTop;
-                    tipText.scrollLeft = savedScrollLeft;
+                const hasValidMd = !!(res && typeof res.md === 'string');
+                const cleanSource = hasValidMd
+                    ? __normalizePermanentViewDescriptionMarkdown(res.md)
+                    : beforeEditStored;
+                if (hasValidMd && (res?.dirty || cleanSource !== (beforeEditStored || ''))) {
                     const key = getStorageKey();
                     __persistPermanentTipStorageValue(key, cleanSource);
-                    updateTipMeta();
                 }
+                if (typeof tipEditorApi.destroy === 'function') tipEditorApi.destroy();
+                tipText.innerHTML = __buildTiptapObservationDom(
+                    cleanSource,
+                    hasValidMd ? res.html : null,
+                    hasValidMd
+                );
+                try { __applyHeadingCollapse(tipText); } catch (_) { }
+                tipText.scrollTop = savedScrollTop;
+                tipText.scrollLeft = savedScrollLeft;
+                updateTipMeta();
             } else {
                 try {
                     if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.flush === 'function') tipEditorApi.flush();
@@ -24305,10 +25140,13 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             }
         } else {
             if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.cancelTiptap === 'function') {
-                tipEditorApi.cancelTiptap();
+                tipEditorApi.cancelTiptap(beforeEditStored);
             }
-            const restored = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(beforeEditStored));
-            tipText.innerHTML = restored;
+            if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.destroy === 'function') {
+                tipEditorApi.destroy();
+            }
+            tipText.innerHTML = __buildTiptapObservationDom(beforeEditStored);
+            try { __applyHeadingCollapse(tipText); } catch (_) { }
             tipText.scrollTop = savedScrollTop;
             tipText.scrollLeft = savedScrollLeft;
             __persistPermanentTipStorageValue(getStorageKey(), beforeEditStored);
@@ -24388,6 +25226,9 @@ function bindPermanentSectionTipBehavior(sectionEl) {
                 active: true
             });
         } catch (_) { }
+        if (!sectionEl.classList.contains('canvas-node-maximized') && tipEditorApi) {
+            tipEditorApi.openFormatPopover();
+        }
     };
 
     tipText.addEventListener('dblclick', (e) => {
@@ -24396,11 +25237,38 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         enterEditingTip(e);
     });
 
-    // 单击选中说明区；若已选中，再次单击进入编辑
+    // 单击选中说明区；若已选中，再次单击进入编辑（观察态支持直接勾选待办与折叠标题）
     tipText.addEventListener('click', (e) => {
         if (e.defaultPrevented) return;
         if (isEditingTip) return;
-        if (e.target && e.target.closest && e.target.closest('a, input[type="checkbox"]')) return;
+        const rawTarget = e.target;
+        const target = (rawTarget && rawTarget.nodeType === Node.ELEMENT_NODE)
+            ? rawTarget
+            : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
+        if (!target) return;
+        if (__handleHeadingCollapseClick(tipText, e)) {
+            return;
+        }
+        if (target.matches('ul[data-type="taskList"] input[type="checkbox"], li[data-type="taskItem"] input[type="checkbox"], input.md-task-checkbox')) {
+            e.stopPropagation();
+            const allCbs = Array.from(tipText.querySelectorAll('ul[data-type="taskList"] input[type="checkbox"], li[data-type="taskItem"] input[type="checkbox"], input.md-task-checkbox'));
+            const cbIdx = allCbs.indexOf(target);
+            const nextChecked = !!target.checked;
+            if (nextChecked) target.setAttribute('checked', 'checked');
+            else target.removeAttribute('checked');
+            const taskLi = target.closest('li[data-type="taskItem"]');
+            if (taskLi) taskLi.setAttribute('data-checked', nextChecked ? 'true' : 'false');
+            if (cbIdx >= 0) {
+                const prevSource = readStoredTipSource();
+                const nextSource = __toggleMarkdownTaskAtIndex(prevSource, cbIdx, nextChecked);
+                if (nextSource !== prevSource) {
+                    __persistPermanentTipStorageValue(getStorageKey(), nextSource);
+                    updateTipMeta();
+                }
+            }
+            return;
+        }
+        if (target.closest('a, input[type="checkbox"], ul[data-type="taskList"] li > label')) return;
         const alreadySelected = tipContainer.classList.contains('desc-selected');
         e.stopPropagation();
         if (alreadySelected) {
@@ -24412,12 +25280,26 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     });
 
     const clearPermanentTip = () => {
-        tipText.innerHTML = '';
+        const activeInst = tipText.__tiptapInstance;
+        if (activeInst && isEditingTip) {
+            try { activeInst.setMarkdown('', false); } catch (_) { }
+        } else {
+            if (typeof tipEditorApi !== 'undefined' && tipEditorApi && typeof tipEditorApi.destroy === 'function') {
+                try { tipEditorApi.destroy(); } catch (_) { }
+            }
+            tipText.innerHTML = '';
+        }
+        beforeEditStored = '';
         updateTipMeta();
-        persistTip({ normalizeEditorHtml: true });
+        const key = getStorageKey();
+        __persistPermanentTipStorageValue(key, '');
 
         if (isEditingTip) {
-            tipText.focus();
+            if (activeInst && typeof activeInst.focus === 'function') {
+                activeInst.focus(null, { scrollIntoView: false });
+            } else {
+                tipText.focus();
+            }
         }
     };
 
@@ -24459,6 +25341,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
 
     tipText.addEventListener('keydown', (e) => {
         if (!isEditingTip) return;
+        if (e.isComposing) return;
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             exitEditingTip({ commit: true });
@@ -24470,14 +25353,21 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         }
     });
 
-    document.addEventListener('mousedown', (e) => {
+    if (sectionEl.__permanentTipDocMouseDown) {
+        document.removeEventListener('mousedown', sectionEl.__permanentTipDocMouseDown, true);
+        sectionEl.__permanentTipDocMouseDown = null;
+    }
+
+    const onPermanentDocMouseDown = (e) => {
         if (!isEditingTip) return;
         if (tipContainer.contains(e.target)) return;
-        if (e.target.closest('.md-toolbar-popover, .md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .md-rgb-picker, .temp-node-description-controls')) return;
-        if (e.target.closest('.desc-clear-confirm-popover')) return;
-        if (e.target.closest('.desc-height-settings-popover')) return;
+        if (e.target.closest('.md-editing-help-popover')?.__editorOwner === tipText) return;
+        if (e.target.closest('.md-toolbar-popover, .md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .md-rgb-picker, .permanent-section-tip-controls, .temp-node-description-controls, .desc-clear-confirm-popover, .desc-height-settings-popover')) return;
         exitEditingTip({ commit: true });
-    }, true);
+    };
+    sectionEl.__permanentTipDocMouseDown = onPermanentDocMouseDown;
+    document.addEventListener('mousedown', onPermanentDocMouseDown, true);
+    sectionEl.__commitDescriptionEdit = () => exitEditingTip({ commit: true });
 
     // 复制时优先输出 Markdown 源码；全选时使用持久化 source
     tipText.addEventListener('copy', (e) => {
@@ -24525,7 +25415,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
                             const index = Array.from(parent.children).indexOf(blockEl) + 1;
                             finalSource = `${index}. ${finalSource}`;
                         } else {
-                            finalSource = (blockEl.classList.contains('md-task-item'))
+                            finalSource = (blockEl.classList.contains('md-task-item') || blockEl.getAttribute('data-type') === 'taskItem')
                                 ? `- ${blockEl.querySelector('input') && blockEl.querySelector('input').checked ? '[x]' : '[ ]'} ${finalSource}`
                                 : `- ${finalSource}`;
                         }
@@ -25269,8 +26159,13 @@ function setupCanvasEventListeners() {
                 requestAnimationFrame(() => {
                     const el = document.getElementById(nodeId);
                     if (!el) return;
-                    const editor = el.querySelector('.md-canvas-editor');
-                    if (editor) editor.focus();
+                    try { selectMdNode(nodeId); } catch (_) { }
+                    if (typeof el.__enterEditMode === 'function') {
+                        el.__enterEditMode();
+                    } else {
+                        const editor = el.querySelector('.md-canvas-editor');
+                        if (editor) editor.focus();
+                    }
                 });
             } catch (err) {
                 console.error('[Canvas] 双击创建空白栏目失败:', err);
@@ -25492,6 +26387,7 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external', optio
                 if (!incomingSectionIds.has(oldSection.id)) {
                     const el = document.getElementById(oldSection.id);
                     if (el) {
+                        try { __cleanupCanvasNodeTiptapInstances(el); } catch (_) {}
                         try { el.remove(); } catch (_) {}
                     }
                     CanvasState.tempSections = CanvasState.tempSections.filter(s => s.id !== oldSection.id);
@@ -25505,6 +26401,7 @@ function __applyCanvasTempStateRealtimeSyncNow(state, source = 'external', optio
                 if (!incomingMdNodeIds.has(oldNode.id)) {
                     const el = document.getElementById(oldNode.id);
                     if (el) {
+                        try { __cleanupMdNodeElementLifecycle(el); } catch (_) {}
                         try { el.remove(); } catch (_) {}
                     }
                     CanvasState.mdNodes = CanvasState.mdNodes.filter(n => n.id !== oldNode.id);
@@ -25943,7 +26840,10 @@ function __removeRuntimeTempSectionsByIds(sectionIds) {
         removed.push(id);
         try {
             const el = document.getElementById(id);
-            if (el) el.remove();
+            if (el) {
+                try { __cleanupCanvasNodeTiptapInstances(el); } catch (__) { }
+                el.remove();
+            }
         } catch (_) { }
     });
     CanvasState.tempSections = (Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections : [])
@@ -26511,21 +27411,30 @@ function __findPermanentTipSectionByStorageKey(parsed) {
 function __applyPermanentTipContentRealtimeSync(sectionEl, rawValue) {
     if (!sectionEl) return;
 
+    const tipContainer = sectionEl.querySelector('.permanent-section-tip-container');
     const tipText = sectionEl.querySelector('.permanent-section-tip');
     if (!tipText) return;
 
+    if (tipContainer && tipContainer.classList.contains('editing')) return;
+    if (tipText.__tiptapInstance) {
+        const source = (typeof rawValue === 'string') ? rawValue : '';
+        const cleanMd = __normalizePermanentViewDescriptionMarkdown(source);
+        if (tipText.__tiptapInstance.getMarkdown() !== cleanMd) {
+            tipText.__tiptapInstance.setMarkdown(cleanMd, false);
+        }
+        return;
+    }
     const editable = String(tipText.contentEditable || '').toLowerCase();
     if (editable === 'true') return;
 
     const source = (typeof rawValue === 'string') ? rawValue : '';
-    const normalized = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(source));
-
-    tipText.innerHTML = normalized;
+    const cleanSource = __normalizePermanentViewDescriptionMarkdown(source);
+    tipText.innerHTML = __buildTiptapObservationDom(cleanSource);
     try { __applyHeadingCollapse(tipText); } catch (_) { }
 
     const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
     const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
-    tipText.title = normalized
+    tipText.title = cleanSource.trim()
         ? (isEn ? 'Click to edit' : '点击编辑说明')
         : (isEn ? 'Click to add description' : '点击添加说明');
 }
@@ -35200,6 +36109,7 @@ function __recycleCanvasCardsDuringSkim(workspace) {
             if (info.type === 'temp') {
                 if (virtualize) {
                     __unloadTempSectionTreeInPlace(id);
+                    __cleanupCanvasNodeTiptapInstances(el, { commit: true });
                     el.remove();
                 } else {
                     el.classList.add('low-detail-active');
@@ -35208,17 +36118,24 @@ function __recycleCanvasCardsDuringSkim(workspace) {
                 }
             } else if (info.type === 'md') {
                 __unloadMdNodeContentInPlace(info.ref);
-                if (virtualize) el.remove();
+                if (virtualize) {
+                    __cleanupMdNodeElementLifecycle(el);
+                    el.remove();
+                }
             } else if (info.type === 'copy') {
                 __unloadPermanentSectionTreeInPlace(el);
                 if (virtualize) {
+                    __cleanupCanvasNodeTiptapInstances(el, { commit: true });
                     el.remove();
                 } else {
                     el.classList.add('low-detail-active');
                     __ensurePermanentSectionLowDetailOverlay(el);
                 }
             } else if (info.type === 'group') {
-                if (virtualize) el.remove();
+                if (virtualize) {
+                    __cleanupMdNodeElementLifecycle(el);
+                    el.remove();
+                }
             }
             canvasInteractionMaterialized.delete(id);
             done++;
@@ -35297,6 +36214,7 @@ function __syncCanvasLowDetailVisibleShells(options = {}) {
                 const canUnload = __shouldNodeBeUnloaded(section.id);
                 if (doUnload && element && canUnload) {
                     try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+                    try { __cleanupCanvasNodeTiptapInstances(element, { commit: true }); } catch (_) { }
                     try { element.remove(); } catch (_) { }
                 }
                 continue;
@@ -35627,6 +36545,7 @@ function runCanvasVirtualizationUpdate(options = {}) {
             const canUnload = __shouldNodeBeUnloaded(section.id);
             if (doUnload && element && canUnload) {
                 try { __unloadTempSectionTreeInPlace(section.id); } catch (_) { }
+                try { __cleanupCanvasNodeTiptapInstances(element, { commit: true }); } catch (_) { }
                 try { element.remove(); } catch (_) { }
                 element = null;
             }
@@ -37004,6 +37923,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         if (!inLazyRange && !shouldKeepLoaded) {
             const canUnload = __shouldNodeBeUnloaded(node.id);
             if (doUnload && el && canUnload) {
+                try { __cleanupMdNodeElementLifecycle(el); } catch (_) { }
                 try { el.remove(); } catch (_) { }
                 el = null;
             }
@@ -37149,6 +38069,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
             const canUnload = __shouldNodeBeUnloaded(elId);
             if (doUnload && el && canUnload) {
                 try { __unloadPermanentSectionTreeInPlace(el); } catch (_) { }
+                try { __cleanupCanvasNodeTiptapInstances(el, { commit: true }); } catch (_) { }
                 try { el.remove(); } catch (_) { }
                 el = null;
             }
@@ -37221,6 +38142,7 @@ function __updateNonTempNodesViewportVisibility(options = {}) {
         if (!inLazyRange && !shouldKeepLoaded) {
             const canUnload = __shouldNodeBeUnloaded(node.id);
             if (doUnload && el && canUnload) {
+                try { __cleanupMdNodeElementLifecycle(el); } catch (_) { }
                 try { el.remove(); } catch (_) { }
                 el = null;
             }
