@@ -116,6 +116,27 @@ test('aligned HTML conversion retains inline formatting', () => {
   assert.match(rendered, /<mark>highlight<\/mark>/);
 });
 
+test('aligned headings and HTML blocks convert inline Markdown syntax into marks', () => {
+  const heading = '<h1 style="text-align: center">**居中粗体** ==高亮==</h1>';
+  const repairedHeading = runtime.window.__repairLegacyCanvasMarkdownSource(heading);
+  assert.match(repairedHeading, /<strong>居中粗体<\/strong>/);
+  assert.match(repairedHeading, /<mark>高亮<\/mark>/);
+  const renderedHeading = engine.renderStaticHTML(repairedHeading);
+  assert.match(renderedHeading, /<strong>居中粗体<\/strong>/);
+  assert.match(renderedHeading, /<mark>高亮<\/mark>/);
+
+  const center = '<center>**居中粗体** `code` *斜体* ~~删除~~</center>';
+  const repairedCenter = runtime.window.__repairLegacyCanvasMarkdownSource(center);
+  assert.match(repairedCenter, /<strong>居中粗体<\/strong>/);
+  assert.match(repairedCenter, /<code>code<\/code>/);
+  assert.match(repairedCenter, /<em>斜体<\/em>/);
+  assert.match(repairedCenter, /<s>删除<\/s>/);
+
+  const summary = '<details><summary>**折叠标题**</summary>内容</details>';
+  const repairedSummary = runtime.window.__repairLegacyCanvasMarkdownSource(summary);
+  assert.match(repairedSummary, /<strong>折叠标题<\/strong>/);
+});
+
 test('static URLs are clickable and existing image/CJK/highlight behavior remains intact', () => {
   assert.match(engine.renderStaticHTML('https://example.com'), /href="https:\/\/example.com"/);
   assert.match(engine.renderStaticHTML('www.example.com'), /href="http:\/\/www.example.com"/);

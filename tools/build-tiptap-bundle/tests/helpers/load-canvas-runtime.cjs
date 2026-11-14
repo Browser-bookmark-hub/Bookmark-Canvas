@@ -38,6 +38,7 @@ module.exports = function loadCanvasRuntime({ platform } = {}) {
     '__buildTiptapObservationInnerHtml', '__buildTiptapObservationDom',
     '__toggleMarkdownTaskAtIndex', '__normalizeCanvasMarkdownSource',
     '__stripUnsupportedCanvasHtmlMarkdown', '__repairLegacyCanvasMarkdownSource',
+    '__convertInlineMarkdownToHtmlTags',
     '__mountMdCloneDescriptionEditor', 'preventCanvasEventsPropagation',
     '__normalizeCanvasRichHtml', '__hasMeaningfulRichContent',
     '__getCleanHtmlForStorage', '__coerceDescriptionSourceToHtml',

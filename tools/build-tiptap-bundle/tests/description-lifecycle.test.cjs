@@ -40,6 +40,18 @@ test('clicking outside commits a temporary note and destroys its editor', async 
   assert.match(window.sectionSaves[0].descriptionMd, /CHANGED/);
 });
 
+test('pressing Escape commits a temporary note safely and destroys its editor', () => {
+  const fixture = note();
+  fixture.descriptionText.__tiptapInstance.rawEditor.commands.insertContent('COMMITTED_ON_ESC');
+  assert.equal(window.sectionSaves.length, 0);
+  const event = new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  fixture.descriptionText.dispatchEvent(event);
+  assert.equal(fixture.isEditing(), false);
+  assert.equal(fixture.descEditorApi.isTiptapActive(), false);
+  assert.equal(window.sectionSaves.length, 1);
+  assert.match(window.sectionSaves[0].descriptionMd, /COMMITTED_ON_ESC/);
+});
+
 test('toolbar focus is retained, but a later outside click commits even with an open popover', async () => {
   const fixture = note();
   fixture.descriptionText.__tiptapInstance.rawEditor.commands.insertContent('changed');

@@ -21,6 +21,7 @@ import Image from '@tiptap/extension-image';
 import Text from '@tiptap/extension-text';
 import { TableRow, TableCell, TableHeader } from '@tiptap/extension-table';
 import { Transform } from '@tiptap/pm/transform';
+import { Selection } from '@tiptap/pm/state';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Markdown } from 'tiptap-markdown';
 import markdownItMark from 'markdown-it-mark';
@@ -29,6 +30,7 @@ import CanvasDetails from './src/canvas-details.js';
 import CanvasTable from './src/canvas-table.js';
 import SingleInlineFormat from './src/single-inline-format.js';
 import PlainTyping from './src/plain-typing.js';
+import CanvasCode from './src/canvas-code.js';
 
 /**
  * 专为 Bookmark Canvas 深度定制的 Markdown 增强扩展
@@ -459,6 +461,7 @@ function buildCanvasTiptapExtensions(options = {}) {
             heading: false,   // 由 CustomHeading 接管以支持 textAlign
             underline: false, // 由 CustomUnderline 接管以支持 Markdown <u> 序列化
             text: false,      // 由 CustomText 接管以支持 Obsidian [[wikilink]] / [!callout] / [^1]
+            code: false,      // 由 CanvasCode 接管以对齐 Obsidian 风格行内代码与中文输入法兼容
             codeBlock: {
                 enableTabIndentation: true,
                 tabSize: 4,
@@ -477,6 +480,7 @@ function buildCanvasTiptapExtensions(options = {}) {
             dropcursor: false,
             gapcursor: true,
         }),
+        CanvasCode,
         CustomText,
         SingleInlineFormat,
         PlainTyping,
@@ -562,6 +566,32 @@ function getStaticMarkdownRenderer() {
         serializer: mockEditor.storage.markdown.serializer,
     };
     return cachedStaticRenderer;
+}
+
+/**
+ * 确保聚焦/光标定位的目标位置总是指向具有 inlineContent 的文本节点或合法 Selection。
+ * 当用户点击卡片空白区（如 padding、段落间隙、末尾留白）时，ProseMirror 的 posAtCoords
+ * 返回的 pos 往往落在 doc 根节点或两块级节点之间（$pos.parent 为 doc，inlineContent 为 false）。
+ * 直接调用 editor.commands.focus(pos) 会触发 TextSelection.create 并打印：
+ * "TextSelection endpoint not pointing into a node with inline content (doc)" 警告。
+ * 通过 Selection.near($pos) 自动吸附至最近的合法文本/节点选区，彻底消除此警告。
+ */
+function resolveSafeSelection(view, pos) {
+    if (typeof pos !== 'number' || !Number.isFinite(pos) || !view || !view.state || !view.state.doc) return null;
+    const doc = view.state.doc;
+    const clamped = Math.max(0, Math.min(doc.content.size, Math.floor(pos)));
+    const $pos = doc.resolve(clamped);
+    if ($pos.parent && $pos.parent.inlineContent) {
+        return { type: 'pos', pos: clamped };
+    }
+    const nearSel = Selection.near($pos);
+    if (nearSel) {
+        if (nearSel.$from && nearSel.$from.parent && nearSel.$from.parent.inlineContent) {
+            return { type: 'pos', pos: nearSel.from };
+        }
+        return { type: 'selection', selection: nearSel };
+    }
+    return null;
 }
 
 /**
@@ -702,7 +732,22 @@ class CanvasTiptapInstance {
         const savedScrollLeft = container ? container.scrollLeft : 0;
         try {
             const focusOpts = { scrollIntoView: false, ...options };
-            if (pos !== null && pos !== undefined) {
+            if (typeof pos === 'number') {
+                const view = this.editor.view;
+                const safe = view ? resolveSafeSelection(view, pos) : null;
+                if (safe) {
+                    if (safe.type === 'pos') {
+                        this.editor.commands.focus(safe.pos, focusOpts);
+                    } else if (safe.selection) {
+                        const tr = view.state.tr.setSelection(safe.selection);
+                        if (focusOpts.scrollIntoView) tr.scrollIntoView();
+                        view.dispatch(tr);
+                        view.focus();
+                    }
+                } else {
+                    this.editor.commands.focus(null, focusOpts);
+                }
+            } else if (pos !== null && pos !== undefined) {
                 this.editor.commands.focus(pos, focusOpts);
             } else {
                 this.editor.commands.focus(null, focusOpts);
@@ -731,8 +776,18 @@ class CanvasTiptapInstance {
                 const posObj = view.posAtCoords({ left: coords.left, top: coords.top });
                 if (posObj && typeof posObj.pos === 'number') {
                     const focusOpts = { scrollIntoView: false, ...options };
-                    this.editor.commands.focus(posObj.pos, focusOpts);
-                    success = true;
+                    const safe = resolveSafeSelection(view, posObj.pos);
+                    if (safe) {
+                        if (safe.type === 'pos') {
+                            this.editor.commands.focus(safe.pos, focusOpts);
+                        } else if (safe.selection) {
+                            const tr = view.state.tr.setSelection(safe.selection);
+                            if (focusOpts.scrollIntoView) tr.scrollIntoView();
+                            view.dispatch(tr);
+                            view.focus();
+                        }
+                        success = true;
+                    }
                 }
             }
         } catch (_) { }

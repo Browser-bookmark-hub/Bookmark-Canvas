@@ -18472,6 +18472,31 @@ function __resolveMarkdownSourceFromEditorHtml(cleanHtml, currentSource, options
     return normalizedConvertedSource.trim() ? normalizedConvertedSource : '';
 }
 
+function __convertInlineMarkdownToHtmlTags(htmlString) {
+    if (!htmlString || typeof htmlString !== 'string') return '';
+    const placeholders = [];
+    const mask = (val) => {
+        const token = `\uFFF2BCS_INLINE_${placeholders.length}\uFFF3`;
+        placeholders.push(val);
+        return token;
+    };
+    let s = htmlString.replace(/<[^>]+>/g, (m) => mask(m));
+    s = s.replace(/`([^`\r\n]+)`/g, (_, code) => mask(`<code>${code}</code>`));
+    s = s.replace(/\*\*([^\s*](?:[\s\S]*?[^\s*])?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^\s_](?:[\s\S]*?[^\s_])?)__/g, '<strong>$1</strong>');
+    s = s.replace(/==([^\s=](?:[\s\S]*?[^\s=])?)==/g, '<mark>$1</mark>');
+    s = s.replace(/~~([^\s~](?:[\s\S]*?[^\s~])?)~~/g, '<s>$1</s>');
+    s = s.replace(/(^|[^*])\*([^\s*](?:[\s\S]*?[^\s*])?)\*(?!\*)/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[^a-zA-Z0-9_])_([^\s_](?:[\s\S]*?[^\s_])?)_(?![a-zA-Z0-9_])/g, '$1<em>$2</em>');
+    for (let p = 0; p < 2 && /\uFFF2BCS_INLINE_\d+\uFFF3/.test(s); p++) {
+        s = s.replace(/\uFFF2BCS_INLINE_(\d+)\uFFF3/g, (_, idx) => {
+            const i = Number(idx);
+            return Number.isInteger(i) && i >= 0 && i < placeholders.length ? placeholders[i] : '';
+        });
+    }
+    return s;
+}
+
 function __repairLegacyCanvasMarkdownSource(value) {
     let normalized = __normalizeCanvasMarkdownSource(value);
     if (!normalized.trim()) return normalized;
@@ -18538,11 +18563,15 @@ function __repairLegacyCanvasMarkdownSource(value) {
         return match;
     };
 
-    normalized = normalized.replace(/<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/gi, (match, _level, _attrs, inner) => {
+    normalized = normalized.replace(/<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/gi, (match, level, attrs, inner) => {
         const plainInner = String(inner || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
         const hasWrappedMarkdown = /^\s*#{1,6}\s+/m.test(plainInner)
             || /\n\s*(?:#{1,6}\s+|[-*]\s+|\d+\.\s+)/.test(plainInner);
-        return hasWrappedMarkdown ? unwrapMatchedMarkdownBlock(match) : maskSpan(match);
+        if (hasWrappedMarkdown) {
+            return unwrapMatchedMarkdownBlock(match);
+        }
+        const upgraded = `<h${level}${attrs}>${__convertInlineMarkdownToHtmlTags(unmaskAll(inner))}</h${level}>`;
+        return maskSpan(upgraded);
     });
 
     normalized = normalized.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (match, attrs, inner) => {
@@ -18552,12 +18581,20 @@ function __repairLegacyCanvasMarkdownSource(value) {
         if (!hasAlignAttr && plainInner.trim() && /(?:^|\n)\s*#{1,6}\s+/m.test(plainInner)) {
             return unwrapMatchedMarkdownBlock(match);
         }
-        return maskSpan(match);
+        const upgraded = `<p${attrs}>${__convertInlineMarkdownToHtmlTags(unmaskAll(inner))}</p>`;
+        return maskSpan(upgraded);
     });
 
-    // Preserve tables and <center> blocks when recovering bare <br> line breaks.
+    // Preserve tables, <center>, <summary>, and <details> blocks when recovering bare <br> line breaks.
     normalized = normalized.replace(/<table\b[^>]*>[\s\S]*?<\/table>/gi, (match) => maskSpan(match));
-    normalized = normalized.replace(/<center\b[^>]*>[\s\S]*?<\/center>/gi, (match) => maskSpan(match));
+    normalized = normalized.replace(/<center\b([^>]*)>([\s\S]*?)<\/center>/gi, (_, attrs, inner) => {
+        const upgraded = `<center${attrs}>${__convertInlineMarkdownToHtmlTags(unmaskAll(inner))}</center>`;
+        return maskSpan(upgraded);
+    });
+    normalized = normalized.replace(/<summary\b([^>]*)>([\s\S]*?)<\/summary>/gi, (_, attrs, inner) => {
+        const upgraded = `<summary${attrs}>${__convertInlineMarkdownToHtmlTags(unmaskAll(inner))}</summary>`;
+        return maskSpan(upgraded);
+    });
     normalized = normalized.replace(/<details\b[^>]*>[\s\S]*<\/details>/gi, (match) => maskSpan(match));
 
     // Recover legacy single-line markdown where line breaks were serialized as <br>.
@@ -21291,7 +21328,9 @@ function __renderTempNodeImpl(section, options = {}) {
             exitEditingDescription({ commit: true });
         } else if (e.key === 'Escape') {
             e.preventDefault();
-            exitEditingDescription({ commit: false });
+            const hasPopover = document.querySelector('.md-color-popover.open, .md-fontcolor-popover.open, .md-heading-popover.open, .md-list-popover.open, .md-align-popover.open, .md-rgb-picker, .desc-clear-confirm-popover, .desc-height-settings-popover, .md-editing-help-popover');
+            if (hasPopover) return;
+            exitEditingDescription({ commit: true });
         }
     });
 
@@ -25347,7 +25386,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             exitEditingTip({ commit: true });
         } else if (e.key === 'Escape') {
             e.preventDefault();
-            const hasPopover = document.querySelector('.md-toolbar-popover.open, .md-format-popover.open, .md-color-popover.open, .md-fontcolor-popover.open, .md-heading-popover.open, .md-list-popover.open, .md-align-popover.open, .desc-clear-confirm-popover, .desc-height-settings-popover');
+            const hasPopover = document.querySelector('.md-color-popover.open, .md-fontcolor-popover.open, .md-heading-popover.open, .md-list-popover.open, .md-align-popover.open, .md-rgb-picker, .desc-clear-confirm-popover, .desc-height-settings-popover, .md-editing-help-popover');
             if (hasPopover) return;
             exitEditingTip({ commit: true });
         }
