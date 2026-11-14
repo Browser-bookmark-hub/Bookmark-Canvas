@@ -280,6 +280,9 @@
     min-width: 320px;
     max-width: 520px;
     box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .canvas-help-modal-header {
@@ -290,6 +293,7 @@
     padding: 10px 14px;
     box-sizing: border-box;
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .canvas-help-modal-header h4 {
@@ -332,6 +336,11 @@
 
 .canvas-help-tabs-body {
     padding: 0;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden !important;
 }
 
 .canvas-help-tabs {
@@ -340,6 +349,7 @@
     padding: 10px 12px;
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-secondary);
+    flex-shrink: 0;
 }
 
 .canvas-help-tab {
@@ -369,9 +379,12 @@
 .canvas-help-panels {
     padding: 12px 14px;
     max-height: 360px;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
     width: 100%;
     box-sizing: border-box;
+    flex: 1;
+    min-height: 0;
 }
 
 .canvas-help-panel {

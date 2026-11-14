@@ -3622,7 +3622,8 @@ body.canvas-node-maximized-active .canvas-edge-label {
     width: 298px;
     max-width: calc(100vw - 20px);
     max-height: calc(100vh - 20px);
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
     padding: 12px 14px;
     border: 1px solid rgba(27, 31, 36, 0.25);
     border-radius: 8px;

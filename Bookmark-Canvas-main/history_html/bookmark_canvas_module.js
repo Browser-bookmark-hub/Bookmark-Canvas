@@ -9690,10 +9690,21 @@ const positionManageModalUnderSettingsBtn = (modalEl) => {
     // Keep tall secondary panels on the anchored side of the title bar and
     // scroll their content instead of clamping the whole panel toward it.
     modalEl.style.maxHeight = `${Math.round(availableHeight)}px`;
-    const modalHeader = modalEl.querySelector('.canvas-manage-modal-header');
-    const modalBody = modalEl.querySelector('.canvas-manage-modal-body');
+    const modalHeader = modalEl.querySelector('.canvas-manage-modal-header, .canvas-help-modal-header');
+    const modalBody = modalEl.querySelector('.canvas-manage-modal-body, .canvas-help-modal-body');
     if (modalBody && modalHeader) {
-        modalBody.style.maxHeight = `${Math.max(0, Math.round(availableHeight - modalHeader.offsetHeight))}px`;
+        const headerH = modalHeader.offsetHeight || 44;
+        if (modalBody.classList.contains('canvas-help-tabs-body')) {
+            modalBody.style.maxHeight = `${Math.max(0, Math.round(availableHeight - headerH))}px`;
+            modalBody.style.overflowY = 'hidden';
+            const panels = modalEl.querySelector('.canvas-help-panels');
+            const tabsH = modalEl.querySelector('.canvas-help-tabs')?.offsetHeight || 42;
+            if (panels) {
+                panels.style.maxHeight = `${Math.max(60, Math.round(availableHeight - headerH - tabsH))}px`;
+            }
+        } else {
+            modalBody.style.maxHeight = `${Math.max(0, Math.round(availableHeight - headerH))}px`;
+        }
     }
     modalRect = modalEl.getBoundingClientRect();
 
@@ -9753,8 +9764,18 @@ const positionModalNearZoomIndicator = (modalEl) => {
     const modalBody = modalEl.querySelector('.canvas-manage-modal-body, .canvas-help-modal-body');
     if (modalBody) {
         const headerH = modalHeader ? modalHeader.offsetHeight : 44;
-        modalBody.style.maxHeight = `${Math.max(60, Math.round(availableHeight - headerH))}px`;
-        modalBody.style.overflowY = 'auto';
+        if (modalBody.classList.contains('canvas-help-tabs-body')) {
+            modalBody.style.maxHeight = `${Math.max(60, Math.round(availableHeight - headerH))}px`;
+            modalBody.style.overflowY = 'hidden';
+            const panels = modalEl.querySelector('.canvas-help-panels');
+            const tabsH = modalEl.querySelector('.canvas-help-tabs')?.offsetHeight || 42;
+            if (panels) {
+                panels.style.maxHeight = `${Math.max(60, Math.round(availableHeight - headerH - tabsH))}px`;
+            }
+        } else {
+            modalBody.style.maxHeight = `${Math.max(60, Math.round(availableHeight - headerH))}px`;
+            modalBody.style.overflowY = 'auto';
+        }
     }
     modalRect = modalEl.getBoundingClientRect();
 
@@ -9784,7 +9805,12 @@ function resetSettingsAnchoredModalSizing(modalEl) {
     modalEl.style.top = '';
     modalEl.style.bottom = '';
     const modalBody = modalEl.querySelector('.canvas-manage-modal-body, .canvas-help-modal-body');
-    if (modalBody) modalBody.style.maxHeight = '';
+    if (modalBody) {
+        modalBody.style.maxHeight = '';
+        modalBody.style.overflowY = '';
+    }
+    const panels = modalEl.querySelector('.canvas-help-panels');
+    if (panels) panels.style.maxHeight = '';
 }
 
 const SETTINGS_ANCHORED_MODAL_IDS = [
