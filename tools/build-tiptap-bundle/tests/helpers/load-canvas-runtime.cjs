@@ -7,6 +7,7 @@ const { buildSync } = require('esbuild');
 const root = path.resolve(__dirname, '../../../..');
 const canvasSource = fs.readFileSync(path.join(root, 'Bookmark-Canvas-main/history_html/bookmark_canvas_module.js'), 'utf8');
 const storageSource = fs.readFileSync(path.join(root, 'Bookmark-Canvas-main/history_html/storageBCS/storageBCS_core.js'), 'utf8');
+const peleBundle = fs.readFileSync(path.join(root, 'Bookmark-Canvas-main/history_html/vendor/pele.min.js'), 'utf8');
 const bundle = buildSync({
   entryPoints: [path.join(__dirname, '../../entry.js')],
   bundle: true,
@@ -32,6 +33,7 @@ module.exports = function loadCanvasRuntime({ platform } = {}) {
   const context = dom.getInternalVMContext();
   if (platform) Object.defineProperty(dom.window.navigator, 'platform', { configurable: true, value: platform });
   const run = code => new vm.Script(code).runInContext(context);
+  run(peleBundle);
   run(bundle);
   const functions = [
     '__looksLikeHtmlTagContent', '__sanitizeCanvasRichTextHtml',
@@ -46,6 +48,7 @@ module.exports = function loadCanvasRuntime({ platform } = {}) {
     '__clearCanvasDescriptionSelection', '__selectCanvasDescriptionContainer',
     '__bindCanvasDescriptionSelectionClear', '__isSelectionAll',
     '__cleanupCanvasNodeTiptapInstances', 'bindPermanentSectionTipBehavior',
+    'renderCanvasMermaidDiagrams',
     '__isHeadingNode', '__getHeadingLevel', '__applyHeadingCollapse', '__handleHeadingCollapseClick',
     '__setupDescAutoScroll',
     '__bindFormatEditingHelp', '__syncFormatToolbarActiveStates', '__renderMdNodeImpl',

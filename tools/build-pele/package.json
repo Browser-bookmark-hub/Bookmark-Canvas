@@ -1,0 +1,10 @@
+{
+  "name": "build-pele",
+  "version": "1.0.0",
+  "description": "Build script for Pele.js (Obsidian-compatible zero-dependency Mermaid renderer)",
+  "main": "build.js",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "license": "MIT"
+}

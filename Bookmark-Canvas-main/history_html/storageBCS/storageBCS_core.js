@@ -3537,6 +3537,11 @@ function __htmlToMarkdown(html, options = {}) {
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return '';
 
+        if (node.hasAttribute && node.hasAttribute('data-mermaid-source')) {
+            const raw = (node.getAttribute('data-mermaid-source') || '').trim();
+            return `\`\`\`mermaid\n${raw}\n\`\`\`\n\n`;
+        }
+
         const tag = node.tagName.toLowerCase();
         const childContent = () => Array.from(node.childNodes).map(processNode).join('');
         const childHtml = () => String(node.innerHTML || '').replace(/\u200B/g, '');

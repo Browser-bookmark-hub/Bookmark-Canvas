@@ -4963,3 +4963,62 @@ html.side-panel-mode .perf-tri-state button {
     font-size: 11px !important;
     padding: 2px 6px !important;
 }
+
+/* Pele.js Mermaid 图表容器与主题映射 */
+.pele-diagram-container {
+    --pele-bg: transparent;
+    --pele-fg: var(--text-primary, #18181b);
+    --pele-muted: var(--text-secondary, #52525b);
+    --pele-line: var(--section-color, var(--text-primary, #18181b));
+    --pele-surface: var(--bg-secondary, #fafafa);
+    --pele-surface-alt: var(--bg-tertiary, #f5f5f7);
+    --pele-border: var(--border-color, #e4e4e7);
+    --pele-accent: var(--section-color, var(--accent-primary, #1877f2));
+    --pele-font: var(--font-sans, sans-serif);
+    --pele-font-mono: var(--font-mono, monospace);
+    --pele-radius: 6px;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    max-width: 100%;
+    margin: 8px 0;
+    padding: 8px;
+    box-sizing: border-box;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-radius: 6px;
+    background-color: rgba(127, 127, 127, 0.04);
+}
+
+[data-theme="dark"] .pele-diagram-container {
+    --pele-fg: var(--text-primary, #e4e6eb);
+    --pele-muted: var(--text-secondary, #b0b3b8);
+    --pele-line: var(--section-color, var(--text-primary, #e4e6eb));
+    --pele-surface: var(--bg-secondary, #242526);
+    --pele-surface-alt: var(--bg-tertiary, #3a3b3c);
+    --pele-border: var(--border-color, #3a3b3c);
+    --pele-accent: var(--section-color, var(--accent-primary, #2d88ff));
+    background-color: rgba(255, 255, 255, 0.03);
+}
+
+.pele-diagram-container svg.pele {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    flex-shrink: 0;
+}
+
+.pele-diagram-error-badge {
+    margin-top: 4px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+    color: var(--error, #e74c3c);
+    background-color: rgba(231, 76, 60, 0.08);
+    border-left: 2px solid var(--error, #e74c3c);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+

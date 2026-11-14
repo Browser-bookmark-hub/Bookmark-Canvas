@@ -18998,8 +18998,52 @@ function __getHeadingLevel(node) {
     return parseInt(node.tagName.slice(1), 10) || 0;
 }
 
+function renderCanvasMermaidDiagrams(containerEl) {
+    if (!containerEl || typeof window === 'undefined') return;
+    const pele = window.pele;
+    if (!pele || typeof pele.render !== 'function') return;
+
+    const codeBlocks = Array.from(containerEl.querySelectorAll('pre > code, pre[class*="mermaid" i] > code, code[class*="mermaid" i]'));
+    if (!codeBlocks || codeBlocks.length === 0) return;
+
+    const isMermaid = (el) => {
+        const cls = ((el.className || '') + ' ' + (el.parentElement?.className || '')).toLowerCase();
+        return /\b(?:language-|lang-)?mermaid\b/.test(cls);
+    };
+
+    codeBlocks.forEach((codeEl) => {
+        if (!isMermaid(codeEl)) return;
+        const pre = codeEl.closest('pre');
+        if (!pre || pre.closest('.pele-diagram-container')) return;
+
+        const rawCode = (codeEl.textContent || '').trim();
+        if (!rawCode) return;
+
+        try {
+            const renderResult = pele.render(rawCode);
+            if (renderResult && typeof renderResult.svg === 'string') {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'pele-diagram-container';
+                wrapper.setAttribute('data-mermaid-source', rawCode);
+                wrapper.innerHTML = renderResult.svg;
+                pre.parentNode.replaceChild(wrapper, pre);
+            }
+        } catch (err) {
+            console.warn('[Pele] Mermaid render error:', err);
+            if (!pre.querySelector('.pele-diagram-error-badge')) {
+                const badge = document.createElement('div');
+                badge.className = 'pele-diagram-error-badge';
+                const msg = err && err.message ? err.message : String(err);
+                badge.textContent = `Mermaid: ${msg}`;
+                pre.appendChild(badge);
+            }
+        }
+    });
+}
+
 function __applyHeadingCollapse(editorEl) {
     if (!editorEl) return;
+    try { renderCanvasMermaidDiagrams(editorEl); } catch (_) { }
     const targetRoot = (editorEl.querySelector && editorEl.querySelector('.tiptap.ProseMirror')) || editorEl;
     const nodes = Array.from(targetRoot.childNodes || []);
     const hasContentBetween = (startIndex, level) => {
