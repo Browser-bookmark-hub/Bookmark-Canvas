@@ -210,6 +210,8 @@ const searchUiState = {
     // Canvas bookmark search: whether to show bookmark / folder / domain results
     // Values: 'bookmark' | 'folder' | 'domain' | null (auto)
     bookmarkTypeFilter: null,
+    // @热度 / @最近 等排行查询下用户是否手动点过筛选栏（点过则在排行查询期间保留用户选择）
+    bookmarkTypeUserOverridden: false,
 
     // Canvas card(group) search: whether to show cards/sections or groups
     // Values: 'card' | 'group' | null (auto)
@@ -443,8 +445,48 @@ const DOMAIN_GROUP_PREF_KEY = 'canvas-search-domain-grouping';
 const TAG_BROWSER_COLOR_ORDER = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
 const TAG_BROWSER_ROOT_QUERIES = new Set(['#', '{#}']);
 const NOTE_BROWSER_ROOT_QUERIES = new Set(['*', '{*}']);
-const TIME_BROWSER_ROOT_QUERIES = new Set(['@', '@时间', '@time', '{@}', '{@时间}', '{@time}']);
+const TIME_BROWSER_ROOT_QUERIES = new Set(['@', '@最近', '@时间', '@recent', '@time', '{@}', '{@最近}', '{@时间}', '{@recent}', '{@time}']);
 const CLICK_BROWSER_ROOT_QUERIES = new Set(['@点击', '@click', '@次数', '@排行', '@hot', '@visit', '@热度', '{@点击}', '{@click}', '{@次数}', '{@排行}', '{@hot}', '{@visit}', '{@热度}']);
+const HISTORY_BROWSER_ROOT_QUERIES = new Set(['@创建', '@create', '@历史', '@history', '{@创建}', '{@create}', '{@历史}', '{@history}']);
+
+function getCanvasHistorySearchNeedle(query) {
+    if (isCanvasClickSearchQuery(query)) return null;
+    const raw = String(query || '').trim();
+    const lower = raw.toLowerCase();
+    if (HISTORY_BROWSER_ROOT_QUERIES.has(lower)) return '';
+    const prefixes = [
+        { prefix: '{@创建}', len: 5, isEn: false },
+        { prefix: '@创建', len: 3, isEn: false },
+        { prefix: '{@create}', len: 9, isEn: false },
+        { prefix: '@create', len: 7, isEn: true },
+        { prefix: '{@历史}', len: 5, isEn: false },
+        { prefix: '@历史', len: 3, isEn: false },
+        { prefix: '{@history}', len: 10, isEn: false },
+        { prefix: '@history', len: 8, isEn: true }
+    ];
+    for (let i = 0; i < prefixes.length; i++) {
+        const { prefix, len, isEn } = prefixes[i];
+        if (lower.startsWith(prefix)) {
+            if (isEn) {
+                const nextChar = lower.charAt(len);
+                if (nextChar && /^[a-z0-9_\-]/i.test(nextChar)) {
+                    continue;
+                }
+            }
+            return raw.slice(len).trim().toLowerCase();
+        }
+    }
+    return null;
+}
+
+function isCanvasHistorySearchQuery(query) {
+    return getCanvasHistorySearchNeedle(query) !== null;
+}
+
+function isHistoryBrowseRootQuery(query) {
+    const raw = String(query || '').trim().toLowerCase();
+    return HISTORY_BROWSER_ROOT_QUERIES.has(raw);
+}
 
 function getCanvasClickSearchNeedle(query) {
     const raw = String(query || '').trim();
@@ -471,8 +513,8 @@ function getCanvasClickSearchNeedle(query) {
         if (lower.startsWith(prefix)) {
             if (isEn) {
                 const nextChar = lower.charAt(len);
-                // 英文前缀如 @hot, @click, @visit 如果紧跟字母/数字（如 @hotel, @hotfix, @clickevent），不视为特殊指令
-                if (nextChar && /^[a-z0-9_]/i.test(nextChar)) {
+                // 英文前缀如 @hot, @click, @visit 如果紧跟字母/数字/连字符（如 @hotel, @hot-fix, @clickevent），不视为特殊指令
+                if (nextChar && /^[a-z0-9_\-]/i.test(nextChar)) {
                     continue;
                 }
             }
@@ -492,16 +534,34 @@ function isClickBrowseRootQuery(query) {
 }
 
 function getCanvasTimeSearchNeedle(query) {
-    if (isCanvasClickSearchQuery(query)) return null;
+    if (isCanvasClickSearchQuery(query) || isCanvasHistorySearchQuery(query)) return null;
     const raw = String(query || '').trim();
     const lower = raw.toLowerCase();
     if (TIME_BROWSER_ROOT_QUERIES.has(lower)) return '';
-    if (lower.startsWith('@时间')) return raw.slice(3).trim().toLowerCase();
-    if (lower.startsWith('{@时间}')) return raw.slice(5).trim().toLowerCase();
-    if (lower.startsWith('@time')) return raw.slice(5).trim().toLowerCase();
-    if (lower.startsWith('{@time}')) return raw.slice(7).trim().toLowerCase();
-    if (lower.startsWith('@')) return raw.slice(1).trim().toLowerCase();
-    if (lower.startsWith('{@}')) return raw.slice(3).trim().toLowerCase();
+    const prefixes = [
+        { prefix: '{@最近}', len: 5, isEn: false },
+        { prefix: '@最近', len: 3, isEn: false },
+        { prefix: '{@时间}', len: 5, isEn: false },
+        { prefix: '@时间', len: 3, isEn: false },
+        { prefix: '{@recent}', len: 9, isEn: false },
+        { prefix: '@recent', len: 7, isEn: true },
+        { prefix: '{@time}', len: 7, isEn: false },
+        { prefix: '@time', len: 5, isEn: true },
+        { prefix: '{@}', len: 3, isEn: false },
+        { prefix: '@', len: 1, isEn: false }
+    ];
+    for (let i = 0; i < prefixes.length; i++) {
+        const { prefix, len, isEn } = prefixes[i];
+        if (lower.startsWith(prefix)) {
+            if (isEn) {
+                const nextChar = lower.charAt(len);
+                if (nextChar && /^[a-z0-9_\-]/i.test(nextChar)) {
+                    continue;
+                }
+            }
+            return raw.slice(len).trim().toLowerCase();
+        }
+    }
     return null;
 }
 
@@ -2513,7 +2573,7 @@ function updateSearchResultSelection(nextIndex, options = {}) {
 
     if (isSearchPanelTableView() && isCanvasSearchTabulatorReady()) {
         try {
-            const rows = canvasSearchTabulatorInstance.getRows();
+            const rows = canvasSearchTabulatorInstance.getRows("active");
             if (!rows || !rows.length) {
                 searchUiState.selectedIndex = -1;
                 return;
@@ -2526,7 +2586,7 @@ function updateSearchResultSelection(nextIndex, options = {}) {
             if (nextIndex >= rows.length && typeof loadNextCanvasSearchTabulatorChunk === 'function' && canvasSearchTabulatorPendingState && canvasSearchTabulatorPendingState.loadedCount < canvasSearchTabulatorPendingState.totalResults.length) {
                 loadNextCanvasSearchTabulatorChunk();
             }
-            const updatedRows = canvasSearchTabulatorInstance.getRows();
+            const updatedRows = canvasSearchTabulatorInstance.getRows("active");
             const maxIdx = (updatedRows && updatedRows.length) ? (updatedRows.length - 1) : 0;
             const clamped = Math.max(0, Math.min(maxIdx, nextIndex));
             canvasSearchTabulatorInstance.deselectRow();
@@ -2829,6 +2889,7 @@ function handleSearchKeydown(e) {
                             }
 
                             searchUiState.bookmarkTypeFilter = nextType;
+                            searchUiState.bookmarkTypeUserOverridden = true;
                             if (nextType === 'domain') {
                                 searchUiState.domainGrouping = nextGrouping;
                                 if (nextGrouping !== currentGrouping) {
@@ -2855,6 +2916,7 @@ function handleSearchKeydown(e) {
                                 const idx = availableTypes.indexOf(currentType);
                                 const nextType = availableTypes[(idx >= 0 ? idx + 1 : 0) % availableTypes.length];
                                 searchUiState.bookmarkTypeFilter = nextType;
+                                searchUiState.bookmarkTypeUserOverridden = true;
                                 const groups = searchUiState.bookmarkGroupModel;
                                 if (Array.isArray(groups)) {
                                     const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups);
@@ -3033,10 +3095,9 @@ async function handleSearchInputFocus(e) {
             await ensureIndexForModeLoaded(activeMode);
         }
 
-        // 纯按需预热：书签模式下聚焦输入框时，若历史热度索引未就绪，轻量异步触发构建（耗时 ~15ms）
+        // 纯按需预热与微切片增量检查：书签模式下聚焦输入框时，轻量异步触发就绪检查（遵从 30 秒节流，杜绝频繁 IPC）
         if (activeMode === 'bookmark' && typeof window !== 'undefined' && window.HistoryStatsService &&
-            typeof window.HistoryStatsService.ensureHistoryStatsIndex === 'function' &&
-            !window.HistoryStatsService.isCacheReady()) {
+            typeof window.HistoryStatsService.ensureHistoryStatsIndex === 'function') {
             window.HistoryStatsService.ensureHistoryStatsIndex().catch(() => {});
         }
 
@@ -3770,6 +3831,7 @@ function handleSearchResultsPanelClick(e) {
         // Update filter and re-render (do NOT close panel)
         const nextFilter = (type === 'all' || searchUiState.bookmarkTypeFilter === type ? null : type);
         searchUiState.bookmarkTypeFilter = nextFilter;
+        searchUiState.bookmarkTypeUserOverridden = true;
         if (nextFilter === 'domain') {
             searchUiState.domainGrouping = 'root';
             searchUiState.focusedHost = null;
@@ -3783,7 +3845,8 @@ function handleSearchResultsPanelClick(e) {
         if (Array.isArray(groups)) {
             const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
             const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(searchUiState.query);
-            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch, isClickSearch });
+            const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(searchUiState.query);
+            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch, isClickSearch, isHistorySearch });
             renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
         } else {
             // Fallback: rerun search
@@ -3870,6 +3933,7 @@ function handleSearchResultsPanelClick(e) {
         const currentGroup = (searchUiState && searchUiState.domainGrouping === 'host') ? 'host' : 'root';
         const next = (requested === 'root' || requested === 'host') ? requested : (currentGroup === 'host' ? 'root' : 'host');
         searchUiState.bookmarkTypeFilter = 'domain';
+        searchUiState.bookmarkTypeUserOverridden = true;
         searchUiState.domainGrouping = next;
         searchUiState.focusedHost = null;
         searchUiState.domainRootContext = null;
@@ -3879,7 +3943,8 @@ function handleSearchResultsPanelClick(e) {
         if (Array.isArray(groups)) {
             const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
             const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(searchUiState.query);
-            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch, isClickSearch });
+            const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(searchUiState.query);
+            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch, isClickSearch, isHistorySearch });
             renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
         } else {
             searchCanvasAndRender(searchUiState.query);
@@ -4235,14 +4300,20 @@ function highlightSearchKeywords(text, query) {
     const rawTokens = q.toLowerCase().split(/\s+/).map(t => t.trim()).filter(Boolean);
     if (!rawTokens.length) return safeText;
 
-    // 过滤去重，剔除独立特殊模式符号（如 #、*、@、@时间、@time、@热度、@hot、@点击、@click、.、..、...），允许 #tag、*note、@time、@hot、@click 高亮其实际词，避免纯点号错误高亮省略号
+    // 过滤去重，剔除独立特殊模式符号（如 #、*、@、@最近、@时间、@recent、@time、@热度、@hot、@点击、@click、@历史、@history、@创建、@create、.、..、...），允许 #tag、*note、@time、@recent、@hot、@click 高亮其实际词，避免纯点号错误高亮省略号
     let uniqueTokens = Array.from(new Set(rawTokens))
-        .filter(t => !['#', '*', '@', '@时间', '@time', '@热度', '@hot', '@点击', '@click', '@次数', '@排行', '@visit'].includes(t) && !/^\.+$/.test(t))
+        .filter(t => !['#', '*', '@', '@最近', '@时间', '@recent', '@time', '@热度', '@hot', '@点击', '@click', '@次数', '@排行', '@visit', '@历史', '@history', '@创建', '@create'].includes(t) && !/^\.+$/.test(t))
         .map(t => {
+            if (t.startsWith('@最近')) return t.slice(3);
+            if (t.startsWith('@recent')) return t.slice(7);
             if (t.startsWith('@热度')) return t.slice(3);
             if (t.startsWith('@hot')) return t.slice(4);
             if (t.startsWith('@时间')) return t.slice(3);
             if (t.startsWith('@time')) return t.slice(5);
+            if (t.startsWith('@历史')) return t.slice(3);
+            if (t.startsWith('@history')) return t.slice(8);
+            if (t.startsWith('@创建')) return t.slice(3);
+            if (t.startsWith('@create')) return t.slice(7);
             if (t.startsWith('@点击')) return t.slice(3);
             if (t.startsWith('@次数')) return t.slice(3);
             if (t.startsWith('@排行')) return t.slice(3);
@@ -5877,9 +5948,12 @@ function showGridGroupPopover(targetBtn, groupId) {
         const faviconSrc = (typeof getFaviconUrl === 'function') ? getFaviconUrl(domainUrl) : '';
         const hasRealFavicon = faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
         if (hasRealFavicon) {
-            iconHtml = `<img src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(domainUrl)}" alt="">`;
+            iconHtml = `<img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(domainUrl)}" alt="" style="width:16px; height:16px; object-fit:contain; border-radius:3px;">`;
         } else {
-            iconHtml = `<i class="fas fa-globe" style="color:#0ea5e9;"></i>`;
+            iconHtml = `<span style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px;">
+                <i class="fas fa-globe search-result-icon-box-inline" style="color:#0ea5e9; font-size:14px;"></i>
+                <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(domainUrl)}" alt="" style="display:none; width:16px; height:16px; object-fit:contain; border-radius:3px; position:absolute; left:0; top:0;">
+            </span>`;
         }
     } else if (isFolder) {
         iconHtml = `<i class="fas fa-folder" style="color:#2563eb;"></i>`;
@@ -5887,9 +5961,12 @@ function showGridGroupPopover(targetBtn, groupId) {
         const faviconSrc = (typeof getFaviconUrl === 'function') ? getFaviconUrl(item.url) : '';
         const hasRealFavicon = faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
         if (hasRealFavicon) {
-            iconHtml = `<img src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(item.url)}" alt="">`;
+            iconHtml = `<img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(item.url)}" alt="" style="width:16px; height:16px; object-fit:contain; border-radius:3px;">`;
         } else {
-            iconHtml = `<i class="fas fa-bookmark" style="color:#f59e0b;"></i>`;
+            iconHtml = `<span style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px;">
+                <i class="fas fa-bookmark search-result-icon-box-inline" style="color:#f59e0b; font-size:14px;"></i>
+                <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(item.url)}" alt="" style="display:none; width:16px; height:16px; object-fit:contain; border-radius:3px; position:absolute; left:0; top:0;">
+            </span>`;
         }
     } else {
         iconHtml = `<i class="fas fa-bookmark" style="color:#f59e0b;"></i>`;
@@ -5933,9 +6010,12 @@ function showGridGroupPopover(targetBtn, groupId) {
                 const faviconSrc = (typeof getFaviconUrl === 'function' && childUrl) ? getFaviconUrl(childUrl) : '';
                 const hasRealFavicon = faviconSrc && !String(faviconSrc).startsWith('data:image/svg+xml') && faviconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
                 if (hasRealFavicon) {
-                    childIconHtml = `<img src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(childUrl)}" alt="" style="width:13px; height:13px; border-radius:3px; object-fit:contain;">`;
+                    childIconHtml = `<img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(childUrl)}" alt="" style="width:13px; height:13px; border-radius:3px; object-fit:contain;">`;
                 } else {
-                    childIconHtml = `<i class="fas fa-bookmark" style="color:#f59e0b; font-size:11px;"></i>`;
+                    childIconHtml = `<span style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px;">
+                        <i class="fas fa-bookmark search-result-icon-box-inline" style="color:#f59e0b; font-size:11px;"></i>
+                        <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(childUrl)}" alt="" style="display:none; width:13px; height:13px; border-radius:3px; object-fit:contain; position:absolute; left:0; top:0;">
+                    </span>`;
                 }
             }
 
@@ -6512,7 +6592,10 @@ function renderCanvasGridDetailsBubbleIconHtml(item, rowData, itemRow, tabRow) {
         if (hasReal) {
             return `<img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(domainUrl)}" alt="" style="width:16px; height:16px; object-fit:contain; border-radius:3px;">`;
         }
-        return `<i class="fas fa-globe" style="color:#0ea5e9; font-size:14px;"></i>`;
+        return `<span style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px;">
+            <i class="fas fa-globe search-result-icon-box-inline" style="color:#0ea5e9; font-size:14px;"></i>
+            <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(domainUrl)}" alt="" style="display:none; width:16px; height:16px; object-fit:contain; border-radius:3px; position:absolute; left:0; top:0;">
+        </span>`;
     }
 
     // 3. 提取目标 URL
@@ -7732,7 +7815,10 @@ function showSubdomainListPopover(targetBtn, domainKey) {
             if (hasReal) {
                 iconHtml = `<img class="search-result-favicon" src="${escapeHtml(faviconSrc)}" data-bookmark-url="${escapeHtml(hostUrl)}" style="width:15px; height:15px; object-fit:contain; border-radius:3px; flex-shrink:0;" alt="">`;
             } else {
-                iconHtml = `<i class="fas fa-globe" style="color:#0ea5e9; font-size:13px; width:15px; text-align:center; flex-shrink:0;"></i>`;
+                iconHtml = `<span style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; flex-shrink:0;">
+                    <i class="fas fa-globe search-result-icon-box-inline" style="color:#0ea5e9; font-size:13px; width:15px; text-align:center;"></i>
+                    <img class="search-result-favicon" src="${escapeHtml(faviconSrc || '')}" data-bookmark-url="${escapeHtml(hostUrl)}" style="display:none; width:15px; height:15px; object-fit:contain; border-radius:3px; position:absolute; left:0; top:0;" alt="">
+                </span>`;
             }
 
             const countText = isZh ? `${sub.count}项` : (sub.count === 1 ? '1 item' : `${sub.count} items`);
@@ -7756,7 +7842,10 @@ function showSubdomainListPopover(targetBtn, domainKey) {
                     if (hasBmReal) {
                         bmIconHtml = `<img class="search-result-favicon" src="${escapeHtml(bmFavicon)}" data-bookmark-url="${escapeHtml(bmUrl)}" style="width:13px; height:13px; object-fit:contain; border-radius:2px; flex-shrink:0;" alt="">`;
                     } else {
-                        bmIconHtml = `<i class="fas fa-bookmark" style="color:#f59e0b; font-size:10.5px; flex-shrink:0;"></i>`;
+                        bmIconHtml = `<span style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; flex-shrink:0;">
+                            <i class="fas fa-bookmark search-result-icon-box-inline" style="color:#f59e0b; font-size:10.5px;"></i>
+                            <img class="search-result-favicon" src="${escapeHtml(bmFavicon || '')}" data-bookmark-url="${escapeHtml(bmUrl)}" style="display:none; width:13px; height:13px; object-fit:contain; border-radius:2px; position:absolute; left:0; top:0;" alt="">
+                        </span>`;
                     }
 
                     const bmSource = bm.source || 'permanent';
@@ -8595,6 +8684,45 @@ function initSearchEvents() {
         }, 800);
     }
 
+    if (typeof window !== 'undefined' && window.HistoryStatsService) {
+        if (typeof window.HistoryStatsService.registerBookmarkProvider === 'function') {
+            window.HistoryStatsService.registerBookmarkProvider(() => {
+                if (typeof canvasSearchDb !== 'undefined' && Array.isArray(canvasSearchDb.bookmarkIndex) && canvasSearchDb.bookmarkIndex.length > 0) {
+                    return canvasSearchDb.bookmarkIndex;
+                }
+                return null;
+            });
+        }
+        // 注册完成后，趁主线程空闲静默预热历史统计（冷启动完全无感）
+        if (typeof SearchIndexManager !== 'undefined' && typeof SearchIndexManager.scheduleHistoryStatsPrewarm === 'function') {
+            SearchIndexManager.scheduleHistoryStatsPrewarm();
+        }
+    }
+
+    if (!document.documentElement.hasAttribute('data-search-history-stats-bound')) {
+        window.addEventListener('canvas-history-stats-updated', () => {
+            if (typeof invalidateCanvasBookmarkVisitStatsCache === 'function') {
+                invalidateCanvasBookmarkVisitStatsCache();
+            }
+            try {
+                const currentQuery = String(searchUiState && searchUiState.query || '').trim();
+                const currentMode = searchUiState && searchUiState.activeMode;
+                const panel = typeof getSearchResultsPanel === 'function' ? getSearchResultsPanel() : null;
+                const isPanelVisible = panel && panel.classList.contains('visible');
+                // 当历史统计更新后，若当前正打开着面板且处于书签普通关键词搜索状态，平滑重刷打分与排名，解决 P14 排序前后不一致
+                if (currentMode === 'bookmark' && currentQuery && isPanelVisible) {
+                    const isRankQuery = (typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQuery)) ||
+                                        (typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQuery)) ||
+                                        (typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(currentQuery));
+                    if (!isRankQuery && typeof searchCanvasAndRender === 'function') {
+                        searchCanvasAndRender(currentQuery, { source: 'stats-update', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                    }
+                }
+            } catch (_) {}
+        });
+        document.documentElement.setAttribute('data-search-history-stats-bound', 'true');
+    }
+
     const searchAreaExitBtn = document.getElementById('searchAreaExitBtn');
     if (searchAreaExitBtn && !searchAreaExitBtn.hasAttribute('data-exit-bound')) {
         searchAreaExitBtn.addEventListener('click', (e) => {
@@ -8652,6 +8780,12 @@ function initSearchEvents() {
                 toggleSearchModeMenu(false);
                 toggleSearchHelpMenu(false);
             } catch (_) { }
+            // 清空输入框视为重新开始：下次输入 @热度 / @最近 时重新默认「书签」筛选
+            if (!String(searchInput.value || '').trim()) {
+                searchUiState.query = '';
+                searchUiState.bookmarkTypeFilter = null;
+                searchUiState.bookmarkTypeUserOverridden = false;
+            }
         });
 
         // Bind input -> trigger search
@@ -8734,11 +8868,11 @@ function initSearchEvents() {
         searchResultsPanel.setAttribute('data-search-wheel-bound', 'true');
     }
 
-    // Global delegation listener for bookmark-mode helper links (# tag / * note / @ time).
+    // Global delegation listener for bookmark-mode helper links (# tag / * note / @ recent / @ hot / @ create).
     if (!document.documentElement.hasAttribute('data-search-helper-link-bound')) {
         document.addEventListener('mousedown', (e) => {
             if (!e || !e.target || typeof e.target.closest !== 'function') return;
-            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link, .search-helper-click-link, .search-helper-hot-link');
+            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-recent-link, .search-helper-time-link, .search-helper-click-link, .search-helper-hot-link, .search-helper-create-link, .search-helper-history-link');
             if (link) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -8752,15 +8886,23 @@ function initSearchEvents() {
                 let helperQuery = String(link.getAttribute('data-helper-query') || '').trim();
                 if (!helperQuery) {
                     if (link.classList.contains('search-helper-note-link')) helperQuery = '*';
-                    else if (link.classList.contains('search-helper-time-link')) helperQuery = (getCurrentLangSafe() === 'zh_CN' ? '@时间' : '@time');
+                    else if (link.classList.contains('search-helper-create-link') || link.classList.contains('search-helper-history-link')) helperQuery = (getCurrentLangSafe() === 'zh_CN' ? '@创建' : '@create');
+                    else if (link.classList.contains('search-helper-recent-link') || link.classList.contains('search-helper-time-link')) helperQuery = (getCurrentLangSafe() === 'zh_CN' ? '@最近' : '@recent');
                     else if (link.classList.contains('search-helper-hot-link') || link.classList.contains('search-helper-click-link')) helperQuery = (getCurrentLangSafe() === 'zh_CN' ? '@热度' : '@hot');
                     else helperQuery = '#';
                 }
                 const input = document.getElementById('searchInput');
                 if (input) {
                     input.value = helperQuery;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
                     input.focus();
+                    if (typeof cancelPendingMainSearchDebounce === 'function') {
+                        cancelPendingMainSearchDebounce();
+                    }
+                    if (typeof performSearch === 'function') {
+                        performSearch(helperQuery);
+                    } else {
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
                 }
 
                 // Close mode menu if open
@@ -8772,7 +8914,7 @@ function initSearchEvents() {
 
         document.addEventListener('click', (e) => {
             if (!e || !e.target || typeof e.target.closest !== 'function') return;
-            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link, .search-helper-click-link, .search-helper-hot-link');
+            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-recent-link, .search-helper-time-link, .search-helper-click-link, .search-helper-hot-link, .search-helper-create-link, .search-helper-history-link');
             if (link) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -8854,8 +8996,8 @@ const SEARCH_MODES = [
         labelEn: 'Bookmark',
         icon: 'fa-bookmark',
         color: 'mode-color-blue',
-        desc: '标题、URL、文件夹、<a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</a>、<a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*笔记</a>、<a href="#" class="search-helper-time-link" data-helper-query="@时间" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@时间</a>、<a href="#" class="search-helper-hot-link search-helper-click-link" data-helper-query="@热度" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@热度</a>',
-        descEn: 'Title, URL, Folders, <a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</a>, <a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*Notes</a>, <a href="#" class="search-helper-time-link" data-helper-query="@time" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@time</a>, <a href="#" class="search-helper-hot-link search-helper-click-link" data-helper-query="@hot" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@hot</a>'
+        desc: '标题、URL、文件夹、<a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</a>、<a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*笔记</a>、<a href="#" class="search-helper-recent-link search-helper-time-link" data-helper-query="@最近" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@最近</a>、<a href="#" class="search-helper-hot-link search-helper-click-link" data-helper-query="@热度" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@热度</a>、<a href="#" class="search-helper-create-link search-helper-history-link" data-helper-query="@创建" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@创建</a>',
+        descEn: 'Title, URL, Folders, <a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</a>, <a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*Notes</a>, <a href="#" class="search-helper-recent-link search-helper-time-link" data-helper-query="@recent" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@recent</a>, <a href="#" class="search-helper-hot-link search-helper-click-link" data-helper-query="@hot" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@hot</a>, <a href="#" class="search-helper-create-link search-helper-history-link" data-helper-query="@create" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@create</a>'
     },
     {
         key: 'structure',
@@ -9585,6 +9727,7 @@ async function setSearchMode(modeKey, options = {}) {
     searchUiState.activeMode = modeKey;
     searchUiState.showFullscreenDescriptionOthers = false;
     searchUiState.bookmarkTypeFilter = null;
+    searchUiState.bookmarkTypeUserOverridden = false;
     searchUiState.structureTypeFilter = null;
     searchUiState.descriptionTypeFilter = null;
     try { localStorage.setItem('canvasSearchMode', modeKey); } catch (_) { }
@@ -10018,24 +10161,28 @@ function renderSearchModeUI() {
 function getSearchHintHelpContent() {
     const isZh = getCurrentLangSafe() === 'zh_CN';
     const text = isZh
-        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换并实时更新结果；空输入：↑/↓ 直接切换模式。书签模式：光标在输入末尾时，→ 切换书签/文件夹/域名筛选。标签/笔记/热度：标签前加 #，笔记前加 *；@时间 按添加时间排序，@热度 按历史频次排序。候选条目：↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。域名粒度：点击域名旁按钮切换主域名/子域名。'
-        : 'Mode: ← to the left mode button, ↑/↓ switches and updates results; empty: ↑/↓ switches modes directly. Bookmark mode: with cursor at end, → toggles bookmark/folder/domain filter. Tags/notes/hot: prefix tag with #, note with *; @time sorts by date, @hot sorts by visits. Results: ↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section. Domain granularity: click the domain pill to toggle root/subdomain.';
+        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换模式；空输入时直接 ↑/↓ 切换。类型筛选：在书签模式下按 → 切换「全部 / 书签 / 文件夹 / 域名」。标签/笔记：输入 # 浏览全部标签色块，输入 #标签 筛选打标书签；输入 * 浏览笔记，输入 *内容 检索书签笔记。最近/热度/创建：输入 @最近 按近 3 个月活跃时间倒序，输入 @热度 按近 3 个月访问频次排序，输入 @创建 按添加时间倒序。条目跳转：↑/↓ 选择，Enter 跳转。'
+        : 'Mode: ← to left mode button, ↑/↓ to switch modes; or press ↑/↓ directly when input is empty. Type Filter: In bookmark mode, press → to toggle All / Bookmarks / Folders / Domains. Tags/Notes: Type # to browse tags, #tag to filter bookmarks; type * to browse notes, *content to search notes. Recent/Hot/Create: @recent sorts by active time (last 3 months), @hot sorts by visit frequency (last 3 months), @created sorts by creation date. Actions: ↑/↓ to select, Enter to jump.';
     const rows = isZh
         ? [
-            ['模式切换：', '← 到左侧模式按钮，↑/↓ 切换并实时更新结果；'],
-            ['', '空输入：↑/↓ 直接切换模式。'],
-            ['书签模式：', '光标在输入末尾时，→ 切换书签/文件夹/域名筛选。'],
-            ['高级筛选：', '标签前加 #，笔记前加 *；@时间 / @热度 快速排行。'],
-            ['候选条目：', '↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。'],
-            ['域名粒度：', '点击域名旁按钮切换主域名/子域名。']
+            ['模式切换：', '← 焦点到左侧模式图标，↑/↓ 切换模式；空输入时也可按 ↑/↓ 直接切换。'],
+            ['类型筛选：', '在书签模式下，按 → 或点击切换「全部 / 书签 / 文件夹 / 域名」。'],
+            ['# 标签：', '输入 # 进入标签色块总览；输入 #标签名（如 #工作）快速过滤打标书签。'],
+            ['* 笔记：', '输入 * 进入书签笔记总览；输入 *内容（如 *待办）即时检索书签备注与笔记。'],
+            ['@最近：', '输入 @最近（或 @time / @recent），按书签近 3 个月的最近访问活跃时间倒序排列。'],
+            ['@热度：', '输入 @热度（或 @hot / @click），按书签近 3 个月的历史访问频次由高到低排列。'],
+            ['@创建：', '输入 @创建（或 @created），按书签初次添加收藏的时间倒序排列。'],
+            ['候选条目：', '↑/↓ 键盘选择，Enter 直达跳转。']
         ]
         : [
-            ['Mode:', '← to the left mode button, ↑/↓ switches and updates results;'],
-            ['', 'Empty: ↑/↓ switches modes directly.'],
-            ['Bookmark:', 'with cursor at end, → toggles bookmark/folder/domain filter.'],
-            ['Advanced:', 'Prefix tags with #, notes with *; @time / @hot quick ranking.'],
-            ['Results:', '↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section.'],
-            ['Domain:', 'click the domain pill to toggle root/subdomain.']
+            ['Modes:', '← to left mode icon, ↑/↓ to switch; or press ↑/↓ directly when input is empty.'],
+            ['Type Filter:', 'In bookmark mode, press → or click to toggle All / Bookmarks / Folders / Domains.'],
+            ['# Tags:', 'Type # to browse tag colors; type #tag (e.g. #work) to filter tagged bookmarks.'],
+            ['* Notes:', 'Type * to browse notes; type *content (e.g. *todo) to search bookmark notes.'],
+            ['@recent:', 'Type @recent (or @time), sort bookmarks descending by last visited time in the last 3 months.'],
+            ['@hot:', 'Type @hot (or @click), sort bookmarks descending by visit frequency in the last 3 months.'],
+            ['@created:', 'Type @created, sort bookmarks descending by bookmark addition/creation date.'],
+            ['Results:', '↑/↓ to navigate, Enter to jump.']
         ];
     const html = rows.map(([label, value]) => `
         <div class="search-hint-help-row">
@@ -10353,9 +10500,13 @@ function bindSearchHistoryEvents(container, activeMode, onUpdate) {
                 if (typeof toggleSearchModeMenu === 'function') toggleSearchModeMenu(false);
                 input.value = query;
                 input.focus();
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                if (typeof handleSearch === 'function') {
-                    handleSearch({ target: input });
+                if (typeof cancelPendingMainSearchDebounce === 'function') {
+                    cancelPendingMainSearchDebounce();
+                }
+                if (typeof performSearch === 'function') {
+                    performSearch(query);
+                } else {
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
                 }
             }
         });
@@ -10613,11 +10764,12 @@ function initSearchModeUI() {
     if (menu) {
         let lastModeSelectTs = 0;
         const handleModeSelectAction = (e) => {
+            if (!e || !e.target || typeof e.target.closest !== 'function') return;
             // Only handle mode selection in Canvas/mode menu
             if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
 
             // Ignore clicks/mousedowns on search history section, help button, or helper links
-            if (e.target.closest('.search-history-section') || e.target.closest('.search-hint-help-btn') || e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link, .search-helper-click-link, .search-helper-hot-link')) {
+            if (e.target.closest('.search-history-section') || e.target.closest('.search-hint-help-btn') || e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-recent-link, .search-helper-time-link, .search-helper-click-link, .search-helper-hot-link, .search-helper-create-link, .search-helper-history-link')) {
                 return;
             }
 
@@ -12402,6 +12554,7 @@ const SearchIndexManager = {
                 }
 
                 this.isIndexing = false;
+                this.scheduleHistoryStatsPrewarm();
                 return;
             }
         } catch (err) {
@@ -12425,6 +12578,7 @@ const SearchIndexManager = {
                                 await buildCanvasSearchDbIncrementallyInMemory();
                             }
                             await saveMemoryIndexToIndexedDb();
+                            this.scheduleHistoryStatsPrewarm();
                             resolve();
                         } catch (err) {
                             reject(err);
@@ -12439,6 +12593,7 @@ const SearchIndexManager = {
                                 await buildCanvasSearchDbIncrementallyInMemory();
                             }
                             await saveMemoryIndexToIndexedDb();
+                            this.scheduleHistoryStatsPrewarm();
                             resolve();
                         } catch (err) {
                             reject(err);
@@ -12454,6 +12609,22 @@ const SearchIndexManager = {
             console.error('[SearchIndexManager] Idle indexing failed:', err);
         } finally {
             this.isIndexing = false;
+        }
+    },
+
+    scheduleHistoryStatsPrewarm() {
+        if (typeof window === 'undefined' || !window.HistoryStatsService || typeof window.HistoryStatsService.ensureHistoryStatsIndex !== 'function') return;
+        const prewarm = () => {
+            try {
+                window.HistoryStatsService.ensureHistoryStatsIndex().catch(() => {});
+            } catch (_) {}
+        };
+        // 极速微秒级静默恢复：由于从 IndexedDB 读取仅需 ~0.6ms，直接以微任务或零延迟启动预热
+        // 杜绝 1000~3000ms 的空闲等待空档，确保用户交互时内存 Map 已就绪
+        if (typeof queueMicrotask === 'function') {
+            queueMicrotask(prewarm);
+        } else {
+            setTimeout(prewarm, 0);
         }
     },
 
@@ -13250,6 +13421,15 @@ function buildCanvasSearchDbSync() {
     canvasSearchDb = db;
     markAllCanvasSearchModesLoaded();
 
+    if (typeof window !== 'undefined' && window.HistoryStatsService && Array.isArray(db.bookmarkIndex) && db.bookmarkIndex.length > 0) {
+        if (typeof window.HistoryStatsService.setBookmarkTargets === 'function') {
+            window.HistoryStatsService.setBookmarkTargets(db.bookmarkIndex);
+        }
+        if (typeof SearchIndexManager !== 'undefined' && typeof SearchIndexManager.scheduleHistoryStatsPrewarm === 'function') {
+            SearchIndexManager.scheduleHistoryStatsPrewarm();
+        }
+    }
+
     const count = db.structureIndex.length + db.descriptionIndex.length + db.bookmarkIndex.length;
     ;
     return canvasSearchDb;
@@ -13809,10 +13989,16 @@ function shouldSkipCanvasSearchCandidateForQuery(item, mode, queryContext) {
     return false;
 }
 
-const canvasBookmarkVisitStatsCache = new WeakMap();
+let canvasBookmarkVisitStatsCache = new WeakMap();
+let canvasBookmarkActiveTimestampCache = new WeakMap();
+
+function invalidateCanvasBookmarkVisitStatsCache() {
+    canvasBookmarkVisitStatsCache = new WeakMap();
+    canvasBookmarkActiveTimestampCache = new WeakMap();
+}
 
 /**
- * 获取书签的访问统计数据（使用 WeakMap 缓存，不污染原始对象，且支持缓存就绪后的动态更新）
+ * 获取书签的访问统计数据（使用纯净 WeakMap 缓存，不污染原始对象，0ms 响应且支持可靠失效）
  */
 function getCanvasBookmarkVisitStats(item) {
     if (!item || typeof item !== 'object') {
@@ -14034,10 +14220,15 @@ function scoreCanvasSearchItem(item, query, options = {}) {
                     score += 15 + Math.min(3 * (tagCount - 1), 9);
                 }
 
-                // 3. 时间时效辅助 (近30天 +10分，近半年 +5分)
+                // 3. 时间活跃时效加权 (基于统一活跃时间：新收藏或近期访问，近30天 +10分，近半年 +5分)
                 const dateVal = Number(item.dateAdded) || 0;
-                if (dateVal > 0) {
-                    const ageMs = Date.now() - dateVal;
+                const visitStats = getCanvasBookmarkVisitStats(item);
+                const visitCount = Number(visitStats && visitStats.visitCount) || 0;
+                const lastVisit = Number(visitStats && visitStats.lastVisitTime) || 0;
+                const activeTs = Math.max(dateVal, lastVisit);
+
+                if (activeTs > 0) {
+                    const ageMs = Date.now() - activeTs;
                     const THIRTY_DAYS_MS = 30 * 86400 * 1000;
                     const HALF_YEAR_MS = 180 * 86400 * 1000;
                     if (ageMs > 0 && ageMs <= THIRTY_DAYS_MS) {
@@ -14048,8 +14239,6 @@ function scoreCanvasSearchItem(item, query, options = {}) {
                 }
 
                 // 4. 访问频次加权 (Frequency Bonus: +3 ~ +15分，采用对数平滑阻尼，避免马太效应)
-                const visitStats = getCanvasBookmarkVisitStats(item);
-                const visitCount = Number(visitStats && visitStats.visitCount) || 0;
                 if (visitCount > 0) {
                     // 1次: +3分; 3次: +5分; 7次: +7分; 15次: +10分; 31次: +12分; 63次+: +15分(封顶)
                     score += Math.min(15, Math.max(3, Math.round(2.5 * Math.log2(visitCount + 1))));
@@ -14288,12 +14477,25 @@ function compareCanvasBookmarkScoredPairs(leftPair, rightPair, scope = null) {
 }
 
 function getBookmarkItemParentPathForSearch(item) {
-    const fullPath = String(item && item.namedPath || '').trim();
-    if (!fullPath) return '';
+    if (!item) return '';
+    const fullPath = String(item.namedPath || '').trim();
+    const title = String(item.title || '').trim();
+    const cacheKey = `${fullPath}:::${title}`;
+    if (item._cachedParentPathKey === cacheKey && typeof item._cachedParentPathForSearch === 'string') {
+        return item._cachedParentPathForSearch;
+    }
+    if (!fullPath) {
+        item._cachedParentPathKey = cacheKey;
+        item._cachedParentPathForSearch = '';
+        return '';
+    }
 
-    const title = String(item && item.title || '').trim();
     const parts = fullPath.split('>').map((part) => String(part || '').trim()).filter(Boolean);
-    if (!parts.length) return '';
+    if (!parts.length) {
+        item._cachedParentPathKey = cacheKey;
+        item._cachedParentPathForSearch = '';
+        return '';
+    }
 
     if (title) {
         const last = String(parts[parts.length - 1] || '').trim();
@@ -14304,7 +14506,10 @@ function getBookmarkItemParentPathForSearch(item) {
         parts.pop();
     }
 
-    return parts.join(' > ');
+    const res = parts.join(' > ');
+    item._cachedParentPathKey = cacheKey;
+    item._cachedParentPathForSearch = res;
+    return res;
 }
 
 function getCanvasBookmarksApiForSearch() {
@@ -14604,6 +14809,85 @@ function getItemOrFolderTimestamp(item) {
     }
     item._calcTimestamp = result;
     return result;
+}
+
+function formatCanvasLastVisitTime(ts, options = {}) {
+    const num = Number(ts);
+    if (!Number.isFinite(num) || num <= 0) return '';
+    try {
+        const date = new Date(num);
+        if (isNaN(date.getTime())) return '';
+        const isZh = options.isZh !== false;
+
+        if (options.relative === true) {
+            const now = Date.now();
+            const diffMs = now - num;
+            if (diffMs < 0 || diffMs < 60000) return isZh ? '刚刚' : 'just now';
+            const diffMin = Math.floor(diffMs / 60000);
+            if (diffMin < 60) return isZh ? `${diffMin}分钟前` : `${diffMin}m ago`;
+            const diffHour = Math.floor(diffMin / 60);
+            if (diffHour < 24) return isZh ? `${diffHour}小时前` : `${diffHour}h ago`;
+            const diffDay = Math.floor(diffHour / 24);
+            if (diffDay === 1) return isZh ? '昨天' : 'yesterday';
+            if (diffDay < 7) return isZh ? `${diffDay}天前` : `${diffDay}d ago`;
+            if (diffDay < 30) return isZh ? `${Math.floor(diffDay / 7)}周前` : `${Math.floor(diffDay / 7)}w ago`;
+            if (diffDay < 365) return isZh ? `${Math.max(1, Math.floor(diffDay / 30))}个月前` : `${Math.max(1, Math.floor(diffDay / 30))}mo ago`;
+            return isZh ? `${Math.floor(diffDay / 365)}年前` : `${Math.floor(diffDay / 365)}y ago`;
+        }
+
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        if (options.dateOnly === true) {
+            return `${year}/${month}/${day}`;
+        }
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
+    } catch (_) {
+        return '';
+    }
+}
+
+function getBookmarkActiveTimestamp(item) {
+    if (!item) return 0;
+    const raw = item.rawItem || item;
+    if (canvasBookmarkActiveTimestampCache.has(raw)) {
+        return canvasBookmarkActiveTimestampCache.get(raw);
+    }
+
+    const createTs = getItemOrFolderTimestamp(raw);
+    let visitTs = 0;
+    if (typeof getCanvasBookmarkVisitStats === 'function') {
+        const stats = getCanvasBookmarkVisitStats(raw);
+        if (stats && stats.lastVisitTime > 0) {
+            visitTs = Number(stats.lastVisitTime) || 0;
+        }
+    }
+    if (!visitTs && Array.isArray(raw.targetItems) && raw.targetItems.length > 0) {
+        let maxVisit = 0;
+        for (let i = 0; i < raw.targetItems.length; i++) {
+            const tStats = getCanvasBookmarkVisitStats(raw.targetItems[i]);
+            if (tStats && tStats.lastVisitTime > maxVisit) maxVisit = tStats.lastVisitTime;
+        }
+        if (maxVisit > 0) visitTs = maxVisit;
+    }
+    if (!visitTs && Array.isArray(raw.children) && raw.children.length > 0) {
+        let maxVisit = 0;
+        for (let i = 0; i < raw.children.length; i++) {
+            const c = raw.children[i];
+            const cItem = c && c.item ? c.item : c;
+            const cStats = getCanvasBookmarkVisitStats(cItem);
+            if (cStats && cStats.lastVisitTime > maxVisit) maxVisit = cStats.lastVisitTime;
+        }
+        if (maxVisit > 0) visitTs = maxVisit;
+    }
+    const finalTs = Math.max(createTs, visitTs);
+    if (visitTs > 0 || (window.HistoryStatsService && window.HistoryStatsService.isCacheReady())) {
+        canvasBookmarkActiveTimestampCache.set(raw, finalTs);
+    }
+    return finalTs;
 }
 
 function getBookmarkItemCreationTimesList(item) {
@@ -15449,23 +15733,33 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
 
     const isTimeSearch = !!(options && options.isTimeSearch);
     const isClickSearch = !!(options && options.isClickSearch);
+    const isHistorySearch = !!(options && options.isHistorySearch);
     for (const g of groups) {
-        if (isClickSearch) {
-            g.children.sort((a, b) => {
-                const visitsA = (a && a.visitCount !== undefined) ? Number(a.visitCount) : getCanvasBookmarkVisitStats(a && a.item).visitCount;
-                const visitsB = (b && b.visitCount !== undefined) ? Number(b.visitCount) : getCanvasBookmarkVisitStats(b && b.item).visitCount;
-                if (visitsB !== visitsA) return visitsB - visitsA;
-                return compareCanvasBookmarkScoredPairs(a, b, scope);
-            });
-        } else if (isTimeSearch) {
-            g.children.sort((a, b) => {
-                const timeA = getItemOrFolderTimestamp(a && a.item);
-                const timeB = getItemOrFolderTimestamp(b && b.item);
-                if (timeB !== timeA) return timeB - timeA;
-                return compareCanvasBookmarkScoredPairs(a, b, scope);
-            });
-        } else {
-            g.children.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, scope));
+        if (g.children.length > 1) {
+            if (isClickSearch) {
+                g.children.sort((a, b) => {
+                    const visitsA = (a && a.visitCount !== undefined) ? Number(a.visitCount) : getCanvasBookmarkVisitStats(a && a.item).visitCount;
+                    const visitsB = (b && b.visitCount !== undefined) ? Number(b.visitCount) : getCanvasBookmarkVisitStats(b && b.item).visitCount;
+                    if (visitsB !== visitsA) return visitsB - visitsA;
+                    return compareCanvasBookmarkScoredPairs(a, b, scope);
+                });
+            } else if (isTimeSearch) {
+                g.children.sort((a, b) => {
+                    const timeA = (typeof getBookmarkActiveTimestamp === 'function') ? getBookmarkActiveTimestamp(a && a.item) : getItemOrFolderTimestamp(a && a.item);
+                    const timeB = (typeof getBookmarkActiveTimestamp === 'function') ? getBookmarkActiveTimestamp(b && b.item) : getItemOrFolderTimestamp(b && b.item);
+                    if (timeB !== timeA) return timeB - timeA;
+                    return compareCanvasBookmarkScoredPairs(a, b, scope);
+                });
+            } else if (isHistorySearch) {
+                g.children.sort((a, b) => {
+                    const timeA = getItemOrFolderTimestamp(a && a.item);
+                    const timeB = getItemOrFolderTimestamp(b && b.item);
+                    if (timeB !== timeA) return timeB - timeA;
+                    return compareCanvasBookmarkScoredPairs(a, b, scope);
+                });
+            } else {
+                g.children.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, scope));
+            }
         }
         g.header.matchesCount = g.children.length;
         g.firstChild = g.children[0] || null;
@@ -15473,14 +15767,22 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
         const uniqueParentPaths = [];
         const parentPathSet = new Set();
         let groupTotalVisits = 0;
+        let maxLastVisit = 0;
         for (let i = 0; i < g.children.length; i += 1) {
             const childPair = g.children[i];
             const child = childPair && childPair.item ? childPair.item : null;
             if (child) {
-                const visits = (childPair && childPair.visitCount !== undefined)
-                    ? Number(childPair.visitCount)
-                    : getCanvasBookmarkVisitStats(child).visitCount;
+                let visits = childPair && childPair.visitCount !== undefined ? Number(childPair.visitCount) : -1;
+                let lastVisit = childPair && childPair.lastVisitTime !== undefined ? Number(childPair.lastVisitTime) : -1;
+                if (visits < 0 || lastVisit < 0) {
+                    const cStats = getCanvasBookmarkVisitStats(child);
+                    if (visits < 0) visits = cStats.visitCount || 0;
+                    if (lastVisit < 0) lastVisit = cStats.lastVisitTime || 0;
+                }
                 groupTotalVisits += visits;
+                if (lastVisit > maxLastVisit) {
+                    maxLastVisit = lastVisit;
+                }
             }
             const rawPath = getBookmarkItemParentPathForSearchScope(child, scope);
             const key = rawPath ? rawPath.toLowerCase() : '__root__';
@@ -15491,13 +15793,16 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
         g.header.parentPaths = uniqueParentPaths;
         g.header.parentPath = uniqueParentPaths.length > 0 ? uniqueParentPaths[0] : '';
         g.header.hasMultipleParentPath = uniqueParentPaths.length > 1;
+        g.header.lastVisitTime = maxLastVisit;
+
         if (g.header.nodeType === 'folder') {
             const primeChildPair = g.firstChild || g.children[0];
             const primeChild = primeChildPair && primeChildPair.item;
             const primeVisits = (primeChildPair && primeChildPair.visitCount !== undefined)
                 ? Number(primeChildPair.visitCount)
                 : (primeChild ? getCanvasBookmarkVisitStats(primeChild).visitCount : 0);
-            g.header.visitCount = primeVisits || groupTotalVisits;
+            g.header.visitCount = groupTotalVisits;
+            g.header.topChildVisitCount = primeVisits;
         } else {
             const primeChildPair = g.firstChild || g.children[0];
             const primeChild = primeChildPair && primeChildPair.item;
@@ -15511,6 +15816,7 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
             g.header.dateAdded = primeItem.dateAdded !== undefined ? primeItem.dateAdded : null;
             g.header.rawItem = primeItem.rawItem || primeItem;
         }
+        g.header.activeTime = Math.max(Number(g.header.dateAdded) || 0, Number(g.header.lastVisitTime) || 0);
     }
 
     groups.sort((a, b) => {
@@ -15518,17 +15824,35 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
             const visitsA = Number(a.header && a.header.visitCount) || 0;
             const visitsB = Number(b.header && b.header.visitCount) || 0;
             if (visitsB !== visitsA) return visitsB - visitsA;
-            return String(a.header.title || '').localeCompare(String(b.header.title || ''));
+            const tA = String(a.header && a.header.title || '');
+            const tB = String(b.header && b.header.title || '');
+            return tA > tB ? 1 : (tA < tB ? -1 : 0);
         }
         if (isTimeSearch) {
-            const timeA = getItemOrFolderTimestamp(a.header || (a.firstChild && a.firstChild.item));
-            const timeB = getItemOrFolderTimestamp(b.header || (b.firstChild && b.firstChild.item));
+            // 优先按实际最近访问时间 lastVisitTime 降序，未访问过（为0）或访问时间相同则按创建时间 dateAdded 降序
+            const visitA = Number(a.header && a.header.lastVisitTime) || 0;
+            const visitB = Number(b.header && b.header.lastVisitTime) || 0;
+            if (visitB !== visitA) return visitB - visitA;
+            const timeA = Number(a.header && a.header.dateAdded) || 0;
+            const timeB = Number(b.header && b.header.dateAdded) || 0;
             if (timeB !== timeA) return timeB - timeA;
-            return String(a.header.title || '').localeCompare(String(b.header.title || ''));
+            const tA = String(a.header && a.header.title || '');
+            const tB = String(b.header && b.header.title || '');
+            return tA > tB ? 1 : (tA < tB ? -1 : 0);
+        }
+        if (isHistorySearch) {
+            const timeA = Number(a.header && a.header.dateAdded) || 0;
+            const timeB = Number(b.header && b.header.dateAdded) || 0;
+            if (timeB !== timeA) return timeB - timeA;
+            const tA = String(a.header && a.header.title || '');
+            const tB = String(b.header && b.header.title || '');
+            return tA > tB ? 1 : (tA < tB ? -1 : 0);
         }
         const childDelta = compareCanvasBookmarkScoredPairs(a.firstChild, b.firstChild, scope);
         if (childDelta !== 0) return childDelta;
-        return String(a.header.title || '').localeCompare(String(b.header.title || ''));
+        const tA = String(a.header && a.header.title || '');
+        const tB = String(b.header && b.header.title || '');
+        return tA > tB ? 1 : (tA < tB ? -1 : 0);
     });
 
     return groups;
@@ -15545,8 +15869,20 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups, options = {}) {
     const isClickSearch = options && options.isClickSearch !== undefined
         ? !!options.isClickSearch
         : (typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ));
+    const isHistorySearch = options && options.isHistorySearch !== undefined
+        ? !!options.isHistorySearch
+        : (typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(currentQ));
 
     const sourceGroups = Array.isArray(groups) ? groups : [];
+
+    // 核心性能提速：将 liveCopies 与 activePermanentCopyId 提取到数千次循环外部，杜绝反复扫描 DOM/视图节点
+    const liveCopies = (typeof getPermanentCopyShellsForSearch === 'function')
+        ? getPermanentCopyShellsForSearch()
+        : [];
+    const activePermanentCopyId = fullscreenScope && String(fullscreenScope.kind || '') === 'permanent'
+        ? String(fullscreenScope.copyId || '').trim()
+        : '';
+    const toAlphaLocal = (num) => (num > 0 ? String.fromCharCode(64 + num) : '');
 
     for (const g of sourceGroups) {
         if (!g || !g.header) continue;
@@ -15554,33 +15890,8 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups, options = {}) {
         const groupId = String(g.id || g.header.id || '');
         if (!groupId) continue;
 
-        // [Phase 3.7 Redesign] Flat Card Layout. 
-        // No more "collapsed/expanded" parent-child rows.
-        // Instead, we pass the children data directly into the group header item.
-        // The render function will use this 'locations' array to draw chips.
-
-        const sortedChildren = Array.isArray(g.children)
-            ? g.children.slice().sort((left, right) => {
-                if (isClickSearch) {
-                    const visitsA = (left && left.visitCount !== undefined) ? Number(left.visitCount) : getCanvasBookmarkVisitStats(left && left.item).visitCount;
-                    const visitsB = (right && right.visitCount !== undefined) ? Number(right.visitCount) : getCanvasBookmarkVisitStats(right && right.item).visitCount;
-                    if (visitsB !== visitsA) return visitsB - visitsA;
-                } else if (isTimeSearch) {
-                    const timeA = getItemOrFolderTimestamp(left && left.item);
-                    const timeB = getItemOrFolderTimestamp(right && right.item);
-                    if (timeB !== timeA) return timeB - timeA;
-                }
-                return compareCanvasBookmarkScoredPairs(left, right, fullscreenScope);
-            })
-            : [];
-        const activePermanentCopyId = fullscreenScope && String(fullscreenScope.kind || '') === 'permanent'
-            ? String(fullscreenScope.copyId || '').trim()
-            : '';
-
-        const liveCopies = (typeof getPermanentCopyShellsForSearch === 'function')
-            ? getPermanentCopyShellsForSearch()
-            : [];
-        const toAlphaLocal = (num) => (num > 0 ? String.fromCharCode(64 + num) : '');
+        // 复用上一步 buildCanvasBookmarkGroupModel 中已排好序的 g.children，彻底消除双重排序严重性能冗余
+        const sortedChildren = Array.isArray(g.children) ? g.children : [];
 
         const targetItems = [];
         const locations = [];
@@ -15732,6 +16043,8 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups, options = {}) {
             groupModel: g,
             matchesCount: targetItems.length,
             visitCount: g.header.visitCount || 0,
+            lastVisitTime: g.header.lastVisitTime || 0,
+            activeTime: Math.max(Number(g.header.dateAdded) || 0, Number(g.header.lastVisitTime) || 0),
             dateAdded: g.header.dateAdded !== undefined ? g.header.dateAdded : (sortedTargetItems[0] ? sortedTargetItems[0].dateAdded : null)
         });
         results.push(headerItem);
@@ -17122,6 +17435,9 @@ function searchCanvasAndRender(query, options = {}) {
 
     const trimmedQuery = String(query).trim();
     if (!trimmedQuery) {
+        searchUiState.query = '';
+        searchUiState.bookmarkTypeFilter = null;
+        searchUiState.bookmarkTypeUserOverridden = false;
         searchUiState.tagBrowseDetail = null;
         searchUiState.tagBrowseBucketsLimit = 5;
         searchUiState.tagBrowseBucketLimits = {};
@@ -17155,16 +17471,27 @@ function searchCanvasAndRender(query, options = {}) {
     const previousCanvasQuery = String(searchUiState.query || '').trim().toLowerCase();
     const nextCanvasQuery = trimmedQuery.toLowerCase();
     searchUiState.query = trimmedQuery;
+    const isRankQuery = (typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(trimmedQuery)) ||
+                        (typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(trimmedQuery));
     if (previousCanvasQuery !== nextCanvasQuery) {
         if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
             exitCanvasSearchSelectionMode({ silent: true });
         }
-        if (triggerSource === 'input') {
+        // @热度 / @hot / @最近 / @：默认临时只看「书签」（文件夹热度是子孙求和，会霸榜）；
+        // 用户手动点过筛选则保留其选择；回到普通关键词时恢复「全部」
+        if (!isRankQuery) {
+            searchUiState.bookmarkTypeUserOverridden = false;
             searchUiState.bookmarkTypeFilter = null;
-            searchUiState.structureTypeFilter = null;
-            searchUiState.descriptionTypeFilter = null;
-            searchUiState.focusedHost = null;
-            searchUiState.domainRootContext = null;
+        } else if (!searchUiState.bookmarkTypeUserOverridden) {
+            searchUiState.bookmarkTypeFilter = 'bookmark';
+        }
+        searchUiState.structureTypeFilter = null;
+        searchUiState.descriptionTypeFilter = null;
+        searchUiState.focusedHost = null;
+        searchUiState.domainRootContext = null;
+    } else {
+        if (isRankQuery && !searchUiState.bookmarkTypeUserOverridden && !searchUiState.bookmarkTypeFilter) {
+            searchUiState.bookmarkTypeFilter = 'bookmark';
         }
     }
 
@@ -17189,13 +17516,15 @@ function searchCanvasAndRender(query, options = {}) {
     const isNoteBrowseRoot = typeof isNoteBrowseRootQuery === 'function' && isNoteBrowseRootQuery(trimmedQuery);
     const isTimeBrowseRoot = typeof isTimeBrowseRootQuery === 'function' && isTimeBrowseRootQuery(trimmedQuery);
     const isClickBrowseRoot = typeof isClickBrowseRootQuery === 'function' && isClickBrowseRootQuery(trimmedQuery);
+    const isHistoryBrowseRoot = typeof isHistoryBrowseRootQuery === 'function' && isHistoryBrowseRootQuery(trimmedQuery);
     const isTagSearch = typeof isCanvasTagSearchQuery === 'function' && isCanvasTagSearchQuery(trimmedQuery)
         && (typeof parsePermanentSectionQuery !== 'function' || parsePermanentSectionQuery(trimmedQuery) === null);
     const isNoteSearch = typeof isCanvasNoteSearchQuery === 'function' && isCanvasNoteSearchQuery(trimmedQuery);
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(trimmedQuery);
     const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(trimmedQuery);
+    const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(trimmedQuery);
 
-    if (hasBrowseDetail || isTagBrowseRoot || isNoteBrowseRoot || isTimeBrowseRoot || isClickBrowseRoot || isTagSearch || isNoteSearch || isTimeSearch || isClickSearch) {
+    if (hasBrowseDetail || isTagBrowseRoot || isNoteBrowseRoot || isTimeBrowseRoot || isClickBrowseRoot || isHistoryBrowseRoot || isTagSearch || isNoteSearch || isTimeSearch || isClickSearch || isHistorySearch) {
         if (searchUiState.activeMode !== 'bookmark') {
             searchUiState.activeMode = 'bookmark';
             if (typeof renderSearchModeUI === 'function') {
@@ -17208,19 +17537,50 @@ function searchCanvasAndRender(query, options = {}) {
     let sourceIndex = [];
     const mode = searchUiState.activeMode;
     const queryContext = createCanvasSearchQueryContext(trimmedQuery, mode);
-    if (mode === 'bookmark' &&
+    const isHistoryStatsRelevant = isTimeSearch || isClickSearch;
+    if (mode === 'bookmark' && isHistoryStatsRelevant &&
         typeof window !== 'undefined' && window.HistoryStatsService &&
         typeof window.HistoryStatsService.ensureHistoryStatsIndex === 'function' &&
         !window.HistoryStatsService.isCacheReady()) {
-        window.HistoryStatsService.ensureHistoryStatsIndex().then(() => {
+        const isFromHistoryCache = options && (options.source === 'history-cache' || options.source === 'history-cache-fallback');
+        if (!isFromHistoryCache) {
+            window.HistoryStatsService.ensureHistoryStatsIndex().then(() => {
+                try {
+                    if (typeof invalidateCanvasBookmarkVisitStatsCache === 'function') {
+                        invalidateCanvasBookmarkVisitStatsCache();
+                    }
+                    const currentQuery = String(searchUiState && searchUiState.query || '').trim();
+                    const currentMode = searchUiState && searchUiState.activeMode;
+                    if (currentMode === 'bookmark' && currentQuery.toLowerCase() === trimmedQuery.toLowerCase()) {
+                        searchCanvasAndRender(trimmedQuery, { source: 'history-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                    }
+                } catch (_) { }
+            }).catch(() => {
+                try {
+                    searchCanvasAndRender(trimmedQuery, { source: 'history-cache-fallback', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                } catch (_) { }
+            });
+            // 核心阻断双重渲染风暴：从 IndexedDB 恢复仅需 ~0.6ms，首帧拒绝拿 0 访问量进行数百毫秒的无谓全量重排与撕毁重画
             try {
-                const currentQuery = String(searchUiState && searchUiState.query || '').trim();
-                const currentMode = searchUiState && searchUiState.activeMode;
-                if (currentMode === 'bookmark' && currentQuery.toLowerCase() === trimmedQuery.toLowerCase()) {
-                    searchCanvasAndRender(trimmedQuery, { source: 'history-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                const panel = typeof getSearchResultsPanel === 'function' ? getSearchResultsPanel() : document.getElementById('searchResultsPanel');
+                if (panel) {
+                    const isZh = (typeof getCurrentLanguage === 'function' ? getCurrentLanguage() : (navigator.language || '')) === 'zh_CN';
+                    const loadingText = isClickSearch
+                        ? (isZh ? '正在统计书签浏览热度...' : 'Calculating visit frequency...')
+                        : (isZh ? '正在统计最近访问时间...' : 'Calculating recent visits...');
+                    panel.innerHTML = `<div class="search-stats-loading-notice" style="padding: 24px 16px; text-align: center; color: var(--text-secondary, #6b7280); font-size: 13px;">
+                        <i class="fas fa-spinner fa-spin" style="margin-right: 8px; color: var(--accent-blue, #3b82f6);"></i>
+                        <span>${loadingText}</span>
+                    </div>`;
+                    if (typeof showSearchResultsPanel === 'function') {
+                        showSearchResultsPanel();
+                    } else {
+                        panel.style.display = 'block';
+                    }
                 }
             } catch (_) { }
-        }).catch(() => { });
+            return;
+        }
     }
     if (mode === 'bookmark' && isCanvasTagSearchQuery(trimmedQuery) &&
         typeof window !== 'undefined' && window.TagSystem &&
@@ -17307,7 +17667,7 @@ function searchCanvasAndRender(query, options = {}) {
             return;
         }
     }
-    if (mode === 'bookmark' && (isTimeBrowseRootQuery(trimmedQuery) || (typeof isClickBrowseRootQuery === 'function' && isClickBrowseRootQuery(trimmedQuery)))) {
+    if (mode === 'bookmark' && (isTimeBrowseRootQuery(trimmedQuery) || (typeof isClickBrowseRootQuery === 'function' && isClickBrowseRootQuery(trimmedQuery)) || (typeof isHistoryBrowseRootQuery === 'function' && isHistoryBrowseRootQuery(trimmedQuery)))) {
         if (typeof recordSearchHistory === 'function') {
             recordSearchHistory(trimmedQuery, 'bookmark', { trigger: 'jump' });
         }
@@ -17498,8 +17858,23 @@ function searchCanvasAndRender(query, options = {}) {
                 rawScore = scoreCanvasSearchItem(item, timeNeedle, { isGroupSearch: false, mode });
                 if (rawScore === -Infinity) continue;
             }
+            const stats = getCanvasBookmarkVisitStats(item);
             const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
-            scored.push({ item, s: rawScore + scopeBonus, rawScore });
+            scored.push({ item, s: rawScore + scopeBonus, rawScore, visitCount: stats.visitCount, lastVisitTime: stats.lastVisitTime });
+            continue;
+        }
+
+        // History search: all bookmark items qualify if root, or score by needle if provided
+        if (mode === 'bookmark' && isHistorySearch) {
+            const historyNeedle = getCanvasHistorySearchNeedle(trimmedQuery);
+            let rawScore = 100;
+            if (historyNeedle) {
+                rawScore = scoreCanvasSearchItem(item, historyNeedle, { isGroupSearch: false, mode });
+                if (rawScore === -Infinity) continue;
+            }
+            const stats = getCanvasBookmarkVisitStats(item);
+            const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
+            scored.push({ item, s: rawScore + scopeBonus, rawScore, visitCount: stats.visitCount, lastVisitTime: stats.lastVisitTime });
             continue;
         }
 
@@ -17527,6 +17902,7 @@ function searchCanvasAndRender(query, options = {}) {
     if (mode === 'bookmark') {
         const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(trimmedQuery);
         const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(trimmedQuery);
+        const isHistoryQuery = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(trimmedQuery);
         if (isClickQuery) {
             scored.sort((a, b) => {
                 const visitsA = (a.visitCount !== undefined) ? Number(a.visitCount) : getCanvasBookmarkVisitStats(a.item).visitCount;
@@ -17536,6 +17912,16 @@ function searchCanvasAndRender(query, options = {}) {
             });
         } else if (isTimeQuery) {
             scored.sort((a, b) => {
+                const visitA = (a.lastVisitTime !== undefined) ? Number(a.lastVisitTime) : (getCanvasBookmarkVisitStats(a.item).lastVisitTime || 0);
+                const visitB = (b.lastVisitTime !== undefined) ? Number(b.lastVisitTime) : (getCanvasBookmarkVisitStats(b.item).lastVisitTime || 0);
+                if (visitB !== visitA) return visitB - visitA;
+                const timeA = getItemOrFolderTimestamp(a.item);
+                const timeB = getItemOrFolderTimestamp(b.item);
+                if (timeB !== timeA) return timeB - timeA;
+                return compareCanvasBookmarkScoredPairs(a, b, fullscreenScope);
+            });
+        } else if (isHistoryQuery) {
+            scored.sort((a, b) => {
                 const timeA = getItemOrFolderTimestamp(a.item);
                 const timeB = getItemOrFolderTimestamp(b.item);
                 if (timeB !== timeA) return timeB - timeA;
@@ -17544,14 +17930,15 @@ function searchCanvasAndRender(query, options = {}) {
         } else {
             scored.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, fullscreenScope));
         }
-        const groups = buildCanvasBookmarkGroupModel(scored, { scope: fullscreenScope, isTimeSearch: isTimeQuery, isClickSearch: isClickQuery });
+        const groups = buildCanvasBookmarkGroupModel(scored, { scope: fullscreenScope, isTimeSearch: isTimeQuery, isClickSearch: isClickQuery, isHistorySearch: isHistoryQuery });
         searchUiState.bookmarkGroupModel = groups;
-        const groupedResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch: isTimeQuery, isClickSearch: isClickQuery });
+        const groupedResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch: isTimeQuery, isClickSearch: isClickQuery, isHistorySearch: isHistoryQuery });
         const preferredIndex = getPreferredSearchResultIndexByScope(groupedResults, fullscreenScope);
         renderCanvasSearchResults(groupedResults, {
             view: 'canvas',
             query: trimmedQuery,
-            selectedIndex: preferredIndex >= 0 ? preferredIndex : 0
+            selectedIndex: preferredIndex >= 0 ? preferredIndex : 0,
+            alreadySorted: true
         });
         return;
     }
@@ -17976,6 +18363,12 @@ function isDomainSearchItemMatched(domain, item, query, detailInput = null, note
         return isDomainSearchItemMatched(domain, item, needle, detail, noteDetail);
     }
 
+    if (typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(q)) {
+        const needle = getCanvasHistorySearchNeedle(q);
+        if (!needle) return true;
+        return isDomainSearchItemMatched(domain, item, needle, detail, noteDetail);
+    }
+
     if (detail) {
         const tags = getCanvasBookmarkTagsForSearchCached(item);
         return tags.some((tag) => tagMatchesBrowseDetail(tag, detail));
@@ -18206,11 +18599,19 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
                 : rawLocations;
             const subdomains = Array.from(entry.hostSet);
             let latestTimestamp = 0;
+            let latestActiveTimestamp = 0;
+            let latestVisitTime = 0;
             if (Array.isArray(targetItems) && targetItems.length) {
-                targetItems.forEach(t => {
+                for (let i = 0; i < targetItems.length; i++) {
+                    const t = targetItems[i];
                     const ts = Number(t.dateAdded) || 0;
                     if (ts > latestTimestamp) latestTimestamp = ts;
-                });
+                    const vStats = (typeof getCanvasBookmarkVisitStats === 'function') ? getCanvasBookmarkVisitStats(t) : null;
+                    const vt = (vStats && vStats.lastVisitTime) || 0;
+                    if (vt > latestVisitTime) latestVisitTime = vt;
+                    const actTs = Math.max(ts, vt);
+                    if (actTs > latestActiveTimestamp) latestActiveTimestamp = actTs;
+                }
             }
             let domainTotalVisits = 0;
             if (window.HistoryStatsService && typeof window.HistoryStatsService.getDomainStats === 'function') {
@@ -18222,6 +18623,8 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
                 domain: entry.domain,
                 title: entry.domain,
                 dateAdded: latestTimestamp,
+                activeTime: latestActiveTimestamp,
+                lastVisitTime: latestVisitTime,
                 count: useMatchedStats ? matchedCount : totalCount,
                 subdomainCount: useMatchedStats ? matchedSubdomainCount : totalSubdomainCount,
                 totalCount,
@@ -18242,6 +18645,7 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
 
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(q);
     const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(q);
+    const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(q);
     results.sort((a, b) => {
         if (isClickSearch) {
             const visitsA = Number(a.visitCount) || 0;
@@ -18250,6 +18654,12 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             return String(a.domain || '').localeCompare(String(b.domain || ''));
         }
         if (isTimeSearch) {
+            const timeA = Number(a.activeTime || a.dateAdded) || 0;
+            const timeB = Number(b.activeTime || b.dateAdded) || 0;
+            if (timeB !== timeA) return timeB - timeA;
+            return String(a.domain || '').localeCompare(String(b.domain || ''));
+        }
+        if (isHistorySearch) {
             const timeA = Number(a.dateAdded) || 0;
             const timeB = Number(b.dateAdded) || 0;
             if (timeB !== timeA) return timeB - timeA;
@@ -18300,12 +18710,17 @@ function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
             : [];
         const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(query);
         const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(query);
+        const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(query);
         childItems.sort((a, b) => {
             if (isClickSearch) {
                 const visitsA = (a && a.visitCount !== undefined) ? Number(a.visitCount) : getCanvasBookmarkVisitStats(a).visitCount;
                 const visitsB = (b && b.visitCount !== undefined) ? Number(b.visitCount) : getCanvasBookmarkVisitStats(b).visitCount;
                 if (visitsB !== visitsA) return visitsB - visitsA;
             } else if (isTimeSearch) {
+                const timeA = (typeof getBookmarkActiveTimestamp === 'function') ? getBookmarkActiveTimestamp(a) : (Number(a && a.dateAdded) || 0);
+                const timeB = (typeof getBookmarkActiveTimestamp === 'function') ? getBookmarkActiveTimestamp(b) : (Number(b && b.dateAdded) || 0);
+                if (timeB !== timeA) return timeB - timeA;
+            } else if (isHistorySearch) {
                 const timeA = Number(a && a.dateAdded) || 0;
                 const timeB = Number(b && b.dateAdded) || 0;
                 if (timeB !== timeA) return timeB - timeA;
@@ -19710,30 +20125,32 @@ function applyTabulatorColumnOrder(cols, mode) {
         orderedCols = indexCol ? [indexCol, ...ordered] : ordered;
     }
 
-    // 检查是否处于 @时间 / @time 或 @点击 / @hot 临时搜索模式
+    // 检查是否处于 @时间、@点击/@热度、@历史 临时搜索模式
     const currentQ = (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
     const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ);
+    const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(currentQ);
+
+    let targetField = null;
     if (isTimeSearch) {
-        // 在 @时间 查询下，无论用户是否有手动调整过列顺序，都临时将“创建时间/最近添加”（dateAdded）列挪到“标题/域名”（title 或 domain）的紧邻右侧
-        const dateAddedCol = orderedCols.find(c => c && c.field === 'dateAdded');
-        if (dateAddedCol) {
-            const colsWithoutDate = orderedCols.filter(c => c !== dateAddedCol);
-            const titleIdx = colsWithoutDate.findIndex(c => c && (c.field === 'title' || c.field === 'domain'));
-            if (titleIdx >= 0) {
-                colsWithoutDate.splice(titleIdx + 1, 0, dateAddedCol);
-                orderedCols = colsWithoutDate;
-            }
-        }
+        // 在 @时间 查询下，临时将“最近访问”（lastVisitTime，若没有则 dateAdded）列挪到“标题/域名”（title 或 domain）的紧邻右侧
+        targetField = orderedCols.some(c => c && c.field === 'lastVisitTime') ? 'lastVisitTime' : 'dateAdded';
     } else if (isClickSearch) {
-        // 在 @点击 / @hot 查询下，无论用户是否有手动调整过列顺序，都临时将“访问频次”（visitCount）列挪到“标题/域名”（title 或 domain）的紧邻右侧
-        const visitCountCol = orderedCols.find(c => c && c.field === 'visitCount');
-        if (visitCountCol) {
-            const colsWithoutVisit = orderedCols.filter(c => c !== visitCountCol);
-            const titleIdx = colsWithoutVisit.findIndex(c => c && (c.field === 'title' || c.field === 'domain'));
+        // 在 @点击 / @hot / @热度 查询下，临时将“访问频次”（visitCount）列挪到“标题/域名”（title 或 domain）的紧邻右侧
+        targetField = 'visitCount';
+    } else if (isHistorySearch) {
+        // 在 @历史 / @创建 查询下，临时将“创建时间/最近添加”（dateAdded）列挪到“标题/域名”（title 或 domain）的紧邻右侧
+        targetField = 'dateAdded';
+    }
+
+    if (targetField) {
+        const targetCol = orderedCols.find(c => c && c.field === targetField);
+        if (targetCol) {
+            const colsWithoutTarget = orderedCols.filter(c => c !== targetCol);
+            const titleIdx = colsWithoutTarget.findIndex(c => c && (c.field === 'title' || c.field === 'domain'));
             if (titleIdx >= 0) {
-                colsWithoutVisit.splice(titleIdx + 1, 0, visitCountCol);
-                orderedCols = colsWithoutVisit;
+                colsWithoutTarget.splice(titleIdx + 1, 0, targetCol);
+                orderedCols = colsWithoutTarget;
             }
         }
     }
@@ -19764,11 +20181,12 @@ function ensureCanvasTabulatorIndexColumnFirst(tableInstance, activeMode) {
             .map(c => c.getField())
             .filter(f => f && f !== 'index');
 
-        // 如果当前处于 @时间 或 @点击 临时模式，绝不能将临时的列顺序持久化保存，避免覆盖用户日常的正常列顺序
+        // 如果当前处于 @时间、@点击 或 @历史 临时模式，绝不能将临时的列顺序持久化保存，避免覆盖用户日常的正常列顺序
         const currentQ = (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
         const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
         const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ);
-        if (!isTimeSearch && !isClickSearch) {
+        const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(currentQ);
+        if (!isTimeSearch && !isClickSearch && !isHistorySearch) {
             saveTabulatorColumnOrder(activeMode, currentFields);
         }
 
@@ -20354,9 +20772,10 @@ function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery,
     const currentQ = renderQuery || (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
     const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ);
+    const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(currentQ);
 
-    // 状态机：统一管理临时搜索模式（@时间 / @点击）与常规搜索模式的表头排序状态转换
-    const targetSpecialSortMode = isTimeSearch ? 'time' : (isClickSearch ? 'click' : null);
+    // 状态机：统一管理临时搜索模式（@时间 / @热度 / @历史）与常规搜索模式的表头排序状态转换
+    const targetSpecialSortMode = isTimeSearch ? 'time' : (isClickSearch ? 'click' : (isHistorySearch ? 'history' : null));
     if (targetSpecialSortMode !== null) {
         if (canvasSearchTabulatorActiveSpecialSortMode === null) {
             // 首次从常规搜索进入特殊排序模式：记录进入前的原始排序
@@ -20384,18 +20803,36 @@ function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery,
         initCanvasSearchTabulator(containerEl, initialData, isZh);
     } else {
         try {
-            canvasSearchTabulatorInstance.setColumns(getCanvasTabulatorColumns(isZh, activeMode, initialData));
+            // 仅在表头尚未初始化或模式切换时才重构列，输入检索过程中直接 replaceData，杜绝 setColumns 销毁重排引发卡顿
+            const currentCols = typeof canvasSearchTabulatorInstance.getColumnDefinitions === 'function' ? canvasSearchTabulatorInstance.getColumnDefinitions() : null;
+            if (!currentCols || currentCols.length === 0 || canvasSearchTabulatorActiveMode !== activeMode) {
+                canvasSearchTabulatorInstance.setColumns(getCanvasTabulatorColumns(isZh, activeMode, initialData));
+            }
             canvasSearchTabulatorInstance.replaceData(initialData);
+            const curSorters = (canvasSearchTabulatorInstance && typeof canvasSearchTabulatorInstance.getSorters === 'function') ? (canvasSearchTabulatorInstance.getSorters() || []) : [];
+            const isTabSorted = (field, dir) => curSorters.length === 1 && curSorters[0].field === field && curSorters[0].dir === dir;
+
             if (canvasSearchTabulatorActiveSpecialSortMode === 'time') {
-                // 在 @时间 临时搜索模式下，表头临时显示降序箭头
-                try {
-                    canvasSearchTabulatorInstance.setSort([{ column: "dateAdded", dir: "desc" }]);
-                } catch (_) { }
+                // 在 @时间 临时搜索模式下，表头临时按 lastVisitTime 降序排
+                if (!isTabSorted("lastVisitTime", "desc")) {
+                    try {
+                        canvasSearchTabulatorInstance.setSort([{ column: "lastVisitTime", dir: "desc" }]);
+                    } catch (_) { }
+                }
             } else if (canvasSearchTabulatorActiveSpecialSortMode === 'click') {
-                // 在 @点击 临时搜索模式下，表头临时按 visitCount 降序排
-                try {
-                    canvasSearchTabulatorInstance.setSort([{ column: "visitCount", dir: "desc" }]);
-                } catch (_) { }
+                // 在 @点击 / @热度 临时搜索模式下，表头临时按 visitCount 降序排
+                if (!isTabSorted("visitCount", "desc")) {
+                    try {
+                        canvasSearchTabulatorInstance.setSort([{ column: "visitCount", dir: "desc" }]);
+                    } catch (_) { }
+                }
+            } else if (canvasSearchTabulatorActiveSpecialSortMode === 'history') {
+                // 在 @历史 临时搜索模式下，表头临时按 dateAdded 降序排
+                if (!isTabSorted("dateAdded", "desc")) {
+                    try {
+                        canvasSearchTabulatorInstance.setSort([{ column: "dateAdded", dir: "desc" }]);
+                    } catch (_) { }
+                }
             } else if (canvasSearchTabulatorPreSpecialSorts !== null) {
                 // 彻底退出特殊搜索模式时，将表头排序状态恢复为进入前的原始状态
                 try {
@@ -20587,13 +21024,22 @@ function buildCanvasTabulatorData(results, query, options = {}) {
                 }
             }
 
-            // Latest creation time among targetItems
+            // Latest creation time & visit time among targetItems
             let latestTimestamp = 0;
-            if (Array.isArray(item.targetItems) && item.targetItems.length) {
-                item.targetItems.forEach(t => {
+            let latestVisitTime = 0;
+            if (item.dateAdded && item.lastVisitTime !== undefined) {
+                latestTimestamp = Number(item.dateAdded) || 0;
+                latestVisitTime = Number(item.lastVisitTime) || 0;
+            } else if (Array.isArray(item.targetItems) && item.targetItems.length) {
+                for (let i = 0; i < item.targetItems.length; i++) {
+                    const t = item.targetItems[i];
                     const ts = Number(t.dateAdded) || 0;
                     if (ts > latestTimestamp) latestTimestamp = ts;
-                });
+                    const vStats = (typeof getCanvasBookmarkVisitStats === 'function') ? getCanvasBookmarkVisitStats(t) : null;
+                    if (vStats && vStats.lastVisitTime > latestVisitTime) {
+                        latestVisitTime = vStats.lastVisitTime;
+                    }
+                }
             }
             let dateAddedText = '';
             if (latestTimestamp > 0) {
@@ -20605,6 +21051,8 @@ function buildCanvasTabulatorData(results, query, options = {}) {
                     dateAddedText = `${y}-${m}-${day}`;
                 } catch (_) {}
             }
+            const lastVisitTimeText = formatCanvasLastVisitTime(latestVisitTime);
+            const activeTime = Math.max(latestTimestamp, latestVisitTime);
 
             const typeLabel = groupLevel === 'root' ? (isZh ? '主域名' : 'Root Domain') : (isZh ? '子域名' : 'Subdomain');
             const visitCount = Number(item.visitCount !== undefined ? item.visitCount : ((item.rawItem && item.rawItem.visitCount) !== undefined ? item.rawItem.visitCount : 0)) || 0;
@@ -20625,6 +21073,9 @@ function buildCanvasTabulatorData(results, query, options = {}) {
                 path: primaryPath,
                 dateAdded: latestTimestamp,
                 dateAddedText,
+                lastVisitTime: latestVisitTime,
+                lastVisitTimeText,
+                activeTime,
                 visitCount,
                 type: 'domain-group',
                 typeLabel,
@@ -20860,11 +21311,23 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             locationLabel = locations.map(l => l.label || l.title).filter(Boolean).join(', ');
         }
 
+        const visitStats = getCanvasBookmarkVisitStats(item.rawItem || item);
         const visitCount = (item.visitCount !== undefined)
             ? Number(item.visitCount)
             : (item.header && item.header.visitCount !== undefined)
                 ? Number(item.header.visitCount)
-                : getCanvasBookmarkVisitStats(item.rawItem || item).visitCount;
+                : visitStats.visitCount;
+        const lastVisitTime = (item.lastVisitTime !== undefined)
+            ? Number(item.lastVisitTime)
+            : (item.header && item.header.lastVisitTime !== undefined)
+                ? Number(item.header.lastVisitTime)
+                : visitStats.lastVisitTime;
+        const lastVisitTimeText = formatCanvasLastVisitTime(lastVisitTime);
+        const activeTime = (item.activeTime !== undefined)
+            ? Number(item.activeTime)
+            : ((typeof getBookmarkActiveTimestamp === 'function')
+                ? getBookmarkActiveTimestamp(item.rawItem || item)
+                : Math.max(creationInfo.timestamp, lastVisitTime));
 
         data.push({
             id: item.id || `row_${rowIdx}`,
@@ -20880,6 +21343,9 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             url,
             dateAdded: creationInfo.timestamp,
             dateAddedText: creationInfo.text,
+            lastVisitTime,
+            lastVisitTimeText,
+            activeTime,
             visitCount,
             type: isCardGroup ? 'group' : item.type,
             rawItem: item,
@@ -21547,9 +22013,12 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                         const hasReal = iconSrc && !String(iconSrc).startsWith('data:image/svg+xml') && iconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
                         let iconHtml = '';
                         if (hasReal) {
-                            iconHtml = `<img class="search-result-favicon" src="${escapeHtml(iconSrc)}" style="width:16px; height:16px; object-fit:contain; border-radius:3px; flex-shrink:0;" alt="">`;
+                            iconHtml = `<img class="search-result-favicon" src="${escapeHtml(iconSrc)}" data-bookmark-url="${escapeHtml(domainUrl)}" style="width:16px; height:16px; object-fit:contain; border-radius:3px; flex-shrink:0;" alt="">`;
                         } else {
-                            iconHtml = `<i class="fas fa-globe" style="color:#0ea5e9; font-size:14px; flex-shrink:0;"></i>`;
+                            iconHtml = `<span style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; flex-shrink:0;">
+                                <i class="fas fa-globe search-result-icon-box-inline" style="color:#0ea5e9; font-size:14px;"></i>
+                                <img class="search-result-favicon" src="${escapeHtml(iconSrc || '')}" data-bookmark-url="${escapeHtml(domainUrl)}" style="display:none; width:16px; height:16px; object-fit:contain; border-radius:3px; position:absolute; left:0; top:0;" alt="">
+                            </span>`;
                         }
                         const highlighted = (typeof highlightSearchKeywords === 'function' && query)
                             ? highlightSearchKeywords(d.domain, query)
@@ -21729,6 +22198,31 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     }
                 },
                 {
+                    title: isZh ? "最近访问" : "Last Visited",
+                    field: "lastVisitTime",
+                    minWidth: 100,
+                    width: savedWidths['lastVisitTime'] || 120,
+                    hozAlign: "left",
+                    headerHozAlign: "left",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    headerSortStartingDir: "desc",
+                    sorter: (a, b, aRow, bRow, col, dir) => {
+                        const numA = Number(a) || 0;
+                        const numB = Number(b) || 0;
+                        if (numA === numB) return 0;
+                        if (!numA) return dir === "desc" ? -1 : 1;
+                        if (!numB) return dir === "desc" ? 1 : -1;
+                        return numA - numB;
+                    },
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        const txt = d.lastVisitTimeText || '-';
+                        return `<div style="display:inline-flex; align-items:center; justify-content:flex-start; width:100%; text-align:left;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
+                    }
+                },
+                {
                     title: isZh ? "访问频次" : "Visits",
                     field: "visitCount",
                     width: savedWidths['visitCount'] || 95,
@@ -21779,9 +22273,12 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                         const hasReal = iconSrc && !String(iconSrc).startsWith('data:image/svg+xml') && iconSrc !== (typeof fallbackIcon !== 'undefined' ? fallbackIcon : null);
                         let iconHtml = '';
                         if (hasReal) {
-                            iconHtml = `<img class="search-result-favicon" src="${escapeHtml(iconSrc)}" style="width:16px; height:16px; object-fit:contain; border-radius:3px; flex-shrink:0;" alt="">`;
+                            iconHtml = `<img class="search-result-favicon" src="${escapeHtml(iconSrc)}" data-bookmark-url="${escapeHtml(domainUrl)}" style="width:16px; height:16px; object-fit:contain; border-radius:3px; flex-shrink:0;" alt="">`;
                         } else {
-                            iconHtml = `<i class="fas fa-globe" style="color:#0ea5e9; font-size:14px; flex-shrink:0;"></i>`;
+                            iconHtml = `<span style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; flex-shrink:0;">
+                                <i class="fas fa-globe search-result-icon-box-inline" style="color:#0ea5e9; font-size:14px;"></i>
+                                <img class="search-result-favicon" src="${escapeHtml(iconSrc || '')}" data-bookmark-url="${escapeHtml(domainUrl)}" style="display:none; width:16px; height:16px; object-fit:contain; border-radius:3px; position:absolute; left:0; top:0;" alt="">
+                            </span>`;
                         }
                         const highlighted = (typeof highlightSearchKeywords === 'function' && query)
                             ? highlightSearchKeywords(d.domain, query)
@@ -21888,6 +22385,31 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                     formatter: (cell) => {
                         const d = cell.getData();
                         const txt = d.dateAddedText || '-';
+                        return `<div style="display:inline-flex; align-items:center; justify-content:flex-start; width:100%; text-align:left;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
+                    }
+                },
+                {
+                    title: isZh ? "最近访问" : "Last Visited",
+                    field: "lastVisitTime",
+                    minWidth: 100,
+                    width: savedWidths['lastVisitTime'] || 120,
+                    hozAlign: "left",
+                    headerHozAlign: "left",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    headerSortStartingDir: "desc",
+                    sorter: (a, b, aRow, bRow, col, dir) => {
+                        const numA = Number(a) || 0;
+                        const numB = Number(b) || 0;
+                        if (numA === numB) return 0;
+                        if (!numA) return dir === "desc" ? -1 : 1;
+                        if (!numB) return dir === "desc" ? 1 : -1;
+                        return numA - numB;
+                    },
+                    formatter: (cell) => {
+                        const d = cell.getData();
+                        const txt = d.lastVisitTimeText || '-';
                         return `<div style="display:inline-flex; align-items:center; justify-content:flex-start; width:100%; text-align:left;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
                     }
                 },
@@ -22735,6 +23257,36 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
             }
         },
         {
+            title: isZh ? "最近访问" : "Last Visited",
+            field: "lastVisitTime",
+            minWidth: 165,
+            width: savedWidths['lastVisitTime'] || 185,
+            hozAlign: "left",
+            headerHozAlign: "left",
+            resizable: true,
+            headerSort: true,
+            headerSortTristate: true,
+            headerSortStartingDir: "desc",
+            sorter: (a, b, aRow, bRow, column, dir) => {
+                const numA = Number(a) || 0;
+                const numB = Number(b) || 0;
+                if (numA === numB) return 0;
+                if (!numA) return dir === "desc" ? -1 : 1;
+                if (!numB) return dir === "desc" ? 1 : -1;
+                return numA - numB;
+            },
+            formatter: (cell) => {
+                const d = cell.getData();
+                const timeText = d.lastVisitTimeText || '';
+                if (!timeText) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
+                const highlightedTime = (typeof highlightSearchKeywords === 'function' && query)
+                    ? highlightSearchKeywords(timeText, query)
+                    : escapeHtml(timeText);
+                return `<div class="canvas-table-date-cell" style="display:inline-flex; align-items:center; justify-content:flex-start; width:100%; text-align:left;"><span class="canvas-table-date-text" title="${escapeHtml(timeText)}">${highlightedTime}</span></div>`;
+            }
+        },
+        {
             title: isZh ? "访问频次" : "Visits",
             field: "visitCount",
             minWidth: 80,
@@ -23069,6 +23621,7 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
     const currentQ = (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
     const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ);
+    const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(currentQ);
 
     let initialSortConfig = undefined;
     if (isTimeSearch) {
@@ -23076,13 +23629,19 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
             canvasSearchTabulatorPreSpecialSorts = [];
         }
         canvasSearchTabulatorActiveSpecialSortMode = 'time';
-        initialSortConfig = [{ column: "dateAdded", dir: "desc" }];
+        initialSortConfig = [{ column: "lastVisitTime", dir: "desc" }];
     } else if (isClickSearch) {
         if (canvasSearchTabulatorPreSpecialSorts === null) {
             canvasSearchTabulatorPreSpecialSorts = [];
         }
         canvasSearchTabulatorActiveSpecialSortMode = 'click';
         initialSortConfig = [{ column: "visitCount", dir: "desc" }];
+    } else if (isHistorySearch) {
+        if (canvasSearchTabulatorPreSpecialSorts === null) {
+            canvasSearchTabulatorPreSpecialSorts = [];
+        }
+        canvasSearchTabulatorActiveSpecialSortMode = 'history';
+        initialSortConfig = [{ column: "dateAdded", dir: "desc" }];
     } else if (canvasSearchTabulatorPreSpecialSorts && canvasSearchTabulatorPreSpecialSorts.length > 0) {
         initialSortConfig = canvasSearchTabulatorPreSpecialSorts;
         canvasSearchTabulatorPreSpecialSorts = null;
@@ -23537,9 +24096,9 @@ function renderCanvasSearchResults(results, options = {}) {
     const panel = getSearchResultsPanel();
     if (!panel) return;
 
-    // 若当前面板处于模式建议/推荐界面或包含历史记录，必须在尺寸计算前彻底清空建议 DOM，恢复纯净结果面板
+    // 若当前面板处于模式建议/推荐界面、统计加载态或包含历史记录，必须在尺寸计算前彻底清空建议 DOM，恢复纯净结果面板
     const isSuggestionsPanel = (panel.dataset && panel.dataset.panelType === 'canvas-suggestions') ||
-        !!panel.querySelector('.search-history-section, .search-suggestions-header, .canvas-suggestions-hide-btn, .search-empty-suggestions-hide-btn, .canvas-suggestion-mode-item');
+        !!panel.querySelector('.search-history-section, .search-suggestions-header, .canvas-suggestions-hide-btn, .search-empty-suggestions-hide-btn, .canvas-suggestion-mode-item, .search-stats-loading-notice');
     if (isSuggestionsPanel) {
         if (typeof destroyCanvasSearchTabulator === 'function') {
             destroyCanvasSearchTabulator();
@@ -23622,8 +24181,29 @@ function renderCanvasSearchResults(results, options = {}) {
             displayResults = sourceResults;
         }
 
-        const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(options.query || searchUiState.query);
-        if (isTimeQuery) {
+        const queryStr = options.query || searchUiState.query;
+        const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(queryStr);
+        const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(queryStr);
+        const isHistoryQuery = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(queryStr);
+        const isAlreadySorted = options && options.alreadySorted === true && effectiveFilter !== 'domain';
+        if (!isAlreadySorted && isClickQuery) {
+            displayResults = displayResults.slice().sort((a, b) => {
+                const visitsA = (a && a.visitCount !== undefined) ? Number(a.visitCount) : getCanvasBookmarkVisitStats(a).visitCount;
+                const visitsB = (b && b.visitCount !== undefined) ? Number(b.visitCount) : getCanvasBookmarkVisitStats(b).visitCount;
+                if (visitsB !== visitsA) return visitsB - visitsA;
+                return 0;
+            });
+        } else if (!isAlreadySorted && isTimeQuery) {
+            displayResults = displayResults.slice().sort((a, b) => {
+                const visitA = (a && a.lastVisitTime !== undefined) ? Number(a.lastVisitTime) : (getCanvasBookmarkVisitStats(a).lastVisitTime || 0);
+                const visitB = (b && b.lastVisitTime !== undefined) ? Number(b.lastVisitTime) : (getCanvasBookmarkVisitStats(b).lastVisitTime || 0);
+                if (visitB !== visitA) return visitB - visitA;
+                const timeA = getItemOrFolderTimestamp(a);
+                const timeB = getItemOrFolderTimestamp(b);
+                if (timeB !== timeA) return timeB - timeA;
+                return 0;
+            });
+        } else if (!isAlreadySorted && isHistoryQuery) {
             displayResults = displayResults.slice().sort((a, b) => {
                 const timeA = getItemOrFolderTimestamp(a);
                 const timeB = getItemOrFolderTimestamp(b);
@@ -24344,25 +24924,35 @@ function renderCanvasSearchResults(results, options = {}) {
 
         const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(queryText);
         const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(queryText);
-        const childVisits = (child.visitCount !== undefined) ? Number(child.visitCount) : getCanvasBookmarkVisitStats(child.rawItem || child).visitCount;
-        const childVisitBadgeHtml = (isClickQuery || childVisits > 0)
-            ? `<span class="canvas-bookmark-child-visit-badge" style="display:inline-flex; align-items:center; font-size:10px; color:var(--text-secondary); margin-left:4px; padding:0 3px; border-radius:3px; background:rgba(128,128,128,0.12); flex-shrink:0;">${childVisits}${isZh ? '次' : ' visits'}</span>`
-            : '';
+        const isHistoryQuery = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(queryText);
+        const childStats = getCanvasBookmarkVisitStats(child.rawItem || child);
+        const childVisits = (child.visitCount !== undefined) ? Number(child.visitCount) : childStats.visitCount;
+        const childLastVisit = (child.lastVisitTime !== undefined) ? Number(child.lastVisitTime) : childStats.lastVisitTime;
+        const childLastVisitText = formatCanvasLastVisitTime(childLastVisit);
         const childVisitSnippetHtml = (childVisits > 0 || isClickQuery)
             ? `<div class="search-result-visit-row" style="font-size:11px; color:var(--text-secondary); display:flex; align-items:center; margin-top:2px;"><span>${isZh ? '访问频次: ' : 'Visits: '}${childVisits} ${isZh ? '次' : 'times'}</span></div>`
             : '';
+        const childLastVisitSnippetHtml = (childLastVisit > 0 || isTimeQuery)
+            ? `<div class="search-result-last-visit-row" style="font-size:11px; color:var(--text-secondary); display:flex; align-items:center; margin-top:2px;"><span>${isZh ? '最近访问: ' : 'Last visited: '}${childLastVisitText || '-'}</span></div>`
+            : '';
 
         const hasPathMatch = isPlainBookmarkDetailsQuery && pathHtml && pathHtml.includes('<mark>');
-        const hasTimeMatch = (isPlainBookmarkDetailsQuery && childCreationTimeHtml && childCreationTimeHtml.includes('<mark>')) || isTimeQuery;
+        const hasTimeMatch = (isPlainBookmarkDetailsQuery && childCreationTimeHtml && childCreationTimeHtml.includes('<mark>')) || isHistoryQuery;
+        const hasLastVisitMatch = isTimeQuery && childLastVisit > 0;
         const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
         const hasTagMatch = childTagMarkersHtml && childTagMarkersHtml.includes('<mark>');
         const hasNoteMatch = childNoteSnippetHtml && childNoteSnippetHtml.includes('<mark>');
 
         const effectivePriorityOrder = isClickQuery
-            ? { visit: 0, tag: 1, note: 2, path: 3, url: 4, time: 5 }
-            : (isTimeQuery ? { time: 1, tag: 2, note: 3, path: 4, url: 5 } : null);
+            ? { visit: 0, tag: 1, note: 2, path: 3, url: 4, time: 5, lastVisit: 6 }
+            : (isTimeQuery
+                ? { lastVisit: 0, time: 1, tag: 2, note: 3, path: 4, url: 5, visit: 6 }
+                : (isHistoryQuery
+                    ? { time: 0, lastVisit: 1, tag: 2, note: 3, path: 4, url: 5, visit: 6 }
+                    : null));
         const preview = buildMatchedDetailsPreviewHtml([
             { type: 'visit', matched: isClickQuery && childVisits > 0, html: childVisitSnippetHtml },
+            { type: 'lastVisit', matched: hasLastVisitMatch, html: childLastVisitSnippetHtml },
             { type: 'tag', matched: hasTagMatch, html: childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '' },
             { type: 'note', matched: hasNoteMatch, html: childNoteSnippetHtml },
             { type: 'path', matched: hasPathMatch, html: pathHtml },
@@ -24387,6 +24977,7 @@ function renderCanvasSearchResults(results, options = {}) {
         let childDetailsContentHtml = '';
         childDetailsContentHtml += pathHtml;
         if (childCreationTimeHtml) childDetailsContentHtml += childCreationTimeHtml;
+        if (childLastVisitSnippetHtml) childDetailsContentHtml += childLastVisitSnippetHtml;
         if (childVisitSnippetHtml) childDetailsContentHtml += childVisitSnippetHtml;
         childDetailsContentHtml += urlHtml;
         if (childTagsHtml) childDetailsContentHtml += childTagsHtml;
@@ -24406,7 +24997,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 <div class="canvas-bookmark-group-child-topline">
                     <span class="canvas-bookmark-group-child-index">${childIndex + 1}</span>
                     ${renderBookmarkChildIconHtml(child)}
-                    <span class="canvas-bookmark-group-child-title" data-raw-title="${escapeHtml(formattedChild.fullTitle)}">${titleHtml}</span>${childVisitBadgeHtml}
+                    <span class="canvas-bookmark-group-child-title" data-raw-title="${escapeHtml(formattedChild.fullTitle)}">${titleHtml}</span>
                     ${childNoteMarkerHtml ? `<span class="canvas-bookmark-group-child-note">${childNoteMarkerHtml}</span>` : ''}
                 </div>
                 <div class="canvas-bookmark-group-child-meta">
@@ -25201,15 +25792,18 @@ function renderCanvasSearchResults(results, options = {}) {
                     : '';
                 const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
                 const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(searchUiState.query);
+                const isHistoryQuery = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(searchUiState.query);
                 let domainDateHtml = '';
-                if (isTimeQuery && item.dateAdded) {
+                const domainTs = (isTimeQuery ? (item.activeTime || item.dateAdded) : item.dateAdded);
+                if ((isTimeQuery || isHistoryQuery) && domainTs) {
                     try {
-                        const d = new Date(Number(item.dateAdded));
+                        const d = new Date(Number(domainTs));
                         if (!isNaN(d.getTime())) {
                             const y = d.getFullYear();
                             const m = String(d.getMonth() + 1).padStart(2, '0');
                             const day = String(d.getDate()).padStart(2, '0');
-                            domainDateHtml = ` · <span class="search-domain-time" style="color:var(--text-secondary); font-size:11px; opacity:0.85;"><i class="far fa-clock" style="margin-right:3px;"></i>${y}-${m}-${day}</span>`;
+                            const iconClass = isTimeQuery ? 'fa-history' : 'fa-clock';
+                            domainDateHtml = ` · <span class="search-domain-time" style="color:var(--text-secondary); font-size:11px; opacity:0.85;"><i class="far ${iconClass}" style="margin-right:3px;"></i>${y}-${m}-${day}</span>`;
                         }
                     } catch (_) {}
                 }
@@ -25295,12 +25889,17 @@ function renderCanvasSearchResults(results, options = {}) {
                     extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
                 }
                 const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(searchUiState.query);
-                const groupVisits = Number(item.visitCount !== undefined ? item.visitCount : ((item.header && item.header.visitCount) !== undefined ? item.header.visitCount : ((item.rawItem && item.rawItem.visitCount) !== undefined ? item.rawItem.visitCount : getCanvasBookmarkVisitStats(item.rawItem || item).visitCount))) || 0;
-                const visitBadgeHtml = (isClickQuery || groupVisits > 0)
-                    ? `<span class="canvas-bookmark-visit-badge" style="display:inline-flex; align-items:center; font-size:10px; color:var(--text-secondary); margin-left:4px; padding:0 3px; border-radius:3px; background:rgba(128,128,128,0.12); flex-shrink:0;">${groupVisits}${isZh ? '次' : ' visits'}</span>`
-                    : '';
+                const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
+                const isHistoryQuery = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(searchUiState.query);
+                const groupStats = getCanvasBookmarkVisitStats(item.rawItem || item);
+                const groupVisits = Number(item.visitCount !== undefined ? item.visitCount : ((item.header && item.header.visitCount) !== undefined ? item.header.visitCount : ((item.rawItem && item.rawItem.visitCount) !== undefined ? item.rawItem.visitCount : groupStats.visitCount))) || 0;
+                const groupLastVisit = Number(item.lastVisitTime !== undefined ? item.lastVisitTime : ((item.header && item.header.lastVisitTime) !== undefined ? item.header.lastVisitTime : ((item.rawItem && item.rawItem.lastVisitTime) !== undefined ? item.rawItem.lastVisitTime : groupStats.lastVisitTime))) || 0;
+                const groupLastVisitText = formatCanvasLastVisitTime(groupLastVisit);
                 const groupVisitSnippetHtml = (groupVisits > 0 || isClickQuery)
                     ? `<div class="search-result-visit-row" style="font-size:11px; color:var(--text-secondary); display:flex; align-items:center; margin-top:2px;"><span>${isFolder ? (isZh ? '累计访问: ' : 'Total Visits: ') : (isZh ? '访问频次: ' : 'Visits: ')}${groupVisits} ${isZh ? '次' : 'times'}</span></div>`
+                    : '';
+                const groupLastVisitSnippetHtml = (groupLastVisit > 0 || isTimeQuery)
+                    ? `<div class="search-result-last-visit-row" style="font-size:11px; color:var(--text-secondary); display:flex; align-items:center; margin-top:2px;"><span>${isZh ? '最近访问: ' : 'Last visited: '}${groupLastVisitText || '-'}</span></div>`
                     : '';
 
                 const countHtml = canExpandGroup
@@ -25313,7 +25912,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const groupActionsHtml = countHtml || toggleHtml
                     ? `<div class="canvas-bookmark-group-actions">${countHtml}${toggleHtml}</div>`
                     : '';
-                title = `<div class="search-result-bookmark-title-text" data-raw-title="${escapeHtml(formatted.fullTitle)}">${titleText}</div>${visitBadgeHtml}${noteMarkerHtml}${groupActionsHtml}`;
+                title = `<div class="search-result-bookmark-title-text" data-raw-title="${escapeHtml(formatted.fullTitle)}">${titleText}</div>${noteMarkerHtml}${groupActionsHtml}`;
                 const rootLabel = isZh ? '根目录' : 'Root';
                 const parentPathListRaw = Array.isArray(item.parentPaths) ? item.parentPaths : [];
                 const parentPathList = parentPathListRaw.length
@@ -25341,18 +25940,23 @@ function renderCanvasSearchResults(results, options = {}) {
                 const noteSnippetHtml = renderBookmarkResultNoteSnippet(item);
                 const creationTimeHtml = renderBookmarkCreationTimeHtml(item, isZh, searchUiState.query);
 
-                const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
                 const hasPathMatch = isPlainBookmarkDetailsQuery && parentPathHtml && parentPathHtml.includes('<mark>');
-                const hasTimeMatch = (isPlainBookmarkDetailsQuery && creationTimeHtml && creationTimeHtml.includes('<mark>')) || isTimeQuery;
+                const hasTimeMatch = (isPlainBookmarkDetailsQuery && creationTimeHtml && creationTimeHtml.includes('<mark>')) || isHistoryQuery;
+                const hasLastVisitMatch = isTimeQuery && groupLastVisit > 0;
                 const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
                 const hasTagMatch = tagsRowHtml && tagsRowHtml.includes('<mark>');
                 const hasNoteMatch = noteSnippetHtml && noteSnippetHtml.includes('<mark>');
 
                 const effectivePriorityOrder = isClickQuery
-                    ? { visit: 0, tag: 1, note: 2, path: 3, url: 4, time: 5 }
-                    : (isTimeQuery ? { time: 1, tag: 2, note: 3, path: 4, url: 5 } : null);
+                    ? { visit: 0, tag: 1, note: 2, path: 3, url: 4, time: 5, lastVisit: 6 }
+                    : (isTimeQuery
+                        ? { lastVisit: 0, time: 1, tag: 2, note: 3, path: 4, url: 5, visit: 6 }
+                        : (isHistoryQuery
+                            ? { time: 0, lastVisit: 1, tag: 2, note: 3, path: 4, url: 5, visit: 6 }
+                            : null));
                 const preview = buildMatchedDetailsPreviewHtml([
                     { type: 'visit', matched: isClickQuery && groupVisits > 0, html: groupVisitSnippetHtml },
+                    { type: 'lastVisit', matched: hasLastVisitMatch, html: groupLastVisitSnippetHtml },
                     { type: 'tag', matched: hasTagMatch, html: tagsRowHtml },
                     { type: 'note', matched: hasNoteMatch, html: noteSnippetHtml },
                     { type: 'path', matched: hasPathMatch, html: parentPathHtml },
@@ -25377,6 +25981,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     <div class="canvas-bookmark-details-collapsible" style="display: ${detailsExpanded ? 'flex' : 'none'}; flex-direction: column; width: 100%; min-width: 0; margin-top: 4px; gap: 4px;">
                         ${parentPathHtml}
                         ${creationTimeHtml}
+                        ${groupLastVisitSnippetHtml}
                         ${groupVisitSnippetHtml}
                         ${urlHtml}
                         ${tagsRowHtml}
@@ -28732,9 +29337,22 @@ function clearCanvasSearchHighlight() {
  */
 async function activateCanvasSearchResultAtIndex(index) {
     const idx = typeof index === 'number' ? index : parseInt(index, 10);
-    if (Number.isNaN(idx) || idx < 0 || idx >= searchUiState.results.length) return;
+    if (Number.isNaN(idx) || idx < 0) return;
 
-    const item = searchUiState.results[idx];
+    let item = null;
+    if (isSearchPanelTableView() && isCanvasSearchTabulatorReady()) {
+        try {
+            const activeRows = canvasSearchTabulatorInstance.getRows("active");
+            if (activeRows && activeRows[idx]) {
+                const rowData = activeRows[idx].getData();
+                item = rowData ? (rowData.rawItem || rowData) : null;
+            }
+        } catch (_) { }
+    }
+    if (!item) {
+        if (idx >= searchUiState.results.length) return;
+        item = searchUiState.results[idx];
+    }
     if (!item) return;
 
     if (item.type === 'tag-browser-color' || item.type === 'tag-browser-tag') {

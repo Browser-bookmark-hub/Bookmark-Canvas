@@ -3193,12 +3193,12 @@ function updateFaviconImages(url, dataUrl) {
                 if (img.style.display === 'none') {
                     img.style.display = '';
                     const prevSibling = img.previousElementSibling;
-                    if (prevSibling && prevSibling.classList.contains('search-result-icon-box-inline')) {
+                    if (prevSibling && (prevSibling.classList.contains('search-result-icon-box-inline') || prevSibling.classList.contains('fa-globe') || prevSibling.classList.contains('fa-bookmark'))) {
                         prevSibling.style.display = 'none';
                     } else {
                         const parent = img.parentElement;
                         if (parent) {
-                            const inlineFallbackIcon = parent.querySelector('.search-result-icon-box-inline');
+                            const inlineFallbackIcon = parent.querySelector('.search-result-icon-box-inline, .fa-globe, .fa-bookmark');
                             if (inlineFallbackIcon) {
                                 inlineFallbackIcon.style.display = 'none';
                             }

@@ -699,11 +699,39 @@
         }
     }
 
+    const BOOKMARK_STATS_KEY = 'bookmark_visit_analytics';
+
+    async function saveBookmarkVisitStats(payload) {
+        try {
+            const db = await openSearchDb();
+            const tx = db.transaction(STORE_META, 'readwrite');
+            const metaStore = tx.objectStore(STORE_META);
+            await metaStore.put(payload, BOOKMARK_STATS_KEY);
+            await tx.done;
+            return true;
+        } catch (err) {
+            console.warn('[SearchIndexDb] Failed to save bookmark visit stats:', err);
+            return false;
+        }
+    }
+
+    async function getBookmarkVisitStats() {
+        try {
+            const db = await openSearchDb();
+            return await db.get(STORE_META, BOOKMARK_STATS_KEY);
+        } catch (err) {
+            console.warn('[SearchIndexDb] Failed to get bookmark visit stats:', err);
+            return null;
+        }
+    }
+
     globalThis.SearchIndexDb = {
         clearLegacyChromeStorageIndex,
         clearProcessedDirtyState,
         getDirtyState,
         getMeta,
+        getBookmarkVisitStats,
+        saveBookmarkVisitStats,
         hasFreshIndex,
         loadAllSnapshot,
         loadLatestSnapshot,

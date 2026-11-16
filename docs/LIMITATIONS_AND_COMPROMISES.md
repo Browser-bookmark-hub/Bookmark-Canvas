@@ -271,4 +271,44 @@ In the experimental development branch (`feat/experimental-schema-v3-sanitizatio
   - **Commit ID:** `cc520ae01bc7217878a9f3800b2c1d0e3b73df1b` (Tag: `重构--临时栏目--清除两个字段`)
   - **Commit title:** `refactor: 清除「"originPermanent""sequenceNumber"」`, removing legacy sequence numbers and permanent origin relations from Temporary Sections.
 
+### 9. Browsing history visit statistics and deletion reconciliation architectural compromise
+
+❌ **Intentional main-branch compromise: No background full-time listeners, no sprawling deletion queues, and no permanent history database like the companion project "Bookmark Record and Recommend".**
+
+When introducing bookmark visit frequency (`@热度` / `@frequency`) and recent visit timestamps (`@最近` / `@recent`), the system faced severe constraints from the browser platform API and data synchronization boundaries. Following architectural evaluation and empirical verification, the main branch established the following explicit compromises and boundaries:
+
+#### 1. Why we intentionally do NOT build a permanent browsing history database like "Bookmark Record and Recommend"
+
+In the bookmark ecosystem, [Bookmark Record and Recommend](https://github.com/Browser-bookmark-hub/Bookmark-Record-Recommend) is designed specifically to track full-time browsing journeys and generate recommendations, requiring a 24/7 background listener to build an independent long-term archive. However, for **Bookmark Canvas**, the main branch explicitly **rejects** this approach:
+
+- **Minimalist performance and zero battery drain:**
+  Building a permanent shadow history database requires the background Service Worker to listen to `chrome.history.onVisited` around the clock. Every opened tab, navigation, or background page reload wakes up the extension, consuming CPU, RAM, and laptop battery. This violates Bookmark Canvas's core performance principle: 0 idle listeners, 0 background wakeups, 0 ms spent when the user is not actively searching.
+- **Unbounded storage bloat and junk URL accumulation:**
+  A typical user navigates through hundreds of thousands of ephemeral, non-bookmark pages each year (news, shopping, temporary tabs). Maintaining a private permanent history log causes local storage to bloat indefinitely, creating heavy storage I/O and backup overhead.
+- **Zombie ghost records and consistency divergence:**
+  If the extension maintains an independent shadow database, when users clear browsing history natively in Chrome, the platform API's notification blind spots (explained below) prevent full reconciliation, leaving the extension's database full of phantom, zombie visit records that diverge from reality.
+- **Privacy and user trust:**
+  Bookmark Canvas is a clean, local workspace. It queries only the browser's native 90-day retention window on demand, reverse-filtering exclusively against user bookmarks, and never accumulates a permanent surveillance trail of browsing activity.
+
+#### 2. Browser platform API (`chrome.history`) hard limits and compromises
+
+- **Physical 90-day retention ceiling:**
+  Chromium-based browsers physically purge history older than ~90 days in their local SQLite database. Regardless of the `startTime` supplied to `history.search`, the browser cannot return older entries. 90 days is a hard platform constraint, not an artificial limitation of the extension.
+- **Total blindness to deleted time range:**
+  The browser's `onVisitRemoved` event object passes only `{ allHistory: boolean, urls: string[] }`, **never informing the extension which time range was cleared** (it is impossible to know whether the user deleted the "last hour", "last 24 hours", "last 7 days", or "last 4 weeks").
+- **Zero notification for "partial deletions":**
+  If a bookmark was visited months ago and also visited yesterday, and the user clears history for the "last 7 days", the recent visit record is physically wiped by the browser, but because older visits for the URL remain in Chrome's SQLite database, **the browser emits NO notification whatsoever for that URL in `onVisitRemoved`**! It only passes a URL when every single visit record for that URL is completely erased.
+- **Background foregoes persistent sprawling deletion queues:**
+  Continuously buffering hundreds of deleted URLs into `chrome.storage.local` wastes storage I/O, fails against partial deletions anyway, and predominantly stores irrelevant non-bookmark web URLs (99.9%+ of general browsing). The compromise: the background keeps only a lightweight debounced buffer; once deletions exceed a burst threshold, it escalates to a clean "major pruning timestamp" watermark rather than maintaining an unbounded URL graveyard.
+
+#### 3. Candidate pool pre-scoring and on-demand synchronization
+
+- **Scoring mechanics: candidates must be scored prior to display:**
+  Bookmark visit counts and timestamps feed directly into search scoring and global ranking (e.g. `@热度` and `@最近` sorting and grouping). The system cannot evaluate only the visible top 50 after rendering; it must calculate scores across the candidate set using the local persisted snapshot and delta journal before the top 50 can be sorted and ranked.
+- **Cold start and incremental compromises:**
+  - **Cold Start**: Fetches up to 90 days of history in a single batched pass (the physical retention ceiling of Chrome's internal SQLite database on desktop), applies a reverse bookmark whitelist filter, and persists the snapshot to IndexedDB.
+  - **Normal Operation**: Zero background `onVisited` listeners during regular browsing (0 battery drain, 0 idle CPU overhead); incremental delta synchronization is triggered on demand only when the user interacts with the search bar, types `@热度`, or right-clicks a folder.
+  - **Single Bookmark Context Menu**: Right-clicking a bookmark queries the browser API directly using the raw bookmark URL (latency <0.1ms), achieving real-time accuracy without full index sync overhead.
+
+
 

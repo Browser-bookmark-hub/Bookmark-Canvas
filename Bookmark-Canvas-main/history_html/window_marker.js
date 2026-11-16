@@ -620,7 +620,7 @@
                     <span class="group-title" style="color: var(--color-group-${group.color}); font-weight: 600;">${escapeHTML(groupTitle)}</span>
                     <span class="panel-count" style="margin-left: 4px; color: var(--color-group-${group.color}); font-weight: 600;">${groupTabsCount}</span>
                   </div>
-                  <div class="group-header-actions" onclick="event.stopPropagation()">
+                  <div class="group-header-actions" data-stop-propagation>
                     <button class="btn btn-sm action-group-drag" title="${t_str.actionDrag || 'Drag to Reorder'}" style="cursor: grab; display: inline-flex; align-items: center; justify-content: center; color: var(--color-group-${group.color});">
                       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0M6 13V9a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5a7 7 0 0 0 7 7h3a5 5 0 0 0 5-5v-5"/>
@@ -678,7 +678,7 @@
           </td>
           <td style="text-align: center; padding-left: 4px !important; padding-right: 4px !important;">
             <div class="cell-icon" style="margin: 0 auto;">
-              <img data-url="${escapeHTML(tab.url || '')}" src="${faviconUrl || '../icons/icon16.png'}" onerror="this.style.display='none'" />
+              <img data-url="${escapeHTML(tab.url || '')}" src="${faviconUrl || '../icons/icon16.png'}" data-hide-on-error />
             </div>
           </td>
           <td>
@@ -688,7 +688,7 @@
             <div class="cell-domain" title="${escapeHTML(tab.url || '')}">${escapeHTML(domain)}</div>
           </td>
           ${sourceTd}
-          <td style="text-align: center;" onclick="event.stopPropagation()">
+          <td style="text-align: center;" data-stop-propagation>
             <div class="action-buttons">
               <button class="btn btn-sm action-drag" title="${t_str.actionDrag || 'Drag to Reorder'}" style="cursor: grab; display: inline-flex; align-items: center; justify-content: center;">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -708,6 +708,7 @@
     });
 
     tabListEl.innerHTML = html;
+    bindInlineReplacementHandlers(tabListEl);
 
     // 绑定事件：
     // 1. 点击 Tab 组头部折叠/展开 与 组操作
@@ -987,7 +988,7 @@
             <tr class="tab-row" data-url="${escapeHTML(item.url)}">
               <td style="text-align: center; padding-left: 4px !important; padding-right: 4px !important;">
                 <div class="cell-icon" style="margin: 0 auto;">
-                  <img data-url="${escapeHTML(item.url || '')}" src="${faviconUrl || '../icons/icon16.png'}" onerror="this.style.display='none'" />
+                  <img data-url="${escapeHTML(item.url || '')}" src="${faviconUrl || '../icons/icon16.png'}" data-hide-on-error />
                 </div>
               </td>
               <td>
@@ -996,7 +997,7 @@
               <td>
                 <div class="cell-domain" title="${escapeHTML(item.url || '')}">${escapeHTML(domain)}</div>
               </td>
-              <td style="text-align: center;" onclick="event.stopPropagation()">
+              <td style="text-align: center;" data-stop-propagation>
                 <div class="action-buttons">
                   <button class="btn btn-sm btn-primary action-open" title="${t_str.actionOpen}">
                     <i class="fas fa-external-link-alt"></i>
@@ -1006,6 +1007,7 @@
             </tr>
           `;
         }).join('');
+        bindInlineReplacementHandlers(bookmarkListEl);
 
         updateFaviconsFromCache(bookmarkListEl);
 
@@ -1102,6 +1104,20 @@
   }
 
   // 9. DOM Ready 运行
+  // MV3 的 CSP 禁止内联事件属性，这里用正常的事件绑定替代
+  function bindInlineReplacementHandlers(root) {
+    root.querySelectorAll('[data-stop-propagation]').forEach(el => {
+      el.addEventListener('click', (e) => e.stopPropagation());
+    });
+  }
+
+  document.addEventListener('error', (e) => {
+    const target = e.target;
+    if (target && target.tagName === 'IMG' && target.hasAttribute('data-hide-on-error')) {
+      target.style.display = 'none';
+    }
+  }, true);
+
   async function domReadyInit() {
     await initLanguageAndTheme();
     initUI();

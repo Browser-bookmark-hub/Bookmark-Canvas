@@ -2475,9 +2475,9 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 
 .perf-help-popover.search-hint-help-popover {
     position: fixed;
-    z-index: 9999;
+    z-index: 100010;
     width: max-content;
-    max-width: 560px;
+    max-width: 580px;
     padding: 8px 12px;
     font-size: 12px;
     line-height: 1.45;
@@ -5164,6 +5164,9 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 
 .search-helper-tag-link,
 .search-helper-note-link,
+.search-helper-create-link,
+.search-helper-history-link,
+.search-helper-recent-link,
 .search-helper-time-link,
 .search-helper-click-link,
 .search-helper-hot-link {
@@ -5176,6 +5179,9 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 
 .search-helper-tag-link:hover,
 .search-helper-note-link:hover,
+.search-helper-create-link:hover,
+.search-helper-history-link:hover,
+.search-helper-recent-link:hover,
 .search-helper-time-link:hover,
 .search-helper-click-link:hover,
 .search-helper-hot-link:hover {
@@ -5197,6 +5203,9 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 
 [data-theme="dark"] .search-helper-tag-link,
 [data-theme="dark"] .search-helper-note-link,
+[data-theme="dark"] .search-helper-create-link,
+[data-theme="dark"] .search-helper-history-link,
+[data-theme="dark"] .search-helper-recent-link,
 [data-theme="dark"] .search-helper-time-link,
 [data-theme="dark"] .search-helper-click-link,
 [data-theme="dark"] .search-helper-hot-link {
@@ -5205,6 +5214,9 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 
 [data-theme="dark"] .search-helper-tag-link:hover,
 [data-theme="dark"] .search-helper-note-link:hover,
+[data-theme="dark"] .search-helper-create-link:hover,
+[data-theme="dark"] .search-helper-history-link:hover,
+[data-theme="dark"] .search-helper-recent-link:hover,
 [data-theme="dark"] .search-helper-time-link:hover,
 [data-theme="dark"] .search-helper-click-link:hover,
 [data-theme="dark"] .search-helper-hot-link:hover {
@@ -7385,9 +7397,11 @@ body.header-dock-bottom .search-history-section .search-history-empty {
     box-sizing: border-box;
 }
 
-/* 说明问号按钮：固定 16px 宽并在 22px 高度轨道上水平居中对齐 */
+/* 说明问号按钮：固定 16px 宽并在 22px 高度轨道上水平居中对齐，调高层级确保点击无阻隔 */
 .search-mode-header-left .search-hint-help-btn,
 .search-history-header-left .search-hint-help-btn {
+    position: relative;
+    z-index: 100;
     display: inline-flex;
     align-items: center;
     justify-content: center;

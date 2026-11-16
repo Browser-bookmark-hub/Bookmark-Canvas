@@ -1,6 +1,6 @@
 # Privacy Policy for Bookmark Canvas
 
-**Last Updated:** 2026-07-19
+**Last Updated:** 2026-11-21
 
 This Privacy Policy explains how Bookmark Canvas (the “Extension”) handles information. The Extension is designed around a local-first principle: **your bookmark and canvas data remain under your control.**
 
@@ -9,17 +9,18 @@ This Privacy Policy explains how Bookmark Canvas (the “Extension”) handles i
 The Extension handles the following information only to provide its bookmark-canvas features:
 
 - **Bookmarks and bookmark metadata:** bookmark titles, URLs, folder structure, Tags, and Notes. This information is needed to display, organize, search, import, export, and update bookmarks in the canvas.
+- **Browsing history for bookmark analytics (local only):** when bookmark visit statistics or heat search (@热度 / @hot) are triggered on demand, the Extension reads your local browsing history solely for URLs matching your existing bookmarks. Browsing history for non-bookmarked web pages is strictly filtered out and discarded immediately.
 - **Canvas data and settings:** Permanent Sections, Temporary Sections, Blank Sections, Card Groups, connections, descriptions, layout, local indexes, and related preferences.
 - **GitHub configuration and credentials:** if you choose GitHub Push/Pull, the configured repository details and Personal Access Token are handled so the Extension can authenticate directly with GitHub.
 - **Favicon-related data:** bookmark URLs may be used to display favicon images; favicon data may be cached locally by the browser or Extension.
 
-The Extension does not request the `history`, `cookies`, `webNavigation`, `identity`, `management`, or `scripting` permissions.
+The Extension requests the `history` permission solely for the local bookmark analytics described above. It does not request the `cookies`, `webNavigation`, `identity`, `management`, or `scripting` permissions.
 
 ## 2. How Your Data Is Handled
 
 **We do not operate a developer backend and do not collect your data on our own servers.**
 
-- **Local processing and storage:** bookmark processing, canvas rendering, search indexing, settings, and caches are handled locally in your browser. Extension data is stored through browser extension storage and IndexedDB, including `chrome.storage.local` / `unlimitedStorage` where applicable.
+- **Local processing and storage:** bookmark processing, canvas rendering, search indexing, bookmark visit statistics, settings, and caches are handled locally in your browser. Extension data is stored through browser extension storage and IndexedDB, including `chrome.storage.local` / `unlimitedStorage` where applicable. Browsing history data is processed entirely on-device and is never transmitted externally.
 - **Local exports:** when you export a canvas package, the Extension uses the browser download flow to save it to your device.
 - **Optional GitHub Push/Pull:** when you configure and initiate GitHub Push or Pull, data is sent directly between your browser and the GitHub API for the repository you selected. Your GitHub token is used only for that direct request flow; the project does not proxy it through a developer-operated server.
 - **No analytics or sale of data:** the Extension does not include a developer analytics service and does not sell, rent, trade, or share your bookmark or canvas data with third parties.
@@ -32,6 +33,7 @@ The Extension requests the following permissions only for its declared functiona
 
 - `sidePanel`: display Bookmark Canvas in the browser Side Panel.
 - `bookmarks`: read and update bookmarks, folders, and bookmark-tree structure.
+- `history`: compute local visit frequency and heat statistics exclusively for your saved bookmarks on demand, entirely within the local browser.
 - `storage` and `unlimitedStorage`: persist canvas documents, settings, indexes, and caches locally.
 - `downloads`: export canvas packages to your device.
 - `tabs`, `activeTab`, `tabGroups`, and `windows`: support canvas navigation and browser-tab, tab-group, and window-related interactions initiated through the Extension.

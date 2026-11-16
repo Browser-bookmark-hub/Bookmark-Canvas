@@ -3,3 +3,5 @@ node_modules/
 dist/
 release.zip
 *.bak
+.DS_Store
+*.DS_Store

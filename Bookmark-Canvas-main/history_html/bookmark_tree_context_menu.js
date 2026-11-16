@@ -5568,6 +5568,9 @@ async function showContextMenu(e, node) {
     e.preventDefault();
     e.stopPropagation();
 
+    // 右键新节点时先关闭上一个节点遗留的二级面板（信息/标签/溯源），避免显示旧节点内容
+    hideSubmenu();
+
     await ensureCurrentWindowId();
 
     currentContextNode = node;
@@ -5842,8 +5845,7 @@ function renderSubmenu(context) {
     }
 
     if (contextSubmenu.dataset.triggerAction === 'tag-submenu-trigger') {
-        renderTagSubmenu(context);
-        return;
+        return renderTagSubmenu(context);
     }
 
     if (contextSubmenu.dataset.triggerAction === 'info-submenu-trigger') {
@@ -5982,6 +5984,7 @@ function hideSubmenu() {
     if (contextSubmenu) {
         flushInfoSubmenuNoteEditor();
         contextSubmenu.__flushInfoNoteEditor = null;
+        contextSubmenu.__activeInfoToken = null;
         contextSubmenu.style.display = 'none';
         contextSubmenu.classList.remove('is-tag-submenu', 'is-trace-submenu');
     }
@@ -6058,8 +6061,8 @@ function toggleSubmenu(triggerItem, context) {
     lastSubmenuContext = context;
     contextSubmenu.dataset.triggerAction = newTriggerAction;
 
-    // 先渲染子菜单内容
-    renderSubmenu(context);
+    // 先渲染子菜单内容；标签已交给共享的 TagSystem 弹层时，不再显示二级面板容器
+    if (renderSubmenu(context) === true) return;
 
     // 挂载到 body 以便进行屏幕绝对定位
     if (contextSubmenu.parentElement !== getOverlayContainer()) {
@@ -8127,14 +8130,13 @@ function renderInfoSubmenu(context) {
             }
         } else if (data.type === 'folder' && data.folderStats) {
             const totalVisits = Number(data.folderStats.totalVisits) || 0;
-            const bmCount = Number(data.folderStats.bookmarkCount) || 0;
             const topBm = data.folderStats.topBookmark;
             const visitsText = totalVisits > 0
-                ? (lang === 'zh_CN' ? `${totalVisits} 次 (共 ${bmCount} 个书签)` : `${totalVisits} visits (${bmCount} bookmarks)`)
-                : (lang === 'zh_CN' ? `0 次 (共 ${bmCount} 个书签)` : `0 visits (${bmCount} bookmarks)`);
+                ? (lang === 'zh_CN' ? `${totalVisits} 次` : `${totalVisits} visits`)
+                : (lang === 'zh_CN' ? '0 次' : '0 visits');
             statsHtml = `
                 <div class="info-card-row info-stats-visits-row">
-                    <span class="info-card-label">${lang === 'zh_CN' ? '累计访问' : 'FOLDER VISITS'}</span>
+                    <span class="info-card-label">${lang === 'zh_CN' ? '累计访问(书签)' : 'FOLDER VISITS (BOOKMARKS)'}</span>
                     <span class="info-card-value">${escapeHtml(visitsText)}</span>
                 </div>
             `;
@@ -8148,7 +8150,7 @@ function renderInfoSubmenu(context) {
             }
         } else if (data.statsPending) {
             const label = (data.type === 'folder' || !data.url)
-                ? (lang === 'zh_CN' ? '累计访问' : 'FOLDER VISITS')
+                ? (lang === 'zh_CN' ? '累计访问(书签)' : 'FOLDER VISITS (BOOKMARKS)')
                 : (lang === 'zh_CN' ? '访问频次' : 'VISITS');
             statsHtml = `
                 <div class="info-card-row info-stats-row-placeholder" data-role="info-stats-placeholder">
@@ -8400,14 +8402,13 @@ function renderInfoSubmenu(context) {
                 }
             } else if (res.folderStats) {
                 const totalVisits = Number(res.folderStats.totalVisits) || 0;
-                const bmCount = Number(res.folderStats.bookmarkCount) || 0;
                 const topBm = res.folderStats.topBookmark;
                 const visitsText = totalVisits > 0
-                    ? (lang === 'zh_CN' ? `${totalVisits} 次 (共 ${bmCount} 个书签)` : `${totalVisits} visits (${bmCount} bookmarks)`)
-                    : (lang === 'zh_CN' ? `0 次 (共 ${bmCount} 个书签)` : `0 visits (${bmCount} bookmarks)`);
+                    ? (lang === 'zh_CN' ? `${totalVisits} 次` : `${totalVisits} visits`)
+                    : (lang === 'zh_CN' ? '0 次' : '0 visits');
                 renderedStatsHtml = `
                     <div class="info-card-row info-stats-visits-row">
-                        <span class="info-card-label">${lang === 'zh_CN' ? '累计访问' : 'FOLDER VISITS'}</span>
+                        <span class="info-card-label">${lang === 'zh_CN' ? '累计访问(书签)' : 'FOLDER VISITS (BOOKMARKS)'}</span>
                         <span class="info-card-value">${escapeHtml(visitsText)}</span>
                     </div>
                 `;
@@ -8499,14 +8500,9 @@ function renderInfoSubmenu(context) {
             const statsPromise = (async () => {
                 let historyStats = null;
                 let folderStats = null;
-                let domainStats = null;
                 if (entry.item && entry.item.url && window.HistoryStatsService && typeof window.HistoryStatsService.getSingleUrlHistoryStats === 'function') {
                     try {
                         historyStats = await window.HistoryStatsService.getSingleUrlHistoryStats(entry.item.url, entry.item.title);
-                        const host = window.HistoryStatsService.extractHostname(entry.item.url);
-                        if (host && typeof window.HistoryStatsService.getDomainStats === 'function') {
-                            domainStats = window.HistoryStatsService.getDomainStats(host);
-                        }
                     } catch (_) {}
                 } else if (entry.item && (!entry.item.url || entry.item.type === 'folder') && window.HistoryStatsService) {
                     try {
@@ -8514,12 +8510,21 @@ function renderInfoSubmenu(context) {
                             ? window.HistoryStatsService.extractLeafBookmarks(entry.item)
                             : [];
                         if (leaves.length > 0) {
-                            const statsIndex = await window.HistoryStatsService.ensureHistoryStatsIndex();
-                            folderStats = window.HistoryStatsService.computeFolderAggregatedStats(leaves, statsIndex);
+                            if (!window.HistoryStatsService.isCacheReady() && typeof window.ensureCanvasSearchIndexForModeLoaded === 'function') {
+                                try {
+                                    await window.ensureCanvasSearchIndexForModeLoaded('bookmark');
+                                } catch (_) {}
+                            }
+                            if (window.HistoryStatsService.isCacheReady()) {
+                                folderStats = window.HistoryStatsService.computeFolderAggregatedStats(leaves);
+                            } else {
+                                const statsIndex = await window.HistoryStatsService.ensureHistoryStatsIndex();
+                                folderStats = window.HistoryStatsService.computeFolderAggregatedStats(leaves, statsIndex);
+                            }
                         }
                     } catch (_) {}
                 }
-                return { historyStats, folderStats, domainStats };
+                return { historyStats, folderStats };
             })();
             updateStatsAsync(statsPromise);
         }
@@ -8614,14 +8619,9 @@ function renderInfoSubmenu(context) {
                 const statsPromise = (async () => {
                     let historyStats = null;
                     let folderStats = null;
-                    let domainStats = null;
                     if (node.url && window.HistoryStatsService && typeof window.HistoryStatsService.getSingleUrlHistoryStats === 'function') {
                         try {
                             historyStats = await window.HistoryStatsService.getSingleUrlHistoryStats(node.url, node.title);
-                            const host = window.HistoryStatsService.extractHostname(node.url);
-                            if (host && typeof window.HistoryStatsService.getDomainStats === 'function') {
-                                domainStats = window.HistoryStatsService.getDomainStats(host);
-                            }
                         } catch (_) {}
                     } else if (!node.url && window.HistoryStatsService && chrome && chrome.bookmarks && typeof chrome.bookmarks.getSubTree === 'function') {
                         try {
@@ -8635,12 +8635,21 @@ function renderInfoSubmenu(context) {
                                 ? window.HistoryStatsService.extractLeafBookmarks(subtrees[0], Infinity)
                                 : [];
                             if (childBookmarks.length > 0) {
-                                const statsIndex = await window.HistoryStatsService.ensureHistoryStatsIndex();
-                                folderStats = window.HistoryStatsService.computeFolderAggregatedStats(childBookmarks, statsIndex);
+                                if (!window.HistoryStatsService.isCacheReady() && typeof window.ensureCanvasSearchIndexForModeLoaded === 'function') {
+                                    try {
+                                        await window.ensureCanvasSearchIndexForModeLoaded('bookmark');
+                                    } catch (_) {}
+                                }
+                                if (window.HistoryStatsService.isCacheReady()) {
+                                    folderStats = window.HistoryStatsService.computeFolderAggregatedStats(childBookmarks);
+                                } else {
+                                    const statsIndex = await window.HistoryStatsService.ensureHistoryStatsIndex();
+                                    folderStats = window.HistoryStatsService.computeFolderAggregatedStats(childBookmarks, statsIndex);
+                                }
                             }
                         } catch (_) {}
                     }
-                    return { historyStats, folderStats, domainStats };
+                    return { historyStats, folderStats };
                 })();
                 updateStatsAsync(statsPromise);
             }
@@ -8680,7 +8689,7 @@ function renderTagSubmenu(context) {
             targets,
             anchor
         });
-        return;
+        return true;
     }
 
     if (!tagSubmenuCtx || JSON.stringify(tagSubmenuCtx.targets) !== JSON.stringify(targets)) {
