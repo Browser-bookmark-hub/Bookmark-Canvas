@@ -2133,12 +2133,14 @@
     }
 
     document.addEventListener('mouseover', (ev) => {
+        if (!ev || !ev.target || typeof ev.target.closest !== 'function') return;
         const dot = ev.target.closest('.tree-item-tag-dots.dots-leading .tag-dot');
         if (!dot || dot.classList.contains('tag-dot-more')) return;
         if (ev.relatedTarget && dot.contains(ev.relatedTarget)) return;
         __showHoverBubble(dot);
     });
     document.addEventListener('mouseout', (ev) => {
+        if (!ev || !ev.target || typeof ev.target.closest !== 'function') return;
         const dot = ev.target.closest('.tree-item-tag-dots.dots-leading .tag-dot');
         if (!dot || (ev.relatedTarget && dot.contains(ev.relatedTarget))) return;
         __hideHoverBubble();
@@ -2867,6 +2869,7 @@
     // -------------------------------------------------------------------------
 
     document.addEventListener('click', (ev) => {
+        if (!ev || !ev.target || typeof ev.target.closest !== 'function') return;
         const tagMark = ev.target.closest('.tree-item-tag-dots .tag-dot, .tree-item-tag-chip, .tree-item-tag-chip-more');
         if (tagMark) {
             ev.stopImmediatePropagation();
@@ -2887,6 +2890,7 @@
     // Prevent dragstart from initiating on the tip icon (it's draggable=false but
     // some browsers still bubble the dragstart up; this is defensive).
     document.addEventListener('mousedown', (ev) => {
+        if (!ev || !ev.target || typeof ev.target.closest !== 'function') return;
         const tip = ev.target.closest('.tree-tip-icon, .tree-item-tag-dots, .tree-item-note-marker');
         if (tip) {
             ev.stopImmediatePropagation();

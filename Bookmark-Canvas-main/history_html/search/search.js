@@ -444,8 +444,55 @@ const TAG_BROWSER_COLOR_ORDER = ['red', 'orange', 'yellow', 'green', 'blue', 'pu
 const TAG_BROWSER_ROOT_QUERIES = new Set(['#', '{#}']);
 const NOTE_BROWSER_ROOT_QUERIES = new Set(['*', '{*}']);
 const TIME_BROWSER_ROOT_QUERIES = new Set(['@', '@时间', '@time', '{@}', '{@时间}', '{@time}']);
+const CLICK_BROWSER_ROOT_QUERIES = new Set(['@点击', '@click', '@次数', '@排行', '@hot', '@visit', '@热度', '{@点击}', '{@click}', '{@次数}', '{@排行}', '{@hot}', '{@visit}', '{@热度}']);
+
+function getCanvasClickSearchNeedle(query) {
+    const raw = String(query || '').trim();
+    const lower = raw.toLowerCase();
+    if (CLICK_BROWSER_ROOT_QUERIES.has(lower)) return '';
+    const prefixes = [
+        { prefix: '{@热度}', len: 5, isEn: false },
+        { prefix: '@热度', len: 3, isEn: false },
+        { prefix: '{@点击}', len: 5, isEn: false },
+        { prefix: '@点击', len: 3, isEn: false },
+        { prefix: '{@次数}', len: 5, isEn: false },
+        { prefix: '@次数', len: 3, isEn: false },
+        { prefix: '{@排行}', len: 5, isEn: false },
+        { prefix: '@排行', len: 3, isEn: false },
+        { prefix: '{@click}', len: 8, isEn: false },
+        { prefix: '@click', len: 6, isEn: true },
+        { prefix: '{@visit}', len: 8, isEn: false },
+        { prefix: '@visit', len: 6, isEn: true },
+        { prefix: '{@hot}', len: 6, isEn: false },
+        { prefix: '@hot', len: 4, isEn: true }
+    ];
+    for (let i = 0; i < prefixes.length; i++) {
+        const { prefix, len, isEn } = prefixes[i];
+        if (lower.startsWith(prefix)) {
+            if (isEn) {
+                const nextChar = lower.charAt(len);
+                // 英文前缀如 @hot, @click, @visit 如果紧跟字母/数字（如 @hotel, @hotfix, @clickevent），不视为特殊指令
+                if (nextChar && /^[a-z0-9_]/i.test(nextChar)) {
+                    continue;
+                }
+            }
+            return raw.slice(len).trim().toLowerCase();
+        }
+    }
+    return null;
+}
+
+function isCanvasClickSearchQuery(query) {
+    return getCanvasClickSearchNeedle(query) !== null;
+}
+
+function isClickBrowseRootQuery(query) {
+    const raw = String(query || '').trim().toLowerCase();
+    return CLICK_BROWSER_ROOT_QUERIES.has(raw);
+}
 
 function getCanvasTimeSearchNeedle(query) {
+    if (isCanvasClickSearchQuery(query)) return null;
     const raw = String(query || '').trim();
     const lower = raw.toLowerCase();
     if (TIME_BROWSER_ROOT_QUERIES.has(lower)) return '';
@@ -2986,6 +3033,13 @@ async function handleSearchInputFocus(e) {
             await ensureIndexForModeLoaded(activeMode);
         }
 
+        // 纯按需预热：书签模式下聚焦输入框时，若历史热度索引未就绪，轻量异步触发构建（耗时 ~15ms）
+        if (activeMode === 'bookmark' && typeof window !== 'undefined' && window.HistoryStatsService &&
+            typeof window.HistoryStatsService.ensureHistoryStatsIndex === 'function' &&
+            !window.HistoryStatsService.isCacheReady()) {
+            window.HistoryStatsService.ensureHistoryStatsIndex().catch(() => {});
+        }
+
         const q = (input.value || '').trim().toLowerCase();
 
         if (!q) {
@@ -3012,7 +3066,7 @@ async function handleSearchInputFocus(e) {
  * 点击搜索结果
  */
 function handleSearchResultsPanelClick(e) {
-    if (!e || e._canvasHandled) return;
+    if (!e || e._canvasHandled || !e.target || typeof e.target.closest !== 'function') return;
     const panel = getSearchResultsPanel();
     const panelType = panel && panel.dataset ? panel.dataset.panelType : '';
     if (panelType !== 'results' && panelType !== 'root-browse') return;
@@ -3728,7 +3782,8 @@ function handleSearchResultsPanelClick(e) {
         const groups = searchUiState.bookmarkGroupModel;
         if (Array.isArray(groups)) {
             const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
-            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch });
+            const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(searchUiState.query);
+            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch, isClickSearch });
             renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
         } else {
             // Fallback: rerun search
@@ -3823,7 +3878,8 @@ function handleSearchResultsPanelClick(e) {
         const groups = searchUiState.bookmarkGroupModel;
         if (Array.isArray(groups)) {
             const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
-            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch });
+            const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(searchUiState.query);
+            const nextResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch, isClickSearch });
             renderCanvasSearchResults(nextResults, { view: 'canvas', query: searchUiState.query, selectedIndex: 0 });
         } else {
             searchCanvasAndRender(searchUiState.query);
@@ -4179,12 +4235,19 @@ function highlightSearchKeywords(text, query) {
     const rawTokens = q.toLowerCase().split(/\s+/).map(t => t.trim()).filter(Boolean);
     if (!rawTokens.length) return safeText;
 
-    // 过滤去重，剔除独立特殊模式符号（如 #、*、@、@时间、@time、.、..、...），允许 #tag、*note、@time 高亮其实际词，避免纯点号错误高亮省略号
+    // 过滤去重，剔除独立特殊模式符号（如 #、*、@、@时间、@time、@热度、@hot、@点击、@click、.、..、...），允许 #tag、*note、@time、@hot、@click 高亮其实际词，避免纯点号错误高亮省略号
     let uniqueTokens = Array.from(new Set(rawTokens))
-        .filter(t => !['#', '*', '@', '@时间', '@time'].includes(t) && !/^\.+$/.test(t))
+        .filter(t => !['#', '*', '@', '@时间', '@time', '@热度', '@hot', '@点击', '@click', '@次数', '@排行', '@visit'].includes(t) && !/^\.+$/.test(t))
         .map(t => {
+            if (t.startsWith('@热度')) return t.slice(3);
+            if (t.startsWith('@hot')) return t.slice(4);
             if (t.startsWith('@时间')) return t.slice(3);
             if (t.startsWith('@time')) return t.slice(5);
+            if (t.startsWith('@点击')) return t.slice(3);
+            if (t.startsWith('@次数')) return t.slice(3);
+            if (t.startsWith('@排行')) return t.slice(3);
+            if (t.startsWith('@click')) return t.slice(6);
+            if (t.startsWith('@visit')) return t.slice(6);
             if (t.startsWith('#') || t.startsWith('*') || t.startsWith('@')) return t.slice(1);
             return t;
         })
@@ -5722,6 +5785,7 @@ function getOrCreateGridGroupPopover() {
 
             document.addEventListener('pointerdown', (e) => {
                 if (!isGridGroupPopoverVisible()) return;
+                if (!e || !e.target || typeof e.target.closest !== 'function') return;
                 if (e.target.closest('#searchGridGroupPopover') || e.target.closest('.canvas-bookmark-group-actions, .canvas-bookmark-group-toggle, .canvas-bookmark-group-count, .canvas-bookmark-match-count, .canvas-bookmark-details-toggle, .canvas-grid-location-more-btn, .canvas-table-loc-more-btn, .canvas-table-tag-more-btn, .canvas-grid-tag-more-btn, .canvas-table-date-more-btn, .canvas-grid-date-more-btn, .canvas-table-path-more-btn, .canvas-grid-path-more-btn, .canvas-table-note-more-btn, .canvas-grid-note-more-btn, .canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle, .canvas-table-tag-ellipsis-btn, .search-result-tag-ellipsis-toggle, .canvas-table-note-ellipsis-btn, .search-result-note-ellipsis-toggle, #searchGridDetailsBubble')) {
                     return;
                 }
@@ -6348,6 +6412,7 @@ function getOrCreateGridDetailsBubble() {
 
             document.addEventListener('pointerdown', (e) => {
                 if (!isGridDetailsBubbleVisible()) return;
+                if (!e || !e.target || typeof e.target.closest !== 'function') return;
                 if (e.target.closest('#searchGridDetailsBubble') || e.target.closest('.canvas-bookmark-details-toggle, .canvas-grid-location-more-btn, .canvas-table-loc-more-btn, .canvas-table-tag-more-btn, .canvas-grid-tag-more-btn, .canvas-table-date-more-btn, .canvas-grid-date-more-btn, .canvas-table-path-more-btn, .canvas-grid-path-more-btn, .canvas-table-note-more-btn, .canvas-grid-note-more-btn, .canvas-table-path-ellipsis-btn, .search-result-path-ellipsis-toggle, .canvas-table-tag-ellipsis-btn, .search-result-tag-ellipsis-toggle, .canvas-table-note-ellipsis-btn, .search-result-note-ellipsis-toggle, .canvas-table-note-btn, .canvas-table-note-wrapper, .canvas-table-url-btn, .canvas-table-url-text, .canvas-bookmark-group-actions, .canvas-bookmark-group-toggle, .canvas-bookmark-group-count, .canvas-bookmark-match-count, #searchGridGroupPopover')) {
                     return;
                 }
@@ -7544,6 +7609,7 @@ function getOrCreateSubdomainListPopover() {
 
             document.addEventListener('pointerdown', (e) => {
                 if (!isSubdomainListPopoverVisible()) return;
+                if (!e || !e.target || typeof e.target.closest !== 'function') return;
                 if (e.target.closest('#searchSubdomainListPopover') || e.target.closest('.canvas-table-subdomain-pill-btn, .canvas-grid-subdomain-more-btn')) {
                     return;
                 }
@@ -8640,7 +8706,7 @@ function initSearchEvents() {
         searchResultsPanel.addEventListener('mouseover', handleSearchResultsPanelMouseOver);
         searchResultsPanel.addEventListener('mouseout', handleSearchResultsPanelMouseOut);
         searchResultsPanel.addEventListener('focusin', (e) => {
-            const tempBtn = e && e.target ? e.target.closest('.canvas-bookmark-to-temp-btn') : null;
+            const tempBtn = (e && e.target && typeof e.target.closest === 'function') ? e.target.closest('.canvas-bookmark-to-temp-btn') : null;
             if (tempBtn) hideSearchTitleTooltip();
         });
         searchResultsPanel.addEventListener('focusout', () => { });
@@ -8671,7 +8737,8 @@ function initSearchEvents() {
     // Global delegation listener for bookmark-mode helper links (# tag / * note / @ time).
     if (!document.documentElement.hasAttribute('data-search-helper-link-bound')) {
         document.addEventListener('mousedown', (e) => {
-            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link');
+            if (!e || !e.target || typeof e.target.closest !== 'function') return;
+            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link, .search-helper-click-link, .search-helper-hot-link');
             if (link) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -8686,6 +8753,7 @@ function initSearchEvents() {
                 if (!helperQuery) {
                     if (link.classList.contains('search-helper-note-link')) helperQuery = '*';
                     else if (link.classList.contains('search-helper-time-link')) helperQuery = (getCurrentLangSafe() === 'zh_CN' ? '@时间' : '@time');
+                    else if (link.classList.contains('search-helper-hot-link') || link.classList.contains('search-helper-click-link')) helperQuery = (getCurrentLangSafe() === 'zh_CN' ? '@热度' : '@hot');
                     else helperQuery = '#';
                 }
                 const input = document.getElementById('searchInput');
@@ -8703,7 +8771,8 @@ function initSearchEvents() {
         }, true); // Capture phase
 
         document.addEventListener('click', (e) => {
-            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link');
+            if (!e || !e.target || typeof e.target.closest !== 'function') return;
+            const link = e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link, .search-helper-click-link, .search-helper-hot-link');
             if (link) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -8785,8 +8854,8 @@ const SEARCH_MODES = [
         labelEn: 'Bookmark',
         icon: 'fa-bookmark',
         color: 'mode-color-blue',
-        desc: '标题、URL、文件夹、<a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</a>、<a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*笔记</a>、<a href="#" class="search-helper-time-link" data-helper-query="@时间" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@时间</a>',
-        descEn: 'Title, URL, Folders, <a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</a>、<a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*Notes</a>、<a href="#" class="search-helper-time-link" data-helper-query="@time" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@time</a>'
+        desc: '标题、URL、文件夹、<a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#标签</a>、<a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*笔记</a>、<a href="#" class="search-helper-time-link" data-helper-query="@时间" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@时间</a>、<a href="#" class="search-helper-hot-link search-helper-click-link" data-helper-query="@热度" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@热度</a>',
+        descEn: 'Title, URL, Folders, <a href="#" class="search-helper-tag-link" data-helper-query="#" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">#Tags</a>, <a href="#" class="search-helper-note-link" data-helper-query="*" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">*Notes</a>, <a href="#" class="search-helper-time-link" data-helper-query="@time" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@time</a>, <a href="#" class="search-helper-hot-link search-helper-click-link" data-helper-query="@hot" style="color: var(--accent-blue, #0a84ff); text-decoration: underline; cursor: pointer;">@hot</a>'
     },
     {
         key: 'structure',
@@ -9949,14 +10018,14 @@ function renderSearchModeUI() {
 function getSearchHintHelpContent() {
     const isZh = getCurrentLangSafe() === 'zh_CN';
     const text = isZh
-        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换并实时更新结果；空输入：↑/↓ 直接切换模式。书签模式：光标在输入末尾时，→ 切换书签/文件夹/域名筛选。标签/笔记：搜索标签前加 #，搜索笔记前加 *。候选条目：↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。域名粒度：点击域名旁按钮切换主域名/子域名。'
-        : 'Mode: ← to the left mode button, ↑/↓ switches and updates results; empty: ↑/↓ switches modes directly. Bookmark mode: with cursor at end, → toggles bookmark/folder/domain filter. Tags/notes: prefix tag searches with # and note searches with *. Results: ↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section. Domain granularity: click the domain pill to toggle root/subdomain.';
+        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换并实时更新结果；空输入：↑/↓ 直接切换模式。书签模式：光标在输入末尾时，→ 切换书签/文件夹/域名筛选。标签/笔记/热度：标签前加 #，笔记前加 *；@时间 按添加时间排序，@热度 按历史频次排序。候选条目：↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。域名粒度：点击域名旁按钮切换主域名/子域名。'
+        : 'Mode: ← to the left mode button, ↑/↓ switches and updates results; empty: ↑/↓ switches modes directly. Bookmark mode: with cursor at end, → toggles bookmark/folder/domain filter. Tags/notes/hot: prefix tag with #, note with *; @time sorts by date, @hot sorts by visits. Results: ↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section. Domain granularity: click the domain pill to toggle root/subdomain.';
     const rows = isZh
         ? [
             ['模式切换：', '← 到左侧模式按钮，↑/↓ 切换并实时更新结果；'],
             ['', '空输入：↑/↓ 直接切换模式。'],
             ['书签模式：', '光标在输入末尾时，→ 切换书签/文件夹/域名筛选。'],
-            ['标签/笔记：', '搜索标签前加 #，搜索笔记前加 *。'],
+            ['高级筛选：', '标签前加 #，笔记前加 *；@时间 / @热度 快速排行。'],
             ['候选条目：', '↑/↓ 选择，Enter 跳转；域名结果：Enter 生成临时栏目。'],
             ['域名粒度：', '点击域名旁按钮切换主域名/子域名。']
         ]
@@ -9964,7 +10033,7 @@ function getSearchHintHelpContent() {
             ['Mode:', '← to the left mode button, ↑/↓ switches and updates results;'],
             ['', 'Empty: ↑/↓ switches modes directly.'],
             ['Bookmark:', 'with cursor at end, → toggles bookmark/folder/domain filter.'],
-            ['Tags/notes:', 'prefix tag searches with # and note searches with *.'],
+            ['Advanced:', 'Prefix tags with #, notes with *; @time / @hot quick ranking.'],
             ['Results:', '↑/↓ to select, Enter to jump; Domain results: Enter creates a temp section.'],
             ['Domain:', 'click the domain pill to toggle root/subdomain.']
         ];
@@ -10548,7 +10617,7 @@ function initSearchModeUI() {
             if (menu.dataset.menuType && menu.dataset.menuType !== 'mode') return;
 
             // Ignore clicks/mousedowns on search history section, help button, or helper links
-            if (e.target.closest('.search-history-section') || e.target.closest('.search-hint-help-btn') || e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link')) {
+            if (e.target.closest('.search-history-section') || e.target.closest('.search-hint-help-btn') || e.target.closest('.search-helper-tag-link, .search-helper-note-link, .search-helper-time-link, .search-helper-click-link, .search-helper-hot-link')) {
                 return;
             }
 
@@ -13740,6 +13809,31 @@ function shouldSkipCanvasSearchCandidateForQuery(item, mode, queryContext) {
     return false;
 }
 
+const canvasBookmarkVisitStatsCache = new WeakMap();
+
+/**
+ * 获取书签的访问统计数据（使用 WeakMap 缓存，不污染原始对象，且支持缓存就绪后的动态更新）
+ */
+function getCanvasBookmarkVisitStats(item) {
+    if (!item || typeof item !== 'object') {
+        return { visitCount: 0, lastVisitTime: 0 };
+    }
+    const raw = item.rawItem || item;
+    if (canvasBookmarkVisitStatsCache.has(raw)) {
+        return canvasBookmarkVisitStatsCache.get(raw);
+    }
+    if (window.HistoryStatsService && window.HistoryStatsService.isCacheReady()) {
+        const stats = window.HistoryStatsService.getBookmarkStatsFromIndex(raw);
+        const result = {
+            visitCount: Number(stats && stats.visitCount) || 0,
+            lastVisitTime: Number(stats && stats.lastVisitTime) || 0
+        };
+        canvasBookmarkVisitStatsCache.set(raw, result);
+        return result;
+    }
+    return { visitCount: 0, lastVisitTime: 0 };
+}
+
 /**
  * 计算画布搜索项的匹配分数
  * @param {Object} item - 索引项
@@ -13951,6 +14045,14 @@ function scoreCanvasSearchItem(item, query, options = {}) {
                     } else if (ageMs > 0 && ageMs <= HALF_YEAR_MS) {
                         score += 5;
                     }
+                }
+
+                // 4. 访问频次加权 (Frequency Bonus: +3 ~ +15分，采用对数平滑阻尼，避免马太效应)
+                const visitStats = getCanvasBookmarkVisitStats(item);
+                const visitCount = Number(visitStats && visitStats.visitCount) || 0;
+                if (visitCount > 0) {
+                    // 1次: +3分; 3次: +5分; 7次: +7分; 15次: +10分; 31次: +12分; 63次+: +15分(封顶)
+                    score += Math.min(15, Math.max(3, Math.round(2.5 * Math.log2(visitCount + 1))));
                 }
             } catch (_) { }
         }
@@ -15339,15 +15441,23 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
         }
 
         const group = getOrCreateGroup(key, { title, url, nodeType, extra });
-        group.children.push({ item, s, rawScore });
+        group.children.push(pair);
         group.bestScore = Math.max(group.bestScore, s);
     }
 
     const groups = Array.from(groupsMap.values());
 
     const isTimeSearch = !!(options && options.isTimeSearch);
+    const isClickSearch = !!(options && options.isClickSearch);
     for (const g of groups) {
-        if (isTimeSearch) {
+        if (isClickSearch) {
+            g.children.sort((a, b) => {
+                const visitsA = (a && a.visitCount !== undefined) ? Number(a.visitCount) : getCanvasBookmarkVisitStats(a && a.item).visitCount;
+                const visitsB = (b && b.visitCount !== undefined) ? Number(b.visitCount) : getCanvasBookmarkVisitStats(b && b.item).visitCount;
+                if (visitsB !== visitsA) return visitsB - visitsA;
+                return compareCanvasBookmarkScoredPairs(a, b, scope);
+            });
+        } else if (isTimeSearch) {
             g.children.sort((a, b) => {
                 const timeA = getItemOrFolderTimestamp(a && a.item);
                 const timeB = getItemOrFolderTimestamp(b && b.item);
@@ -15362,8 +15472,16 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
         g.firstOrder = g.firstChild ? getCanvasBookmarkSearchOrderValue(g.firstChild.item) : Number.POSITIVE_INFINITY;
         const uniqueParentPaths = [];
         const parentPathSet = new Set();
+        let groupTotalVisits = 0;
         for (let i = 0; i < g.children.length; i += 1) {
-            const child = g.children[i] && g.children[i].item ? g.children[i].item : null;
+            const childPair = g.children[i];
+            const child = childPair && childPair.item ? childPair.item : null;
+            if (child) {
+                const visits = (childPair && childPair.visitCount !== undefined)
+                    ? Number(childPair.visitCount)
+                    : getCanvasBookmarkVisitStats(child).visitCount;
+                groupTotalVisits += visits;
+            }
             const rawPath = getBookmarkItemParentPathForSearchScope(child, scope);
             const key = rawPath ? rawPath.toLowerCase() : '__root__';
             if (parentPathSet.has(key)) continue;
@@ -15373,6 +15491,21 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
         g.header.parentPaths = uniqueParentPaths;
         g.header.parentPath = uniqueParentPaths.length > 0 ? uniqueParentPaths[0] : '';
         g.header.hasMultipleParentPath = uniqueParentPaths.length > 1;
+        if (g.header.nodeType === 'folder') {
+            const primeChildPair = g.firstChild || g.children[0];
+            const primeChild = primeChildPair && primeChildPair.item;
+            const primeVisits = (primeChildPair && primeChildPair.visitCount !== undefined)
+                ? Number(primeChildPair.visitCount)
+                : (primeChild ? getCanvasBookmarkVisitStats(primeChild).visitCount : 0);
+            g.header.visitCount = primeVisits || groupTotalVisits;
+        } else {
+            const primeChildPair = g.firstChild || g.children[0];
+            const primeChild = primeChildPair && primeChildPair.item;
+            const primeVisits = (primeChildPair && primeChildPair.visitCount !== undefined)
+                ? Number(primeChildPair.visitCount)
+                : (primeChild ? getCanvasBookmarkVisitStats(primeChild).visitCount : 0);
+            g.header.visitCount = primeVisits;
+        }
         const primeItem = (g.firstChild && g.firstChild.item) || (g.children[0] && g.children[0].item) || null;
         if (primeItem) {
             g.header.dateAdded = primeItem.dateAdded !== undefined ? primeItem.dateAdded : null;
@@ -15381,6 +15514,12 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
     }
 
     groups.sort((a, b) => {
+        if (isClickSearch) {
+            const visitsA = Number(a.header && a.header.visitCount) || 0;
+            const visitsB = Number(b.header && b.header.visitCount) || 0;
+            if (visitsB !== visitsA) return visitsB - visitsA;
+            return String(a.header.title || '').localeCompare(String(b.header.title || ''));
+        }
         if (isTimeSearch) {
             const timeA = getItemOrFolderTimestamp(a.header || (a.firstChild && a.firstChild.item));
             const timeB = getItemOrFolderTimestamp(b.header || (b.firstChild && b.firstChild.item));
@@ -15399,7 +15538,13 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups, options = {}) {
     const results = [];
     const isZh = currentLang === 'zh_CN';
     const fullscreenScope = getActiveFullscreenSearchScopeForFiltering();
-    const isTimeSearch = !!(options && options.isTimeSearch);
+    const currentQ = (searchUiState && searchUiState.query) || '';
+    const isTimeSearch = options && options.isTimeSearch !== undefined
+        ? !!options.isTimeSearch
+        : (typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ));
+    const isClickSearch = options && options.isClickSearch !== undefined
+        ? !!options.isClickSearch
+        : (typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ));
 
     const sourceGroups = Array.isArray(groups) ? groups : [];
 
@@ -15416,7 +15561,11 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups, options = {}) {
 
         const sortedChildren = Array.isArray(g.children)
             ? g.children.slice().sort((left, right) => {
-                if (isTimeSearch) {
+                if (isClickSearch) {
+                    const visitsA = (left && left.visitCount !== undefined) ? Number(left.visitCount) : getCanvasBookmarkVisitStats(left && left.item).visitCount;
+                    const visitsB = (right && right.visitCount !== undefined) ? Number(right.visitCount) : getCanvasBookmarkVisitStats(right && right.item).visitCount;
+                    if (visitsB !== visitsA) return visitsB - visitsA;
+                } else if (isTimeSearch) {
                     const timeA = getItemOrFolderTimestamp(left && left.item);
                     const timeB = getItemOrFolderTimestamp(right && right.item);
                     if (timeB !== timeA) return timeB - timeA;
@@ -15582,6 +15731,7 @@ function buildCanvasBookmarkGroupedResultsFromModel(groups, options = {}) {
             children: g.children,
             groupModel: g,
             matchesCount: targetItems.length,
+            visitCount: g.header.visitCount || 0,
             dateAdded: g.header.dateAdded !== undefined ? g.header.dateAdded : (sortedTargetItems[0] ? sortedTargetItems[0].dateAdded : null)
         });
         results.push(headerItem);
@@ -17004,6 +17154,7 @@ function searchCanvasAndRender(query, options = {}) {
     }
     const previousCanvasQuery = String(searchUiState.query || '').trim().toLowerCase();
     const nextCanvasQuery = trimmedQuery.toLowerCase();
+    searchUiState.query = trimmedQuery;
     if (previousCanvasQuery !== nextCanvasQuery) {
         if (typeof exitCanvasSearchSelectionMode === 'function' && isCanvasSearchSelectionModeActive()) {
             exitCanvasSearchSelectionMode({ silent: true });
@@ -17031,18 +17182,20 @@ function searchCanvasAndRender(query, options = {}) {
         }
     }
 
-    // Auto-align mode for Tag / Note / Time browse or queries
+    // Auto-align mode for Tag / Note / Time / Click browse or queries
     const hasBrowseDetail = (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.active === true)
         || (searchUiState.noteBrowseDetail && searchUiState.noteBrowseDetail.active === true);
     const isTagBrowseRoot = typeof isTagBrowseRootQuery === 'function' && isTagBrowseRootQuery(trimmedQuery);
     const isNoteBrowseRoot = typeof isNoteBrowseRootQuery === 'function' && isNoteBrowseRootQuery(trimmedQuery);
     const isTimeBrowseRoot = typeof isTimeBrowseRootQuery === 'function' && isTimeBrowseRootQuery(trimmedQuery);
+    const isClickBrowseRoot = typeof isClickBrowseRootQuery === 'function' && isClickBrowseRootQuery(trimmedQuery);
     const isTagSearch = typeof isCanvasTagSearchQuery === 'function' && isCanvasTagSearchQuery(trimmedQuery)
         && (typeof parsePermanentSectionQuery !== 'function' || parsePermanentSectionQuery(trimmedQuery) === null);
     const isNoteSearch = typeof isCanvasNoteSearchQuery === 'function' && isCanvasNoteSearchQuery(trimmedQuery);
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(trimmedQuery);
+    const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(trimmedQuery);
 
-    if (hasBrowseDetail || isTagBrowseRoot || isNoteBrowseRoot || isTimeBrowseRoot || isTagSearch || isNoteSearch || isTimeSearch) {
+    if (hasBrowseDetail || isTagBrowseRoot || isNoteBrowseRoot || isTimeBrowseRoot || isClickBrowseRoot || isTagSearch || isNoteSearch || isTimeSearch || isClickSearch) {
         if (searchUiState.activeMode !== 'bookmark') {
             searchUiState.activeMode = 'bookmark';
             if (typeof renderSearchModeUI === 'function') {
@@ -17055,6 +17208,20 @@ function searchCanvasAndRender(query, options = {}) {
     let sourceIndex = [];
     const mode = searchUiState.activeMode;
     const queryContext = createCanvasSearchQueryContext(trimmedQuery, mode);
+    if (mode === 'bookmark' &&
+        typeof window !== 'undefined' && window.HistoryStatsService &&
+        typeof window.HistoryStatsService.ensureHistoryStatsIndex === 'function' &&
+        !window.HistoryStatsService.isCacheReady()) {
+        window.HistoryStatsService.ensureHistoryStatsIndex().then(() => {
+            try {
+                const currentQuery = String(searchUiState && searchUiState.query || '').trim();
+                const currentMode = searchUiState && searchUiState.activeMode;
+                if (currentMode === 'bookmark' && currentQuery.toLowerCase() === trimmedQuery.toLowerCase()) {
+                    searchCanvasAndRender(trimmedQuery, { source: 'history-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                }
+            } catch (_) { }
+        }).catch(() => { });
+    }
     if (mode === 'bookmark' && isCanvasTagSearchQuery(trimmedQuery) &&
         typeof window !== 'undefined' && window.TagSystem &&
         typeof window.TagSystem.ensurePermTagsLoaded === 'function' &&
@@ -17068,7 +17235,7 @@ function searchCanvasAndRender(query, options = {}) {
                 }
                 const currentQuery = String(searchUiState && searchUiState.query || '').trim();
                 const currentMode = searchUiState && searchUiState.activeMode;
-                if (currentMode === 'bookmark' && currentQuery === trimmedQuery) {
+                if (currentMode === 'bookmark' && currentQuery.toLowerCase() === trimmedQuery.toLowerCase()) {
                     searchCanvasAndRender(trimmedQuery, { source: 'tag-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
                 }
             } catch (_) { }
@@ -17087,7 +17254,7 @@ function searchCanvasAndRender(query, options = {}) {
                 }
                 const currentQuery = String(searchUiState && searchUiState.query || '').trim();
                 const currentMode = searchUiState && searchUiState.activeMode;
-                if (currentMode === 'bookmark' && currentQuery === trimmedQuery) {
+                if (currentMode === 'bookmark' && currentQuery.toLowerCase() === trimmedQuery.toLowerCase()) {
                     searchCanvasAndRender(trimmedQuery, { source: 'note-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
                 }
             } catch (_) { }
@@ -17140,7 +17307,7 @@ function searchCanvasAndRender(query, options = {}) {
             return;
         }
     }
-    if (mode === 'bookmark' && isTimeBrowseRootQuery(trimmedQuery)) {
+    if (mode === 'bookmark' && (isTimeBrowseRootQuery(trimmedQuery) || (typeof isClickBrowseRootQuery === 'function' && isClickBrowseRootQuery(trimmedQuery)))) {
         if (typeof recordSearchHistory === 'function') {
             recordSearchHistory(trimmedQuery, 'bookmark', { trigger: 'jump' });
         }
@@ -17309,6 +17476,20 @@ function searchCanvasAndRender(query, options = {}) {
             continue;
         }
 
+        // Click search: all bookmark items qualify if root, or score by needle if provided
+        if (mode === 'bookmark' && isClickSearch) {
+            const clickNeedle = getCanvasClickSearchNeedle(trimmedQuery);
+            let rawScore = 100;
+            if (clickNeedle) {
+                rawScore = scoreCanvasSearchItem(item, clickNeedle, { isGroupSearch: false, mode });
+                if (rawScore === -Infinity) continue;
+            }
+            const stats = getCanvasBookmarkVisitStats(item);
+            const scopeBonus = getCanvasScopePriorityForItem(item, fullscreenScope);
+            scored.push({ item, s: rawScore + scopeBonus, rawScore, visitCount: stats.visitCount, lastVisitTime: stats.lastVisitTime });
+            continue;
+        }
+
         // Time search: all bookmark items qualify if root, or score by needle if provided
         if (mode === 'bookmark' && isTimeSearch) {
             const timeNeedle = getCanvasTimeSearchNeedle(trimmedQuery);
@@ -17345,7 +17526,15 @@ function searchCanvasAndRender(query, options = {}) {
     // Bookmark Mode: Group results by "section card" (永久栏目 / 临时栏目)
     if (mode === 'bookmark') {
         const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(trimmedQuery);
-        if (isTimeQuery) {
+        const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(trimmedQuery);
+        if (isClickQuery) {
+            scored.sort((a, b) => {
+                const visitsA = (a.visitCount !== undefined) ? Number(a.visitCount) : getCanvasBookmarkVisitStats(a.item).visitCount;
+                const visitsB = (b.visitCount !== undefined) ? Number(b.visitCount) : getCanvasBookmarkVisitStats(b.item).visitCount;
+                if (visitsB !== visitsA) return visitsB - visitsA;
+                return compareCanvasBookmarkScoredPairs(a, b, fullscreenScope);
+            });
+        } else if (isTimeQuery) {
             scored.sort((a, b) => {
                 const timeA = getItemOrFolderTimestamp(a.item);
                 const timeB = getItemOrFolderTimestamp(b.item);
@@ -17355,9 +17544,9 @@ function searchCanvasAndRender(query, options = {}) {
         } else {
             scored.sort((a, b) => compareCanvasBookmarkScoredPairs(a, b, fullscreenScope));
         }
-        const groups = buildCanvasBookmarkGroupModel(scored, { scope: fullscreenScope, isTimeSearch: isTimeQuery });
+        const groups = buildCanvasBookmarkGroupModel(scored, { scope: fullscreenScope, isTimeSearch: isTimeQuery, isClickSearch: isClickQuery });
         searchUiState.bookmarkGroupModel = groups;
-        const groupedResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch: isTimeQuery });
+        const groupedResults = buildCanvasBookmarkGroupedResultsFromModel(groups, { isTimeSearch: isTimeQuery, isClickSearch: isClickQuery });
         const preferredIndex = getPreferredSearchResultIndexByScope(groupedResults, fullscreenScope);
         renderCanvasSearchResults(groupedResults, {
             view: 'canvas',
@@ -17775,6 +17964,12 @@ function isDomainSearchItemMatched(domain, item, query, detailInput = null, note
     const noteDetail = noteDetailInput && noteDetailInput.active === true ? noteDetailInput : null;
     if (!q) return true;
 
+    if (typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(q)) {
+        const needle = getCanvasClickSearchNeedle(q);
+        if (!needle) return true;
+        return isDomainSearchItemMatched(domain, item, needle, detail, noteDetail);
+    }
+
     if (typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(q)) {
         const needle = getCanvasTimeSearchNeedle(q);
         if (!needle) return true;
@@ -18017,6 +18212,10 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
                     if (ts > latestTimestamp) latestTimestamp = ts;
                 });
             }
+            let domainTotalVisits = 0;
+            if (window.HistoryStatsService && typeof window.HistoryStatsService.getDomainStats === 'function') {
+                domainTotalVisits = window.HistoryStatsService.getDomainStats(entry.domain).visitCount || 0;
+            }
             return {
                 id: `domain:${entry.domain}`,
                 type: 'domain-group',
@@ -18036,12 +18235,20 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
                 childItems: targetItems,
                 locations: canonicalLocations,
                 subdomains: subdomains,
-                matchesCount: targetItems.length
+                matchesCount: targetItems.length,
+                visitCount: domainTotalVisits
             };
         });
 
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(q);
+    const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(q);
     results.sort((a, b) => {
+        if (isClickSearch) {
+            const visitsA = Number(a.visitCount) || 0;
+            const visitsB = Number(b.visitCount) || 0;
+            if (visitsB !== visitsA) return visitsB - visitsA;
+            return String(a.domain || '').localeCompare(String(b.domain || ''));
+        }
         if (isTimeSearch) {
             const timeA = Number(a.dateAdded) || 0;
             const timeB = Number(b.dateAdded) || 0;
@@ -18092,8 +18299,13 @@ function buildCanvasDomainDisplayResultsForQuery(query, scopeInput = null) {
             ? entry.items.filter((child) => !hasQuery || child.matched === true).slice()
             : [];
         const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(query);
+        const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(query);
         childItems.sort((a, b) => {
-            if (isTimeSearch) {
+            if (isClickSearch) {
+                const visitsA = (a && a.visitCount !== undefined) ? Number(a.visitCount) : getCanvasBookmarkVisitStats(a).visitCount;
+                const visitsB = (b && b.visitCount !== undefined) ? Number(b.visitCount) : getCanvasBookmarkVisitStats(b).visitCount;
+                if (visitsB !== visitsA) return visitsB - visitsA;
+            } else if (isTimeSearch) {
                 const timeA = Number(a && a.dateAdded) || 0;
                 const timeB = Number(b && b.dateAdded) || 0;
                 if (timeB !== timeA) return timeB - timeA;
@@ -18864,9 +19076,14 @@ let canvasSearchTabulatorPendingState = {
     isZh: true
 };
 
-// 记录进入 @时间 临时搜索模式前的原始表头排序状态，以便退出时精准复原
+// 状态机：统一管理进入临时搜索模式（@时间 / @点击）前的原始表头排序状态，以便退出时精准复原
+let canvasSearchTabulatorPreSpecialSorts = null;
+let canvasSearchTabulatorActiveSpecialSortMode = null; // null | 'time' | 'click'
+// 兼容性保留别名
 let canvasSearchTabulatorPreTimeSearchSorts = null;
 let canvasSearchTabulatorWasTimeSearch = false;
+let canvasSearchTabulatorPreClickSearchSorts = null;
+let canvasSearchTabulatorWasClickSearch = false;
 
 function cancelCanvasSearchTabulatorLazyLoad() {
     isAppendingTableChunk = false;
@@ -19493,9 +19710,10 @@ function applyTabulatorColumnOrder(cols, mode) {
         orderedCols = indexCol ? [indexCol, ...ordered] : ordered;
     }
 
-    // 检查是否处于 @时间 / @time 临时搜索模式
+    // 检查是否处于 @时间 / @time 或 @点击 / @hot 临时搜索模式
     const currentQ = (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
+    const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ);
     if (isTimeSearch) {
         // 在 @时间 查询下，无论用户是否有手动调整过列顺序，都临时将“创建时间/最近添加”（dateAdded）列挪到“标题/域名”（title 或 domain）的紧邻右侧
         const dateAddedCol = orderedCols.find(c => c && c.field === 'dateAdded');
@@ -19505,6 +19723,17 @@ function applyTabulatorColumnOrder(cols, mode) {
             if (titleIdx >= 0) {
                 colsWithoutDate.splice(titleIdx + 1, 0, dateAddedCol);
                 orderedCols = colsWithoutDate;
+            }
+        }
+    } else if (isClickSearch) {
+        // 在 @点击 / @hot 查询下，无论用户是否有手动调整过列顺序，都临时将“访问频次”（visitCount）列挪到“标题/域名”（title 或 domain）的紧邻右侧
+        const visitCountCol = orderedCols.find(c => c && c.field === 'visitCount');
+        if (visitCountCol) {
+            const colsWithoutVisit = orderedCols.filter(c => c !== visitCountCol);
+            const titleIdx = colsWithoutVisit.findIndex(c => c && (c.field === 'title' || c.field === 'domain'));
+            if (titleIdx >= 0) {
+                colsWithoutVisit.splice(titleIdx + 1, 0, visitCountCol);
+                orderedCols = colsWithoutVisit;
             }
         }
     }
@@ -19535,10 +19764,11 @@ function ensureCanvasTabulatorIndexColumnFirst(tableInstance, activeMode) {
             .map(c => c.getField())
             .filter(f => f && f !== 'index');
 
-        // 如果当前处于 @时间 临时模式，绝不能将临时的列顺序持久化保存，避免覆盖用户日常的正常列顺序
+        // 如果当前处于 @时间 或 @点击 临时模式，绝不能将临时的列顺序持久化保存，避免覆盖用户日常的正常列顺序
         const currentQ = (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
         const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
-        if (!isTimeSearch) {
+        const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ);
+        if (!isTimeSearch && !isClickSearch) {
             saveTabulatorColumnOrder(activeMode, currentFields);
         }
 
@@ -20123,27 +20353,31 @@ function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery,
     const isReady = isCanvasSearchTabulatorReady();
     const currentQ = renderQuery || (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
+    const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ);
 
-    // 状态机：跟踪 @时间 / @time 临时搜索模式与常规搜索模式的互相转换
-    if (isTimeSearch && !canvasSearchTabulatorWasTimeSearch) {
-        // 进入 @时间 模式：记录用户原先的表头排序状态
-        try {
-            if (canvasSearchTabulatorInstance && typeof canvasSearchTabulatorInstance.getSorters === 'function') {
-                const currentSorters = canvasSearchTabulatorInstance.getSorters() || [];
-                canvasSearchTabulatorPreTimeSearchSorts = currentSorters.map(s => ({
-                    column: s.field,
-                    dir: s.dir
-                }));
-            } else {
-                canvasSearchTabulatorPreTimeSearchSorts = [];
+    // 状态机：统一管理临时搜索模式（@时间 / @点击）与常规搜索模式的表头排序状态转换
+    const targetSpecialSortMode = isTimeSearch ? 'time' : (isClickSearch ? 'click' : null);
+    if (targetSpecialSortMode !== null) {
+        if (canvasSearchTabulatorActiveSpecialSortMode === null) {
+            // 首次从常规搜索进入特殊排序模式：记录进入前的原始排序
+            try {
+                if (canvasSearchTabulatorInstance && typeof canvasSearchTabulatorInstance.getSorters === 'function') {
+                    const currentSorters = canvasSearchTabulatorInstance.getSorters() || [];
+                    canvasSearchTabulatorPreSpecialSorts = currentSorters.map(s => ({
+                        column: s.field,
+                        dir: s.dir
+                    }));
+                } else {
+                    canvasSearchTabulatorPreSpecialSorts = [];
+                }
+            } catch (_) {
+                canvasSearchTabulatorPreSpecialSorts = [];
             }
-        } catch (_) {
-            canvasSearchTabulatorPreTimeSearchSorts = [];
         }
-        canvasSearchTabulatorWasTimeSearch = true;
-    } else if (!isTimeSearch && canvasSearchTabulatorWasTimeSearch) {
-        // 退出 @时间 模式
-        canvasSearchTabulatorWasTimeSearch = false;
+        canvasSearchTabulatorActiveSpecialSortMode = targetSpecialSortMode;
+    } else if (canvasSearchTabulatorActiveSpecialSortMode !== null) {
+        // 退出特殊搜索模式
+        canvasSearchTabulatorActiveSpecialSortMode = null;
     }
 
     if (!canvasSearchTabulatorInstance || !isReady || !hasTableholder || canvasSearchTabulatorActiveMode !== activeMode || (canvasSearchTabulatorInstance.options && canvasSearchTabulatorInstance.options.layout !== expectedLayout)) {
@@ -20152,21 +20386,26 @@ function feedCanvasSearchTabulatorData(containerEl, displayResults, renderQuery,
         try {
             canvasSearchTabulatorInstance.setColumns(getCanvasTabulatorColumns(isZh, activeMode, initialData));
             canvasSearchTabulatorInstance.replaceData(initialData);
-            if (isTimeSearch) {
-                // 在 @时间 临时搜索模式下，表头临时与当前结果集内容保持一致（显示降序箭头），直观匹配内容
+            if (canvasSearchTabulatorActiveSpecialSortMode === 'time') {
+                // 在 @时间 临时搜索模式下，表头临时显示降序箭头
                 try {
                     canvasSearchTabulatorInstance.setSort([{ column: "dateAdded", dir: "desc" }]);
                 } catch (_) { }
-            } else if (canvasSearchTabulatorPreTimeSearchSorts !== null) {
-                // 退出 @时间 临时搜索模式时，将表头排序状态严格恢复为进入前的值（如原本是 '-' 未排序，则彻底清除箭头恢复 '-'）
+            } else if (canvasSearchTabulatorActiveSpecialSortMode === 'click') {
+                // 在 @点击 临时搜索模式下，表头临时按 visitCount 降序排
                 try {
-                    if (Array.isArray(canvasSearchTabulatorPreTimeSearchSorts) && canvasSearchTabulatorPreTimeSearchSorts.length > 0) {
-                        canvasSearchTabulatorInstance.setSort(canvasSearchTabulatorPreTimeSearchSorts);
+                    canvasSearchTabulatorInstance.setSort([{ column: "visitCount", dir: "desc" }]);
+                } catch (_) { }
+            } else if (canvasSearchTabulatorPreSpecialSorts !== null) {
+                // 彻底退出特殊搜索模式时，将表头排序状态恢复为进入前的原始状态
+                try {
+                    if (Array.isArray(canvasSearchTabulatorPreSpecialSorts) && canvasSearchTabulatorPreSpecialSorts.length > 0) {
+                        canvasSearchTabulatorInstance.setSort(canvasSearchTabulatorPreSpecialSorts);
                     } else {
                         canvasSearchTabulatorInstance.clearSort();
                     }
                 } catch (_) { }
-                canvasSearchTabulatorPreTimeSearchSorts = null;
+                canvasSearchTabulatorPreSpecialSorts = null;
             }
             safeRedrawCanvasSearchTabulator(false);
         } catch (err) {
@@ -20368,6 +20607,7 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             }
 
             const typeLabel = groupLevel === 'root' ? (isZh ? '主域名' : 'Root Domain') : (isZh ? '子域名' : 'Subdomain');
+            const visitCount = Number(item.visitCount !== undefined ? item.visitCount : ((item.rawItem && item.rawItem.visitCount) !== undefined ? item.rawItem.visitCount : 0)) || 0;
 
             data.push({
                 id: item.id || `domain:${domainKey}`,
@@ -20385,6 +20625,7 @@ function buildCanvasTabulatorData(results, query, options = {}) {
                 path: primaryPath,
                 dateAdded: latestTimestamp,
                 dateAddedText,
+                visitCount,
                 type: 'domain-group',
                 typeLabel,
                 rawItem: item,
@@ -20519,16 +20760,22 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             }
         } catch (_) { }
 
-        // 文件夹路径提取
+        // 文件夹路径提取：优先利用索引期已预计算好的 namedPath / parentPath，极大降低重复回溯树开销
         let parentPath = '';
         try {
-            const targetChild = (item.type === 'bookmark-group' && Array.isArray(item.targetItems) && item.targetItems.length)
-                ? item.targetItems[0]
-                : item;
-            if (typeof getBookmarkItemParentPathForSearchScope === 'function') {
+            if (fullscreenScope && typeof getBookmarkItemParentPathForSearchScope === 'function') {
+                const targetChild = (item.type === 'bookmark-group' && Array.isArray(item.targetItems) && item.targetItems.length)
+                    ? item.targetItems[0]
+                    : item;
                 parentPath = getBookmarkItemParentPathForSearchScope(targetChild, fullscreenScope) || '';
-            } else if (item.path) {
-                parentPath = item.path;
+            } else {
+                parentPath = item.parentPath || (item.header && item.header.parentPath) || item.namedPath || (item.rawItem && item.rawItem.namedPath) || item.path || '';
+                if (!parentPath && typeof getBookmarkItemParentPathForSearchScope === 'function') {
+                    const targetChild = (item.type === 'bookmark-group' && Array.isArray(item.targetItems) && item.targetItems.length)
+                        ? item.targetItems[0]
+                        : item;
+                    parentPath = getBookmarkItemParentPathForSearchScope(targetChild, null) || '';
+                }
             }
         } catch (_) { }
 
@@ -20613,6 +20860,12 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             locationLabel = locations.map(l => l.label || l.title).filter(Boolean).join(', ');
         }
 
+        const visitCount = (item.visitCount !== undefined)
+            ? Number(item.visitCount)
+            : (item.header && item.header.visitCount !== undefined)
+                ? Number(item.header.visitCount)
+                : getCanvasBookmarkVisitStats(item.rawItem || item).visitCount;
+
         data.push({
             id: item.id || `row_${rowIdx}`,
             index: rowIdx++,
@@ -20627,6 +20880,7 @@ function buildCanvasTabulatorData(results, query, options = {}) {
             url,
             dateAdded: creationInfo.timestamp,
             dateAddedText: creationInfo.text,
+            visitCount,
             type: isCardGroup ? 'group' : item.type,
             rawItem: item,
             targetItems: item.targetItems || item.childItems || null,
@@ -21473,6 +21727,24 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                         const txt = d.dateAddedText || '-';
                         return `<div style="display:inline-flex; align-items:center; justify-content:flex-start; width:100%; text-align:left;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
                     }
+                },
+                {
+                    title: isZh ? "访问频次" : "Visits",
+                    field: "visitCount",
+                    width: savedWidths['visitCount'] || 95,
+                    minWidth: 80,
+                    hozAlign: "center",
+                    headerHozAlign: "left",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    headerSortStartingDir: "desc",
+                    sorter: "number",
+                    formatter: (cell) => {
+                        const val = Number(cell.getValue()) || 0;
+                        if (!val) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${val}</span></div>`;
+                    }
                 }
             ];
             return applyTabulatorColumnOrder(cols, 'domain-root');
@@ -21617,6 +21889,24 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
                         const d = cell.getData();
                         const txt = d.dateAddedText || '-';
                         return `<div style="display:inline-flex; align-items:center; justify-content:flex-start; width:100%; text-align:left;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${escapeHtml(txt)}</span></div>`;
+                    }
+                },
+                {
+                    title: isZh ? "访问频次" : "Visits",
+                    field: "visitCount",
+                    width: savedWidths['visitCount'] || 95,
+                    minWidth: 80,
+                    hozAlign: "center",
+                    headerHozAlign: "left",
+                    resizable: true,
+                    headerSort: true,
+                    headerSortTristate: true,
+                    headerSortStartingDir: "desc",
+                    sorter: "number",
+                    formatter: (cell) => {
+                        const val = Number(cell.getValue()) || 0;
+                        if (!val) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                        return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${val}</span></div>`;
                     }
                 }
             ];
@@ -22445,6 +22735,24 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
             }
         },
         {
+            title: isZh ? "访问频次" : "Visits",
+            field: "visitCount",
+            minWidth: 80,
+            width: savedWidths['visitCount'] || 95,
+            hozAlign: "center",
+            headerHozAlign: "left",
+            resizable: true,
+            headerSort: true,
+            headerSortTristate: true,
+            headerSortStartingDir: "desc",
+            sorter: "number",
+            formatter: (cell) => {
+                const val = Number(cell.getValue()) || 0;
+                if (!val) return '<span class="text-muted" style="opacity:0.4;">-</span>';
+                return `<div style="display:inline-flex; align-items:center; justify-content:center; width:100%; text-align:center;"><span class="canvas-table-date-text" style="font-size:11px; color:var(--text-secondary); font-family:var(--font-mono, monospace);">${val}</span></div>`;
+            }
+        },
+        {
             title: isZh ? "网址链接" : "URL",
             field: "url",
             minWidth: 120,
@@ -22760,21 +23068,28 @@ function initCanvasSearchTabulator(containerEl, tableData, isZh) {
     const tabulatorLayout = getCanvasTabulatorLayoutMode(activeMode);
     const currentQ = (searchUiState && searchUiState.query) || (typeof document !== 'undefined' && document.getElementById('searchInput') && document.getElementById('searchInput').value) || '';
     const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQ);
+    const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQ);
 
     let initialSortConfig = undefined;
     if (isTimeSearch) {
-        if (canvasSearchTabulatorPreTimeSearchSorts === null) {
-            canvasSearchTabulatorPreTimeSearchSorts = [];
+        if (canvasSearchTabulatorPreSpecialSorts === null) {
+            canvasSearchTabulatorPreSpecialSorts = [];
         }
-        canvasSearchTabulatorWasTimeSearch = true;
+        canvasSearchTabulatorActiveSpecialSortMode = 'time';
         initialSortConfig = [{ column: "dateAdded", dir: "desc" }];
-    } else if (canvasSearchTabulatorPreTimeSearchSorts && canvasSearchTabulatorPreTimeSearchSorts.length > 0) {
-        initialSortConfig = canvasSearchTabulatorPreTimeSearchSorts;
-        canvasSearchTabulatorPreTimeSearchSorts = null;
-        canvasSearchTabulatorWasTimeSearch = false;
-    } else if (canvasSearchTabulatorWasTimeSearch) {
-        canvasSearchTabulatorPreTimeSearchSorts = null;
-        canvasSearchTabulatorWasTimeSearch = false;
+    } else if (isClickSearch) {
+        if (canvasSearchTabulatorPreSpecialSorts === null) {
+            canvasSearchTabulatorPreSpecialSorts = [];
+        }
+        canvasSearchTabulatorActiveSpecialSortMode = 'click';
+        initialSortConfig = [{ column: "visitCount", dir: "desc" }];
+    } else if (canvasSearchTabulatorPreSpecialSorts && canvasSearchTabulatorPreSpecialSorts.length > 0) {
+        initialSortConfig = canvasSearchTabulatorPreSpecialSorts;
+        canvasSearchTabulatorPreSpecialSorts = null;
+        canvasSearchTabulatorActiveSpecialSortMode = null;
+    } else if (canvasSearchTabulatorActiveSpecialSortMode !== null) {
+        canvasSearchTabulatorPreSpecialSorts = null;
+        canvasSearchTabulatorActiveSpecialSortMode = null;
     }
 
     let placeholderText = isZh ? "无结果" : "No results";
@@ -24028,20 +24343,32 @@ function renderCanvasSearchResults(results, options = {}) {
         const childCreationTimeHtml = renderBookmarkCreationTimeHtml(child, isZh, queryText);
 
         const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(queryText);
+        const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(queryText);
+        const childVisits = (child.visitCount !== undefined) ? Number(child.visitCount) : getCanvasBookmarkVisitStats(child.rawItem || child).visitCount;
+        const childVisitBadgeHtml = (isClickQuery || childVisits > 0)
+            ? `<span class="canvas-bookmark-child-visit-badge" style="display:inline-flex; align-items:center; font-size:10px; color:var(--text-secondary); margin-left:4px; padding:0 3px; border-radius:3px; background:rgba(128,128,128,0.12); flex-shrink:0;">${childVisits}${isZh ? '次' : ' visits'}</span>`
+            : '';
+        const childVisitSnippetHtml = (childVisits > 0 || isClickQuery)
+            ? `<div class="search-result-visit-row" style="font-size:11px; color:var(--text-secondary); display:flex; align-items:center; margin-top:2px;"><span>${isZh ? '访问频次: ' : 'Visits: '}${childVisits} ${isZh ? '次' : 'times'}</span></div>`
+            : '';
+
         const hasPathMatch = isPlainBookmarkDetailsQuery && pathHtml && pathHtml.includes('<mark>');
         const hasTimeMatch = (isPlainBookmarkDetailsQuery && childCreationTimeHtml && childCreationTimeHtml.includes('<mark>')) || isTimeQuery;
         const hasUrlMatch = isPlainBookmarkDetailsQuery && urlHtml && urlHtml.includes('<mark>');
         const hasTagMatch = childTagMarkersHtml && childTagMarkersHtml.includes('<mark>');
         const hasNoteMatch = childNoteSnippetHtml && childNoteSnippetHtml.includes('<mark>');
 
-        const timePriorityOrder = isTimeQuery ? { time: 1, tag: 2, note: 3, path: 4, url: 5 } : null;
+        const effectivePriorityOrder = isClickQuery
+            ? { visit: 0, tag: 1, note: 2, path: 3, url: 4, time: 5 }
+            : (isTimeQuery ? { time: 1, tag: 2, note: 3, path: 4, url: 5 } : null);
         const preview = buildMatchedDetailsPreviewHtml([
+            { type: 'visit', matched: isClickQuery && childVisits > 0, html: childVisitSnippetHtml },
             { type: 'tag', matched: hasTagMatch, html: childTagMarkersHtml ? `<div class="canvas-bookmark-child-tags-row" style="margin-top:3px;">${childTagMarkersHtml}</div>` : '' },
             { type: 'note', matched: hasNoteMatch, html: childNoteSnippetHtml },
             { type: 'path', matched: hasPathMatch, html: pathHtml },
             { type: 'url', matched: hasUrlMatch, html: urlHtml },
             { type: 'time', matched: hasTimeMatch, html: childCreationTimeHtml }
-        ], timePriorityOrder);
+        ], effectivePriorityOrder);
 
         const previewContextHtml = renderDetailsPreviewContextHtml(child, preview, detailsExpanded);
 
@@ -24060,6 +24387,7 @@ function renderCanvasSearchResults(results, options = {}) {
         let childDetailsContentHtml = '';
         childDetailsContentHtml += pathHtml;
         if (childCreationTimeHtml) childDetailsContentHtml += childCreationTimeHtml;
+        if (childVisitSnippetHtml) childDetailsContentHtml += childVisitSnippetHtml;
         childDetailsContentHtml += urlHtml;
         if (childTagsHtml) childDetailsContentHtml += childTagsHtml;
         if (childNoteSnippetHtml) childDetailsContentHtml += childNoteSnippetHtml;
@@ -24078,7 +24406,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 <div class="canvas-bookmark-group-child-topline">
                     <span class="canvas-bookmark-group-child-index">${childIndex + 1}</span>
                     ${renderBookmarkChildIconHtml(child)}
-                    <span class="canvas-bookmark-group-child-title" data-raw-title="${escapeHtml(formattedChild.fullTitle)}">${titleHtml}</span>
+                    <span class="canvas-bookmark-group-child-title" data-raw-title="${escapeHtml(formattedChild.fullTitle)}">${titleHtml}</span>${childVisitBadgeHtml}
                     ${childNoteMarkerHtml ? `<span class="canvas-bookmark-group-child-note">${childNoteMarkerHtml}</span>` : ''}
                 </div>
                 <div class="canvas-bookmark-group-child-meta">
@@ -24872,6 +25200,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     ? `<button type="button" class="canvas-grid-subdomain-more-btn" data-domain="${escapeHtml(domainKey)}" title="${escapeHtml(isZh ? `查看全部 ${subdomainCount} 个旗下子域名` : `View all ${subdomainCount} subdomains`)}" style="background:none; border:none; padding:0; margin:0; font:inherit; color:var(--accent-primary, #0ea5e9); cursor:pointer; text-decoration:underline; text-underline-offset:2px; opacity:0.95;">${escapeHtml(subdomainsLabel)}</button>`
                     : '';
                 const isTimeQuery = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(searchUiState.query);
+                const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(searchUiState.query);
                 let domainDateHtml = '';
                 if (isTimeQuery && item.dateAdded) {
                     try {
@@ -24884,9 +25213,14 @@ function renderCanvasSearchResults(results, options = {}) {
                         }
                     } catch (_) {}
                 }
+                let domainVisitHtml = '';
+                const domainVisits = Number(item.visitCount !== undefined ? item.visitCount : (item.rawItem && item.rawItem.visitCount)) || 0;
+                if ((isClickQuery || domainVisits > 0) && domainVisits > 0) {
+                    domainVisitHtml = ` · <span class="search-domain-visits" style="color:var(--text-secondary); font-size:11px; opacity:0.85;">${domainVisits}${isZh ? '次访问' : ' visits'}</span>`;
+                }
                 const summaryHtml = subdomainsBtnHtml
-                    ? `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)} · ${subdomainsBtnHtml}${domainDateHtml}</div></div>`
-                    : `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)}${domainDateHtml}</div></div>`;
+                    ? `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)} · ${subdomainsBtnHtml}${domainDateHtml}${domainVisitHtml}</div></div>`
+                    : `<div class="search-result-match search-domain-summary"><div class="search-domain-count-line search-domain-bookmarks-count">${escapeHtml(bookmarksLabel)}${domainDateHtml}${domainVisitHtml}</div></div>`;
 
                 descHtml = `<div class="search-result-match canvas-bookmark-group-summary" style="display:flex; flex-direction:column; width:100%; min-width:0;">
                     ${summaryHtml}
@@ -24960,6 +25294,15 @@ function renderCanvasSearchResults(results, options = {}) {
                 if (formatted.isTruncated) {
                     extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formatted.fullTitle)}"`;
                 }
+                const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(searchUiState.query);
+                const groupVisits = Number(item.visitCount !== undefined ? item.visitCount : ((item.header && item.header.visitCount) !== undefined ? item.header.visitCount : ((item.rawItem && item.rawItem.visitCount) !== undefined ? item.rawItem.visitCount : getCanvasBookmarkVisitStats(item.rawItem || item).visitCount))) || 0;
+                const visitBadgeHtml = (isClickQuery || groupVisits > 0)
+                    ? `<span class="canvas-bookmark-visit-badge" style="display:inline-flex; align-items:center; font-size:10px; color:var(--text-secondary); margin-left:4px; padding:0 3px; border-radius:3px; background:rgba(128,128,128,0.12); flex-shrink:0;">${groupVisits}${isZh ? '次' : ' visits'}</span>`
+                    : '';
+                const groupVisitSnippetHtml = (groupVisits > 0 || isClickQuery)
+                    ? `<div class="search-result-visit-row" style="font-size:11px; color:var(--text-secondary); display:flex; align-items:center; margin-top:2px;"><span>${isFolder ? (isZh ? '累计访问: ' : 'Total Visits: ') : (isZh ? '访问频次: ' : 'Visits: ')}${groupVisits} ${isZh ? '次' : 'times'}</span></div>`
+                    : '';
+
                 const countHtml = canExpandGroup
                     ? `<button class="canvas-bookmark-match-count canvas-bookmark-group-count" type="button" data-bookmark-group-id="${escapeHtml(groupId)}" aria-expanded="${isGroupExpanded ? 'true' : 'false'}">${isZh ? `${matchCount}处` : `${matchCount} locations`}</button>`
                     : '';
@@ -24970,7 +25313,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const groupActionsHtml = countHtml || toggleHtml
                     ? `<div class="canvas-bookmark-group-actions">${countHtml}${toggleHtml}</div>`
                     : '';
-                title = `<div class="search-result-bookmark-title-text" data-raw-title="${escapeHtml(formatted.fullTitle)}">${titleText}</div>${noteMarkerHtml}${groupActionsHtml}`;
+                title = `<div class="search-result-bookmark-title-text" data-raw-title="${escapeHtml(formatted.fullTitle)}">${titleText}</div>${visitBadgeHtml}${noteMarkerHtml}${groupActionsHtml}`;
                 const rootLabel = isZh ? '根目录' : 'Root';
                 const parentPathListRaw = Array.isArray(item.parentPaths) ? item.parentPaths : [];
                 const parentPathList = parentPathListRaw.length
@@ -25005,14 +25348,17 @@ function renderCanvasSearchResults(results, options = {}) {
                 const hasTagMatch = tagsRowHtml && tagsRowHtml.includes('<mark>');
                 const hasNoteMatch = noteSnippetHtml && noteSnippetHtml.includes('<mark>');
 
-                const timePriorityOrder = isTimeQuery ? { time: 1, tag: 2, note: 3, path: 4, url: 5 } : null;
+                const effectivePriorityOrder = isClickQuery
+                    ? { visit: 0, tag: 1, note: 2, path: 3, url: 4, time: 5 }
+                    : (isTimeQuery ? { time: 1, tag: 2, note: 3, path: 4, url: 5 } : null);
                 const preview = buildMatchedDetailsPreviewHtml([
+                    { type: 'visit', matched: isClickQuery && groupVisits > 0, html: groupVisitSnippetHtml },
                     { type: 'tag', matched: hasTagMatch, html: tagsRowHtml },
                     { type: 'note', matched: hasNoteMatch, html: noteSnippetHtml },
                     { type: 'path', matched: hasPathMatch, html: parentPathHtml },
                     { type: 'url', matched: hasUrlMatch, html: urlHtml },
                     { type: 'time', matched: hasTimeMatch, html: creationTimeHtml }
-                ], timePriorityOrder);
+                ], effectivePriorityOrder);
 
                 const detailsExpanded = isBookmarkDetailsExpanded(item.id);
                 const previewContextHtml = renderDetailsPreviewContextHtml(item, preview, detailsExpanded);
@@ -25031,6 +25377,7 @@ function renderCanvasSearchResults(results, options = {}) {
                     <div class="canvas-bookmark-details-collapsible" style="display: ${detailsExpanded ? 'flex' : 'none'}; flex-direction: column; width: 100%; min-width: 0; margin-top: 4px; gap: 4px;">
                         ${parentPathHtml}
                         ${creationTimeHtml}
+                        ${groupVisitSnippetHtml}
                         ${urlHtml}
                         ${tagsRowHtml}
                         ${noteSnippetHtml}

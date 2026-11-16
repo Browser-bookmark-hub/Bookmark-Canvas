@@ -226,6 +226,7 @@ function attachPointerDragEvents(treeContainer) {
 function handlePointerDown(e) {
     // 只处理左键
     if (e.button !== 0) return;
+    if (!e || !e.target || typeof e.target.closest !== 'function') return;
 
     // 查找最近的 tree-item
     const treeItem = e.target.closest('.tree-item[data-node-id]');

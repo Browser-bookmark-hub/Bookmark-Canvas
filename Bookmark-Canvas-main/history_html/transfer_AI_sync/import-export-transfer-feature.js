@@ -2508,6 +2508,7 @@ function showImportDialog(options = {}) {
     });
 
     dialog.addEventListener('click', (e) => {
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (e.target === dialog) {
             dialog.remove();
             return;
@@ -4273,6 +4274,7 @@ function showExportModeDialog(options = {}) {
     }
 
     dialog.addEventListener('click', (e) => {
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (e.target === dialog) {
             dialog.remove();
             return;

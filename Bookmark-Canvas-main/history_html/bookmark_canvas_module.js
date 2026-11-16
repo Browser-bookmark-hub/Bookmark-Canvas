@@ -9602,6 +9602,7 @@ function setupCanvasManageModal() {
 
     // 点击其他地方关闭弹窗
     document.addEventListener('click', (e) => {
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (manageModal.style.display === 'block' &&
             !manageModal.contains(e.target) &&
             e.target !== manageBtn &&
@@ -13010,6 +13011,7 @@ function makePermanentSectionDraggable(permanentSection) {
     registerSectionCtrlOverlay(permanentSection);
 
     const onMouseDown = (e) => {
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (permanentSection.classList.contains('canvas-node-maximized')) return;
         // 不要在连接点或其触发区上触发拖动
         if (e.target.closest('.canvas-node-anchor') || e.target.closest('.canvas-anchor-zone')) return;
@@ -24092,6 +24094,7 @@ function wakeSection(section) {
 if (typeof window !== 'undefined' && !window._canvasDormancyClickAttached) {
     window._canvasDormancyClickAttached = true;
     document.addEventListener('mousedown', (e) => {
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         // 检查点击目标是否位于休眠内容中
         const dormantEl = e.target.closest('.dormant-content');
         if (dormantEl && dormantEl.id) {
@@ -25469,6 +25472,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
 
     const onPermanentDocMouseDown = (e) => {
         if (!isEditingTip) return;
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (tipContainer.contains(e.target)) return;
         if (e.target.closest('.md-editing-help-popover')?.__editorOwner === tipText) return;
         if (e.target.closest('.md-toolbar-popover, .md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .md-rgb-picker, .permanent-section-tip-controls, .temp-node-description-controls, .desc-clear-confirm-popover, .desc-height-settings-popover')) return;
@@ -40563,6 +40567,7 @@ function updateScrollbarControls(axis) {
 
 function handleScrollbarTrackMouseDown(event, axis) {
     if (event.button !== 0) return;
+    if (!event || !event.target || typeof event.target.closest !== 'function') return;
     if (event.target.closest('.scrollbar-thumb')) return;
 
     const bar = axis === 'vertical' ? document.getElementById('canvasVerticalScrollbar') : document.getElementById('canvasHorizontalScrollbar');
@@ -43986,6 +43991,9 @@ function updateNodeFullscreenButtons() {
 }
 
 function shouldHandleCustomScroll(event) {
+    if (!event || !event.target || typeof event.target.closest !== 'function') {
+        return false;
+    }
     const workspace = document.getElementById('canvasWorkspace');
     if (!workspace || !workspace.contains(event.target)) {
         return false;
@@ -47092,6 +47100,7 @@ function createCanvasAppearanceSettingsModal() {
     });
 
     modal.addEventListener('click', (e) => {
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
             hidePopovers();
         }
@@ -47536,6 +47545,7 @@ function createCanvasSidePanelSettingsModal() {
     bindSidePanelHelpPopover(helpBtn, helpPopover);
     bindSidePanelHelpPopover(sidePanelSidebarCollapseHelpBtn, sidePanelSidebarCollapseHelpPopover);
     modal.addEventListener('click', (e) => {
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
             hidePopovers();
         }
@@ -49425,6 +49435,7 @@ function createCanvasOtherSettingsModal() {
     bindOtherHelpPopover(tempHelpBtn, tempHelpPopover);
     bindOtherHelpPopover(tempUnlockHelpBtn, tempUnlockHelpPopover);
     modal.addEventListener('click', (e) => {
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
             modal.querySelectorAll('.perf-help-popover.show').forEach(p => p.classList.remove('show'));
         }
@@ -50420,6 +50431,7 @@ function createCanvasPerfSettingsModal() {
 
     // 点击其他区域关闭弹层
     modal.addEventListener('click', (e) => {
+        if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (!e.target.closest('.perf-help-btn') && !e.target.closest('.perf-help-popover')) {
             hidePopovers();
         }

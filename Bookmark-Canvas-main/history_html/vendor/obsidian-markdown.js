@@ -315,6 +315,7 @@
   marked.use({ extensions: [highlightExtension, wikiLinkExtension, calloutExtension, invertedSetextExtension] });
 
   const handleCalloutToggle = (event) => {
+    if (!event || !event.target || typeof event.target.closest !== 'function') return;
     const toggle = event.target.closest('.md-callout-toggle');
     if (!toggle) return;
     const callout = toggle.closest('.md-callout');

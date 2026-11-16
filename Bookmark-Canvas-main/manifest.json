@@ -48,6 +48,7 @@
   "permissions": [
     "sidePanel",
     "bookmarks",
+    "history",
     "storage",
     "clipboardWrite",
     "unlimitedStorage",

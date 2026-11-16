@@ -5164,7 +5164,9 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 
 .search-helper-tag-link,
 .search-helper-note-link,
-.search-helper-time-link {
+.search-helper-time-link,
+.search-helper-click-link,
+.search-helper-hot-link {
     display: inline-block;
     pointer-events: auto !important;
     cursor: pointer !important;
@@ -5174,7 +5176,9 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 
 .search-helper-tag-link:hover,
 .search-helper-note-link:hover,
-.search-helper-time-link:hover {
+.search-helper-time-link:hover,
+.search-helper-click-link:hover,
+.search-helper-hot-link:hover {
     color: #1d4ed8 !important;
     text-decoration: underline !important;
 }
@@ -5193,13 +5197,17 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 
 [data-theme="dark"] .search-helper-tag-link,
 [data-theme="dark"] .search-helper-note-link,
-[data-theme="dark"] .search-helper-time-link {
+[data-theme="dark"] .search-helper-time-link,
+[data-theme="dark"] .search-helper-click-link,
+[data-theme="dark"] .search-helper-hot-link {
     color: #60a5fa !important;
 }
 
 [data-theme="dark"] .search-helper-tag-link:hover,
 [data-theme="dark"] .search-helper-note-link:hover,
-[data-theme="dark"] .search-helper-time-link:hover {
+[data-theme="dark"] .search-helper-time-link:hover,
+[data-theme="dark"] .search-helper-click-link:hover,
+[data-theme="dark"] .search-helper-hot-link:hover {
     color: #93c5fd !important;
 }
 
