@@ -295,6 +295,7 @@
     align-items: center;
     gap: 4px;
     width: 100%;
+    min-width: 0 !important;
 }
 
 .permanent-section-tip {
@@ -304,6 +305,7 @@
     opacity: 0.95;
     line-height: var(--desc-line-height, 1.4);
     flex: 1;
+    min-width: 0 !important;
     padding: 4px 8px 4px 14px;
     border: 1px solid transparent;
     border-radius: 4px;
@@ -1750,10 +1752,12 @@
     display: flex;
     /* IMPORTANT */
     align-items: center;
+    min-width: 0 !important;
 }
 
 .temp-node-description {
     flex: 1;
+    min-width: 0 !important;
     /* Match Permanent Section layout */
     margin: 0;
     padding: 4px 8px 4px 14px;

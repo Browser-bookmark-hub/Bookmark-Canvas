@@ -3557,6 +3557,7 @@ body.canvas-scrollbar-dragging * {
     color: var(--text-secondary);
 }
 
+#otherLinearZoomTitle.other-zoom-input-title,
 #otherZoomCurveTitle.other-zoom-input-title {
     margin-top: 14px;
     margin-bottom: 6px;
@@ -3566,6 +3567,20 @@ body.canvas-scrollbar-dragging * {
     display: flex;
     align-items: center;
     gap: 6px;
+}
+
+#otherLinearZoomTitle.other-zoom-input-title {
+    margin-top: 4px;
+}
+
+#otherLinearZoomFields .other-settings-field-label {
+    white-space: normal;
+}
+
+.other-field-subnote {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-tertiary);
 }
 
 .other-zoom-input-title-note {
@@ -4587,10 +4602,7 @@ html.side-panel-mode .other-linear-rate-control .other-settings-field-label {
     font-size: 11px !important;
 }
 
-html.side-panel-mode #otherTrackpadZoomRate {
-    width: 46px !important;
-    min-width: 46px !important;
-    height: 20px !important;
+html.side-panel-mode .other-field-subnote {
     font-size: 11px !important;
 }
 
@@ -4966,7 +4978,7 @@ html.side-panel-mode .perf-tri-state button {
 
 /* Pele.js Mermaid 图表容器与主题映射 */
 .pele-diagram-container {
-    --pele-bg: transparent;
+    --pele-bg: #ffffff;
     --pele-fg: var(--text-primary, #18181b);
     --pele-muted: var(--text-secondary, #52525b);
     --pele-line: var(--section-color, var(--text-primary, #18181b));
@@ -4992,14 +5004,50 @@ html.side-panel-mode .perf-tri-state button {
 }
 
 [data-theme="dark"] .pele-diagram-container {
+    --pele-bg: var(--bg-secondary, #242526);
     --pele-fg: var(--text-primary, #e4e6eb);
-    --pele-muted: var(--text-secondary, #b0b3b8);
+    --pele-muted: var(--text-secondary, #a0a3a8);
     --pele-line: var(--section-color, var(--text-primary, #e4e6eb));
-    --pele-surface: var(--bg-secondary, #242526);
-    --pele-surface-alt: var(--bg-tertiary, #3a3b3c);
-    --pele-border: var(--border-color, #3a3b3c);
+    --pele-surface: #2d2f33;
+    --pele-surface-alt: #36393e;
+    --pele-border: #4a4d52;
     --pele-accent: var(--section-color, var(--accent-primary, #2d88ff));
-    background-color: rgba(255, 255, 255, 0.03);
+    background-color: rgba(0, 0, 0, 0.18);
+}
+
+/* 徽章与彩色实底节点文字高对比度保护（Timeline年份胶囊、GitGraph分支标签、时序图步骤编号） */
+.pele-diagram-container .pele-period > text,
+.pele-diagram-container .pele-branch > text,
+.pele-diagram-container .pele-sequence-number > text {
+    fill: #ffffff !important;
+}
+
+/* 深色模式：看板图（Kanban）列背景与卡片背景分层优化，彻底解决卡片变纯白矩形且文字看不清的问题 */
+[data-theme="dark"] .pele-diagram-container .pele-kanban .pele-column > rect {
+    fill: #1c1d1f;
+}
+[data-theme="dark"] .pele-diagram-container .pele-kanban .pele-card > rect {
+    fill: #2a2c30;
+    stroke: #42454a;
+}
+
+/* 深色模式：时序图（Sequence）参与者矩形、Note 备注与激活框分层优化 */
+[data-theme="dark"] .pele-diagram-container .pele-sequence .pele-actor-participant > rect {
+    fill: #2d2f33;
+    stroke: #4a4d52;
+}
+[data-theme="dark"] .pele-diagram-container .pele-sequence .pele-note > rect {
+    fill: #34373d;
+    stroke: #4e5259;
+}
+
+/* 深色模式：状态机（State Diagram）状态节点与结束状态圆环优化 */
+[data-theme="dark"] .pele-diagram-container .pele-state .pele-node.pele-state > rect {
+    fill: #2d2f33;
+    stroke: #4a4d52;
+}
+[data-theme="dark"] .pele-diagram-container .pele-state .pele-state-end circle:first-child {
+    fill: var(--bg-secondary, #242526);
 }
 
 .pele-diagram-container svg.pele {
@@ -5007,6 +5055,21 @@ html.side-panel-mode .perf-tri-state button {
     max-width: 100%;
     height: auto;
     flex-shrink: 0;
+}
+
+.permanent-section-tip .pele-diagram-container,
+.temp-node-description .pele-diagram-container {
+    max-height: 160px;
+    margin: 4px 0;
+    padding: 4px;
+    overflow-x: auto;
+    overflow-y: auto;
+    min-width: 0;
+}
+.permanent-section-tip .pele-diagram-container svg.pele,
+.temp-node-description .pele-diagram-container svg.pele {
+    max-width: 100%;
+    height: auto;
 }
 
 .pele-diagram-error-badge {
@@ -5020,5 +5083,308 @@ html.side-panel-mode .perf-tri-state button {
     border-left: 2px solid var(--error, #e74c3c);
     white-space: pre-wrap;
     word-break: break-all;
+}
+
+/* ==========================================================================
+   Mermaid 图表选中态与悬浮操作栏（预览大图 / 编辑源码 / 退出）
+   ========================================================================== */
+.pele-diagram-container {
+    cursor: default;
+    transition: outline-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pele-diagram-container.pele-selected {
+    outline: 2px solid var(--accent-primary, #1877f2) !important;
+    outline-offset: 2px;
+    border-radius: 6px;
+}
+
+@keyframes peleToolbarFadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.pele-diagram-toolbar {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 50;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
+    user-select: none;
+    pointer-events: auto;
+    animation: peleToolbarFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme="dark"] .pele-diagram-toolbar {
+    background: rgba(36, 37, 38, 0.96);
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.pele-diagram-toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary, #18181b);
+    cursor: pointer;
+    transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.pele-diagram-toolbar-btn svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    display: block;
+}
+
+.pele-diagram-toolbar-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--accent-primary, #1877f2);
+}
+
+[data-theme="dark"] .pele-diagram-toolbar-btn {
+    color: var(--text-primary, #e4e6eb);
+}
+
+[data-theme="dark"] .pele-diagram-toolbar-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--accent-primary, #2d88ff);
+}
+
+.pele-diagram-toolbar-btn.pele-btn-close:hover {
+    color: var(--error, #e74c3c);
+    background: rgba(231, 76, 60, 0.12);
+}
+
+/* ==========================================================================
+   Mermaid 全屏浮层微画布（Layer Canvas）- 继承主画布交互与快捷键
+   ========================================================================== */
+.canvas-mermaid-lightbox-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000000 !important;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.16s ease-out;
+    pointer-events: none;
+}
+
+[data-theme="dark"] .canvas-mermaid-lightbox-overlay {
+    background: rgba(0, 0, 0, 0.58);
+}
+
+.canvas-mermaid-lightbox-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.canvas-mermaid-lightbox-header {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2000010 !important;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 20px;
+    background: rgba(30, 32, 35, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    color: #f3f4f6;
+    user-select: none;
+}
+
+.canvas-mermaid-lightbox-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #e5e7eb;
+    font-size: 12px;
+    font-family: var(--font-sans, -apple-system, sans-serif);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.canvas-mermaid-lightbox-btn svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    display: block;
+}
+
+.canvas-mermaid-lightbox-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+
+.canvas-mermaid-lightbox-btn.btn-close:hover {
+    background: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+}
+
+.canvas-mermaid-lightbox-zoom-display {
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+    color: #9ca3af;
+    min-width: 44px;
+    text-align: center;
+}
+
+.canvas-mermaid-lightbox-viewport {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+    cursor: grab;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+.canvas-mermaid-lightbox-viewport.is-panning {
+    cursor: grabbing !important;
+}
+
+.canvas-mermaid-lightbox-viewport.space-pressed {
+    cursor: grab !important;
+}
+
+.canvas-mermaid-lightbox-viewport.space-pressed.is-panning {
+    cursor: grabbing !important;
+}
+
+.canvas-mermaid-lightbox-viewport.is-zooming .canvas-mermaid-lightbox-content,
+.canvas-mermaid-lightbox-viewport.is-panning .canvas-mermaid-lightbox-content {
+    pointer-events: none !important;
+}
+
+.canvas-mermaid-lightbox-content {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+    pointer-events: auto;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+/* 核心：浮层大图画纸（Sheet），自动根据当前主题渲染实底与立体投影，确保文字与连线高对比度完全清晰 */
+.canvas-mermaid-lightbox-content .pele-lightbox-sheet {
+    display: inline-block;
+    padding: 36px 48px !important;
+    margin: 0 !important;
+    border-radius: 14px;
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.2);
+    box-sizing: content-box;
+    transition: background 0.2s ease, border-color 0.2s ease;
+    cursor: inherit !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    -webkit-user-drag: none !important;
+}
+
+.canvas-mermaid-lightbox-content .pele-lightbox-sheet * {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    -webkit-user-drag: none !important;
+}
+
+.canvas-mermaid-lightbox-content svg.pele-lightbox-cloned-svg {
+    display: block;
+    max-width: none !important;
+    max-height: none !important;
+    pointer-events: none !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    -webkit-user-drag: none !important;
+}
+
+[data-theme="dark"] .canvas-mermaid-lightbox-content .pele-lightbox-sheet {
+    background: #242526 !important;
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: 0 28px 72px rgba(0, 0, 0, 0.65), 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-mermaid-lightbox-content svg.pele {
+    display: block;
+    max-width: none !important;
+    max-height: none !important;
+}
+
+.canvas-mermaid-lightbox-hint,
+.canvas-mermaid-lightbox-help-popover {
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2000020 !important;
+    padding: 7px 14px;
+    border-radius: 12px;
+    background: rgba(20, 22, 25, 0.94);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    color: #e5e7eb;
+    font-size: 12px;
+    font-family: var(--font-sans, -apple-system, sans-serif);
+    line-height: 1.4;
+    white-space: nowrap;
+    user-select: none;
+    pointer-events: auto;
+}
+
+.canvas-mermaid-lightbox-hint::after,
+.canvas-mermaid-lightbox-help-popover::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 6px;
+    border-style: solid;
+    border-color: rgba(20, 22, 25, 0.94) transparent transparent transparent;
 }
 

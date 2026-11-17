@@ -48,8 +48,12 @@ module.exports = function loadCanvasRuntime({ platform } = {}) {
     '__clearCanvasDescriptionSelection', '__selectCanvasDescriptionContainer',
     '__bindCanvasDescriptionSelectionClear', '__isSelectionAll',
     '__cleanupCanvasNodeTiptapInstances', 'bindPermanentSectionTipBehavior',
-    'renderCanvasMermaidDiagrams',
-    '__isHeadingNode', '__getHeadingLevel', '__applyHeadingCollapse', '__handleHeadingCollapseClick',
+    'renderCanvasMermaidDiagrams', '__deselectCanvasMermaidDiagram', '__selectCanvasMermaidDiagram',
+    '__triggerDiagramParentEdit', '__getCanvasMermaidLightboxZoomKeyName', '__updateCanvasMermaidLightboxHint',
+    '__ensureCanvasMermaidLightboxOverlay', '__openCanvasMermaidLightbox',
+    '__bindCanvasMermaidSelectionClear',
+    '__isHeadingNode', '__getHeadingLevel', '__applyHeadingCollapse', '__postProcessCanvasObservationDom', '__handleHeadingCollapseClick',
+    '__isViewportLowDetailEffective', 'isCanvasVirtualizationEnabled',
     '__setupDescAutoScroll',
     '__bindFormatEditingHelp', '__syncFormatToolbarActiveStates', '__renderMdNodeImpl',
     '__cleanupMdNodeElementLifecycle', '__resetMdNodeElementForRender',
@@ -73,11 +77,26 @@ module.exports = function loadCanvasRuntime({ platform } = {}) {
     const DESC_CLEAR_CONFIRM_POPOVER_ID = 'test-confirm';
     const DESC_HEIGHT_SETTINGS_POPOVER_ID = 'test-height-pop';
     const CANVAS_BROOM_SVG = '';
+    const PELE_ICON_PREVIEW_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+    const PELE_ICON_EDIT_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>';
+    const PELE_ICON_CLOSE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
     const MD_NODE_DEFAULT_FONT_SIZE = 20;
     const CANVAS_MD_CONTENT_UNLOADED_CLASS = 'md-content-unloaded';
     const CANVAS_PLUGIN_MARKDOWN_SUBTYPE = 'canvas-markdown-blank';
     const CANVAS_PLUGIN_MARKDOWN_SOURCE = 'bookmark-canvas-blank';
     const CanvasState = { mdNodes: [], lowDetailActive: false, selectedMdNodeId: null };
+    window.CanvasState = CanvasState;
+    let activeSelectedDiagram = null;
+    let activeLightboxOverlay = null;
+    let canvasShortcuts = { ctrlKey: 'Control', spaceKey: 'Space' };
+    window.canvasShortcuts = canvasShortcuts;
+    function isMacEnvironment() { return typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || ''); }
+    function getKeyDisplayName(key) { if (key === 'Control') return 'Ctrl'; if (key === 'Meta') return 'Cmd'; if (key === 'Alt') return 'Option'; return key; }
+    function isCustomCtrlKeyPressed(e) { return !!e.ctrlKey; }
+    function isCustomSpaceKeyCode(code) { return code === 'Space'; }
+    window.__canvasActiveSelectedDiagram = null;
+    window.__canvasActiveLightboxOverlay = null;
+    function __getCanvasTotalDataStatsSync() { return window.__canvasTotalStats || { totalColumnCount: 0, totalBookmarkCount: 0, totalFolderCount: 0 }; }
     let __canvasDescSelectionClearBound = false;
     window.sectionSaves = [];
     window.tipSaves = [];

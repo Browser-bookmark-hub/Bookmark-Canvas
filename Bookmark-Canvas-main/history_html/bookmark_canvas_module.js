@@ -183,11 +183,14 @@ const CanvasState = {
     viewportLowDetailEnabled: 'auto', // 'on' | 'off' | 'auto'
     virtualizationEnabled: 'auto', // 'on' | 'off' | 'auto'
     viewportLowDetailDelayS: 3.0, // 进入低细节模式的离屏延迟时间（秒）
+    viewportLowDetailMinColumns: 15, // 总栏目数超过此值时自动触发视野外低细节模式
     viewportLowDetailMinLoadedNodes: 100, // 已加载书签+文件夹数超过此值时自动触发视野外低细节模式
     _loadedNodeCount: 0, // 缓存的已加载节点总数（书签+文件夹）
     _loadedNodeCountAt: 0, // 缓存刷新时间戳
     __viewportLowDetailWasActive: false, // 追踪视野外低细节是否曾激活（用于状态转换清理）
     virtualizationUnloadDelayS: 6.0, // 进入懒加载/卸载的离屏延迟时间（秒）
+    virtualizationMinColumns: 15, // 栏目总数超过此值时自动触发视野外虚拟化
+    virtualizationMinLoadedNodes: 100, // 已加载书签+文件夹数超过此值时自动触发视野外虚拟化
     offScreenNodesTime: new Map(), // 离屏节点的时间戳映射表 (nodeId -> Date.now())
     lowDetailActive: false,
     lowDetailFreezeInv: null,
@@ -2397,6 +2400,7 @@ const TRACKPAD_ZOOM_RATE_DEFAULT = 1.0;
 const CANVAS_PAN_RATE_MIN = 0.4;
 const CANVAS_PAN_RATE_MAX = 3.0;
 const CANVAS_PAN_RATE_DEFAULT = 1.0;
+const TRACKPAD_ZOOM_BASE_SENSITIVITY = 0.012;
 const TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER = 3.0;
 const TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR = 100;
 const TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER = 0.44;
@@ -8767,13 +8771,8 @@ function setupCanvasZoomAndPan() {
     });
     workspace.addEventListener('gestureend', (e) => {
         CanvasState.touchpadState.isPinchGestureActive = false;
-        // 手势结束时，立即触发缩放清理，确保视觉和数据状态一致
-        const workspaceEl = document.getElementById('canvasWorkspace');
-        if (workspaceEl && workspaceEl._zoomEndTimer) {
-            clearTimeout(workspaceEl._zoomEndTimer);
-            workspaceEl._zoomEndTimer = null;
-        }
-        __onCanvasZoomEndCleanup();
+        // 手指离开触控板后，允许硬件惯性事件（momentum tail）自然衰减以实现丝滑滑行；
+        // workspace._zoomEndTimer 会在惯性事件流彻底停止后自动执行 __onCanvasZoomEndCleanup()。
     });
 
     // Ctrl + 滚轮缩放（以鼠标位置为中心）- 性能优化版本
@@ -8798,14 +8797,6 @@ function setupCanvasZoomAndPan() {
         const workspaceEl = document.getElementById('canvasWorkspace');
         const isZoomingActive = workspaceEl && (workspaceEl.classList.contains('is-zooming') || workspaceEl._zoomEndTimer);
         const hasRecentZoom = isZoomingActive || (now - lastZoomTime < 300);
-
-        // 如果是触控板物理捏合，但物理手势已经结束（手指抬起），且不是缩放激活状态，忽略后续的物理捏合惯性事件
-        // 仅在支持且已触发过 gesture 事件的设备/浏览器上启用此惯性拦截，避免在 Windows/Linux 或不支持 gesturestart 的环境下导致缩放完全失效
-        const useGestureCheck = !!CanvasState.touchpadState.gestureEventsSupported;
-        if (__isCanvasTouchpadPinch(e) && useGestureCheck && !CanvasState.touchpadState.isPinchGestureActive && !isZoomingActive) {
-            e.preventDefault();
-            return;
-        }
 
         // 如果近期有缩放，且当前不是任何缩放控制输入，说明是释放修饰键后的惯性滚动，直接拦截
         if (hasRecentZoom && !isCustomCtrlKeyPressed(e) && !e.metaKey && !__isCanvasTouchpadPinch(e)) {
@@ -9038,17 +9029,12 @@ function setupCanvasZoomAndPan() {
                     : 1
             };
             if (isTouchpad) {
-                __cancelCanvasSmoothWheelZoom();
                 __cancelCanvasTrackpadZoomInertia();
-                if (CANVAS_RUNTIME_WINDOWS_LIKE) {
-                    __cancelCanvasPendingZoomUpdate();
-                    setCanvasZoom(newZoom, mouseX, mouseY, zoomOptions);
-                } else {
-                    scheduleZoomUpdate(newZoom, mouseX, mouseY, zoomOptions);
-                }
+                zoomOptions.isTouchpad = true;
+                __queueCanvasSmoothWheelZoom(newZoom, mouseX, mouseY, zoomOptions);
                 if (__isCanvasWinInputDebugEnabled()) {
                     __logCanvasWinInput('wheel-zoom-apply', {
-                        route: 'touchpad-direct-inertia',
+                        route: 'touchpad-smooth',
                         targetZoom: __roundCanvasDebugNumber(newZoom, 5),
                         centerX: __roundCanvasDebugNumber(mouseX, 2),
                         centerY: __roundCanvasDebugNumber(mouseY, 2),
@@ -12101,7 +12087,7 @@ function __applyPermanentViewShellToSectionElement(sectionEl, shell) {
     const tipText = sectionEl.querySelector('.permanent-section-tip');
     if (tipText && !tipText.__tiptapInstance) {
         tipText.innerHTML = __buildTiptapObservationDom(shell.descriptionMd || '');
-        try { __applyHeadingCollapse(tipText); } catch (_) { }
+        try { __postProcessCanvasObservationDom(tipText); } catch (_) { }
     }
 }
 
@@ -15798,7 +15784,7 @@ function __renderMdNodeImpl(node, options = {}) {
         return cand;
     };
     editor.innerHTML = __buildTiptapObservationDom(initialMdSource, !initialMdSource.trim() ? node.html : null);
-    try { __applyHeadingCollapse(editor); } catch (_) { }
+    try { __postProcessCanvasObservationDom(editor); } catch (_) { }
 
     editor.blur = () => {
         const inst = getLiveTiptap();
@@ -16285,21 +16271,55 @@ function __renderMdNodeImpl(node, options = {}) {
             }
         }
 
+        const targetScrollTop = (eventOrCoords && typeof eventOrCoords.offsetTop === 'number')
+            ? Math.max(0, eventOrCoords.offsetTop - 30)
+            : ((eventOrCoords && typeof eventOrCoords.scrollTop === 'number')
+                ? eventOrCoords.scrollTop
+                : savedScrollTop);
+
         if (inst) {
             inst.setEditable(true, false);
-            if (eventOrCoords && typeof inst.focusAtCoords === 'function') {
-                const coords = (typeof eventOrCoords.clientX === 'number')
-                    ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
-                    : eventOrCoords;
-                inst.focusAtCoords(coords, { scrollIntoView: false });
-            } else {
-                inst.focus(null, { scrollIntoView: false });
+            let positioned = false;
+            if (eventOrCoords && eventOrCoords.source) {
+                try {
+                    const doc = inst.editor ? inst.editor.state.doc : null;
+                    if (doc) {
+                        const snippet = eventOrCoords.source.trim().slice(0, 30);
+                        doc.descendants((pmNode, pos) => {
+                            if (positioned) return false;
+                            if (pmNode.type && pmNode.type.name === 'codeBlock') {
+                                const txt = pmNode.textContent || '';
+                                if (txt.includes(snippet) || (pmNode.attrs && pmNode.attrs.language === 'mermaid')) {
+                                    inst.editor.commands.focus(pos + 1, { scrollIntoView: false });
+                                    positioned = true;
+                                    return false;
+                                }
+                            }
+                        });
+                    }
+                } catch (_) { }
+            }
+            if (!positioned) {
+                if (eventOrCoords && eventOrCoords.coords && typeof inst.focusAtCoords === 'function') {
+                    inst.focusAtCoords(eventOrCoords.coords, { scrollIntoView: false });
+                } else if (eventOrCoords && typeof eventOrCoords.clientX === 'number' && typeof inst.focusAtCoords === 'function') {
+                    inst.focusAtCoords({ left: eventOrCoords.clientX, top: eventOrCoords.clientY }, { scrollIntoView: false });
+                } else {
+                    inst.focus(null, { scrollIntoView: false });
+                }
             }
             try { __syncFormatToolbarActiveStates(toolbar, inst); } catch (_) { }
         } else {
             editor.contentEditable = 'true';
             editor.focus();
         }
+
+        editor.scrollTop = targetScrollTop;
+        editor.scrollLeft = savedScrollLeft;
+        requestAnimationFrame(() => {
+            if (editor.scrollTop !== targetScrollTop) editor.scrollTop = targetScrollTop;
+            if (editor.scrollLeft !== savedScrollLeft) editor.scrollLeft = savedScrollLeft;
+        });
     };
 
     const exitEditMode = () => {
@@ -16351,7 +16371,7 @@ function __renderMdNodeImpl(node, options = {}) {
                     typeof finalMd === 'string' ? finalHtml : null,
                     typeof finalMd === 'string'
                 );
-                try { __applyHeadingCollapse(editor); } catch (_) { }
+                try { __postProcessCanvasObservationDom(editor); } catch (_) { }
                 editor.scrollTop = savedScrollTop;
                 editor.scrollLeft = savedScrollLeft;
                 requestAnimationFrame(() => {
@@ -16422,7 +16442,10 @@ function __renderMdNodeImpl(node, options = {}) {
             target.closest('.canvas-layout-zoom-controls') ||
             target.closest('input[type="checkbox"]') ||
             target.closest('ul[data-type="taskList"] li > label') ||
-            target.closest('a')) return;
+            target.closest('a') ||
+            target.closest('.pele-diagram-container') ||
+            target.closest('.pele-diagram-toolbar') ||
+            target.closest('.canvas-mermaid-lightbox-overlay')) return;
 
         // 按住Ctrl键时，暂停编辑模式，允许拖动和调整大小
         if (isSectionCtrlModeEvent(e)) {
@@ -16434,6 +16457,9 @@ function __renderMdNodeImpl(node, options = {}) {
 
         // 全屏时单击直接进入编辑（保持可输入）
         if (el.classList.contains('canvas-node-maximized')) {
+            if (target && target.closest && target.closest('.pele-diagram-container, .pele-diagram-toolbar, .canvas-mermaid-lightbox-overlay')) {
+                return;
+            }
             if (!isInEditMode) {
                 try { selectMdNode(node.id); } catch (_) { }
                 enterEditMode(e);
@@ -16539,7 +16565,10 @@ function __renderMdNodeImpl(node, options = {}) {
             target.closest('.md-align-option') ||
             target.closest('input[type="checkbox"]') ||
             target.closest('ul[data-type="taskList"] li > label') ||
-            target.closest('a')) {
+            target.closest('a') ||
+            target.closest('.pele-diagram-container') ||
+            target.closest('.pele-diagram-toolbar') ||
+            target.closest('.canvas-mermaid-lightbox-overlay')) {
             return;
         }
 
@@ -16569,7 +16598,12 @@ function __renderMdNodeImpl(node, options = {}) {
             ? e.target
             : (e.target && e.target.parentElement ? e.target.parentElement : null);
         if (!target) return;
-        if (target.closest('.resize-handle') || target.closest('.md-node-toolbar-btn') || target.closest('.canvas-layout-zoom-controls')) return;
+        if (target.closest('.resize-handle') ||
+            target.closest('.md-node-toolbar-btn') ||
+            target.closest('.canvas-layout-zoom-controls') ||
+            target.closest('.pele-diagram-container') ||
+            target.closest('.pele-diagram-toolbar') ||
+            target.closest('.canvas-mermaid-lightbox-overlay')) return;
         if (CanvasState.lowDetailActive || el.classList.contains('low-detail-active')) return;
         e.preventDefault();
         e.stopPropagation();
@@ -17502,7 +17536,22 @@ function __sanitizeCanvasRichTextHtml(html) {
         'th',
         'td',
         'colgroup',
-        'col'
+        'col',
+        'svg',
+        'g',
+        'path',
+        'rect',
+        'circle',
+        'line',
+        'polygon',
+        'polyline',
+        'ellipse',
+        'text',
+        'tspan',
+        'marker',
+        'defs',
+        'use',
+        'foreignobject'
     ]);
 
     const allowedAttrs = new Set([
@@ -17532,7 +17581,44 @@ function __sanitizeCanvasRichTextHtml(html) {
         'height',
         'colspan',
         'rowspan',
-        'colwidth'
+        'colwidth',
+        'data-mermaid-source',
+        'viewbox',
+        'preserveaspectratio',
+        'transform',
+        'fill',
+        'stroke',
+        'stroke-width',
+        'stroke-dasharray',
+        'stroke-linecap',
+        'stroke-linejoin',
+        'd',
+        'cx',
+        'cy',
+        'r',
+        'rx',
+        'ry',
+        'x1',
+        'y1',
+        'x2',
+        'y2',
+        'points',
+        'dx',
+        'dy',
+        'text-anchor',
+        'dominant-baseline',
+        'font-size',
+        'font-family',
+        'font-weight',
+        'opacity',
+        'fill-opacity',
+        'stroke-opacity',
+        'xmlns',
+        'xmlns:xlink',
+        'version',
+        'marker-end',
+        'marker-start',
+        'marker-mid'
     ]);
 
     const normalizeExternalHref = (href) => {
@@ -17620,7 +17706,7 @@ function __sanitizeCanvasRichTextHtml(html) {
             const prop = String(parts.shift() || '').trim().toLowerCase();
             const value = parts.join(':').trim();
             if (!prop || !value) return;
-            if (!/^(color|background-color|text-align|font-weight|font-style|text-decoration)$/.test(prop)) return;
+            if (!/^(color|background-color|text-align|font-weight|font-style|text-decoration|fill|stroke|font-size|font-family|opacity|max-width)$/.test(prop)) return;
             if (/javascript:|expression\s*\(|url\s*\(/i.test(value)) return;
             safe.push(`${prop}: ${value}`);
         });
@@ -19000,8 +19086,1085 @@ function __getHeadingLevel(node) {
     return parseInt(node.tagName.slice(1), 10) || 0;
 }
 
+let activeSelectedDiagram = null;
+let activeLightboxOverlay = null;
+if (typeof window !== 'undefined') {
+    window.__canvasActiveSelectedDiagram = null;
+    window.__canvasActiveLightboxOverlay = null;
+}
+
+function __deselectCanvasMermaidDiagram(wrapper) {
+    const active = typeof window !== 'undefined' ? window.__canvasActiveSelectedDiagram : activeSelectedDiagram;
+    const target = wrapper || active;
+    if (target) {
+        target.classList.remove('pele-selected');
+        const toolbar = target.querySelector('.pele-diagram-toolbar');
+        if (toolbar) toolbar.remove();
+    }
+    if (!wrapper || active === wrapper) {
+        activeSelectedDiagram = null;
+        if (typeof window !== 'undefined') {
+            window.__canvasActiveSelectedDiagram = null;
+        }
+    }
+}
+
+const PELE_ICON_PREVIEW_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+const PELE_ICON_EDIT_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>';
+const PELE_ICON_CLOSE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+
+function __selectCanvasMermaidDiagram(wrapper) {
+    if (!wrapper || wrapper.nodeType !== 1) return;
+    try { __bindCanvasMermaidSelectionClear(); } catch (_) { }
+
+    const PELE_ICON_PREVIEW_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
+    const PELE_ICON_EDIT_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>';
+    const PELE_ICON_CLOSE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+    const active = typeof window !== 'undefined' ? window.__canvasActiveSelectedDiagram : activeSelectedDiagram;
+    if (active === wrapper && wrapper.classList.contains('pele-selected')) {
+        return;
+    }
+    if (active && active !== wrapper) {
+        __deselectCanvasMermaidDiagram(active);
+    }
+    activeSelectedDiagram = wrapper;
+    if (typeof window !== 'undefined') {
+        window.__canvasActiveSelectedDiagram = wrapper;
+    }
+    wrapper.classList.add('pele-selected');
+
+    const existingToolbar = wrapper.querySelector('.pele-diagram-toolbar');
+    if (existingToolbar) existingToolbar.remove();
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'pele-diagram-toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Mermaid 图表工具栏');
+
+    ['pointerdown', 'mousedown', 'click', 'dblclick'].forEach((evt) => {
+        toolbar.addEventListener(evt, (e) => {
+            e.stopPropagation();
+        });
+    });
+
+    // 1. 预览大图（纯 SVG 图标，与标题栏按钮风格一致）
+    const previewBtn = document.createElement('button');
+    previewBtn.type = 'button';
+    previewBtn.className = 'pele-diagram-toolbar-btn pele-btn-preview';
+    previewBtn.title = '预览大图 (进入缩放微画布)';
+    previewBtn.setAttribute('aria-label', '预览大图');
+    previewBtn.innerHTML = PELE_ICON_PREVIEW_SVG;
+    previewBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        __openCanvasMermaidLightbox(wrapper);
+    });
+    toolbar.appendChild(previewBtn);
+
+    // 2. 编辑源码（纯 SVG 图标，与标题栏按钮风格一致）
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'pele-diagram-toolbar-btn pele-btn-edit';
+    editBtn.title = '编辑源码 (进入卡片编辑)';
+    editBtn.setAttribute('aria-label', '编辑源码');
+    editBtn.innerHTML = PELE_ICON_EDIT_SVG;
+    editBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        __triggerDiagramParentEdit(wrapper);
+    });
+    toolbar.appendChild(editBtn);
+
+    // 3. 退出（纯 SVG 图标，与标题栏按钮风格一致）
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'pele-diagram-toolbar-btn pele-btn-close';
+    closeBtn.title = '退出选择 (Esc)';
+    closeBtn.setAttribute('aria-label', '退出');
+    closeBtn.innerHTML = PELE_ICON_CLOSE_SVG;
+    closeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        __deselectCanvasMermaidDiagram(wrapper);
+    });
+    toolbar.appendChild(closeBtn);
+
+    wrapper.appendChild(toolbar);
+}
+
+function __triggerDiagramParentEdit(wrapper) {
+    if (!wrapper) return;
+
+    const wrapperRect = (wrapper.getBoundingClientRect && typeof wrapper.getBoundingClientRect === 'function')
+        ? wrapper.getBoundingClientRect()
+        : null;
+    const scrollParent = wrapper.closest('.md-canvas-editor, .temp-node-description, .permanent-section-tip') || wrapper.parentElement;
+    const parentScrollTop = scrollParent ? scrollParent.scrollTop : 0;
+    const wrapperOffsetTop = wrapper.offsetTop || 0;
+    const mermaidSource = wrapper.getAttribute('data-mermaid-source') || '';
+
+    const editTarget = {
+        coords: wrapperRect ? { clientX: wrapperRect.left + 24, clientY: wrapperRect.top + 24 } : null,
+        offsetTop: wrapperOffsetTop,
+        scrollTop: parentScrollTop,
+        source: mermaidSource
+    };
+
+    __deselectCanvasMermaidDiagram(wrapper);
+
+    // 1. Permanent section tip
+    const permTip = wrapper.closest('.permanent-section-tip, .permanent-bookmark-section');
+    if (permTip && typeof permTip.__enterEditingTip === 'function') {
+        permTip.__enterEditingTip(editTarget);
+        return;
+    }
+    const permSection = wrapper.closest('.permanent-bookmark-section');
+    if (permSection && typeof permSection.__enterEditingTip === 'function') {
+        permSection.__enterEditingTip(editTarget);
+        return;
+    }
+
+    // 2. Temp node description
+    const tempDesc = wrapper.closest('.temp-node-description, .temp-canvas-node');
+    if (tempDesc && typeof tempDesc.__enterEditingDescription === 'function') {
+        tempDesc.__enterEditingDescription(editTarget);
+        return;
+    }
+    const tempNode = wrapper.closest('.temp-canvas-node');
+    if (tempNode && typeof tempNode.__enterEditingDescription === 'function') {
+        tempNode.__enterEditingDescription(editTarget);
+        return;
+    }
+
+    // 3. Markdown node
+    const mdNode = wrapper.closest('.canvas-node, [data-node-type="markdown"], [id*="node-"], [id*="card-"]');
+    if (mdNode && typeof mdNode.__enterEditMode === 'function') {
+        mdNode.__enterEditMode(editTarget);
+        return;
+    }
+
+    // 4. Fallback search through parent hierarchy
+    let curr = wrapper.parentElement;
+    while (curr && curr !== document.body) {
+        if (typeof curr.__enterEditingTip === 'function') {
+            curr.__enterEditingTip(editTarget);
+            return;
+        }
+        if (typeof curr.__enterEditingDescription === 'function') {
+            curr.__enterEditingDescription(editTarget);
+            return;
+        }
+        if (typeof curr.__enterEditMode === 'function') {
+            curr.__enterEditMode(editTarget);
+            return;
+        }
+        curr = curr.parentElement;
+    }
+}
+
+function __getCanvasMermaidLightboxZoomKeyName(lang) {
+    const isMac = isMacEnvironment();
+    const ctrlVal = (typeof canvasShortcuts !== 'undefined' && (canvasShortcuts.ctrlKey || canvasShortcuts.ctrl)) || 'Control';
+    if (ctrlVal === 'Control') {
+        return isMac ? 'Ctrl / ⌘' : 'Ctrl';
+    }
+    if (typeof getKeyDisplayName === 'function') {
+        return getKeyDisplayName(ctrlVal, lang);
+    }
+    return ctrlVal;
+}
+
+function __updateCanvasMermaidLightboxHint(overlay) {
+    if (!overlay) return;
+    const hintEl = overlay.querySelector('.canvas-mermaid-lightbox-hint');
+    const helpBtn = overlay.querySelector('[data-action="help"]');
+
+    const lang = (typeof window !== 'undefined' && window.currentLang) ? window.currentLang : 'zh_CN';
+    const isZh = lang === 'zh_CN' || lang.startsWith('zh');
+    const zoomKeyName = __getCanvasMermaidLightboxZoomKeyName(lang);
+
+    const hintText = isZh
+        ? `${zoomKeyName} + 滚轮缩放 · 鼠标拖拽平移 · 双击自适应 · Esc 退出`
+        : `${zoomKeyName} + Wheel zoom · Drag to pan · Double-click to fit · Esc to exit`;
+
+    if (hintEl) {
+        hintEl.textContent = hintText;
+    }
+    if (helpBtn) {
+        helpBtn.setAttribute('title', isZh ? `快捷键与手势说明 (${hintText})` : `Shortcuts & gestures (${hintText})`);
+        helpBtn.setAttribute('aria-label', hintText);
+    }
+}
+
+function __ensureCanvasMermaidLightboxOverlay() {
+    let overlay = typeof window !== 'undefined' ? window.__canvasActiveLightboxOverlay : activeLightboxOverlay;
+    if (overlay && document.body && document.body.contains(overlay)) {
+        __updateCanvasMermaidLightboxHint(overlay);
+        return overlay;
+    }
+    overlay = document.querySelector('.canvas-mermaid-lightbox-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'canvas-mermaid-lightbox-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', 'Mermaid 图表全屏微画布');
+        overlay.innerHTML = `
+            <div class="canvas-mermaid-lightbox-header">
+                <button type="button" class="canvas-mermaid-lightbox-btn btn-help" data-action="help" title="快捷键与手势说明" aria-label="快捷键与手势说明">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                </button>
+                <button type="button" class="canvas-mermaid-lightbox-btn" data-action="zoom-in" title="放大 (+)" aria-label="放大">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <span class="canvas-mermaid-lightbox-zoom-display">100%</span>
+                <button type="button" class="canvas-mermaid-lightbox-btn" data-action="zoom-out" title="缩小 (-)" aria-label="缩小">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <button type="button" class="canvas-mermaid-lightbox-btn" data-action="reset" title="定位复位 (1:1 / 居中)" aria-label="定位复位">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle><circle cx="12" cy="12" r="2"></circle><line x1="12" y1="2" x2="12" y2="5"></line><line x1="12" y1="19" x2="12" y2="22"></line><line x1="2" y1="12" x2="5" y2="12"></line><line x1="19" y1="12" x2="22" y2="12"></line></svg>
+                </button>
+                <button type="button" class="canvas-mermaid-lightbox-btn btn-close" data-action="close" title="关闭 (Esc)" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+                <div class="canvas-mermaid-lightbox-hint canvas-mermaid-lightbox-help-popover" style="display: none;"></div>
+            </div>
+            <div class="canvas-mermaid-lightbox-viewport">
+                <div class="canvas-mermaid-lightbox-content"></div>
+            </div>
+        `;
+        const targetParent = (typeof getOverlayContainer === 'function' ? getOverlayContainer() : null) || document.body;
+        if (targetParent) {
+            targetParent.appendChild(overlay);
+        }
+
+        ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'click', 'dblclick', 'wheel', 'touchstart', 'touchmove', 'touchend', 'keydown', 'keyup', 'contextmenu', 'dragstart', 'selectstart'].forEach((evt) => {
+            overlay.addEventListener(evt, (e) => {
+                e.stopPropagation();
+            });
+        });
+
+        overlay.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+        overlay.addEventListener('dragstart', (e) => {
+            e.preventDefault();
+        });
+        overlay.addEventListener('selectstart', (e) => {
+            e.preventDefault();
+        });
+    }
+    __updateCanvasMermaidLightboxHint(overlay);
+    activeLightboxOverlay = overlay;
+    if (typeof window !== 'undefined') {
+        window.__canvasActiveLightboxOverlay = overlay;
+    }
+    return overlay;
+}
+
+function __openCanvasMermaidLightbox(wrapper) {
+    if (!wrapper) return;
+    const svg = wrapper.querySelector('svg');
+    if (!svg) return;
+
+    const overlay = __ensureCanvasMermaidLightboxOverlay();
+    const viewport = overlay.querySelector('.canvas-mermaid-lightbox-viewport');
+    const content = overlay.querySelector('.canvas-mermaid-lightbox-content');
+    const zoomDisplay = overlay.querySelector('.canvas-mermaid-lightbox-zoom-display');
+
+    __deselectCanvasMermaidDiagram(wrapper);
+
+    content.innerHTML = '';
+
+    // 核心画纸底板（Sheet），外层包裹 .pele-diagram-container 保证深浅色主题、高对比度徽章与字体无缝原生继承
+    const sheet = document.createElement('div');
+    sheet.className = 'pele-diagram-container pele-lightbox-sheet';
+    const clonedSvg = svg.cloneNode(true);
+    clonedSvg.classList.add('pele-lightbox-cloned-svg');
+    sheet.appendChild(clonedSvg);
+    content.appendChild(sheet);
+
+    let svgW = 800;
+    let svgH = 600;
+
+    if (clonedSvg.viewBox && clonedSvg.viewBox.baseVal && clonedSvg.viewBox.baseVal.width > 0) {
+        svgW = clonedSvg.viewBox.baseVal.width;
+        svgH = clonedSvg.viewBox.baseVal.height;
+    } else {
+        const vbAttr = clonedSvg.getAttribute && clonedSvg.getAttribute('viewBox');
+        if (vbAttr) {
+            const parts = vbAttr.trim().split(/[\s,]+/).map(Number);
+            if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+                svgW = parts[2];
+                svgH = parts[3];
+            }
+        } else {
+            const attrW = parseFloat(clonedSvg.getAttribute && clonedSvg.getAttribute('width'));
+            const attrH = parseFloat(clonedSvg.getAttribute && clonedSvg.getAttribute('height'));
+            if (attrW > 0 && attrH > 0) {
+                svgW = attrW;
+                svgH = attrH;
+            } else if (svg.clientWidth > 0 && svg.clientHeight > 0) {
+                svgW = svg.clientWidth;
+                svgH = svg.clientHeight;
+            }
+        }
+    }
+
+    clonedSvg.style.maxWidth = 'none';
+    clonedSvg.style.maxHeight = 'none';
+    clonedSvg.style.width = `${svgW}px`;
+    clonedSvg.style.height = `${svgH}px`;
+
+    // 画纸左右 48px*2、上下 36px*2 留白
+    const sheetTotalW = svgW + 96;
+    const sheetTotalH = svgH + 72;
+
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+
+    const applyTransform = () => {
+        content.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})`;
+        if (zoomDisplay) {
+            zoomDisplay.textContent = `${Math.round(scale * 100)}%`;
+        }
+    };
+
+    // 核心几何锚定：保持鼠标指针下的图形内容点 (contentX, contentY) 在视觉像素上绝对静止！
+    const setLightboxZoom = (newScale, cx, cy) => {
+        newScale = Math.max(0.1, Math.min(10.0, newScale));
+        if (Math.abs(newScale - scale) < 0.000001) return;
+
+        if (cx == null || cy == null) {
+            const vpRect = (viewport.getBoundingClientRect && viewport.getBoundingClientRect()) || {};
+            cx = (vpRect.width || (typeof window !== 'undefined' ? window.innerWidth : 800) || 800) / 2;
+            cy = (vpRect.height || (typeof window !== 'undefined' ? window.innerHeight : 600) || 600) / 2;
+        }
+
+        const contentX = (cx - translateX) / scale;
+        const contentY = (cy - translateY) / scale;
+
+        scale = newScale;
+        translateX = cx - contentX * scale;
+        translateY = cy - contentY * scale;
+
+        applyTransform();
+    };
+
+    let pendingZoomRequest = null;
+    let zoomUpdateFrame = null;
+    let glideAnimFrame = null;
+    let glideTargetScale = null;
+    let glideTargetX = null;
+    let glideTargetY = null;
+    let zoomEndTimer = null;
+
+    // 惯性平移物理模型 (完全对应主画布 startInertiaScroll)
+    let panInertiaVelocityX = 0;
+    let panInertiaVelocityY = 0;
+    let panInertiaFrame = null;
+    let lastPanDeltaX = 0;
+    let lastPanDeltaY = 0;
+    let lastPanTime = 0;
+    let wheelScrollEndTimer = null;
+
+    let smoothZoomTargetScale = null;
+    let smoothZoomCenterX = null;
+    let smoothZoomCenterY = null;
+    let smoothZoomFrame = null;
+    let smoothZoomIsPinch = false;
+
+    const cancelLightboxSmoothZoom = () => {
+        if (smoothZoomFrame && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(smoothZoomFrame);
+            smoothZoomFrame = null;
+        }
+        if (Number.isFinite(smoothZoomTargetScale)) {
+            scale = smoothZoomTargetScale;
+        }
+        smoothZoomTargetScale = null;
+        smoothZoomCenterX = null;
+        smoothZoomCenterY = null;
+    };
+
+    const cancelAllZoomAnimations = () => {
+        cancelLightboxSmoothZoom();
+        if (zoomUpdateFrame && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(zoomUpdateFrame);
+            zoomUpdateFrame = null;
+        }
+        if (glideAnimFrame && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(glideAnimFrame);
+            glideAnimFrame = null;
+        }
+        if (panInertiaFrame && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(panInertiaFrame);
+            panInertiaFrame = null;
+        }
+        if (wheelScrollEndTimer) {
+            clearTimeout(wheelScrollEndTimer);
+            wheelScrollEndTimer = null;
+        }
+        panInertiaVelocityX = 0;
+        panInertiaVelocityY = 0;
+
+        if (pendingZoomRequest && Number.isFinite(pendingZoomRequest.zoom)) {
+            scale = pendingZoomRequest.zoom;
+        }
+        if (Number.isFinite(glideTargetScale)) scale = glideTargetScale;
+        if (Number.isFinite(glideTargetX)) translateX = glideTargetX;
+        if (Number.isFinite(glideTargetY)) translateY = glideTargetY;
+
+        pendingZoomRequest = null;
+        glideTargetScale = null;
+        glideTargetX = null;
+        glideTargetY = null;
+    };
+
+    const runLightboxSmoothZoomStep = () => {
+        smoothZoomFrame = null;
+        if (!Number.isFinite(smoothZoomTargetScale)) return;
+
+        const diff = smoothZoomTargetScale - scale;
+        if (Math.abs(diff) <= 0.0004) {
+            setLightboxZoom(smoothZoomTargetScale, smoothZoomCenterX, smoothZoomCenterY);
+            smoothZoomTargetScale = null;
+            smoothZoomCenterX = null;
+            smoothZoomCenterY = null;
+            return;
+        }
+
+        // 与主画布 Ctrl+滚轮 完全一致的物理步进 (0.30 ~ 0.38)
+        const stepFactor = smoothZoomIsPinch
+            ? (Math.abs(diff) > 0.06 ? 0.38 : 0.30)
+            : (Math.abs(diff) > 0.06 ? 0.34 : 0.26);
+        const nextScale = scale + diff * stepFactor;
+        setLightboxZoom(nextScale, smoothZoomCenterX, smoothZoomCenterY);
+        smoothZoomFrame = requestAnimationFrame(runLightboxSmoothZoomStep);
+    };
+
+    const queueLightboxSmoothZoom = (targetScale, cx, cy, isPinchGesture) => {
+        const clampedTarget = Math.max(0.1, Math.min(10.0, targetScale));
+        smoothZoomTargetScale = clampedTarget;
+        if (Number.isFinite(cx)) smoothZoomCenterX = cx;
+        if (Number.isFinite(cy)) smoothZoomCenterY = cy;
+        smoothZoomIsPinch = !!isPinchGesture;
+
+        if (!smoothZoomFrame) {
+            smoothZoomFrame = requestAnimationFrame(runLightboxSmoothZoomStep);
+        }
+    };
+
+    const startLightboxInertiaPan = () => {
+        const timeSinceLast = Date.now() - (lastPanTime || 0);
+        if (timeSinceLast > 260) return; // 超过 260ms 视为采样过期
+
+        const absVx = Math.abs(lastPanDeltaX);
+        const absVy = Math.abs(lastPanDeltaY);
+        const minSpeed = 0.35;
+        if (absVx < minSpeed && absVy < minSpeed) return;
+
+        // 主画布惯性参数：multiplier 0.72, damping 0.84, stopThreshold 0.12
+        panInertiaVelocityX = lastPanDeltaX * 0.72;
+        panInertiaVelocityY = lastPanDeltaY * 0.72;
+        const damping = 0.84;
+        const stopThreshold = 0.12;
+
+        const stepInertia = () => {
+            panInertiaFrame = null;
+            if (Math.abs(panInertiaVelocityX) > stopThreshold) {
+                translateX += panInertiaVelocityX;
+            }
+            if (Math.abs(panInertiaVelocityY) > stopThreshold) {
+                translateY += panInertiaVelocityY;
+            }
+
+            panInertiaVelocityX *= damping;
+            panInertiaVelocityY *= damping;
+
+            applyTransform();
+
+            if (Math.abs(panInertiaVelocityX) >= stopThreshold || Math.abs(panInertiaVelocityY) >= stopThreshold) {
+                panInertiaFrame = requestAnimationFrame(stepInertia);
+            } else {
+                panInertiaVelocityX = 0;
+                panInertiaVelocityY = 0;
+            }
+        };
+
+        if (panInertiaFrame) cancelAnimationFrame(panInertiaFrame);
+        panInertiaFrame = requestAnimationFrame(stepInertia);
+    };
+
+    const markZoomActivity = () => {
+        viewport.classList.add('is-zooming');
+        if (zoomEndTimer) clearTimeout(zoomEndTimer);
+        zoomEndTimer = setTimeout(() => {
+            viewport.classList.remove('is-zooming');
+            zoomEndTimer = null;
+        }, 280);
+    };
+
+    // 主画布同款：直接 rAF 帧合并缩放（消除人工插值与阶梯顿挫感，确保 60/120Hz 跟手丝滑）
+    const scheduleLightboxZoomUpdate = (newScale, cx, cy) => {
+        newScale = Math.max(0.1, Math.min(10.0, newScale));
+        pendingZoomRequest = { zoom: newScale, cx, cy };
+
+        if (!zoomUpdateFrame) {
+            zoomUpdateFrame = requestAnimationFrame(() => {
+                zoomUpdateFrame = null;
+                if (!pendingZoomRequest) return;
+                const { zoom, cx: reqCx, cy: reqCy } = pendingZoomRequest;
+                pendingZoomRequest = null;
+                setLightboxZoom(zoom, reqCx, reqCy);
+            });
+        }
+    };
+
+    // 针对按钮点击的平滑居中动画 (如 1:1 定位、自适应充满)
+    const animateGlideTo = (destScale, destTx, destTy) => {
+        cancelAllZoomAnimations();
+        glideTargetScale = destScale;
+        glideTargetX = destTx;
+        glideTargetY = destTy;
+
+        const stepGlide = () => {
+            glideAnimFrame = null;
+            const ds = destScale - scale;
+            const dx = destTx - translateX;
+            const dy = destTy - translateY;
+
+            if (Math.abs(ds) < 0.001 && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+                scale = destScale;
+                translateX = destTx;
+                translateY = destTy;
+                glideTargetScale = null;
+                glideTargetX = null;
+                glideTargetY = null;
+                applyTransform();
+                return;
+            }
+
+            scale += ds * 0.28;
+            translateX += dx * 0.28;
+            translateY += dy * 0.28;
+            applyTransform();
+            glideAnimFrame = requestAnimationFrame(stepGlide);
+        };
+
+        if (typeof requestAnimationFrame === 'function') {
+            glideAnimFrame = requestAnimationFrame(stepGlide);
+        } else {
+            scale = destScale;
+            translateX = destTx;
+            translateY = destTy;
+            glideTargetScale = null;
+            glideTargetX = null;
+            glideTargetY = null;
+            applyTransform();
+        }
+    };
+
+    const fitToView = (animate = true) => {
+        cancelAllZoomAnimations();
+        const vpRect = (viewport.getBoundingClientRect && viewport.getBoundingClientRect()) || {};
+        const vpW = vpRect.width || (typeof window !== 'undefined' ? window.innerWidth : 1000) || 1000;
+        const vpH = vpRect.height || (typeof window !== 'undefined' ? window.innerHeight : 800) || 800;
+        const marginX = 80;
+        const marginY = 80;
+        const availW = Math.max(200, vpW - marginX * 2);
+        const availH = Math.max(200, vpH - marginY * 2);
+
+        const fitScale = Math.min(availW / sheetTotalW, availH / sheetTotalH);
+        const targetS = Math.max(0.15, Math.min(5.0, fitScale));
+        const targetX = (vpW - sheetTotalW * targetS) / 2;
+        const targetY = (vpH - sheetTotalH * targetS) / 2;
+
+        if (animate) {
+            animateGlideTo(targetS, targetX, targetY);
+        } else {
+            scale = targetS;
+            translateX = targetX;
+            translateY = targetY;
+            applyTransform();
+        }
+    };
+
+    const resetToActual = () => {
+        cancelAllZoomAnimations();
+        const vpRect = (viewport.getBoundingClientRect && viewport.getBoundingClientRect()) || {};
+        const vpW = vpRect.width || (typeof window !== 'undefined' ? window.innerWidth : 1000) || 1000;
+        const vpH = vpRect.height || (typeof window !== 'undefined' ? window.innerHeight : 800) || 800;
+        const targetS = 1;
+        const targetX = (vpW - sheetTotalW) / 2;
+        const targetY = (vpH - sheetTotalH) / 2;
+
+        animateGlideTo(targetS, targetX, targetY);
+    };
+
+    const zoomAtPoint = (cx, cy, factor) => {
+        cancelAllZoomAnimations();
+        const newTarget = Math.max(0.1, Math.min(10.0, scale * factor));
+        setLightboxZoom(newTarget, cx, cy);
+    };
+
+    const zoomAtCenter = (factor) => {
+        const vpRect = (viewport.getBoundingClientRect && viewport.getBoundingClientRect()) || {};
+        const cx = (vpRect.width || (typeof window !== 'undefined' ? window.innerWidth : 800) || 800) / 2;
+        const cy = (vpRect.height || (typeof window !== 'undefined' ? window.innerHeight : 600) || 600) / 2;
+        zoomAtPoint(cx, cy, factor);
+    };
+
+    overlay.classList.add('active');
+    __updateCanvasMermaidLightboxHint(overlay);
+
+    sheet.setAttribute('draggable', 'false');
+    clonedSvg.setAttribute('draggable', 'false');
+
+    // 打开时无缝自适应居中，无需动画滑动延迟
+    fitToView(false);
+
+    if (overlay.__cleanupListeners) {
+        overlay.__cleanupListeners();
+    }
+
+    let isPointerDown = false;
+    let startX = 0;
+    let startY = 0;
+    let lastPointerX = 0;
+    let lastPointerY = 0;
+
+    const helpBtn = overlay.querySelector('[data-action="help"]');
+    const helpPopover = overlay.querySelector('.canvas-mermaid-lightbox-help-popover');
+    const onHelpEnter = () => {
+        if (helpPopover) helpPopover.style.display = 'block';
+    };
+    const onHelpLeave = () => {
+        if (helpPopover && (!helpBtn || !helpBtn.classList.contains('active'))) {
+            helpPopover.style.display = 'none';
+        }
+    };
+    if (helpBtn) {
+        helpBtn.addEventListener('mouseenter', onHelpEnter);
+        helpBtn.addEventListener('mouseleave', onHelpLeave);
+    }
+
+    const onPointerDown = (e) => {
+        if (helpPopover && helpPopover.style.display !== 'none' && (!helpBtn || !helpBtn.contains(e.target))) {
+            helpPopover.style.display = 'none';
+            if (helpBtn) helpBtn.classList.remove('active');
+        }
+        if (e.target && e.target.closest && e.target.closest('.canvas-mermaid-lightbox-header, button, input, select, textarea')) return;
+        // 支持左键 (0)、中键 (1)、Mac Ctrl+单击/右键 (2)
+        if (e.button !== undefined && e.button !== 0 && e.button !== 1 && e.button !== 2) return;
+
+        cancelAllZoomAnimations();
+        isPointerDown = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        lastPointerX = e.clientX;
+        lastPointerY = e.clientY;
+        lastPanDeltaX = 0;
+        lastPanDeltaY = 0;
+        lastPanTime = Date.now();
+
+        viewport.classList.add('is-panning');
+        try { if (viewport.setPointerCapture && e.pointerId != null) viewport.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
+        e.stopPropagation();
+    };
+
+    const onPointerMove = (e) => {
+        if (!isPointerDown) return;
+        const dx = e.clientX - lastPointerX;
+        const dy = e.clientY - lastPointerY;
+
+        lastPointerX = e.clientX;
+        lastPointerY = e.clientY;
+
+        translateX += dx;
+        translateY += dy;
+        applyTransform();
+
+        const blend = 0.72;
+        lastPanDeltaX = (lastPanDeltaX * (1 - blend)) + (dx * blend);
+        lastPanDeltaY = (lastPanDeltaY * (1 - blend)) + (dy * blend);
+        lastPanTime = Date.now();
+
+        e.preventDefault();
+        e.stopPropagation();
+    };
+
+    const onPointerUp = (e) => {
+        if (!isPointerDown) return;
+        isPointerDown = false;
+        viewport.classList.remove('is-panning');
+        try {
+            if (viewport.releasePointerCapture && e.pointerId != null && viewport.hasPointerCapture && viewport.hasPointerCapture(e.pointerId)) {
+                viewport.releasePointerCapture(e.pointerId);
+            }
+        } catch (_) {}
+        applyTransform();
+
+        // 松手时启动主画布同款惯性滑行
+        startLightboxInertiaPan();
+
+        e.preventDefault();
+        e.stopPropagation();
+    };
+
+    const onMouseDown = (e) => {
+        if (isPointerDown) return;
+        onPointerDown(e);
+    };
+
+    const onMouseMove = (e) => {
+        if (!isPointerDown) return;
+        onPointerMove(e);
+    };
+
+    const onMouseUp = (e) => {
+        if (!isPointerDown) return;
+        onPointerUp(e);
+    };
+
+    const onWheel = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const isPinch = (typeof __isCanvasTouchpadPinch === 'function') && __isCanvasTouchpadPinch(e);
+        const ctrlVal = (typeof canvasShortcuts !== 'undefined' && (canvasShortcuts.ctrlKey || canvasShortcuts.ctrl)) || 'Control';
+        let isPhysicalModifierActive = false;
+        if (!isPinch) {
+            switch (ctrlVal) {
+                case 'Control':
+                    isPhysicalModifierActive = !!(CanvasState?.physicalModifiers?.Control || CanvasState?.isCtrlPressed || e.ctrlKey);
+                    break;
+                case 'Alt':
+                    isPhysicalModifierActive = !!(CanvasState?.physicalModifiers?.Alt || e.altKey);
+                    break;
+                case 'Shift':
+                    isPhysicalModifierActive = !!(CanvasState?.physicalModifiers?.Shift || e.shiftKey);
+                    break;
+                case 'Meta':
+                    isPhysicalModifierActive = !!(CanvasState?.physicalModifiers?.Meta || e.metaKey);
+                    break;
+                default:
+                    isPhysicalModifierActive = typeof isCustomCtrlKeyPressed === 'function' ? isCustomCtrlKeyPressed(e) : !!e.ctrlKey;
+                    break;
+            }
+        }
+        const isModifierZoom = !isPinch && (isPhysicalModifierActive || (ctrlVal === 'Control' && (e.ctrlKey || e.metaKey)) || (isMacEnvironment() && e.metaKey));
+        const isZoom = isPinch || isModifierZoom;
+
+        // 1. 标准化滚轮增量 (Pixel, Line, Page 跨平台统一)
+        const normalized = (typeof __normalizeCanvasWheelEventDeltas === 'function')
+            ? __normalizeCanvasWheelEventDeltas(e)
+            : { deltaX: e.deltaX || 0, deltaY: e.deltaY || 0 };
+
+        const vpRect = (viewport.getBoundingClientRect && viewport.getBoundingClientRect()) || {};
+        const cx = e.clientX - (vpRect.left || 0);
+        const cy = e.clientY - (vpRect.top || 0);
+
+        if (isZoom) {
+            // 取消平移动画与惯性
+            if (panInertiaFrame) {
+                cancelAnimationFrame(panInertiaFrame);
+                panInertiaFrame = null;
+            }
+            if (wheelScrollEndTimer) {
+                clearTimeout(wheelScrollEndTimer);
+                wheelScrollEndTimer = null;
+            }
+            if (glideAnimFrame) {
+                cancelAnimationFrame(glideAnimFrame);
+                glideAnimFrame = null;
+                glideTargetScale = null;
+                glideTargetX = null;
+                glideTargetY = null;
+            }
+
+            markZoomActivity();
+
+            const rawDelta = normalized.deltaY !== 0 ? -normalized.deltaY : -normalized.deltaX;
+
+            const baseScaleForCalc = Number.isFinite(smoothZoomTargetScale)
+                ? smoothZoomTargetScale
+                : (pendingZoomRequest && Number.isFinite(pendingZoomRequest.zoom) ? pendingZoomRequest.zoom : scale);
+
+            let zoomFactor = 1;
+            if (isPinch) {
+                zoomFactor = (typeof getCanvasTrackpadZoomFactor === 'function')
+                    ? getCanvasTrackpadZoomFactor(rawDelta, baseScaleForCalc)
+                    : Math.exp(rawDelta * TRACKPAD_ZOOM_BASE_SENSITIVITY);
+            } else {
+                // 机械鼠标滚轮（Ctrl/Cmd + 滚轮）缩放：保持原有的鼠标滚轮管线
+                const wheelCurveSpeedFactor = (typeof getCanvasZoomSpeedFactor === 'function')
+                    ? getCanvasZoomSpeedFactor(baseScaleForCalc)
+                    : 1;
+                // 复用主画布精准系数：rawDelta * wheelCurveSpeedFactor * 0.5 * 1.35 * 0.001
+                const effectiveDelta = rawDelta * wheelCurveSpeedFactor * 0.5 * 1.35;
+                zoomFactor = Math.exp(effectiveDelta * 0.001);
+            }
+
+            const newScale = Math.max(0.1, Math.min(10.0, baseScaleForCalc * zoomFactor));
+            queueLightboxSmoothZoom(newScale, cx, cy, isPinch);
+        } else {
+            // ====== 平移/垂直滚动管线 (直接位移 + 主画布同款 0.84 阻尼惯性平移) ======
+            let horizontalDelta = normalized.deltaX;
+            let verticalDelta = normalized.deltaY;
+
+            // Shift + 滚轮 横向滚动
+            if (e.shiftKey) {
+                horizontalDelta = horizontalDelta !== 0 ? horizontalDelta : verticalDelta;
+                verticalDelta = 0;
+            }
+
+            if (horizontalDelta !== 0 || verticalDelta !== 0) {
+                if (panInertiaFrame) {
+                    cancelAnimationFrame(panInertiaFrame);
+                    panInertiaFrame = null;
+                }
+                if (glideAnimFrame) {
+                    cancelAnimationFrame(glideAnimFrame);
+                    glideAnimFrame = null;
+                    glideTargetScale = null;
+                    glideTargetX = null;
+                    glideTargetY = null;
+                }
+
+                const panDeltaX = -horizontalDelta;
+                const panDeltaY = -verticalDelta;
+
+                translateX += panDeltaX;
+                translateY += panDeltaY;
+                applyTransform();
+
+                // 累积平移速度采样 (复用主画布 WHEEL_PAN_INERTIA_SAMPLE_BLEND: 0.72)
+                const blend = 0.72;
+                lastPanDeltaX = (lastPanDeltaX * (1 - blend)) + (panDeltaX * blend);
+                lastPanDeltaY = (lastPanDeltaY * (1 - blend)) + (panDeltaY * blend);
+                lastPanTime = Date.now();
+
+                // 滚动停止 60ms 后启动平滑惯性减速拖尾
+                if (wheelScrollEndTimer) clearTimeout(wheelScrollEndTimer);
+                wheelScrollEndTimer = setTimeout(() => {
+                    wheelScrollEndTimer = null;
+                    startLightboxInertiaPan();
+                }, 60);
+            }
+        }
+    };
+
+    const onDblClick = (e) => {
+        if (e.target && e.target.closest && e.target.closest('button, a')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        fitToView();
+    };
+
+    const onKeyDown = (e) => {
+        if (!overlay.classList.contains('active')) return;
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (helpPopover && helpPopover.style.display !== 'none') {
+                helpPopover.style.display = 'none';
+                if (helpBtn) helpBtn.classList.remove('active');
+                return;
+            }
+            closeLightbox();
+            return;
+        }
+        if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            e.stopPropagation();
+            zoomAtCenter(1.25);
+            return;
+        }
+        if (e.key === '-' || e.key === '_') {
+            e.preventDefault();
+            e.stopPropagation();
+            zoomAtCenter(1 / 1.25);
+            return;
+        }
+        if (e.key === '0') {
+            e.preventDefault();
+            e.stopPropagation();
+            resetToActual();
+            return;
+        }
+        if (e.code === 'Space' || (typeof isCustomSpaceKeyCode === 'function' && isCustomSpaceKeyCode(e.code))) {
+            viewport.classList.add('space-pressed');
+            return;
+        }
+        const isCtrlCode = (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') || (typeof isCustomCtrlKeyCode === 'function' && isCustomCtrlKeyCode(e.code));
+        if (isCtrlCode) {
+            viewport.classList.add('ctrl-pressed');
+        }
+    };
+
+    const onKeyUp = (e) => {
+        if (e.code === 'Space' || (typeof isCustomSpaceKeyCode === 'function' && isCustomSpaceKeyCode(e.code))) {
+            viewport.classList.remove('space-pressed');
+        }
+        const isCtrlCode = (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') || (typeof isCustomCtrlKeyCode === 'function' && isCustomCtrlKeyCode(e.code));
+        if (isCtrlCode) {
+            viewport.classList.remove('ctrl-pressed');
+        }
+    };
+
+    const preventEvent = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    };
+
+    const onHeaderClick = (e) => {
+        const btn = e.target.closest('.canvas-mermaid-lightbox-btn');
+        if (!btn) return;
+        const action = btn.getAttribute('data-action');
+        e.preventDefault();
+        e.stopPropagation();
+        if (action === 'help') {
+            if (helpPopover) {
+                const isHidden = helpPopover.style.display === 'none';
+                helpPopover.style.display = isHidden ? 'block' : 'none';
+                btn.classList.toggle('active', isHidden);
+            }
+        }
+        else if (action === 'zoom-in') zoomAtCenter(1.25);
+        else if (action === 'zoom-out') zoomAtCenter(1 / 1.25);
+        else if (action === 'reset' || action === 'locate') resetToActual();
+        else if (action === 'fit') fitToView();
+        else if (action === 'close') closeLightbox();
+    };
+
+    const closeLightbox = () => {
+        cancelAllZoomAnimations();
+        overlay.classList.remove('active');
+        content.innerHTML = '';
+        if (overlay.__cleanupListeners) {
+            overlay.__cleanupListeners();
+            overlay.__cleanupListeners = null;
+        }
+        if (typeof window !== 'undefined' && window.__canvasActiveLightboxOverlay === overlay) {
+            window.__canvasActiveLightboxOverlay = null;
+        }
+    };
+
+    viewport.addEventListener('pointerdown', onPointerDown);
+    viewport.addEventListener('pointermove', onPointerMove);
+    viewport.addEventListener('pointerup', onPointerUp);
+    viewport.addEventListener('pointercancel', onPointerUp);
+    viewport.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('pointermove', onPointerMove, true);
+    window.addEventListener('pointerup', onPointerUp, true);
+    window.addEventListener('mousemove', onMouseMove, true);
+    window.addEventListener('mouseup', onMouseUp, true);
+    viewport.addEventListener('contextmenu', preventEvent);
+    viewport.addEventListener('dragstart', preventEvent);
+    viewport.addEventListener('selectstart', preventEvent);
+    viewport.addEventListener('wheel', onWheel, { passive: false });
+    viewport.addEventListener('dblclick', onDblClick);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    overlay.querySelector('.canvas-mermaid-lightbox-header').addEventListener('click', onHeaderClick);
+
+    const onShortcutsUpdated = () => {
+        __updateCanvasMermaidLightboxHint(overlay);
+    };
+    window.addEventListener('canvas-shortcuts-updated', onShortcutsUpdated);
+
+    overlay.__cleanupListeners = () => {
+        cancelAllZoomAnimations();
+        if (helpBtn) {
+            helpBtn.removeEventListener('mouseenter', onHelpEnter);
+            helpBtn.removeEventListener('mouseleave', onHelpLeave);
+            helpBtn.classList.remove('active');
+        }
+        if (helpPopover) {
+            helpPopover.style.display = 'none';
+        }
+        viewport.removeEventListener('pointerdown', onPointerDown);
+        viewport.removeEventListener('pointermove', onPointerMove);
+        viewport.removeEventListener('pointerup', onPointerUp);
+        viewport.removeEventListener('pointercancel', onPointerUp);
+        viewport.removeEventListener('mousedown', onMouseDown);
+        window.removeEventListener('pointermove', onPointerMove, true);
+        window.removeEventListener('pointerup', onPointerUp, true);
+        window.removeEventListener('mousemove', onMouseMove, true);
+        window.removeEventListener('mouseup', onMouseUp, true);
+        viewport.removeEventListener('contextmenu', preventEvent);
+        viewport.removeEventListener('dragstart', preventEvent);
+        viewport.removeEventListener('selectstart', preventEvent);
+        viewport.removeEventListener('wheel', onWheel);
+        viewport.removeEventListener('dblclick', onDblClick);
+        window.removeEventListener('keydown', onKeyDown, true);
+        window.removeEventListener('keyup', onKeyUp, true);
+        window.removeEventListener('canvas-shortcuts-updated', onShortcutsUpdated);
+        overlay.querySelector('.canvas-mermaid-lightbox-header').removeEventListener('click', onHeaderClick);
+    };
+
+    overlay.__closeLightbox = closeLightbox;
+    overlay.__fitToView = fitToView;
+    overlay.__resetToActual = resetToActual;
+    overlay.__zoomAtPoint = zoomAtPoint;
+    overlay.__zoomAtCenter = zoomAtCenter;
+    overlay.__getScale = () => {
+        if (Number.isFinite(glideTargetScale)) return glideTargetScale;
+        if (pendingZoomRequest && Number.isFinite(pendingZoomRequest.zoom)) return pendingZoomRequest.zoom;
+        return scale;
+    };
+    overlay.__getTranslate = () => ({
+        x: Number.isFinite(glideTargetX) ? glideTargetX : translateX,
+        y: Number.isFinite(glideTargetY) ? glideTargetY : translateY
+    });
+}
+
+function __bindCanvasMermaidSelectionClear() {
+    if (typeof document === 'undefined' || document.__canvasMermaidSelectionBound) return;
+    document.__canvasMermaidSelectionBound = true;
+    document.addEventListener('mousedown', (e) => {
+        const active = typeof window !== 'undefined' ? window.__canvasActiveSelectedDiagram : activeSelectedDiagram;
+        if (!active) return;
+        if (e.target && e.target.closest && e.target.closest('.pele-diagram-container')) {
+            return;
+        }
+        __deselectCanvasMermaidDiagram();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const active = typeof window !== 'undefined' ? window.__canvasActiveSelectedDiagram : activeSelectedDiagram;
+            const lightbox = typeof window !== 'undefined' ? window.__canvasActiveLightboxOverlay : activeLightboxOverlay;
+            if (lightbox && lightbox.classList.contains('active')) {
+                return;
+            }
+            if (active) {
+                __deselectCanvasMermaidDiagram();
+            }
+        }
+    });
+}
+
+if (typeof document !== 'undefined') {
+    try { __bindCanvasMermaidSelectionClear(); } catch (_) { }
+}
+
+if (typeof window !== 'undefined') {
+    window.__selectCanvasMermaidDiagram = __selectCanvasMermaidDiagram;
+    window.__deselectCanvasMermaidDiagram = __deselectCanvasMermaidDiagram;
+    window.__openCanvasMermaidLightbox = __openCanvasMermaidLightbox;
+    window.__triggerDiagramParentEdit = __triggerDiagramParentEdit;
+    window.__bindCanvasMermaidSelectionClear = __bindCanvasMermaidSelectionClear;
+    window.__getCanvasMermaidLightboxZoomKeyName = __getCanvasMermaidLightboxZoomKeyName;
+    window.__updateCanvasMermaidLightboxHint = __updateCanvasMermaidLightboxHint;
+}
+
 function renderCanvasMermaidDiagrams(containerEl) {
     if (!containerEl || typeof window === 'undefined') return;
+    try { __bindCanvasMermaidSelectionClear(); } catch (_) { }
+    if (containerEl.contentEditable === 'true' || containerEl.__tiptapInstance) return;
     const pele = window.pele;
     if (!pele || typeof pele.render !== 'function') return;
 
@@ -19013,21 +20176,89 @@ function renderCanvasMermaidDiagrams(containerEl) {
         return /\b(?:language-|lang-)?mermaid\b/.test(cls);
     };
 
+    const isElementEditable = (el) => {
+        let curr = el;
+        while (curr && curr.nodeType === 1) {
+            if (curr.contentEditable === 'true' || (curr.getAttribute && curr.getAttribute('contenteditable') === 'true') || curr.__tiptapInstance) {
+                return true;
+            }
+            if (curr === containerEl) break;
+            curr = curr.parentElement;
+        }
+        return false;
+    };
+
     codeBlocks.forEach((codeEl) => {
         if (!isMermaid(codeEl)) return;
         const pre = codeEl.closest('pre');
         if (!pre || pre.closest('.pele-diagram-container')) return;
+        if (isElementEditable(pre)) return;
 
         const rawCode = (codeEl.textContent || '').trim();
         if (!rawCode) return;
 
         try {
-            const renderResult = pele.render(rawCode);
+            // 容错增强：修正常见图表类型关键字大小写 (如 Mindmap/MINDMAP -> mindmap)
+            let sanitizedCode = rawCode
+                .replace(/^(\s*)mindmap\b/im, '$1mindmap')
+                .replace(/^(\s*)flowchart\b/im, '$1flowchart')
+                .replace(/^(\s*)graph\b/im, '$1graph')
+                .replace(/^(\s*)sequencediagram\b/im, '$1sequenceDiagram')
+                .replace(/^(\s*)classdiagram\b/im, '$1classDiagram')
+                .replace(/^(\s*)statediagram(-v2)?\b/im, '$1stateDiagram$2')
+                .replace(/^(\s*)erdiagram\b/im, '$1erDiagram')
+                .replace(/^(\s*)pie\b/im, '$1pie')
+                .replace(/^(\s*)gantt\b/im, '$1gantt')
+                .replace(/^(\s*)gitgraph\b/im, '$1gitGraph')
+                .replace(/^(\s*)journey\b/im, '$1journey')
+                .replace(/^(\s*)quadrantchart\b/im, '$1quadrantChart')
+                .replace(/^(\s*)sankey(-beta)?\b/im, '$1sankey$2')
+                .replace(/^(\s*)timeline\b/im, '$1timeline')
+                .replace(/^(\s*)zenuml\b/im, '$1zenuml');
+
+            const renderResult = pele.render(sanitizedCode);
             if (renderResult && typeof renderResult.svg === 'string') {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'pele-diagram-container';
                 wrapper.setAttribute('data-mermaid-source', rawCode);
                 wrapper.innerHTML = renderResult.svg;
+                wrapper.querySelectorAll('a[href]').forEach((a) => {
+                    a.setAttribute('target', '_blank');
+                    a.setAttribute('rel', 'noopener noreferrer');
+                });
+                wrapper.addEventListener('pointerdown', (e) => {
+                    if (e.target && e.target.closest && e.target.closest('.pele-diagram-toolbar, button, a, input')) {
+                        return;
+                    }
+                    e.stopPropagation();
+                });
+                wrapper.addEventListener('mousedown', (e) => {
+                    if (e.target && e.target.closest && e.target.closest('.pele-diagram-toolbar, button, a, input')) {
+                        return;
+                    }
+                    e.stopPropagation();
+                });
+                wrapper.addEventListener('dblclick', (e) => {
+                    if (e.target && e.target.closest && e.target.closest('.pele-diagram-toolbar, button, a, input')) {
+                        return;
+                    }
+                    e.preventDefault();
+                    e.stopPropagation();
+                    __triggerDiagramParentEdit(wrapper);
+                });
+                wrapper.addEventListener('click', (e) => {
+                    if (e.target && e.target.closest && e.target.closest('.pele-diagram-toolbar, button, a, input')) {
+                        return;
+                    }
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const isAlreadySelected = wrapper.classList.contains('pele-selected');
+                    if (isAlreadySelected) {
+                        __triggerDiagramParentEdit(wrapper);
+                    } else {
+                        __selectCanvasMermaidDiagram(wrapper);
+                    }
+                });
                 pre.parentNode.replaceChild(wrapper, pre);
             }
         } catch (err) {
@@ -19043,9 +20274,14 @@ function renderCanvasMermaidDiagrams(containerEl) {
     });
 }
 
+function __postProcessCanvasObservationDom(containerEl) {
+    if (!containerEl) return;
+    try { renderCanvasMermaidDiagrams(containerEl); } catch (_) { }
+    try { __applyHeadingCollapse(containerEl); } catch (_) { }
+}
+
 function __applyHeadingCollapse(editorEl) {
     if (!editorEl) return;
-    try { renderCanvasMermaidDiagrams(editorEl); } catch (_) { }
     const targetRoot = (editorEl.querySelector && editorEl.querySelector('.tiptap.ProseMirror')) || editorEl;
     const nodes = Array.from(targetRoot.childNodes || []);
     const hasContentBetween = (startIndex, level) => {
@@ -19149,7 +20385,11 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             return null;
         }
 
-        const savedScrollTop = editor.scrollTop;
+        const targetScrollTop = (eventOrCoords && typeof eventOrCoords.offsetTop === 'number')
+            ? Math.max(0, eventOrCoords.offsetTop - 30)
+            : ((eventOrCoords && typeof eventOrCoords.scrollTop === 'number')
+                ? eventOrCoords.scrollTop
+                : editor.scrollTop);
         const savedScrollLeft = editor.scrollLeft;
 
         const liveInst = getLiveTiptap();
@@ -19165,19 +20405,46 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
                     liveInst.setMarkdown(initialMarkdown, false);
                 }
             }
-            editor.scrollTop = savedScrollTop;
+            editor.scrollTop = targetScrollTop;
             editor.scrollLeft = savedScrollLeft;
             if (autoFocus) {
-                if (eventOrCoords && typeof liveInst.focusAtCoords === 'function') {
-                    const coords = (typeof eventOrCoords.clientX === 'number')
-                        ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
-                        : eventOrCoords;
-                    liveInst.focusAtCoords(coords, { scrollIntoView: false });
-                } else {
-                    liveInst.focus(null, { scrollIntoView: false });
+                let positioned = false;
+                if (eventOrCoords && eventOrCoords.source) {
+                    try {
+                        const doc = liveInst.editor ? liveInst.editor.state.doc : null;
+                        if (doc) {
+                            const snippet = eventOrCoords.source.trim().slice(0, 30);
+                            doc.descendants((pmNode, pos) => {
+                                if (positioned) return false;
+                                if (pmNode.type && pmNode.type.name === 'codeBlock') {
+                                    const txt = pmNode.textContent || '';
+                                    if (txt.includes(snippet) || (pmNode.attrs && pmNode.attrs.language === 'mermaid')) {
+                                        liveInst.editor.commands.focus(pos + 1, { scrollIntoView: false });
+                                        positioned = true;
+                                        return false;
+                                    }
+                                }
+                            });
+                        }
+                    } catch (_) { }
+                }
+                if (!positioned) {
+                    if (eventOrCoords && eventOrCoords.coords && typeof liveInst.focusAtCoords === 'function') {
+                        liveInst.focusAtCoords(eventOrCoords.coords, { scrollIntoView: false });
+                    } else if (eventOrCoords && typeof eventOrCoords.clientX === 'number' && typeof liveInst.focusAtCoords === 'function') {
+                        liveInst.focusAtCoords({ left: eventOrCoords.clientX, top: eventOrCoords.clientY }, { scrollIntoView: false });
+                    } else {
+                        liveInst.focus(null, { scrollIntoView: false });
+                    }
                 }
                 try { __syncFormatToolbarActiveStates(toolbar, liveInst); } catch (_) { }
             }
+            editor.scrollTop = targetScrollTop;
+            editor.scrollLeft = savedScrollLeft;
+            requestAnimationFrame(() => {
+                if (editor.scrollTop !== targetScrollTop) editor.scrollTop = targetScrollTop;
+                if (editor.scrollLeft !== savedScrollLeft) editor.scrollLeft = savedScrollLeft;
+            });
             return liveInst;
         }
         let previousHtml = '';
@@ -19201,23 +20468,46 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             });
             editor.__tiptapInstance = tiptapInstance;
 
-            editor.scrollTop = savedScrollTop;
+            editor.scrollTop = targetScrollTop;
             editor.scrollLeft = savedScrollLeft;
 
             if (autoFocus) {
-                if (eventOrCoords && typeof tiptapInstance.focusAtCoords === 'function') {
-                    const coords = (typeof eventOrCoords.clientX === 'number')
-                        ? { left: eventOrCoords.clientX, top: eventOrCoords.clientY }
-                        : eventOrCoords;
-                    tiptapInstance.focusAtCoords(coords, { scrollIntoView: false });
-                } else {
-                    tiptapInstance.focus(null, { scrollIntoView: false });
+                let positioned = false;
+                if (eventOrCoords && eventOrCoords.source) {
+                    try {
+                        const doc = tiptapInstance.editor ? tiptapInstance.editor.state.doc : null;
+                        if (doc) {
+                            const snippet = eventOrCoords.source.trim().slice(0, 30);
+                            doc.descendants((pmNode, pos) => {
+                                if (positioned) return false;
+                                if (pmNode.type && pmNode.type.name === 'codeBlock') {
+                                    const txt = pmNode.textContent || '';
+                                    if (txt.includes(snippet) || (pmNode.attrs && pmNode.attrs.language === 'mermaid')) {
+                                        tiptapInstance.editor.commands.focus(pos + 1, { scrollIntoView: false });
+                                        positioned = true;
+                                        return false;
+                                    }
+                                }
+                            });
+                        }
+                    } catch (_) { }
+                }
+                if (!positioned) {
+                    if (eventOrCoords && eventOrCoords.coords && typeof tiptapInstance.focusAtCoords === 'function') {
+                        tiptapInstance.focusAtCoords(eventOrCoords.coords, { scrollIntoView: false });
+                    } else if (eventOrCoords && typeof eventOrCoords.clientX === 'number' && typeof tiptapInstance.focusAtCoords === 'function') {
+                        tiptapInstance.focusAtCoords({ left: eventOrCoords.clientX, top: eventOrCoords.clientY }, { scrollIntoView: false });
+                    } else {
+                        tiptapInstance.focus(null, { scrollIntoView: false });
+                    }
                 }
                 try { __syncFormatToolbarActiveStates(toolbar, tiptapInstance); } catch (_) { }
             }
 
+            editor.scrollTop = targetScrollTop;
+            editor.scrollLeft = savedScrollLeft;
             requestAnimationFrame(() => {
-                if (editor.scrollTop !== savedScrollTop) editor.scrollTop = savedScrollTop;
+                if (editor.scrollTop !== targetScrollTop) editor.scrollTop = targetScrollTop;
                 if (editor.scrollLeft !== savedScrollLeft) editor.scrollLeft = savedScrollLeft;
             });
             return tiptapInstance;
@@ -20979,7 +22269,7 @@ function __renderTempNodeImpl(section, options = {}) {
     section.descriptionMd = initialDescSource;
     section.description = initialHtml;
     descriptionText.innerHTML = __buildTiptapObservationDom(initialDescSource);
-    try { __applyHeadingCollapse(descriptionText); } catch (_) { }
+    try { __postProcessCanvasObservationDom(descriptionText); } catch (_) { }
     const savedDescFontSize = Number(section && section.descFontSize);
     if (Number.isFinite(savedDescFontSize) && savedDescFontSize > 0) {
         descriptionText.style.fontSize = savedDescFontSize + 'px';
@@ -21039,6 +22329,13 @@ function __renderTempNodeImpl(section, options = {}) {
 
     // 双击编辑功能
     descriptionText.addEventListener('dblclick', (e) => {
+        const rawTarget = e.target;
+        const target = (rawTarget && rawTarget.nodeType === Node.ELEMENT_NODE)
+            ? rawTarget
+            : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
+        if (target && target.closest && target.closest('.pele-diagram-container, .pele-diagram-toolbar, .canvas-mermaid-lightbox-overlay')) {
+            return;
+        }
         e.preventDefault();
         e.stopPropagation();
         enterEditingDescription(e);
@@ -21053,6 +22350,9 @@ function __renderTempNodeImpl(section, options = {}) {
             ? rawTarget
             : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
         if (!target) return;
+        if (target.closest('.pele-diagram-container, .pele-diagram-toolbar, .canvas-mermaid-lightbox-overlay')) {
+            return;
+        }
         if (__handleHeadingCollapseClick(descriptionText, e)) {
             return;
         }
@@ -21178,7 +22478,7 @@ function __renderTempNodeImpl(section, options = {}) {
         section.description = renderedHtml;
         if (normalizeEditorHtml) {
             descriptionText.innerHTML = __buildTiptapObservationDom(cleanSource);
-            try { __applyHeadingCollapse(descriptionText); } catch (_) { }
+            try { __postProcessCanvasObservationDom(descriptionText); } catch (_) { }
         }
         updateDescMeta();
         return cleanSource;
@@ -21219,7 +22519,7 @@ function __renderTempNodeImpl(section, options = {}) {
                     hasValidMd ? res.html : null,
                     hasValidMd
                 );
-                try { __applyHeadingCollapse(descriptionText); } catch (_) { }
+                try { __postProcessCanvasObservationDom(descriptionText); } catch (_) { }
                 descriptionText.scrollTop = savedScrollTop;
                 descriptionText.scrollLeft = savedScrollLeft;
                 updateDescMeta();
@@ -21237,7 +22537,7 @@ function __renderTempNodeImpl(section, options = {}) {
                 descEditorApi.destroy();
             }
             descriptionText.innerHTML = __buildTiptapObservationDom(beforeEditStored);
-            try { __applyHeadingCollapse(descriptionText); } catch (_) { }
+            try { __postProcessCanvasObservationDom(descriptionText); } catch (_) { }
             section.descriptionMd = beforeEditStored;
             section.description = __normalizeCanvasRichHtml(__coerceDescriptionSourceToHtml(beforeEditStored));
             descriptionText.scrollTop = savedScrollTop;
@@ -21280,8 +22580,13 @@ function __renderTempNodeImpl(section, options = {}) {
         beforeEditStored = __normalizeTempSectionDescriptionMarkdown(section);
         __clearCanvasDescriptionSelection();
         descriptionContainer.classList.add('editing');
+        descriptionContainer.__enterEditingDescription = enterEditingDescription;
 
-        const savedScrollTop = descriptionText.scrollTop;
+        const targetScrollTop = (eventOrCoords && typeof eventOrCoords.offsetTop === 'number')
+            ? Math.max(0, eventOrCoords.offsetTop - 30)
+            : ((eventOrCoords && typeof eventOrCoords.scrollTop === 'number')
+                ? eventOrCoords.scrollTop
+                : descriptionText.scrollTop);
         const savedScrollLeft = descriptionText.scrollLeft;
 
         let tiptapMounted = false;
@@ -21295,10 +22600,10 @@ function __renderTempNodeImpl(section, options = {}) {
         }
         applyDescHeightSettings();
 
-        descriptionText.scrollTop = savedScrollTop;
+        descriptionText.scrollTop = targetScrollTop;
         descriptionText.scrollLeft = savedScrollLeft;
         requestAnimationFrame(() => {
-            if (descriptionText.scrollTop !== savedScrollTop) descriptionText.scrollTop = savedScrollTop;
+            if (descriptionText.scrollTop !== targetScrollTop) descriptionText.scrollTop = targetScrollTop;
             if (descriptionText.scrollLeft !== savedScrollLeft) descriptionText.scrollLeft = savedScrollLeft;
         });
         if (descEditorApi && typeof descEditorApi.recordSnapshot === 'function') {
@@ -21323,6 +22628,9 @@ function __renderTempNodeImpl(section, options = {}) {
             descEditorApi.openFormatPopover();
         }
     };
+
+    descriptionContainer.__enterEditingDescription = enterEditingDescription;
+    nodeElement.__enterEditingDescription = enterEditingDescription;
 
     // editDescBtn listener removed
 
@@ -22145,7 +23453,7 @@ function __patchTempSectionDescriptionInPlace(section, nodeElement, options = {}
     section.description = nextHtml;
     if (descriptionText.innerHTML !== nextObservationDom) {
         descriptionText.innerHTML = nextObservationDom;
-        try { __applyHeadingCollapse(descriptionText); } catch (_) { }
+        try { __postProcessCanvasObservationDom(descriptionText); } catch (_) { }
     }
     __patchTempSectionDescriptionMeta(descriptionText, section);
     return true;
@@ -25062,7 +26370,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
     };
     const savedTipSource = readStoredTipSource();
     tipText.innerHTML = __buildTiptapObservationDom(savedTipSource);
-    try { __applyHeadingCollapse(tipText); } catch (_) { }
+    try { __postProcessCanvasObservationDom(tipText); } catch (_) { }
     const savedTipFontSize = (() => {
         try {
             const raw = localStorage.getItem(getFontSizeStorageKey());
@@ -25199,7 +26507,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         const cleanSource = __normalizePermanentViewDescriptionMarkdown(normalizedSource);
         if (normalizeEditorHtml) {
             tipText.innerHTML = __buildTiptapObservationDom(cleanSource);
-            try { __applyHeadingCollapse(tipText); } catch (_) { }
+            try { __postProcessCanvasObservationDom(tipText); } catch (_) { }
         }
         updateTipMeta();
         return cleanSource;
@@ -25240,7 +26548,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
                     hasValidMd ? res.html : null,
                     hasValidMd
                 );
-                try { __applyHeadingCollapse(tipText); } catch (_) { }
+                try { __postProcessCanvasObservationDom(tipText); } catch (_) { }
                 tipText.scrollTop = savedScrollTop;
                 tipText.scrollLeft = savedScrollLeft;
                 updateTipMeta();
@@ -25258,7 +26566,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
                 tipEditorApi.destroy();
             }
             tipText.innerHTML = __buildTiptapObservationDom(beforeEditStored);
-            try { __applyHeadingCollapse(tipText); } catch (_) { }
+            try { __postProcessCanvasObservationDom(tipText); } catch (_) { }
             tipText.scrollTop = savedScrollTop;
             tipText.scrollLeft = savedScrollLeft;
             __persistPermanentTipStorageValue(getStorageKey(), beforeEditStored);
@@ -25301,7 +26609,11 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         __clearCanvasDescriptionSelection();
         tipContainer.classList.add('editing');
 
-        const savedScrollTop = tipText.scrollTop;
+        const targetScrollTop = (eventOrCoords && typeof eventOrCoords.offsetTop === 'number')
+            ? Math.max(0, eventOrCoords.offsetTop - 30)
+            : ((eventOrCoords && typeof eventOrCoords.scrollTop === 'number')
+                ? eventOrCoords.scrollTop
+                : tipText.scrollTop);
         const savedScrollLeft = tipText.scrollLeft;
 
         let tiptapMounted = false;
@@ -25315,10 +26627,10 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         }
         applyTipHeightSettings();
 
-        tipText.scrollTop = savedScrollTop;
+        tipText.scrollTop = targetScrollTop;
         tipText.scrollLeft = savedScrollLeft;
         requestAnimationFrame(() => {
-            if (tipText.scrollTop !== savedScrollTop) tipText.scrollTop = savedScrollTop;
+            if (tipText.scrollTop !== targetScrollTop) tipText.scrollTop = targetScrollTop;
             if (tipText.scrollLeft !== savedScrollLeft) tipText.scrollLeft = savedScrollLeft;
         });
 
@@ -25343,7 +26655,17 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         }
     };
 
+    tipContainer.__enterEditingTip = enterEditingTip;
+    sectionEl.__enterEditingTip = enterEditingTip;
+
     tipText.addEventListener('dblclick', (e) => {
+        const rawTarget = e.target;
+        const target = (rawTarget && rawTarget.nodeType === Node.ELEMENT_NODE)
+            ? rawTarget
+            : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
+        if (target && target.closest && target.closest('.pele-diagram-container, .pele-diagram-toolbar, .canvas-mermaid-lightbox-overlay')) {
+            return;
+        }
         e.preventDefault();
         e.stopPropagation();
         enterEditingTip(e);
@@ -25358,6 +26680,9 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             ? rawTarget
             : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
         if (!target) return;
+        if (target.closest('.pele-diagram-container, .pele-diagram-toolbar, .canvas-mermaid-lightbox-overlay')) {
+            return;
+        }
         if (__handleHeadingCollapseClick(tipText, e)) {
             return;
         }
@@ -27543,7 +28868,7 @@ function __applyPermanentTipContentRealtimeSync(sectionEl, rawValue) {
     const source = (typeof rawValue === 'string') ? rawValue : '';
     const cleanSource = __normalizePermanentViewDescriptionMarkdown(source);
     tipText.innerHTML = __buildTiptapObservationDom(cleanSource);
-    try { __applyHeadingCollapse(tipText); } catch (_) { }
+    try { __postProcessCanvasObservationDom(tipText); } catch (_) { }
 
     const lang = typeof currentLang !== 'undefined' ? currentLang : 'zh_CN';
     const isEn = lang === 'en' || lang === 'en_US' || lang === 'en-GB' || String(lang).toLowerCase().startsWith('en');
@@ -32979,6 +34304,13 @@ function updateShortcutDisplays() {
             el.textContent = comboText;
         });
     });
+
+    try {
+        const activeLightbox = typeof window !== 'undefined' ? window.__canvasActiveLightboxOverlay : activeLightboxOverlay;
+        if (activeLightbox && typeof __updateCanvasMermaidLightboxHint === 'function') {
+            __updateCanvasMermaidLightboxHint(activeLightbox);
+        }
+    } catch (_) { }
 }
 
 function startShortcutRecording(target) {
@@ -34014,14 +35346,11 @@ function __shouldTreatMacWheelAsTouchpad(event, normalizedWheel) {
     if (!CANVAS_RUNTIME_PLATFORM.isMac || !event) return true;
     if (__isCanvasTouchpadPinch(event)) return true;
     if (__isCanvasDiscretePanWheelEvent(event)) return false;
-    const absX = Math.abs(Number(normalizedWheel.deltaX) || 0);
-    const absY = Math.abs(Number(normalizedWheel.deltaY) || 0);
-    if (absX >= 1 && absY >= 1) return true;
-    return false;
+    return true;
 }
 
 function __shouldPreferSnappyCanvasPan(isTouchpad, wheelVerticalPanRate, wheelHorizontalPanRate, trackpadPanRate) {
-    if (isTouchpad) return trackpadPanRate <= 1;
+    if (isTouchpad) return true;
     // 鼠标滚轮始终同步直达；速率百分比只改变步进大小，不引入额外拖尾。
     return true;
 }
@@ -34071,13 +35400,21 @@ function __isLikelyCanvasDiscreteWheelEvent(event) {
     const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
     if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return false;
 
-    if (primaryDelta >= DISCRETE_WHEEL_EVENT_DELTA_MIN) return true;
-
+    // 1. 如果存在浮点小数，100% 是高精度触控板（物理机械滚轮不可能输出小数像素）
     const hasFractional = (absDeltaX > 0 && !Number.isInteger(absDeltaX))
         || (absDeltaY > 0 && !Number.isInteger(absDeltaY));
     if (hasFractional) return false;
 
-    return (Number.isInteger(absDeltaX) && Number.isInteger(absDeltaY) && primaryDelta >= 8);
+    // 2. 双向同时有位移（横纵双向），绝大多数是触控板自然滑动，而非单轴滚轮
+    if (absDeltaX > 0 && absDeltaY > 0) return false;
+
+    // 3. 典型机械滚轮特征：整数步进、单轴滚动、单步幅值较大 (>= 24 或 100/120)
+    if (primaryDelta >= DISCRETE_WHEEL_EVENT_DELTA_MIN) return true;
+
+    // 4. Windows/Linux 或 Mac 上某些低速机械滚轮单档位 (>= 8 且为纯整数且无横向位移)
+    if (CANVAS_RUNTIME_WINDOWS_LIKE && primaryDelta >= 8) return true;
+
+    return false;
 }
 
 function __isCanvasDiscreteWheelEvent(event) {
@@ -34096,17 +35433,28 @@ function __isCanvasTouchpadLikeScrollInput(event, normalizedDeltas = null) {
     const primaryDelta = absDeltaY > 0 ? absDeltaY : absDeltaX;
     if (!Number.isFinite(primaryDelta) || primaryDelta <= 0) return false;
 
-    if (primaryDelta <= ZOOM_INPUT_TOUCHPAD_DELTA_MAX) return true;
+    // 1. 浮点小数像素：触控板铁证
+    const rawAbsDeltaX = Math.abs(Number(event.deltaX) || 0);
+    const rawAbsDeltaY = Math.abs(Number(event.deltaY) || 0);
+    const hasFractional = (rawAbsDeltaX > 0 && !Number.isInteger(rawAbsDeltaX))
+        || (rawAbsDeltaY > 0 && !Number.isInteger(rawAbsDeltaY));
+    if (hasFractional) return true;
 
-    if (primaryDelta < ZOOM_INPUT_WHEEL_DELTA_MIN) {
-        const rawAbsDeltaX = Math.abs(Number(event.deltaX) || 0);
-        const rawAbsDeltaY = Math.abs(Number(event.deltaY) || 0);
-        const hasFractional = (rawAbsDeltaX > 0 && !Number.isInteger(rawAbsDeltaX))
-            || (rawAbsDeltaY > 0 && !Number.isInteger(rawAbsDeltaY));
-        if (hasFractional) return true;
+    // 2. 双向同时滑动：触控板自然滑动
+    if (rawAbsDeltaX > 0 && rawAbsDeltaY > 0) return true;
+
+    // 3. 微小连续步进 (<= 16px)：触控板起步或慢速滑动
+    if (primaryDelta <= 16) return true;
+
+    // 4. 触控板连续性粘滞：如果近期 250ms 内处于触控板滚动状态，延续触控板模式
+    const state = CanvasState.touchpadState;
+    if (state && (state.isScrolling || (Date.now() - (state.lastScrollTime || 0) < 250))) {
+        if (!__isLikelyCanvasDiscreteWheelEvent(event)) {
+            return true;
+        }
     }
 
-    return false;
+    return !__isLikelyCanvasDiscreteWheelEvent(event);
 }
 
 function __shouldSmoothCanvasWheelZoom(event, zoomInputMode) {
@@ -34199,11 +35547,11 @@ function __shouldSmoothCanvasWheelPan(event, isTouchpad) {
 
 function __isCanvasTouchpadPinch(e) {
     if (!e) return false;
-    // Touchpad pinch always sends a wheel event with ctrlKey: true.
-    // And the physical Ctrl key is not pressed on the keyboard.
-    // Also, it is not a discrete/step-wise wheel event.
-    return !!(e.ctrlKey && !CanvasState.physicalModifiers.Control
-        && !CanvasState.isCtrlPressed && !__isLikelyCanvasDiscreteWheelEvent(e));
+    // 触控板物理捏合手势：浏览器为 wheel 事件合成 ctrlKey: true，且物理键盘上的 Ctrl 键未被按下
+    if (!e.ctrlKey) return false;
+    if (CanvasState.physicalModifiers.Control || CanvasState.isCtrlPressed) return false;
+    if (Number(e.deltaMode) !== 0) return false;
+    return true;
 }
 
 function resolveCanvasZoomInputMode(event) {
@@ -34282,65 +35630,17 @@ function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
     const delta = Number(rawDelta);
     if (!Number.isFinite(delta) || delta === 0) return 1;
 
-    const absDelta = Math.abs(delta);
-    const rateFactor = getCanvasTrackpadZoomRate() * TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER;
+    // 触控板直接物理对数映射（业界大厂标准规范：Figma / Miro / tldraw / Google Maps）：
+    // 1. 完全不吃滚轮非线性贝塞尔曲线（无 curveFactor）
+    // 2. 完全不吃安全区/低细节磁矩阻尼（无 magnetFactor，恒定丝滑穿透，无磁矩曲线）
+    // 3. 彻底消除人工 IIR 滤波滞后与残留方向粘合，做到 1:1 跟手，即动即走，即停即停
+    // 4. 消除硬编码步进上限（stepCap），微小捏合极度细腻敏锐，大幅捏合迅捷到位
+    // 5. 联动用户设置项中的触控板缩放速率（默认 1.0）
+    const rate = getCanvasTrackpadZoomRate();
+    const sensitivity = TRACKPAD_ZOOM_BASE_SENSITIVITY;
+    const logDelta = delta * sensitivity * rate;
 
-    // 与 Chromium 的 pinch->wheel 映射保持一致：scale = exp(-deltaY / 100)
-    // 这里 rawDelta = -deltaY，因此 nativeLogDelta = rawDelta / 100
-    const nativeLogDelta = delta / TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR;
-    // 触控板捏合遵循滚轮曲线与磁矩（若开启全局线性平滑，则完全独立且不吃曲线与磁矩）
-    const isGlobalLinear = isCanvasGlobalLinearSmoothEnabled();
-    const curveFactor = isGlobalLinear ? 1 : getCanvasZoomSpeedFactor(_displayZoom);
-    const nextDisplayZoomNoMagnet = _displayZoom * Math.exp(nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER);
-    const magnet = isGlobalLinear ? { factor: 1, strength: 0 } : getCanvasZoomMagnetEffect(_displayZoom, nextDisplayZoomNoMagnet);
-    const magnetFactor = isGlobalLinear ? 1 : magnet.factor;
-    let targetLogDelta = nativeLogDelta * rateFactor * TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER * curveFactor * magnetFactor;
-
-    const prevLogDelta = Number.isFinite(CanvasState.touchpadState.lastZoomDelta)
-        ? CanvasState.touchpadState.lastZoomDelta
-        : 0;
-
-    // 方向切换时快速衰减残留，避免“反向捏合被黏住”的阻尼感
-    const hasPrev = Math.abs(prevLogDelta) > 0.000001;
-    const hasTarget = Math.abs(targetLogDelta) > 0.000001;
-    const directionFlip = hasPrev && hasTarget && ((prevLogDelta > 0) !== (targetLogDelta > 0));
-    const carriedPrev = directionFlip ? (prevLogDelta * 0.22) : prevLogDelta;
-
-    const alphaBase = Math.max(
-        TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN,
-        Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, 0.36 + absDelta / 26)
-    );
-    const alpha = directionFlip
-        ? Math.min(TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX, alphaBase + 0.12)
-        : alphaBase;
-
-    let smoothedLogDelta = hasPrev
-        ? carriedPrev + (targetLogDelta - carriedPrev) * alpha
-        : targetLogDelta;
-
-    // 手势趋近停止时快速贴近目标，避免尾巴拖拽造成“粘手”
-    if (Math.abs(targetLogDelta) < 0.0012 && Math.abs(smoothedLogDelta) < 0.0022) {
-        smoothedLogDelta = targetLogDelta;
-    }
-
-    CanvasState.touchpadState.lastZoomDelta = smoothedLogDelta;
-    if (CanvasState.touchpadState.zoomDeltaTimer) {
-        clearTimeout(CanvasState.touchpadState.zoomDeltaTimer);
-    }
-    CanvasState.touchpadState.zoomDeltaTimer = setTimeout(() => {
-        CanvasState.touchpadState.lastZoomDelta = 0;
-        CanvasState.touchpadState.zoomDeltaTimer = null;
-    }, TRACKPAD_ZOOM_IDLE_RESET_MS);
-
-    let zoomFactor = Math.exp(smoothedLogDelta);
-    let stepCap = Math.max(
-        TRACKPAD_ZOOM_STEP_CAP_MIN,
-        Math.min(TRACKPAD_ZOOM_STEP_CAP_MAX, 1.022 + Math.min(24, absDelta) / 260)
-    );
-
-    if (zoomFactor > stepCap) zoomFactor = stepCap;
-    if (zoomFactor < (1 / stepCap)) zoomFactor = 1 / stepCap;
-    return zoomFactor;
+    return Math.exp(logDelta);
 }
 
 function getCanvasLowDetailDisplayZoomThreshold() {
@@ -34832,16 +36132,21 @@ function isCanvasVirtualizationEnabled() {
     const mode = CanvasState.virtualizationEnabled;
     if (mode === 'off') return false;
     if (mode === 'on') return true;
-    // 'auto': 保留原有自动判断逻辑（栏目数阈值）
+    // 'auto': 双轨混合判断（栏目数阈值 OR 节点数阈值）
 
     try {
         const totals = __getCanvasTotalDataStatsSync();
-        const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && isFinite(CanvasState.virtualizationMinColumns))
+        const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && Number.isFinite(CanvasState.virtualizationMinColumns))
             ? CanvasState.virtualizationMinColumns
             : 15;
-        if (totals && totals.totalColumnCount < minCols) {
-            return false;
-        }
+        const minNodes = (typeof CanvasState.virtualizationMinLoadedNodes === 'number' && Number.isFinite(CanvasState.virtualizationMinLoadedNodes))
+            ? CanvasState.virtualizationMinLoadedNodes
+            : 100;
+
+        const nodesHeavy = ((totals.totalBookmarkCount || 0) + (totals.totalFolderCount || 0)) >= minNodes;
+        const columnsHeavy = (totals.totalColumnCount || 0) >= minCols;
+
+        return nodesHeavy || columnsHeavy;
     } catch (_) {}
 
     return true;
@@ -35332,14 +36637,20 @@ function __isViewportLowDetailEffective() {
     const mode = CanvasState.viewportLowDetailEnabled;
     if (mode === 'off') return false;
     if (mode === 'on') return true;
-    // 'auto': 保留原有自动判断逻辑
 
-    const minNodes = (typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' &&
-                      Number.isFinite(CanvasState.viewportLowDetailMinLoadedNodes))
+    // 双轨混合触发：满足任意高负载特征即开启视野外防护
+    const totals = __getCanvasTotalDataStatsSync();
+    const minNodes = (typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' && Number.isFinite(CanvasState.viewportLowDetailMinLoadedNodes))
         ? CanvasState.viewportLowDetailMinLoadedNodes
         : 100;
+    const minCols = (typeof CanvasState.viewportLowDetailMinColumns === 'number' && Number.isFinite(CanvasState.viewportLowDetailMinColumns))
+        ? CanvasState.viewportLowDetailMinColumns
+        : (typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 15);
 
-    return __getLoadedNodeCountFast() >= minNodes;
+    const nodesHeavy = ((totals.totalBookmarkCount || 0) + (totals.totalFolderCount || 0)) >= minNodes;
+    const columnsHeavy = (totals.totalColumnCount || 0) >= minCols;
+
+    return nodesHeavy || columnsHeavy;
 }
 
 function __shouldNodeBeLowDetail(id, defaultIsLowDetail) {
@@ -40045,7 +41356,8 @@ function __runCanvasSmoothWheelZoomStep() {
     const baseZoom = (CanvasState.baseZoom && CanvasState.baseZoom > 0) ? CanvasState.baseZoom : 1;
     const displayCurrent = currentZoom / baseZoom;
     const displayTarget = targetZoom / baseZoom;
-    const isGlobalLinear = isCanvasGlobalLinearSmoothEnabled();
+    const isTouchpad = !!(smoothWheelZoomOptions && smoothWheelZoomOptions.isTouchpad);
+    const isGlobalLinear = isCanvasGlobalLinearSmoothEnabled() || isTouchpad;
     const curveFactor = isGlobalLinear
         ? 1
         : Math.max(0.2, Math.min(ZOOM_CURVE_ABS_MAX_FACTOR, getCanvasZoomSpeedFactor(displayCurrent)));
@@ -40060,10 +41372,12 @@ function __runCanvasSmoothWheelZoomStep() {
     const clampedMagnetFactor = Math.max(0.35, Math.min(1.35, magnet.factor));
     const responseFromMagnet = isGlobalLinear ? 1 : (0.84 + (0.16 * clampedMagnetFactor));
 
-    const fastStep = 0.34;
-    const slowStep = 0.26;
+    const fastStep = isTouchpad ? 0.38 : 0.34;
+    const slowStep = isTouchpad ? 0.30 : 0.26;
     const baseStep = (Math.abs(diff) > 0.06 ? fastStep : slowStep) * wheelStepMultiplier;
-    const stepFactor = Math.max(0.10, Math.min(0.38, baseStep * responseFromCurve * responseFromMagnet));
+    const stepFactor = isTouchpad
+        ? Math.max(0.12, Math.min(0.48, baseStep))
+        : Math.max(0.10, Math.min(0.38, baseStep * responseFromCurve * responseFromMagnet));
     const nextZoom = currentZoom + diff * stepFactor;
     __logCanvasWinInput('wheel-zoom-smooth-step', {
         currentZoom: __roundCanvasDebugNumber(currentZoom, 5),
@@ -44215,19 +45529,8 @@ function handleCanvasCustomScroll(event) {
     );
 
     if (isTouchpad) {
-        if (preferSnappyPan) {
-            scrollFactor = 0.8 * trackpadPanRate;
-        } else {
-            scrollFactor = 1.0 / zoomForScroll;
-            scrollFactor *= Math.pow(zoomForScroll, 0.3);
-            scrollFactor *= 0.7 * trackpadPanRate;
-
-            const scrollSpeed = Math.sqrt(horizontalDelta * horizontalDelta + verticalDelta * verticalDelta);
-            if (scrollSpeed > 8) {
-                const speedBoost = Math.min(1.15, 1 + (scrollSpeed - 8) / 200);
-                scrollFactor *= speedBoost;
-            }
-        }
+        // 触控板平移：1:1 绝对像素直通跟随（与 Figma / Miro / 浏览器原生一致，消除 0.8 阻尼与滞后）
+        scrollFactor = 1.0 * trackpadPanRate;
     } else {
         scrollFactor *= 0.8;
         if (isDraggingCanvasNode) {
@@ -47650,15 +48953,15 @@ function openCanvasOtherSettingsModal() {
     const zoomCurveTitle = modal.querySelector('#otherZoomCurveTitle');
     const linearRateControl = modal.querySelector('#otherLinearRateControl');
     const linearRateInput = modal.querySelector('#otherTrackpadZoomRate');
+    if (linearRateControl) {
+        linearRateControl.style.opacity = '';
+        linearRateControl.style.pointerEvents = '';
+        linearRateControl.classList.remove('is-disabled');
+    }
+    if (linearRateInput) {
+        linearRateInput.disabled = false;
+    }
     if (isLinearSmooth) {
-        if (linearRateControl) {
-            linearRateControl.style.opacity = '';
-            linearRateControl.style.pointerEvents = '';
-            linearRateControl.classList.remove('is-disabled');
-        }
-        if (linearRateInput) {
-            linearRateInput.disabled = false;
-        }
         if (safeToggle) {
             safeToggle.checked = false;
             safeToggle.disabled = true;
@@ -47680,14 +48983,6 @@ function openCanvasOtherSettingsModal() {
             zoomCurveTitle.style.opacity = '0.5';
         }
     } else {
-        if (linearRateControl) {
-            linearRateControl.style.opacity = '0.35';
-            linearRateControl.style.pointerEvents = 'none';
-            linearRateControl.classList.add('is-disabled');
-        }
-        if (linearRateInput) {
-            linearRateInput.disabled = true;
-        }
         const magnetSettings = getCanvasZoomMagnetSettings();
         if (safeToggle) {
             safeToggle.disabled = false;
@@ -48380,8 +49675,8 @@ function __renderOtherZoomMagnetCurve(modal) {
 
         if (noteEl) {
             noteEl.textContent = isEn
-                ? 'Global linear smooth is active. Zoom speed is constant across all zoom levels.'
-                : '已启用全局线性平滑：所有缩放比例下速率恒定，曲线与磁矩已停用。上下拖动蓝线可调节速率。';
+                ? 'Linear smooth enabled for modifier scroll zoom: shares the linear speed above, disabling curve & magnet points.'
+                : '已为修饰键滚动缩放启用线性平滑：与双指捏合共用上方速率，下方曲线与磁矩已停用。上下拖动蓝线可调节速率。';
             noteEl.style.display = 'block';
         }
 
@@ -49033,33 +50328,37 @@ function createCanvasOtherSettingsModal() {
                 <!-- 2.3 缩放速率调节 -->
                 <div class="detail-section">
                     <div class="detail-section-title" id="otherZoomMagnetTitle">${isEn ? '2.3 Zoom Speed' : '2.3 缩放速率调节'}</div>
-                    <div class="other-zoom-input-title other-zoom-input-title-trackpad" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-                        <span>${isEn ? '1. Global Linear Smooth (incl. Trackpad)' : '1. 全局线性平滑(包括触控板)'}</span>
-                        <div class="other-linear-smooth-header-controls" style="display: inline-flex; align-items: center; gap: 10px; margin-left: auto;">
-                            <div class="other-linear-rate-control is-disabled" id="otherLinearRateControl" style="display: inline-flex; align-items: center; gap: 6px; transition: opacity 0.2s ease;">
-                                <span class="other-settings-field-label" style="font-size: 12px; font-weight: normal; color: var(--text-secondary);">${isEn ? 'Linear Speed' : '线性速率'}</span>
-                                <div class="other-settings-field-control" style="display: inline-flex; align-items: center; gap: 3px;">
-                                    <input
-                                        type="number"
-                                        id="otherTrackpadZoomRate"
-                                        class="other-trackpad-speed-input"
-                                        min="${Math.round(TRACKPAD_ZOOM_RATE_MIN * 100)}"
-                                        max="${Math.round(TRACKPAD_ZOOM_RATE_MAX * 100)}"
-                                        step="5"
-                                        style="height: 22px; width: 62px; min-width: 62px; padding: 2px 4px; font-size: 12px;"
-                                    >
-                                    <span class="other-trackpad-speed-unit" style="font-size: 12px;">%</span>
-                                </div>
+                    <div class="other-zoom-input-title" id="otherLinearZoomTitle">
+                        <span>${isEn ? '1. Linear Smooth Zoom' : '1. 线性平滑缩放'}</span>
+                    </div>
+                    <div class="other-settings-fields-row" id="otherLinearZoomFields">
+                        <div class="other-settings-field">
+                            <label class="other-settings-field-label" id="otherLinearZoomRateLabel" for="otherTrackpadZoomRate">${isEn ? 'Pinch Zoom <span class="other-field-subnote">(Trackpad)</span>' : '双指捏合缩放<span class="other-field-subnote">（触控板）</span>'}</label>
+                            <div class="other-settings-field-control" id="otherLinearRateControl">
+                                <input
+                                    type="number"
+                                    id="otherTrackpadZoomRate"
+                                    class="other-trackpad-speed-input"
+                                    min="${Math.round(TRACKPAD_ZOOM_RATE_MIN * 100)}"
+                                    max="${Math.round(TRACKPAD_ZOOM_RATE_MAX * 100)}"
+                                    step="5"
+                                >
+                                <span class="other-trackpad-speed-unit">%</span>
                             </div>
-                            <label class="other-toggle-switch other-magnet-toggle" style="margin: 0; transform: scale(0.85); transform-origin: right center;">
-                                <input type="checkbox" id="otherGlobalLinearSmoothToggle">
-                                <span class="other-toggle-slider"></span>
-                            </label>
+                        </div>
+                        <div class="other-settings-field">
+                            <label class="other-settings-field-label" for="otherGlobalLinearSmoothToggle" style="cursor: pointer;">${isEn ? 'Modifier Scroll Zoom <span class="other-field-subnote">(Wheel / Ctrl+Swipe)</span>' : '修饰键滚动缩放<span class="other-field-subnote">（滚轮 / Ctrl+双指滑动）</span>'}</label>
+                            <div class="other-settings-field-control">
+                                <label class="other-toggle-switch other-magnet-toggle" style="margin: 0;">
+                                    <input type="checkbox" id="otherGlobalLinearSmoothToggle">
+                                    <span class="other-toggle-slider"></span>
+                                </label>
+                            </div>
                         </div>
                     </div>
                     <div class="other-zoom-input-title" id="otherZoomCurveTitle" style="margin-top: 12px; display: flex; align-items: center; gap: 6px; transition: opacity 0.2s ease;">
-                        <span>${isEn ? '2. Zoom Curve & Magnet Points' : '2. 缩放曲线与磁矩点'}</span>
-                        <button class="perf-help-btn" id="otherZoomMagnetHelpBtn" title="${isEn ? 'View help' : '查看说明'}" style="margin: 0; display: inline-flex; align-items: center; justify-content: center;">
+                        <span>${isEn ? '2. Zoom Curve & Magnet Points <span class="other-field-subnote">(Modifier Scroll Zoom)</span>' : '2. 缩放曲线与磁矩点<span class="other-field-subnote">（修饰键滚动缩放）</span>'}</span>
+                        <button type="button" class="perf-help-btn" id="otherZoomMagnetHelpBtn" title="${isEn ? 'View help' : '查看说明'}" style="margin: 0; display: inline-flex; align-items: center; justify-content: center;">
                             <i class="fas fa-question-circle"></i>
                         </button>
                     </div>
@@ -49083,7 +50382,7 @@ function createCanvasOtherSettingsModal() {
                             </label>
                         </div>
                         <div class="other-magnet-toggle-item" style="margin-left: auto;">
-                            <button class="sidepanel-settings-btn" id="otherUseDefaultZoomCurve" style="height: 20px; line-height: 18px; padding: 0 8px; font-size: 11px; margin: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px;">
+                            <button type="button" class="sidepanel-settings-btn" id="otherUseDefaultZoomCurve" style="height: 20px; line-height: 18px; padding: 0 8px; font-size: 11px; margin: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px;">
                                 ${isEn ? 'Restore' : '还原'}
                             </button>
                         </div>
@@ -49124,8 +50423,8 @@ function createCanvasOtherSettingsModal() {
             <div class="perf-help-popover" id="otherZoomMagnetHelpPopover">
                 <div class="perf-help-popover-content">
                     ${isEn
-                ? '<b>Zoom Curve & Magnet</b>: The global zoom speed is driven by a cubic Bézier curve, with magnetic damping buffers overlaid at critical thresholds (magnet points).<br>Magnet Point 1\'s X value is <b>synchronized</b> with the <b>"Auto-triggered Zoom Percentage"</b> in the Performance panel to slow down zoom when toggling low-detail cards.<br><br>${defaultMagnetHint}'
-                : `<b>缩放曲线与磁矩</b>：由三阶贝塞尔曲线控制全局缩放速率，并在关键阈值（磁矩点）叠加磁吸阻尼缓冲。<br>磁矩点1的X值与<b>「性能」面板的「自动触发的缩放比例」</b>的值是<b>同步</b>的，在切换低细节模式时使缩放变慢。<br><br>${defaultMagnetHint}`}
+                ? `<b>Zoom Curve & Magnet</b>: A cubic Bézier curve drives <b>Modifier Scroll Zoom (Wheel / Ctrl+Swipe)</b> speed (Trackpad Pinch always uses the constant linear speed above), with magnetic damping buffers overlaid at critical thresholds (magnet points).<br>Magnet Point 1's X value is <b>synchronized</b> with the <b>"Auto-triggered Zoom Percentage"</b> in the Performance panel to slow down zoom when toggling low-detail cards.<br><br>${defaultMagnetHint}`
+                : `<b>缩放曲线与磁矩</b>：由三阶贝塞尔曲线控制<b>修饰键滚动缩放（滚轮 / Ctrl+双指滑动）</b>的速率（双指捏合缩放始终走上方恒定线性速率），并在关键阈值（磁矩点）叠加磁吸阻尼缓冲。<br>磁矩点1的X值与<b>「性能」面板的「自动触发的缩放比例」</b>的值是<b>同步</b>的，在切换低细节模式时使缩放变慢。<br><br>${defaultMagnetHint}`}
                 </div>
             </div>
         </div>
@@ -49451,19 +50750,7 @@ function createCanvasOtherSettingsModal() {
             const isLinearSmooth = !!globalLinearSmoothToggle.checked;
             modal._globalLinearSmooth = isLinearSmooth;
 
-            const linearRateControl = modal.querySelector('#otherLinearRateControl');
-            const linearRateInput = modal.querySelector('#otherTrackpadZoomRate');
-
             if (isLinearSmooth) {
-                // 打开后「线性速率」启用高亮
-                if (linearRateControl) {
-                    linearRateControl.style.opacity = '';
-                    linearRateControl.style.pointerEvents = '';
-                    linearRateControl.classList.remove('is-disabled');
-                }
-                if (linearRateInput) {
-                    linearRateInput.disabled = false;
-                }
                 // 打开后「缩放曲线与磁矩点」两个点自动关闭，互斥
                 if (safeToggle) {
                     safeToggle.checked = false;
@@ -49486,15 +50773,6 @@ function createCanvasOtherSettingsModal() {
                     zoomCurveTitle.style.opacity = '0.5';
                 }
             } else {
-                // 关闭后「线性速率」变成阴影，不可点击
-                if (linearRateControl) {
-                    linearRateControl.style.opacity = '0.35';
-                    linearRateControl.style.pointerEvents = 'none';
-                    linearRateControl.classList.add('is-disabled');
-                }
-                if (linearRateInput) {
-                    linearRateInput.disabled = true;
-                }
                 // 关闭后恢复磁矩开关与曲线控制（从持久化设置回显，不覆写用户偏好）
                 const magnetSettings = getCanvasZoomMagnetSettings();
                 if (safeToggle) {
@@ -49629,6 +50907,13 @@ function loadCanvasDataIntensiveSettings() {
         } else {
             CanvasState.viewportLowDetailMinLoadedNodes = 100;
         }
+        const savedViewportLowMinCols = localStorage.getItem('canvasViewportLowDetailMinColumns');
+        if (savedViewportLowMinCols !== null) {
+            const val = parseInt(savedViewportLowMinCols, 10);
+            CanvasState.viewportLowDetailMinColumns = Number.isFinite(val) && val >= 1 ? val : 15;
+        } else {
+            CanvasState.viewportLowDetailMinColumns = 15;
+        }
         const savedUnloadDelay = localStorage.getItem('canvasVirtualizationUnloadDelayS');
         if (savedUnloadDelay !== null) {
             const val = parseFloat(savedUnloadDelay);
@@ -49655,6 +50940,13 @@ function loadCanvasDataIntensiveSettings() {
             CanvasState.virtualizationMinColumns = parseInt(minCols, 10);
         } else {
             CanvasState.virtualizationMinColumns = 15;
+        }
+        const savedVirtMinNodes = localStorage.getItem('canvasVirtualizationMinLoadedNodes');
+        if (savedVirtMinNodes !== null) {
+            const val = parseInt(savedVirtMinNodes, 10);
+            CanvasState.virtualizationMinLoadedNodes = Number.isFinite(val) && val >= 1 ? val : 100;
+        } else {
+            CanvasState.virtualizationMinLoadedNodes = 100;
         }
 
         CanvasState.virtualizationUnloadDebounceMs = CanvasState.virtualizationUnloadDelayS * 1000;
@@ -49730,6 +51022,10 @@ function openCanvasPerfSettingsModal() {
     if (inputViewportLowMinNodes) {
         inputViewportLowMinNodes.value = typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' ? CanvasState.viewportLowDetailMinLoadedNodes : 100;
     }
+    const inputViewportLowMinCols = document.getElementById('perfInputViewportLowDetailMinCols');
+    if (inputViewportLowMinCols) {
+        inputViewportLowMinCols.value = typeof CanvasState.viewportLowDetailMinColumns === 'number' ? CanvasState.viewportLowDetailMinColumns : 15;
+    }
 
     const triVirt = document.getElementById('perfTriStateVirtualization');
     if (triVirt) __setTriStateValue(triVirt, CanvasState.virtualizationEnabled || 'auto');
@@ -49740,6 +51036,10 @@ function openCanvasPerfSettingsModal() {
     const inputUnloadDelay = document.getElementById('perfInputVirtualizationUnloadDelay');
     if (inputUnloadDelay) {
         inputUnloadDelay.value = typeof CanvasState.virtualizationUnloadDelayS === 'number' ? CanvasState.virtualizationUnloadDelayS : 6.0;
+    }
+    const inputVirtMinNodes = document.getElementById('perfInputVirtualizationMinLoadedNodes');
+    if (inputVirtMinNodes) {
+        inputVirtMinNodes.value = typeof CanvasState.virtualizationMinLoadedNodes === 'number' ? CanvasState.virtualizationMinLoadedNodes : 100;
     }
 
     // [P5] Zoom magnet toggles
@@ -49832,6 +51132,13 @@ function updateCanvasPerfSettingsUI() {
             el.disabled = !isViewportLowMinNodesEnabled;
         });
     }
+    const viewportMinColsGroup = document.getElementById('perfViewportLowDetailMinColsGroup');
+    if (viewportMinColsGroup) {
+        viewportMinColsGroup.classList.toggle('perf-disabled-section', !isViewportLowMinNodesEnabled);
+        viewportMinColsGroup.querySelectorAll('input').forEach(el => {
+            el.disabled = !isViewportLowMinNodesEnabled;
+        });
+    }
 
     const triVirt = document.getElementById('perfTriStateVirtualization');
     const virtValue = __getTriStateValue(triVirt);
@@ -49842,6 +51149,14 @@ function updateCanvasPerfSettingsUI() {
     if (virtMinColsInput) {
         virtMinColsInput.disabled = !isVirtMinColsEnabled;
         const parentGroup = document.getElementById('perfVirtualizationMinColsGroup') || virtMinColsInput.closest('.perf-input-group');
+        if (parentGroup) {
+            parentGroup.classList.toggle('perf-disabled-section', !isVirtMinColsEnabled);
+        }
+    }
+    const virtMinNodesInput = document.getElementById('perfInputVirtualizationMinLoadedNodes');
+    if (virtMinNodesInput) {
+        virtMinNodesInput.disabled = !isVirtMinColsEnabled;
+        const parentGroup = document.getElementById('perfVirtualizationMinNodesGroup') || virtMinNodesInput.closest('.perf-input-group');
         if (parentGroup) {
             parentGroup.classList.toggle('perf-disabled-section', !isVirtMinColsEnabled);
         }
@@ -50006,6 +51321,14 @@ function saveCanvasPerfSettings(options = {}) {
             saveSharedState('canvasViewportLowDetailMinLoadedNodes', val, { asJSON: false });
         }
     }
+    const inputViewportLowMinCols = document.getElementById('perfInputViewportLowDetailMinCols');
+    if (inputViewportLowMinCols) {
+        const val = parseInt(inputViewportLowMinCols.value, 10);
+        if (Number.isFinite(val) && val >= 1) {
+            CanvasState.viewportLowDetailMinColumns = val;
+            saveSharedState('canvasViewportLowDetailMinColumns', val, { asJSON: false });
+        }
+    }
 
     const triVirt = document.getElementById('perfTriStateVirtualization');
     if (triVirt) {
@@ -50024,6 +51347,14 @@ function saveCanvasPerfSettings(options = {}) {
         if (Number.isFinite(val) && val >= 1) {
             CanvasState.virtualizationMinColumns = val;
             saveSharedState('canvasVirtualizationMinColumns', val, { asJSON: false });
+        }
+    }
+    const inputVirtMinNodes = document.getElementById('perfInputVirtualizationMinLoadedNodes');
+    if (inputVirtMinNodes) {
+        const val = parseInt(inputVirtMinNodes.value, 10);
+        if (Number.isFinite(val) && val >= 1) {
+            CanvasState.virtualizationMinLoadedNodes = val;
+            saveSharedState('canvasVirtualizationMinLoadedNodes', val, { asJSON: false });
         }
     }
     const inputUnloadDelay = document.getElementById('perfInputVirtualizationUnloadDelay');
@@ -50274,6 +51605,13 @@ function createCanvasPerfSettingsModal() {
                             <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? 'seconds' : '秒'}</span>
                         </div>
                     </div>
+                    <div class="perf-input-group" id="perfViewportLowDetailMinColsGroup" style="margin-top: 6px;">
+                        <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Auto-trigger Min Total Columns' : '自动触发的最小总栏目数'}</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="perfInputViewportLowDetailMinCols" min="1" step="1">
+                            <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? 'columns' : '个'}</span>
+                        </div>
+                    </div>
                     <div class="perf-input-group" id="perfViewportLowDetailMinNodesGroup" style="margin-top: 6px;">
                         <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Auto-trigger Min Loaded Nodes (Bookmarks+Folders)' : '自动触发的最小已加载数（书签+文件夹）'}</label>
                         <div style="display: flex; align-items: center; gap: 8px;">
@@ -50305,11 +51643,18 @@ function createCanvasPerfSettingsModal() {
                             <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? 'seconds' : '秒'}</span>
                         </div>
                     </div>
-                    <div class="perf-input-group" id="perfVirtualizationMinColsGroup" style="margin-top: 6px; margin-bottom: 8px;">
-                        <label>${isEn ? 'Auto-trigger Min Total Columns' : '自动触发的最小总栏目数'}</label>
+                    <div class="perf-input-group" id="perfVirtualizationMinColsGroup" style="margin-top: 6px;">
+                        <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Auto-trigger Min Total Columns' : '自动触发的最小总栏目数'}</label>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <input type="number" id="perfInputVirtualizationMinCols" min="1" step="1">
                             <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? 'columns' : '个'}</span>
+                        </div>
+                    </div>
+                    <div class="perf-input-group" id="perfVirtualizationMinNodesGroup" style="margin-top: 6px; margin-bottom: 8px;">
+                        <label style="font-weight: normal; color: var(--text-secondary);">${isEn ? 'Auto-trigger Min Loaded Nodes (Bookmarks+Folders)' : '自动触发的最小已加载数（书签+文件夹）'}</label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="perfInputVirtualizationMinLoadedNodes" min="1" step="10">
+                            <span style="color: var(--text-secondary); font-size: 12px;">${isEn ? 'nodes' : '个'}</span>
                         </div>
                     </div>
                 </div>
@@ -50331,8 +51676,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfViewportLowDetailHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Outside Viewport -- Low-Detail Mode</b>: When enabled, columns outside the current viewport automatically stay in low-detail mode, reducing off-screen DOM overhead.'
-            : '<b>视野以外--低细节模式</b>：开启后，当前视口之外的栏目卡片会自动处于低细节（色块）状态，以减少视口外的 DOM 渲染开销，优化整体性能。'}
+            ? '<b>Outside Viewport -- Low-Detail Mode</b>: When enabled, cards outside the current viewport automatically switch to low-detail mode (3s off-screen delay) to reduce DOM and vector rendering overhead.<br><br><b>Dual-track Auto-trigger</b>: In "Auto" mode, protection activates if <b>either</b> high-load condition is met:<br>1. Total loaded bookmarks + folders reaches the node threshold (deep bookmark board);<br>2. Total columns/cards (including Markdown nodes) reaches the "Min Total Columns" threshold below (flat mindmap board).'
+            : '<b>视野以外--低细节模式</b>：开启后，当前视口之外的卡片在离屏 3 秒后自动处于低细节（色块）状态，以减少视口外的图表重绘与 DOM 消耗。<br><br><b>双轨混合触发机制</b>：处于「自动」模式时，画板满足以下<b>任意一项</b>高负载条件即会自动激活：<br>1. 已加载书签与文件夹总数达到设定的最小节点阈值（深井型书签画板）；<br>2. 画板总栏目/卡片数（含纯 Markdown 卡片）达到下方设定的「最小总栏目数」阈值（平铺型思维导图画板）。'}
             </div>
         </div>
 
@@ -50340,8 +51685,8 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfVirtualizationHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Outside Viewport -- Lazy Loading (Virtualization)</b>: Dynamically loads visible/nearby column cards and unloads off-screen columns, drastically reducing DOM element count and memory footprint.'
-            : '<b>视野以外--懒惰加载（虚拟化）</b>：启用后，系统仅渲染视口内可见及临近的栏目卡片，视口外较远（不可见）的栏目将被动态卸载（回收其树形 DOM 元素进行懒惰加载），能成倍降低大型画布的内存占用与重排耗时。'}
+            ? '<b>Outside Viewport -- Lazy Loading (Virtualization)</b>: Dynamically loads visible column cards and unloads off-screen columns (6s off-screen delay), drastically reducing DOM element count and memory footprint.<br><br><b>Two-stage Pipeline</b>: Coordinates with Low-Detail mode on a unified timeline: cards off-screen for 3s enter low-detail mode, and at 6s their internal DOM is unmounted, keeping the canvas silky smooth.'
+            : '<b>视野以外--懒惰加载（虚拟化）</b>：启用后，系统仅渲染视口内可见及临近的栏目卡片，视口外较远的栏目在离屏 6 秒后动态卸载内部 DOM（仅保留轻量壳体），极大降低内存占用与重排耗时。<br><br><b>双阶梯协同流水线</b>：与上方的低细节模式形成完整的时序保护网（3 秒低细节轻量化 -> 6 秒深度卸载懒加载），当达到总栏目数阈值时全套协同生效。'}
             </div>
         </div>
     `;
@@ -50440,10 +51785,12 @@ function createCanvasPerfSettingsModal() {
     const perfInputs = [
         '#perfInputExitLowDetail',
         '#perfInputEnterLowDetail',
-        '#perfInputVirtualizationMinCols',
+        '#perfInputViewportLowDetailMinCols',
         '#perfInputViewportLowDetailDelay',
         '#perfInputViewportLowDetailMinLoadedNodes',
-        '#perfInputVirtualizationUnloadDelay'
+        '#perfInputVirtualizationMinCols',
+        '#perfInputVirtualizationUnloadDelay',
+        '#perfInputVirtualizationMinLoadedNodes'
     ];
     perfInputs.forEach(selector => {
         const el = modal.querySelector(selector);
@@ -50530,6 +51877,10 @@ function restoreDefaultZoomSettings() {
     if (exitInput) exitInput.value = __formatPercentInputValue(DEFAULT_PERF_BASELINE.exitLowDetail);
     const viewportDelay = document.getElementById('perfInputViewportLowDetailDelay');
     if (viewportDelay) viewportDelay.value = 3.0;
+    const viewportMinCols = document.getElementById('perfInputViewportLowDetailMinCols');
+    if (viewportMinCols) viewportMinCols.value = 15;
+    const viewportMinNodes = document.getElementById('perfInputViewportLowDetailMinLoadedNodes');
+    if (viewportMinNodes) viewportMinNodes.value = 100;
     // 三态控件恢复默认 'auto'
     const triViewportLow = document.getElementById('perfTriStateViewportLowDetail');
     if (triViewportLow && typeof __setTriStateValue === 'function') __setTriStateValue(triViewportLow, 'auto');
@@ -50538,6 +51889,8 @@ function restoreDefaultZoomSettings() {
 function restoreDefaultVirtualizationSettings() {
     const minCols = document.getElementById('perfInputVirtualizationMinCols');
     if (minCols) minCols.value = 15;
+    const minNodes = document.getElementById('perfInputVirtualizationMinLoadedNodes');
+    if (minNodes) minNodes.value = 100;
     const unloadDelay = document.getElementById('perfInputVirtualizationUnloadDelay');
     if (unloadDelay) unloadDelay.value = 6.0;
     // 三态控件恢复默认 'auto'
