@@ -17,8 +17,8 @@ function resolveEntryPoint() {
     }
 
     const candidatePaths = [
-        path.resolve(__dirname, '../../node_modules/@obsidianmd/pele/src/index.ts'),
-        '/Users/kk/Downloads/pele-main/src/index.ts'
+        path.resolve(__dirname, 'node_modules/@obsidianmd/pele/src/index.ts'),
+        path.resolve(__dirname, '../../node_modules/@obsidianmd/pele/src/index.ts')
     ];
 
     for (const candidate of candidatePaths) {
@@ -29,7 +29,8 @@ function resolveEntryPoint() {
 
     throw new Error(
         `Neither PELE_SRC nor default source path exists. Looked for:\n` +
-        candidatePaths.map(p => `  - ${p}`).join('\n')
+        candidatePaths.map(p => `  - ${p}`).join('\n') +
+        `\nSet PELE_SRC to a local checkout of https://github.com/obsidianmd/pele (repo root or src/index.ts).`
     );
 }
 

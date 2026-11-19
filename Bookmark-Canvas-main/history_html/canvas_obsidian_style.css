@@ -5181,6 +5181,15 @@ html.side-panel-mode .perf-tri-state button {
 .canvas-mermaid-lightbox-overlay {
     position: fixed;
     inset: 0;
+    /* 作为 popover 进入顶层时，清掉浏览器默认的 popover 盒模型样式 */
+    margin: 0;
+    padding: 0;
+    border: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    color: inherit;
     z-index: 2000000 !important;
     background: rgba(0, 0, 0, 0.45);
     display: flex;
@@ -5254,7 +5263,14 @@ html.side-panel-mode .perf-tri-state button {
     color: #ffffff;
 }
 
+.canvas-mermaid-lightbox-btn.btn-close {
+    border: 1px solid rgba(239, 68, 68, 0.85);
+    background: rgba(239, 68, 68, 0.12);
+    color: #f87171;
+}
+
 .canvas-mermaid-lightbox-btn.btn-close:hover {
+    border-color: #ef4444;
     background: rgba(239, 68, 68, 0.3);
     color: #fca5a5;
 }
@@ -5370,8 +5386,9 @@ html.side-panel-mode .perf-tri-state button {
     color: #e5e7eb;
     font-size: 12px;
     font-family: var(--font-sans, -apple-system, sans-serif);
-    line-height: 1.4;
-    white-space: nowrap;
+    line-height: 1.6;
+    white-space: pre;
+    text-align: left;
     user-select: none;
     pointer-events: auto;
 }
@@ -5388,3 +5405,17 @@ html.side-panel-mode .perf-tri-state button {
     border-color: rgba(20, 22, 25, 0.94) transparent transparent transparent;
 }
 
+
+/* Mermaid 编辑态实时预览：光标不在代码块内时隐藏源码、原位显示渲染图；点击图进入源码 */
+.ProseMirror pre.mermaid-live-source-hidden {
+    display: none !important;
+}
+
+.ProseMirror .mermaid-live-preview {
+    cursor: text;
+}
+
+.ProseMirror .mermaid-live-preview:hover {
+    outline: 1px dashed var(--section-color, var(--accent-primary, #1877f2));
+    outline-offset: -1px;
+}

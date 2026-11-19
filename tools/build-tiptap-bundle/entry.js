@@ -31,6 +31,7 @@ import CanvasTable from './src/canvas-table.js';
 import SingleInlineFormat from './src/single-inline-format.js';
 import PlainTyping from './src/plain-typing.js';
 import CanvasCode from './src/canvas-code.js';
+import MermaidLivePreview from './src/mermaid-live-preview.js';
 
 /**
  * 专为 Bookmark Canvas 深度定制的 Markdown 增强扩展
@@ -519,6 +520,7 @@ function buildCanvasTiptapExtensions(options = {}) {
     if (!forStatic) {
         list.push(
             CanvasTabHandler,
+            MermaidLivePreview,
             Placeholder.configure({
                 placeholder: ({ node }) => {
                     if (node && node.type && node.type.name === 'heading') return '';

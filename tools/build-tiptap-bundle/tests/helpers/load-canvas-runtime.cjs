@@ -48,12 +48,15 @@ module.exports = function loadCanvasRuntime({ platform } = {}) {
     '__clearCanvasDescriptionSelection', '__selectCanvasDescriptionContainer',
     '__bindCanvasDescriptionSelectionClear', '__isSelectionAll',
     '__cleanupCanvasNodeTiptapInstances', 'bindPermanentSectionTipBehavior',
-    'renderCanvasMermaidDiagrams', '__deselectCanvasMermaidDiagram', '__selectCanvasMermaidDiagram',
+    '__normalizeMermaidDiagramKeyword', 'renderCanvasMermaidDiagrams', '__deselectCanvasMermaidDiagram', '__selectCanvasMermaidDiagram',
+    '__focusTiptapMermaidCodeBlock', '__focusTiptapAtEditTarget',
     '__triggerDiagramParentEdit', '__getCanvasMermaidLightboxZoomKeyName', '__updateCanvasMermaidLightboxHint',
     '__ensureCanvasMermaidLightboxOverlay', '__openCanvasMermaidLightbox',
     '__bindCanvasMermaidSelectionClear',
     '__isHeadingNode', '__getHeadingLevel', '__applyHeadingCollapse', '__postProcessCanvasObservationDom', '__handleHeadingCollapseClick',
+    '__readPositiveIntSetting', '__evaluateCanvasAutoTrigger',
     '__isViewportLowDetailEffective', 'isCanvasVirtualizationEnabled',
+    'countVisibleDOMNodes', '__collectCanvasLoadedTreeNodeCount',
     '__setupDescAutoScroll',
     '__bindFormatEditingHelp', '__syncFormatToolbarActiveStates', '__renderMdNodeImpl',
     '__cleanupMdNodeElementLifecycle', '__resetMdNodeElementForRender',
@@ -84,7 +87,7 @@ module.exports = function loadCanvasRuntime({ platform } = {}) {
     const CANVAS_MD_CONTENT_UNLOADED_CLASS = 'md-content-unloaded';
     const CANVAS_PLUGIN_MARKDOWN_SUBTYPE = 'canvas-markdown-blank';
     const CANVAS_PLUGIN_MARKDOWN_SOURCE = 'bookmark-canvas-blank';
-    const CanvasState = { mdNodes: [], lowDetailActive: false, selectedMdNodeId: null };
+    const CanvasState = { mdNodes: [], tempSections: [], unloadedTempSectionTrees: new Set(), lowDetailActive: false, selectedMdNodeId: null };
     window.CanvasState = CanvasState;
     let activeSelectedDiagram = null;
     let activeLightboxOverlay = null;
@@ -96,7 +99,8 @@ module.exports = function loadCanvasRuntime({ platform } = {}) {
     function isCustomSpaceKeyCode(code) { return code === 'Space'; }
     window.__canvasActiveSelectedDiagram = null;
     window.__canvasActiveLightboxOverlay = null;
-    function __getCanvasTotalDataStatsSync() { return window.__canvasTotalStats || { totalColumnCount: 0, totalBookmarkCount: 0, totalFolderCount: 0 }; }
+    function __getCanvasAutoTriggerStats() { return window.__canvasAutoTriggerStats || { totalColumnCount: 0, loadedNodeCount: 0 }; }
+    function __readPermanentSectionCopies() { return window.__permanentSectionCopies || []; }
     let __canvasDescSelectionClearBound = false;
     window.sectionSaves = [];
     window.tipSaves = [];

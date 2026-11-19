@@ -185,8 +185,6 @@ const CanvasState = {
     viewportLowDetailDelayS: 3.0, // 进入低细节模式的离屏延迟时间（秒）
     viewportLowDetailMinColumns: 15, // 总栏目数超过此值时自动触发视野外低细节模式
     viewportLowDetailMinLoadedNodes: 100, // 已加载书签+文件夹数超过此值时自动触发视野外低细节模式
-    _loadedNodeCount: 0, // 缓存的已加载节点总数（书签+文件夹）
-    _loadedNodeCountAt: 0, // 缓存刷新时间戳
     __viewportLowDetailWasActive: false, // 追踪视野外低细节是否曾激活（用于状态转换清理）
     virtualizationUnloadDelayS: 6.0, // 进入懒加载/卸载的离屏延迟时间（秒）
     virtualizationMinColumns: 15, // 栏目总数超过此值时自动触发视野外虚拟化
@@ -998,7 +996,7 @@ function __bindCanvasDescriptionSelectionClear() {
     __canvasDescSelectionClearBound = true;
     document.addEventListener('mousedown', (event) => {
         const target = event && event.target;
-        const isToolbar = target && target.closest && target.closest('.md-toolbar-popover, .md-format-popover, .md-editing-help-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .md-rgb-picker, .desc-clear-confirm-popover, .desc-height-settings-popover');
+        const isToolbar = target && target.closest && target.closest('.md-toolbar-popover, .md-format-popover, .md-editing-help-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .md-rgb-picker, .desc-clear-confirm-popover, .desc-height-settings-popover, .canvas-mermaid-lightbox-overlay');
         if (!isToolbar) {
             document.querySelectorAll('.temp-node-description-container.editing').forEach((container) => {
                 if (target && container.contains(target)) return;
@@ -2401,14 +2399,7 @@ const CANVAS_PAN_RATE_MIN = 0.4;
 const CANVAS_PAN_RATE_MAX = 3.0;
 const CANVAS_PAN_RATE_DEFAULT = 1.0;
 const TRACKPAD_ZOOM_BASE_SENSITIVITY = 0.012;
-const TRACKPAD_ZOOM_RATE_BASELINE_MULTIPLIER = 3.0;
-const TRACKPAD_ZOOM_NATIVE_DELTA_DENOMINATOR = 100;
-const TRACKPAD_ZOOM_NATIVE_FEEL_MULTIPLIER = 0.44;
-const TRACKPAD_ZOOM_SMOOTH_ALPHA_MIN = 0.36;
-const TRACKPAD_ZOOM_SMOOTH_ALPHA_MAX = 0.84;
-const TRACKPAD_ZOOM_STEP_CAP_MIN = 1.02;
-const TRACKPAD_ZOOM_STEP_CAP_MAX = 1.14;
-const TRACKPAD_ZOOM_IDLE_RESET_MS = 96;
+const TRACKPAD_ZOOM_MAX_LOG_STEP = Math.log(1.35);
 const TRACKPAD_ZOOM_INERTIA_START_DELAY_MS = 22;
 const TRACKPAD_ZOOM_INERTIA_DAMPING = 0.86;
 const TRACKPAD_ZOOM_INERTIA_MIN_LOG_DELTA = 0.00075;
@@ -16279,35 +16270,7 @@ function __renderMdNodeImpl(node, options = {}) {
 
         if (inst) {
             inst.setEditable(true, false);
-            let positioned = false;
-            if (eventOrCoords && eventOrCoords.source) {
-                try {
-                    const doc = inst.editor ? inst.editor.state.doc : null;
-                    if (doc) {
-                        const snippet = eventOrCoords.source.trim().slice(0, 30);
-                        doc.descendants((pmNode, pos) => {
-                            if (positioned) return false;
-                            if (pmNode.type && pmNode.type.name === 'codeBlock') {
-                                const txt = pmNode.textContent || '';
-                                if (txt.includes(snippet) || (pmNode.attrs && pmNode.attrs.language === 'mermaid')) {
-                                    inst.editor.commands.focus(pos + 1, { scrollIntoView: false });
-                                    positioned = true;
-                                    return false;
-                                }
-                            }
-                        });
-                    }
-                } catch (_) { }
-            }
-            if (!positioned) {
-                if (eventOrCoords && eventOrCoords.coords && typeof inst.focusAtCoords === 'function') {
-                    inst.focusAtCoords(eventOrCoords.coords, { scrollIntoView: false });
-                } else if (eventOrCoords && typeof eventOrCoords.clientX === 'number' && typeof inst.focusAtCoords === 'function') {
-                    inst.focusAtCoords({ left: eventOrCoords.clientX, top: eventOrCoords.clientY }, { scrollIntoView: false });
-                } else {
-                    inst.focus(null, { scrollIntoView: false });
-                }
-            }
+            __focusTiptapAtEditTarget(inst, eventOrCoords);
             try { __syncFormatToolbarActiveStates(toolbar, inst); } catch (_) { }
         } else {
             editor.contentEditable = 'true';
@@ -17536,22 +17499,7 @@ function __sanitizeCanvasRichTextHtml(html) {
         'th',
         'td',
         'colgroup',
-        'col',
-        'svg',
-        'g',
-        'path',
-        'rect',
-        'circle',
-        'line',
-        'polygon',
-        'polyline',
-        'ellipse',
-        'text',
-        'tspan',
-        'marker',
-        'defs',
-        'use',
-        'foreignobject'
+        'col'
     ]);
 
     const allowedAttrs = new Set([
@@ -17581,44 +17529,7 @@ function __sanitizeCanvasRichTextHtml(html) {
         'height',
         'colspan',
         'rowspan',
-        'colwidth',
-        'data-mermaid-source',
-        'viewbox',
-        'preserveaspectratio',
-        'transform',
-        'fill',
-        'stroke',
-        'stroke-width',
-        'stroke-dasharray',
-        'stroke-linecap',
-        'stroke-linejoin',
-        'd',
-        'cx',
-        'cy',
-        'r',
-        'rx',
-        'ry',
-        'x1',
-        'y1',
-        'x2',
-        'y2',
-        'points',
-        'dx',
-        'dy',
-        'text-anchor',
-        'dominant-baseline',
-        'font-size',
-        'font-family',
-        'font-weight',
-        'opacity',
-        'fill-opacity',
-        'stroke-opacity',
-        'xmlns',
-        'xmlns:xlink',
-        'version',
-        'marker-end',
-        'marker-start',
-        'marker-mid'
+        'colwidth'
     ]);
 
     const normalizeExternalHref = (href) => {
@@ -17706,7 +17617,7 @@ function __sanitizeCanvasRichTextHtml(html) {
             const prop = String(parts.shift() || '').trim().toLowerCase();
             const value = parts.join(':').trim();
             if (!prop || !value) return;
-            if (!/^(color|background-color|text-align|font-weight|font-style|text-decoration|fill|stroke|font-size|font-family|opacity|max-width)$/.test(prop)) return;
+            if (!/^(color|background-color|text-align|font-weight|font-style|text-decoration)$/.test(prop)) return;
             if (/javascript:|expression\s*\(|url\s*\(/i.test(value)) return;
             safe.push(`${prop}: ${value}`);
         });
@@ -17715,6 +17626,18 @@ function __sanitizeCanvasRichTextHtml(html) {
 
     const tpl = document.createElement('template');
     tpl.innerHTML = raw;
+
+    // Mermaid 渲染产物是纯视图层：还原为源码代码块（与只读视图渲染前完全一致），交互控件与报错徽章不入库
+    tpl.content.querySelectorAll('.mermaid-live-preview, .pele-diagram-toolbar, .pele-diagram-error-badge').forEach((el) => el.remove());
+    tpl.content.querySelectorAll('.mermaid-live-source-hidden').forEach((el) => el.classList.remove('mermaid-live-source-hidden'));
+    tpl.content.querySelectorAll('[data-mermaid-source]').forEach((el) => {
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.className = 'language-mermaid';
+        code.textContent = el.getAttribute('data-mermaid-source') || '';
+        pre.appendChild(code);
+        el.replaceWith(pre);
+    });
 
     const sanitizeElement = (el) => {
         const tag = String(el.tagName || '').toLowerCase();
@@ -18275,6 +18198,9 @@ function __bindFormatEditingHelp(formatPop, { editor, toolbar, getLiveTiptap, on
         condition.title = isEn ? 'At the end of a formatted span' : '在格式片段末尾';
         const shortcut = document.createElement('kbd');
         shortcut.textContent = 'Ctrl/Cmd+\\';
+        shortcut.title = isEn
+            ? 'Inside a Mermaid code block: jump to a new line below the diagram'
+            : '在 Mermaid 代码块内：跳到图下方的新一行';
         syntaxSlot.append(arrow, condition);
         plain.append(label, shortcut, syntaxSlot);
         list.appendChild(plain);
@@ -18394,6 +18320,12 @@ function __getCleanHtmlForStorage(editorEl) {
     });
     targetRoot.querySelectorAll('br[data-md-auto-br]').forEach(el => {
         try { el.remove(); } catch (_) { }
+    });
+    targetRoot.querySelectorAll('.mermaid-live-preview, .pele-diagram-toolbar, .pele-diagram-error-badge').forEach(el => {
+        try { el.remove(); } catch (_) { }
+    });
+    targetRoot.querySelectorAll('.mermaid-live-source-hidden').forEach(el => {
+        try { el.classList.remove('mermaid-live-source-hidden'); } catch (_) { }
     });
     return targetRoot.innerHTML;
 }
@@ -19117,9 +19049,6 @@ function __selectCanvasMermaidDiagram(wrapper) {
     if (!wrapper || wrapper.nodeType !== 1) return;
     try { __bindCanvasMermaidSelectionClear(); } catch (_) { }
 
-    const PELE_ICON_PREVIEW_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>';
-    const PELE_ICON_EDIT_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>';
-    const PELE_ICON_CLOSE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
     const active = typeof window !== 'undefined' ? window.__canvasActiveSelectedDiagram : activeSelectedDiagram;
     if (active === wrapper && wrapper.classList.contains('pele-selected')) {
         return;
@@ -19146,6 +19075,8 @@ function __selectCanvasMermaidDiagram(wrapper) {
             e.stopPropagation();
         });
     });
+    // 编辑态下点击工具栏不抢走编辑器焦点，避免卡片/备注因失焦退出编辑
+    toolbar.addEventListener('mousedown', (e) => e.preventDefault());
 
     // 1. 预览大图（纯 SVG 图标，与标题栏按钮风格一致）
     const previewBtn = document.createElement('button');
@@ -19192,58 +19123,76 @@ function __selectCanvasMermaidDiagram(wrapper) {
     wrapper.appendChild(toolbar);
 }
 
+function __focusTiptapMermaidCodeBlock(inst, target) {
+    const doc = inst && inst.editor && inst.editor.state ? inst.editor.state.doc : null;
+    if (!doc || !target || typeof target.source !== 'string') return false;
+    const source = target.source.trim();
+    const candidates = [];
+    doc.descendants((pmNode, pos) => {
+        if (pmNode.type && pmNode.type.name === 'codeBlock') {
+            if (String((pmNode.attrs && pmNode.attrs.language) || '').toLowerCase() === 'mermaid') {
+                candidates.push({ pos, text: (pmNode.textContent || '').trim() });
+            }
+            return false;
+        }
+    });
+    if (candidates.length === 0) return false;
+    const idx = Number.isInteger(target.diagramIndex) ? target.diagramIndex : -1;
+    const byIndex = idx >= 0 ? candidates[idx] : null;
+    const exact = candidates.filter(c => c.text === source);
+    const hit = (byIndex && (exact.length === 0 || byIndex.text === source)) ? byIndex : (exact[0] || null);
+    if (!hit) return false;
+    inst.editor.commands.focus(hit.pos + 1, { scrollIntoView: false });
+    return true;
+}
+
+function __focusTiptapAtEditTarget(inst, target) {
+    if (!inst) return;
+    if (target && typeof target.source === 'string' && target.source.trim()) {
+        try { if (__focusTiptapMermaidCodeBlock(inst, target)) return; } catch (_) { }
+    }
+    if (target && typeof inst.focusAtCoords === 'function') {
+        let coords = null;
+        if (target.coords && typeof target.coords.left === 'number') coords = target.coords;
+        else if (typeof target.clientX === 'number') coords = { left: target.clientX, top: target.clientY };
+        else if (typeof target.left === 'number' && typeof target.top === 'number') coords = target;
+        if (coords) {
+            inst.focusAtCoords(coords, { scrollIntoView: false });
+            return;
+        }
+    }
+    inst.focus(null, { scrollIntoView: false });
+}
+
 function __triggerDiagramParentEdit(wrapper) {
     if (!wrapper) return;
+
+    // 编辑态实时预览的图：直接把光标放进它自己的源码块（已在编辑中，无需再走卡片进入编辑流程）
+    if (typeof wrapper.__mermaidEditSource === 'function') {
+        __deselectCanvasMermaidDiagram(wrapper);
+        wrapper.__mermaidEditSource();
+        return;
+    }
 
     const wrapperRect = (wrapper.getBoundingClientRect && typeof wrapper.getBoundingClientRect === 'function')
         ? wrapper.getBoundingClientRect()
         : null;
     const scrollParent = wrapper.closest('.md-canvas-editor, .temp-node-description, .permanent-section-tip') || wrapper.parentElement;
-    const parentScrollTop = scrollParent ? scrollParent.scrollTop : 0;
-    const wrapperOffsetTop = wrapper.offsetTop || 0;
-    const mermaidSource = wrapper.getAttribute('data-mermaid-source') || '';
+    const mermaidBlocks = scrollParent
+        ? Array.from(scrollParent.querySelectorAll('.pele-diagram-container, pre > code[class*="mermaid" i]'))
+        : [];
 
     const editTarget = {
-        coords: wrapperRect ? { clientX: wrapperRect.left + 24, clientY: wrapperRect.top + 24 } : null,
-        offsetTop: wrapperOffsetTop,
-        scrollTop: parentScrollTop,
-        source: mermaidSource
+        coords: wrapperRect ? { left: wrapperRect.left + 24, top: wrapperRect.top + 24 } : null,
+        offsetTop: wrapper.offsetTop || 0,
+        scrollTop: scrollParent ? scrollParent.scrollTop : 0,
+        source: wrapper.getAttribute('data-mermaid-source') || '',
+        diagramIndex: mermaidBlocks.indexOf(wrapper)
     };
 
     __deselectCanvasMermaidDiagram(wrapper);
 
-    // 1. Permanent section tip
-    const permTip = wrapper.closest('.permanent-section-tip, .permanent-bookmark-section');
-    if (permTip && typeof permTip.__enterEditingTip === 'function') {
-        permTip.__enterEditingTip(editTarget);
-        return;
-    }
-    const permSection = wrapper.closest('.permanent-bookmark-section');
-    if (permSection && typeof permSection.__enterEditingTip === 'function') {
-        permSection.__enterEditingTip(editTarget);
-        return;
-    }
-
-    // 2. Temp node description
-    const tempDesc = wrapper.closest('.temp-node-description, .temp-canvas-node');
-    if (tempDesc && typeof tempDesc.__enterEditingDescription === 'function') {
-        tempDesc.__enterEditingDescription(editTarget);
-        return;
-    }
-    const tempNode = wrapper.closest('.temp-canvas-node');
-    if (tempNode && typeof tempNode.__enterEditingDescription === 'function') {
-        tempNode.__enterEditingDescription(editTarget);
-        return;
-    }
-
-    // 3. Markdown node
-    const mdNode = wrapper.closest('.canvas-node, [data-node-type="markdown"], [id*="node-"], [id*="card-"]');
-    if (mdNode && typeof mdNode.__enterEditMode === 'function') {
-        mdNode.__enterEditMode(editTarget);
-        return;
-    }
-
-    // 4. Fallback search through parent hierarchy
+    // 由近及远查找宿主卡片的编辑入口：永久栏目备注 / 临时栏目备注 / 空白卡片
     let curr = wrapper.parentElement;
     while (curr && curr !== document.body) {
         if (typeof curr.__enterEditingTip === 'function') {
@@ -19255,6 +19204,10 @@ function __triggerDiagramParentEdit(wrapper) {
             return;
         }
         if (typeof curr.__enterEditMode === 'function') {
+            // 与常规「先选中卡片、再进入编辑」一致：先选中宿主空白卡片，卡片工具栏与文字工具栏一同出现
+            if (curr.id && curr.classList && curr.classList.contains('md-canvas-node') && typeof selectMdNode === 'function') {
+                try { selectMdNode(curr.id); } catch (_) { }
+            }
             curr.__enterEditMode(editTarget);
             return;
         }
@@ -19282,17 +19235,29 @@ function __updateCanvasMermaidLightboxHint(overlay) {
     const lang = (typeof window !== 'undefined' && window.currentLang) ? window.currentLang : 'zh_CN';
     const isZh = lang === 'zh_CN' || lang.startsWith('zh');
     const zoomKeyName = __getCanvasMermaidLightboxZoomKeyName(lang);
+    // 缩放键被自定义为 Shift 时，Shift + 滚轮就是缩放，不再提示水平滚动
+    const zoomKey = (typeof canvasShortcuts !== 'undefined' && (canvasShortcuts.ctrlKey || canvasShortcuts.ctrl)) || 'Control';
+    const showShiftScroll = zoomKey !== 'Shift';
 
-    const hintText = isZh
-        ? `${zoomKeyName} + 滚轮缩放 · 鼠标拖拽平移 · 双击自适应 · Esc 退出`
-        : `${zoomKeyName} + Wheel zoom · Drag to pan · Double-click to fit · Esc to exit`;
+    const lines = isZh
+        ? [
+            `${zoomKeyName} + 滚轮 / 双指捏合：缩放`,
+            `鼠标拖拽 / 滚轮：平移${showShiftScroll ? ' · Shift + 滚轮：水平滚动' : ''}`,
+            '双击：自适应 · Esc：退出'
+        ]
+        : [
+            `${zoomKeyName} + Wheel / Pinch: zoom`,
+            `Drag / Wheel: pan${showShiftScroll ? ' · Shift + Wheel: horizontal scroll' : ''}`,
+            'Double-click: fit · Esc: exit'
+        ];
+    const hintText = lines.join('\n');
 
     if (hintEl) {
         hintEl.textContent = hintText;
     }
     if (helpBtn) {
-        helpBtn.setAttribute('title', isZh ? `快捷键与手势说明 (${hintText})` : `Shortcuts & gestures (${hintText})`);
-        helpBtn.setAttribute('aria-label', hintText);
+        helpBtn.setAttribute('title', isZh ? `快捷键与手势说明\n${hintText}` : `Shortcuts & gestures\n${hintText}`);
+        helpBtn.setAttribute('aria-label', lines.join('；'));
     }
 }
 
@@ -19345,6 +19310,10 @@ function __ensureCanvasMermaidLightboxOverlay() {
         });
 
         overlay.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+        // 浮层内点击不转移焦点：从编辑态打开预览时，卡片/备注不会因失焦而退出编辑
+        overlay.addEventListener('mousedown', (e) => {
             e.preventDefault();
         });
         overlay.addEventListener('dragstart', (e) => {
@@ -19452,8 +19421,6 @@ function __openCanvasMermaidLightbox(wrapper) {
         applyTransform();
     };
 
-    let pendingZoomRequest = null;
-    let zoomUpdateFrame = null;
     let glideAnimFrame = null;
     let glideTargetScale = null;
     let glideTargetX = null;
@@ -19475,25 +19442,24 @@ function __openCanvasMermaidLightbox(wrapper) {
     let smoothZoomFrame = null;
     let smoothZoomIsPinch = false;
 
+    // 打断平滑缩放时直接落到目标比例，并按原锚点重算位移，避免画面跳动
     const cancelLightboxSmoothZoom = () => {
         if (smoothZoomFrame && typeof cancelAnimationFrame === 'function') {
             cancelAnimationFrame(smoothZoomFrame);
             smoothZoomFrame = null;
         }
-        if (Number.isFinite(smoothZoomTargetScale)) {
-            scale = smoothZoomTargetScale;
-        }
+        const target = smoothZoomTargetScale;
+        const anchorX = smoothZoomCenterX;
+        const anchorY = smoothZoomCenterY;
         smoothZoomTargetScale = null;
         smoothZoomCenterX = null;
         smoothZoomCenterY = null;
+        if (Number.isFinite(target)) setLightboxZoom(target, anchorX, anchorY);
     };
 
     const cancelAllZoomAnimations = () => {
+        cancelLightboxDirectZoom(true);
         cancelLightboxSmoothZoom();
-        if (zoomUpdateFrame && typeof cancelAnimationFrame === 'function') {
-            cancelAnimationFrame(zoomUpdateFrame);
-            zoomUpdateFrame = null;
-        }
         if (glideAnimFrame && typeof cancelAnimationFrame === 'function') {
             cancelAnimationFrame(glideAnimFrame);
             glideAnimFrame = null;
@@ -19509,14 +19475,12 @@ function __openCanvasMermaidLightbox(wrapper) {
         panInertiaVelocityX = 0;
         panInertiaVelocityY = 0;
 
-        if (pendingZoomRequest && Number.isFinite(pendingZoomRequest.zoom)) {
-            scale = pendingZoomRequest.zoom;
+        if (Number.isFinite(glideTargetScale) && Number.isFinite(glideTargetX) && Number.isFinite(glideTargetY)) {
+            scale = glideTargetScale;
+            translateX = glideTargetX;
+            translateY = glideTargetY;
+            applyTransform();
         }
-        if (Number.isFinite(glideTargetScale)) scale = glideTargetScale;
-        if (Number.isFinite(glideTargetX)) translateX = glideTargetX;
-        if (Number.isFinite(glideTargetY)) translateY = glideTargetY;
-
-        pendingZoomRequest = null;
         glideTargetScale = null;
         glideTargetX = null;
         glideTargetY = null;
@@ -19542,6 +19506,29 @@ function __openCanvasMermaidLightbox(wrapper) {
         const nextScale = scale + diff * stepFactor;
         setLightboxZoom(nextScale, smoothZoomCenterX, smoothZoomCenterY);
         smoothZoomFrame = requestAnimationFrame(runLightboxSmoothZoomStep);
+    };
+
+    // 直达缩放（对齐主画布 scheduleZoomUpdate）：每帧只应用最新一次请求，不做插值追赶，
+    // 输入停止即缩放停止，松开修饰键后不会残留任何"追目标"的动画。
+    let directZoomRequest = null;
+    let directZoomFrame = null;
+    const scheduleLightboxDirectZoom = (newScale, cx, cy) => {
+        directZoomRequest = { scale: Math.max(0.1, Math.min(10.0, newScale)), cx, cy };
+        if (directZoomFrame) return;
+        directZoomFrame = requestAnimationFrame(() => {
+            directZoomFrame = null;
+            const req = directZoomRequest;
+            directZoomRequest = null;
+            if (req) setLightboxZoom(req.scale, req.cx, req.cy);
+        });
+    };
+    // apply=true：立即落地挂起的请求（按钮/拖拽打断时）；apply=false：直接丢弃（松开修饰键时，与主画布一致）
+    const cancelLightboxDirectZoom = (apply) => {
+        if (directZoomFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(directZoomFrame);
+        directZoomFrame = null;
+        const req = directZoomRequest;
+        directZoomRequest = null;
+        if (apply && req) setLightboxZoom(req.scale, req.cx, req.cy);
     };
 
     const queueLightboxSmoothZoom = (targetScale, cx, cy, isPinchGesture) => {
@@ -19606,20 +19593,30 @@ function __openCanvasMermaidLightbox(wrapper) {
         }, 280);
     };
 
-    // 主画布同款：直接 rAF 帧合并缩放（消除人工插值与阶梯顿挫感，确保 60/120Hz 跟手丝滑）
-    const scheduleLightboxZoomUpdate = (newScale, cx, cy) => {
-        newScale = Math.max(0.1, Math.min(10.0, newScale));
-        pendingZoomRequest = { zoom: newScale, cx, cy };
+    // 修饰键缩放的松键截断（与画布一致）：松开缩放键立即停在当前比例；之后按时间窗口拦截缩放惯性，
+    // 普通滚动在窗口结束后立刻恢复。仅"仍带缩放键标记的惯性尾巴"会被丢弃到该串事件结束，避免误判为捏合继续缩放。
+    const LIGHTBOX_WHEEL_STREAM_GAP_MS = 140;
+    const LIGHTBOX_MODIFIER_RELEASE_BLOCK_MS = 300;
+    const LIGHTBOX_MODIFIER_TRUST_DELAY_MS = 800;
+    const LIGHTBOX_RECENT_ZOOM_BLOCK_MS = 300;
+    let modifierReleasedAt = 0;
+    let lastWheelAt = 0;
+    let lastZoomInputAt = 0;
+    let zoomedWithModifier = false;
+    let releaseGhostTail = false;
 
-        if (!zoomUpdateFrame) {
-            zoomUpdateFrame = requestAnimationFrame(() => {
-                zoomUpdateFrame = null;
-                if (!pendingZoomRequest) return;
-                const { zoom, cx: reqCx, cy: reqCy } = pendingZoomRequest;
-                pendingZoomRequest = null;
-                setLightboxZoom(zoom, reqCx, reqCy);
-            });
+    const stopLightboxZoomNow = () => {
+        cancelLightboxDirectZoom(false);
+        if (smoothZoomFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(smoothZoomFrame);
+        smoothZoomFrame = null;
+        smoothZoomTargetScale = null;
+        smoothZoomCenterX = null;
+        smoothZoomCenterY = null;
+        if (zoomEndTimer) {
+            clearTimeout(zoomEndTimer);
+            zoomEndTimer = null;
         }
+        viewport.classList.remove('is-zooming');
     };
 
     // 针对按钮点击的平滑居中动画 (如 1:1 定位、自适应充满)
@@ -19716,6 +19713,14 @@ function __openCanvasMermaidLightbox(wrapper) {
         zoomAtPoint(cx, cy, factor);
     };
 
+    // 进入浏览器顶层（top layer）：格式工具窗等卡片浮层也在顶层，仅靠 z-index 压不住；后打开者在最上层
+    if (typeof overlay.showPopover === 'function') {
+        try {
+            overlay.setAttribute('popover', 'manual');
+            if (overlay.matches(':popover-open')) overlay.hidePopover();
+            overlay.showPopover();
+        } catch (_) { }
+    }
     overlay.classList.add('active');
     __updateCanvasMermaidLightboxHint(overlay);
 
@@ -19814,49 +19819,66 @@ function __openCanvasMermaidLightbox(wrapper) {
         e.stopPropagation();
     };
 
-    const onMouseDown = (e) => {
-        if (isPointerDown) return;
-        onPointerDown(e);
-    };
-
-    const onMouseMove = (e) => {
-        if (!isPointerDown) return;
-        onPointerMove(e);
-    };
-
-    const onMouseUp = (e) => {
-        if (!isPointerDown) return;
-        onPointerUp(e);
-    };
-
     const onWheel = (e) => {
         e.preventDefault();
         e.stopPropagation();
 
-        const isPinch = (typeof __isCanvasTouchpadPinch === 'function') && __isCanvasTouchpadPinch(e);
         const ctrlVal = (typeof canvasShortcuts !== 'undefined' && (canvasShortcuts.ctrlKey || canvasShortcuts.ctrl)) || 'Control';
-        let isPhysicalModifierActive = false;
-        if (!isPinch) {
+        const modifiers = (CanvasState && CanvasState.physicalModifiers) || {};
+        const isMac = isMacEnvironment();
+        // 键盘上缩放键此刻是否真的按着（由画布 keydown/keyup 维护，不受滚轮事件自带修饰键标记影响）
+        const physicalZoomKeyDown = (() => {
+            if (isMac && modifiers.Meta) return true;
             switch (ctrlVal) {
-                case 'Control':
-                    isPhysicalModifierActive = !!(CanvasState?.physicalModifiers?.Control || CanvasState?.isCtrlPressed || e.ctrlKey);
-                    break;
-                case 'Alt':
-                    isPhysicalModifierActive = !!(CanvasState?.physicalModifiers?.Alt || e.altKey);
-                    break;
-                case 'Shift':
-                    isPhysicalModifierActive = !!(CanvasState?.physicalModifiers?.Shift || e.shiftKey);
-                    break;
-                case 'Meta':
-                    isPhysicalModifierActive = !!(CanvasState?.physicalModifiers?.Meta || e.metaKey);
-                    break;
-                default:
-                    isPhysicalModifierActive = typeof isCustomCtrlKeyPressed === 'function' ? isCustomCtrlKeyPressed(e) : !!e.ctrlKey;
-                    break;
+                case 'Control': return !!(modifiers.Control || modifiers.Meta);
+                case 'Alt': case 'Shift': case 'Meta': return !!modifiers[ctrlVal];
+                default: return !!(CanvasState && CanvasState.isCtrlPressed);
             }
+        })();
+        const eventCarriesZoomKey = (() => {
+            switch (ctrlVal) {
+                case 'Control': return !!(e.ctrlKey || e.metaKey);
+                case 'Alt': return !!e.altKey;
+                case 'Shift': return !!e.shiftKey;
+                case 'Meta': return !!e.metaKey;
+                default: return !!(CanvasState && CanvasState.isCtrlPressed);
+            }
+        })() || (isMac && !!e.metaKey);
+
+        const now = Date.now();
+        const streamContinues = (now - lastWheelAt) < LIGHTBOX_WHEEL_STREAM_GAP_MS;
+        lastWheelAt = now;
+        if (!streamContinues || physicalZoomKeyDown) releaseGhostTail = false;
+        const sinceRelease = now - modifierReleasedAt;
+
+        // 规则与画布一致（只用时间窗口，不持续吞没普通滚动）：
+        // 1) 松开缩放键 300ms 内、键盘上没按住缩放键：丢弃全部滚轮事件（画布 isModifierInertiaReleased）
+        if (sinceRelease < LIGHTBOX_MODIFIER_RELEASE_BLOCK_MS && !physicalZoomKeyDown) {
+            stopLightboxZoomNow();
+            return;
         }
-        const isModifierZoom = !isPinch && (isPhysicalModifierActive || (ctrlVal === 'Control' && (e.ctrlKey || e.metaKey)) || (isMacEnvironment() && e.metaKey));
+        // 2) 松键后的惯性尾巴里仍带缩放键/ctrlKey 标记的事件（会被误认成捏合）：丢弃到这串事件结束为止；
+        //    不带标记的普通滚动不受影响
+        if (releaseGhostTail && (eventCarriesZoomKey || e.ctrlKey)) {
+            stopLightboxZoomNow();
+            return;
+        }
+        // 3) 松键 800ms 内不相信事件自带的修饰键标记，只认物理按键（画布 isCustomCtrlKeyPressed）
+        const distrustEventModifiers = sinceRelease < LIGHTBOX_MODIFIER_TRUST_DELAY_MS && !physicalZoomKeyDown;
+        const isPinch = (typeof __isCanvasTouchpadPinch === 'function') && __isCanvasTouchpadPinch(e);
+        const isModifierZoom = !isPinch && (physicalZoomKeyDown || (!distrustEventModifiers && eventCarriesZoomKey));
         const isZoom = isPinch || isModifierZoom;
+
+        if (!isZoom) {
+            // 4) 刚缩放完 300ms 内的非缩放滚轮视为缩放惯性：丢弃并停止缩放（画布 hasRecentZoom），之后立即恢复普通滚动
+            if ((now - lastZoomInputAt) < LIGHTBOX_RECENT_ZOOM_BLOCK_MS) {
+                stopLightboxZoomNow();
+                return;
+            }
+        } else {
+            lastZoomInputAt = now;
+            if (isModifierZoom) zoomedWithModifier = true;
+        }
 
         // 1. 标准化滚轮增量 (Pixel, Line, Page 跨平台统一)
         const normalized = (typeof __normalizeCanvasWheelEventDeltas === 'function')
@@ -19889,9 +19911,19 @@ function __openCanvasMermaidLightbox(wrapper) {
 
             const rawDelta = normalized.deltaY !== 0 ? -normalized.deltaY : -normalized.deltaX;
 
+            // 路由与主画布一致：捏合走平滑；修饰键滚动缩放仅 Windows/Linux 的离散滚轮档位走平滑，
+            // 其余（macOS 全部、触控板 Ctrl+双指滑动）一律直达，不做插值追赶。
+            const isDiscreteWheel = !isPinch && typeof __isCanvasDiscreteWheelEvent === 'function' && __isCanvasDiscreteWheelEvent(e);
+            const useSmooth = isPinch || isDiscreteWheel;
+            if (useSmooth) {
+                cancelLightboxDirectZoom(true);
+            } else if (Number.isFinite(smoothZoomTargetScale)) {
+                stopLightboxZoomNow();
+                markZoomActivity();
+            }
             const baseScaleForCalc = Number.isFinite(smoothZoomTargetScale)
                 ? smoothZoomTargetScale
-                : (pendingZoomRequest && Number.isFinite(pendingZoomRequest.zoom) ? pendingZoomRequest.zoom : scale);
+                : (directZoomRequest ? directZoomRequest.scale : scale);
 
             let zoomFactor = 1;
             if (isPinch) {
@@ -19909,7 +19941,8 @@ function __openCanvasMermaidLightbox(wrapper) {
             }
 
             const newScale = Math.max(0.1, Math.min(10.0, baseScaleForCalc * zoomFactor));
-            queueLightboxSmoothZoom(newScale, cx, cy, isPinch);
+            if (useSmooth) queueLightboxSmoothZoom(newScale, cx, cy, isPinch);
+            else scheduleLightboxDirectZoom(newScale, cx, cy);
         } else {
             // ====== 平移/垂直滚动管线 (直接位移 + 主画布同款 0.84 阻尼惯性平移) ======
             let horizontalDelta = normalized.deltaX;
@@ -19997,21 +20030,46 @@ function __openCanvasMermaidLightbox(wrapper) {
         }
         if (e.code === 'Space' || (typeof isCustomSpaceKeyCode === 'function' && isCustomSpaceKeyCode(e.code))) {
             viewport.classList.add('space-pressed');
+            e.preventDefault();
+            e.stopPropagation();
             return;
         }
-        const isCtrlCode = (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') || (typeof isCustomCtrlKeyCode === 'function' && isCustomCtrlKeyCode(e.code));
+        const isCtrlCode = (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') || (typeof getCustomCtrlKeyCode === 'function' && e.code === getCustomCtrlKeyCode());
         if (isCtrlCode) {
             viewport.classList.add('ctrl-pressed');
         }
+        // 浮层为模态：其余按键不再下发给画布（避免 Delete / Ctrl+Z / 方向键作用到底层卡片）；
+        // 修饰键本身放行，保证画布的物理修饰键状态追踪正确。
+        if (!isCtrlCode && e.key !== 'Shift') e.stopPropagation();
     };
 
     const onKeyUp = (e) => {
         if (e.code === 'Space' || (typeof isCustomSpaceKeyCode === 'function' && isCustomSpaceKeyCode(e.code))) {
             viewport.classList.remove('space-pressed');
         }
-        const isCtrlCode = (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') || (typeof isCustomCtrlKeyCode === 'function' && isCustomCtrlKeyCode(e.code));
+        const isCtrlCode = (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') || (typeof getCustomCtrlKeyCode === 'function' && e.code === getCustomCtrlKeyCode());
         if (isCtrlCode) {
             viewport.classList.remove('ctrl-pressed');
+        }
+        // 只认用户设置的缩放键（默认 Ctrl，macOS 上 ⌘ 同样可缩放），松开其他修饰键不影响
+        const zoomKeySetting = (typeof canvasShortcuts !== 'undefined' && (canvasShortcuts.ctrlKey || canvasShortcuts.ctrl)) || 'Control';
+        const isZoomKeyRelease = (isMacEnvironment() && e.key === 'Meta')
+            || (zoomKeySetting === 'Control' && (e.key === 'Control' || e.key === 'Meta'))
+            || (['Alt', 'Shift', 'Meta'].includes(zoomKeySetting) && e.key === zoomKeySetting)
+            || (typeof getCustomCtrlKeyCode === 'function' && e.code === getCustomCtrlKeyCode());
+        if (isZoomKeyRelease) {
+            const now = Date.now();
+            const zoomActive = zoomedWithModifier
+                || Number.isFinite(smoothZoomTargetScale)
+                || !!directZoomRequest
+                || (now - lastZoomInputAt) < LIGHTBOX_RECENT_ZOOM_BLOCK_MS;
+            if (zoomActive) {
+                zoomedWithModifier = false;
+                releaseGhostTail = true;
+                lastWheelAt = now;
+                modifierReleasedAt = now;
+                stopLightboxZoomNow();
+            }
         }
     };
 
@@ -20043,6 +20101,7 @@ function __openCanvasMermaidLightbox(wrapper) {
     const closeLightbox = () => {
         cancelAllZoomAnimations();
         overlay.classList.remove('active');
+        try { if (typeof overlay.hidePopover === 'function' && overlay.matches(':popover-open')) overlay.hidePopover(); } catch (_) { }
         content.innerHTML = '';
         if (overlay.__cleanupListeners) {
             overlay.__cleanupListeners();
@@ -20053,15 +20112,11 @@ function __openCanvasMermaidLightbox(wrapper) {
         }
     };
 
+    // 拖拽移动/抬起只在 window 捕获阶段处理一次（含拖出视口），避免同一次移动被重复计算而稀释惯性采样
     viewport.addEventListener('pointerdown', onPointerDown);
-    viewport.addEventListener('pointermove', onPointerMove);
-    viewport.addEventListener('pointerup', onPointerUp);
-    viewport.addEventListener('pointercancel', onPointerUp);
-    viewport.addEventListener('mousedown', onMouseDown);
     window.addEventListener('pointermove', onPointerMove, true);
     window.addEventListener('pointerup', onPointerUp, true);
-    window.addEventListener('mousemove', onMouseMove, true);
-    window.addEventListener('mouseup', onMouseUp, true);
+    window.addEventListener('pointercancel', onPointerUp, true);
     viewport.addEventListener('contextmenu', preventEvent);
     viewport.addEventListener('dragstart', preventEvent);
     viewport.addEventListener('selectstart', preventEvent);
@@ -20087,14 +20142,9 @@ function __openCanvasMermaidLightbox(wrapper) {
             helpPopover.style.display = 'none';
         }
         viewport.removeEventListener('pointerdown', onPointerDown);
-        viewport.removeEventListener('pointermove', onPointerMove);
-        viewport.removeEventListener('pointerup', onPointerUp);
-        viewport.removeEventListener('pointercancel', onPointerUp);
-        viewport.removeEventListener('mousedown', onMouseDown);
         window.removeEventListener('pointermove', onPointerMove, true);
         window.removeEventListener('pointerup', onPointerUp, true);
-        window.removeEventListener('mousemove', onMouseMove, true);
-        window.removeEventListener('mouseup', onMouseUp, true);
+        window.removeEventListener('pointercancel', onPointerUp, true);
         viewport.removeEventListener('contextmenu', preventEvent);
         viewport.removeEventListener('dragstart', preventEvent);
         viewport.removeEventListener('selectstart', preventEvent);
@@ -20112,8 +20162,9 @@ function __openCanvasMermaidLightbox(wrapper) {
     overlay.__zoomAtPoint = zoomAtPoint;
     overlay.__zoomAtCenter = zoomAtCenter;
     overlay.__getScale = () => {
+        if (directZoomRequest) return directZoomRequest.scale;
+        if (Number.isFinite(smoothZoomTargetScale)) return smoothZoomTargetScale;
         if (Number.isFinite(glideTargetScale)) return glideTargetScale;
-        if (pendingZoomRequest && Number.isFinite(pendingZoomRequest.zoom)) return pendingZoomRequest.zoom;
         return scale;
     };
     overlay.__getTranslate = () => ({
@@ -20125,14 +20176,15 @@ function __openCanvasMermaidLightbox(wrapper) {
 function __bindCanvasMermaidSelectionClear() {
     if (typeof document === 'undefined' || document.__canvasMermaidSelectionBound) return;
     document.__canvasMermaidSelectionBound = true;
+    // 捕获阶段监听：编辑器、卡片等会在冒泡阶段阻止 mousedown 传播（编辑态尤其如此），冒泡监听收不到点击
     document.addEventListener('mousedown', (e) => {
         const active = typeof window !== 'undefined' ? window.__canvasActiveSelectedDiagram : activeSelectedDiagram;
         if (!active) return;
-        if (e.target && e.target.closest && e.target.closest('.pele-diagram-container')) {
-            return;
-        }
+        // 点在当前选中的图（含其三键工具栏）上：保持选中；点到其他图由其自身的点击逻辑切换选中
+        if (e.target && active.contains && active.contains(e.target)) return;
+        if (e.target && e.target.closest && e.target.closest('.canvas-mermaid-lightbox-overlay')) return;
         __deselectCanvasMermaidDiagram();
-    });
+    }, true);
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             const active = typeof window !== 'undefined' ? window.__canvasActiveSelectedDiagram : activeSelectedDiagram;
@@ -20159,6 +20211,32 @@ if (typeof window !== 'undefined') {
     window.__bindCanvasMermaidSelectionClear = __bindCanvasMermaidSelectionClear;
     window.__getCanvasMermaidLightboxZoomKeyName = __getCanvasMermaidLightboxZoomKeyName;
     window.__updateCanvasMermaidLightboxHint = __updateCanvasMermaidLightboxHint;
+}
+
+// 容错增强：仅修正图表声明行（首个有效行）的类型关键字大小写 (如 Mindmap/MINDMAP -> mindmap)，正文内容保持原样
+function __normalizeMermaidDiagramKeyword(code) {
+    const keywords = ['mindmap', 'flowchart', 'graph', 'sequenceDiagram', 'classDiagram', 'stateDiagram-v2', 'stateDiagram',
+        'erDiagram', 'pie', 'gantt', 'gitGraph', 'journey', 'quadrantChart', 'sankey-beta', 'sankey', 'timeline', 'zenuml'];
+    const lines = String(code || '').split('\n');
+    let inFrontmatter = false;
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        if (i === 0 && trimmed === '---') { inFrontmatter = true; continue; }
+        if (inFrontmatter) { if (trimmed === '---') inFrontmatter = false; continue; }
+        if (!trimmed || trimmed.startsWith('%%')) continue;
+        const m = lines[i].match(/^(\s*)([A-Za-z][\w-]*)/);
+        const hit = m ? keywords.find(k => k.toLowerCase() === m[2].toLowerCase()) : null;
+        if (hit) lines[i] = m[1] + hit + lines[i].slice(m[0].length);
+        // Pele 词法器在 mindmap 正文里也会把以 "mindmap" 开头的节点文字识别成关键字（如子节点 "Mindmap 结构"）而报错，
+        // 在节点文字前插入零宽空格绕开，显示效果不变（仅作用于渲染输入，data-mermaid-source 仍保留原文）
+        if (hit === 'mindmap') {
+            for (let j = i + 1; j < lines.length; j++) {
+                lines[j] = lines[j].replace(/^(\s*)(mindmap\b)/i, '$1\u200B$2');
+            }
+        }
+        break;
+    }
+    return lines.join('\n');
 }
 
 function renderCanvasMermaidDiagrams(containerEl) {
@@ -20198,23 +20276,7 @@ function renderCanvasMermaidDiagrams(containerEl) {
         if (!rawCode) return;
 
         try {
-            // 容错增强：修正常见图表类型关键字大小写 (如 Mindmap/MINDMAP -> mindmap)
-            let sanitizedCode = rawCode
-                .replace(/^(\s*)mindmap\b/im, '$1mindmap')
-                .replace(/^(\s*)flowchart\b/im, '$1flowchart')
-                .replace(/^(\s*)graph\b/im, '$1graph')
-                .replace(/^(\s*)sequencediagram\b/im, '$1sequenceDiagram')
-                .replace(/^(\s*)classdiagram\b/im, '$1classDiagram')
-                .replace(/^(\s*)statediagram(-v2)?\b/im, '$1stateDiagram$2')
-                .replace(/^(\s*)erdiagram\b/im, '$1erDiagram')
-                .replace(/^(\s*)pie\b/im, '$1pie')
-                .replace(/^(\s*)gantt\b/im, '$1gantt')
-                .replace(/^(\s*)gitgraph\b/im, '$1gitGraph')
-                .replace(/^(\s*)journey\b/im, '$1journey')
-                .replace(/^(\s*)quadrantchart\b/im, '$1quadrantChart')
-                .replace(/^(\s*)sankey(-beta)?\b/im, '$1sankey$2')
-                .replace(/^(\s*)timeline\b/im, '$1timeline')
-                .replace(/^(\s*)zenuml\b/im, '$1zenuml');
+            const sanitizedCode = __normalizeMermaidDiagramKeyword(rawCode);
 
             const renderResult = pele.render(sanitizedCode);
             if (renderResult && typeof renderResult.svg === 'string') {
@@ -20262,7 +20324,6 @@ function renderCanvasMermaidDiagrams(containerEl) {
                 pre.parentNode.replaceChild(wrapper, pre);
             }
         } catch (err) {
-            console.warn('[Pele] Mermaid render error:', err);
             if (!pre.querySelector('.pele-diagram-error-badge')) {
                 const badge = document.createElement('div');
                 badge.className = 'pele-diagram-error-badge';
@@ -20408,35 +20469,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             editor.scrollTop = targetScrollTop;
             editor.scrollLeft = savedScrollLeft;
             if (autoFocus) {
-                let positioned = false;
-                if (eventOrCoords && eventOrCoords.source) {
-                    try {
-                        const doc = liveInst.editor ? liveInst.editor.state.doc : null;
-                        if (doc) {
-                            const snippet = eventOrCoords.source.trim().slice(0, 30);
-                            doc.descendants((pmNode, pos) => {
-                                if (positioned) return false;
-                                if (pmNode.type && pmNode.type.name === 'codeBlock') {
-                                    const txt = pmNode.textContent || '';
-                                    if (txt.includes(snippet) || (pmNode.attrs && pmNode.attrs.language === 'mermaid')) {
-                                        liveInst.editor.commands.focus(pos + 1, { scrollIntoView: false });
-                                        positioned = true;
-                                        return false;
-                                    }
-                                }
-                            });
-                        }
-                    } catch (_) { }
-                }
-                if (!positioned) {
-                    if (eventOrCoords && eventOrCoords.coords && typeof liveInst.focusAtCoords === 'function') {
-                        liveInst.focusAtCoords(eventOrCoords.coords, { scrollIntoView: false });
-                    } else if (eventOrCoords && typeof eventOrCoords.clientX === 'number' && typeof liveInst.focusAtCoords === 'function') {
-                        liveInst.focusAtCoords({ left: eventOrCoords.clientX, top: eventOrCoords.clientY }, { scrollIntoView: false });
-                    } else {
-                        liveInst.focus(null, { scrollIntoView: false });
-                    }
-                }
+                __focusTiptapAtEditTarget(liveInst, eventOrCoords);
                 try { __syncFormatToolbarActiveStates(toolbar, liveInst); } catch (_) { }
             }
             editor.scrollTop = targetScrollTop;
@@ -20472,35 +20505,7 @@ function __mountMdCloneDescriptionEditor({ editor, toolbar, formatToggleBtn, isE
             editor.scrollLeft = savedScrollLeft;
 
             if (autoFocus) {
-                let positioned = false;
-                if (eventOrCoords && eventOrCoords.source) {
-                    try {
-                        const doc = tiptapInstance.editor ? tiptapInstance.editor.state.doc : null;
-                        if (doc) {
-                            const snippet = eventOrCoords.source.trim().slice(0, 30);
-                            doc.descendants((pmNode, pos) => {
-                                if (positioned) return false;
-                                if (pmNode.type && pmNode.type.name === 'codeBlock') {
-                                    const txt = pmNode.textContent || '';
-                                    if (txt.includes(snippet) || (pmNode.attrs && pmNode.attrs.language === 'mermaid')) {
-                                        tiptapInstance.editor.commands.focus(pos + 1, { scrollIntoView: false });
-                                        positioned = true;
-                                        return false;
-                                    }
-                                }
-                            });
-                        }
-                    } catch (_) { }
-                }
-                if (!positioned) {
-                    if (eventOrCoords && eventOrCoords.coords && typeof tiptapInstance.focusAtCoords === 'function') {
-                        tiptapInstance.focusAtCoords(eventOrCoords.coords, { scrollIntoView: false });
-                    } else if (eventOrCoords && typeof eventOrCoords.clientX === 'number' && typeof tiptapInstance.focusAtCoords === 'function') {
-                        tiptapInstance.focusAtCoords({ left: eventOrCoords.clientX, top: eventOrCoords.clientY }, { scrollIntoView: false });
-                    } else {
-                        tiptapInstance.focus(null, { scrollIntoView: false });
-                    }
-                }
+                __focusTiptapAtEditTarget(tiptapInstance, eventOrCoords);
                 try { __syncFormatToolbarActiveStates(toolbar, tiptapInstance); } catch (_) { }
             }
 
@@ -22707,6 +22712,7 @@ function __renderTempNodeImpl(section, options = {}) {
             e.preventDefault();
             exitEditingDescription({ commit: true });
         } else if (e.key === 'Escape') {
+            if (e.defaultPrevented) return; // 编辑器内已处理（如取消 Mermaid 图的选中）
             e.preventDefault();
             const hasPopover = document.querySelector('.md-color-popover.open, .md-fontcolor-popover.open, .md-heading-popover.open, .md-list-popover.open, .md-align-popover.open, .md-rgb-picker, .desc-clear-confirm-popover, .desc-height-settings-popover, .md-editing-help-popover');
             if (hasPopover) return;
@@ -22725,7 +22731,7 @@ function __renderTempNodeImpl(section, options = {}) {
             const activeEl = document.activeElement;
             if (activeEl?.closest('.md-editing-help-popover')?.__editorOwner === descriptionText) return;
             if (activeEl && (
-                activeEl.closest('.md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .temp-node-description-controls, .md-rgb-picker') ||
+                activeEl.closest('.md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .temp-node-description-controls, .md-rgb-picker, .canvas-mermaid-lightbox-overlay') ||
                 (descriptionContainer && descriptionContainer.contains(activeEl))
             )) return;
             exitEditingDescription({ commit: true });
@@ -26783,6 +26789,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
             e.preventDefault();
             exitEditingTip({ commit: true });
         } else if (e.key === 'Escape') {
+            if (e.defaultPrevented) return; // 编辑器内已处理（如取消 Mermaid 图的选中）
             e.preventDefault();
             const hasPopover = document.querySelector('.md-color-popover.open, .md-fontcolor-popover.open, .md-heading-popover.open, .md-list-popover.open, .md-align-popover.open, .md-rgb-picker, .desc-clear-confirm-popover, .desc-height-settings-popover, .md-editing-help-popover');
             if (hasPopover) return;
@@ -26800,7 +26807,7 @@ function bindPermanentSectionTipBehavior(sectionEl) {
         if (!e || !e.target || typeof e.target.closest !== 'function') return;
         if (tipContainer.contains(e.target)) return;
         if (e.target.closest('.md-editing-help-popover')?.__editorOwner === tipText) return;
-        if (e.target.closest('.md-toolbar-popover, .md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .md-rgb-picker, .permanent-section-tip-controls, .temp-node-description-controls, .desc-clear-confirm-popover, .desc-height-settings-popover')) return;
+        if (e.target.closest('.md-toolbar-popover, .md-format-popover, .md-color-popover, .md-fontcolor-popover, .md-heading-popover, .md-list-popover, .md-align-popover, .md-rgb-picker, .permanent-section-tip-controls, .temp-node-description-controls, .desc-clear-confirm-popover, .desc-height-settings-popover, .canvas-mermaid-lightbox-overlay')) return;
         exitEditingTip({ commit: true });
     };
     sectionEl.__permanentTipDocMouseDown = onPermanentDocMouseDown;
@@ -29142,7 +29149,12 @@ function __handleCanvasRealtimeLocalStorageSync(key, rawValue) {
         || key === 'canvasLowDetailEnabled'
         || key === 'canvasViewportLowDetailEnabled'
         || key === 'canvasVirtualizationEnabled'
+        || key === 'canvasViewportLowDetailDelayS'
+        || key === 'canvasViewportLowDetailMinColumns'
+        || key === 'canvasViewportLowDetailMinLoadedNodes'
         || key === 'canvasVirtualizationMinColumns'
+        || key === 'canvasVirtualizationMinLoadedNodes'
+        || key === 'canvasVirtualizationUnloadDelayS'
         || key === 'canvasZoomThresholds'
         || key === 'canvasSafeZoneSettings'
         || key === 'canvasMinZoomLimit'
@@ -35551,6 +35563,8 @@ function __isCanvasTouchpadPinch(e) {
     if (!e.ctrlKey) return false;
     if (CanvasState.physicalModifiers.Control || CanvasState.isCtrlPressed) return false;
     if (Number(e.deltaMode) !== 0) return false;
+    // 物理修饰键状态可能漏记（如窗口获得焦点前已按住 Ctrl），机械滚轮的离散大步进不能当作捏合
+    if (__isLikelyCanvasDiscreteWheelEvent(e)) return false;
     return true;
 }
 
@@ -35634,13 +35648,14 @@ function getCanvasTrackpadZoomFactor(rawDelta, _displayZoom) {
     // 1. 完全不吃滚轮非线性贝塞尔曲线（无 curveFactor）
     // 2. 完全不吃安全区/低细节磁矩阻尼（无 magnetFactor，恒定丝滑穿透，无磁矩曲线）
     // 3. 彻底消除人工 IIR 滤波滞后与残留方向粘合，做到 1:1 跟手，即动即走，即停即停
-    // 4. 消除硬编码步进上限（stepCap），微小捏合极度细腻敏锐，大幅捏合迅捷到位
+    // 4. 仅保留单事件安全上限（TRACKPAD_ZOOM_MAX_LOG_STEP），防止异常大增量一次性跳变；正常捏合不受影响
     // 5. 联动用户设置项中的触控板缩放速率（默认 1.0）
     const rate = getCanvasTrackpadZoomRate();
     const sensitivity = TRACKPAD_ZOOM_BASE_SENSITIVITY;
     const logDelta = delta * sensitivity * rate;
+    const clampedLogDelta = Math.max(-TRACKPAD_ZOOM_MAX_LOG_STEP, Math.min(TRACKPAD_ZOOM_MAX_LOG_STEP, logDelta));
 
-    return Math.exp(logDelta);
+    return Math.exp(clampedLogDelta);
 }
 
 function getCanvasLowDetailDisplayZoomThreshold() {
@@ -35757,30 +35772,6 @@ function countBookmarksRecursive(items) {
     return count;
 }
 
-function __countBookmarksAndFoldersRecursive(items, acc) {
-    if (!Array.isArray(items) || !acc) return;
-    for (const item of items) {
-        if (!item) continue;
-
-        const hasChildren = Array.isArray(item.children) && item.children.length > 0;
-        const isBookmark = !!(item.url || item.type === 'bookmark');
-        const isFolder = !isBookmark;
-
-        if (isBookmark) acc.bookmarks++;
-        else if (isFolder) acc.folders++;
-
-        if (hasChildren) {
-            __countBookmarksAndFoldersRecursive(item.children, acc);
-        }
-    }
-}
-
-function __getBookmarkAndFolderStats(items) {
-    const acc = { bookmarks: 0, folders: 0 };
-    __countBookmarksAndFoldersRecursive(items, acc);
-    return acc;
-}
-
 function __getPermanentColumnCountForPerfTotals() {
     let count = 0;
     if (document.getElementById('permanentSection')) {
@@ -35794,80 +35785,11 @@ function __getPermanentColumnCountForPerfTotals() {
 }
 
 function __getCanvasTotalDataStatsSync() {
-    if (!CanvasState.__perfTotalStats) {
-        CanvasState.__perfTotalStats = {
-            permanentBase: { bookmarks: 0, folders: 0 },
-            permanentFetchedAt: 0,
-            totalColumnCount: 0,
-            totalBookmarkCount: 0,
-            totalFolderCount: 0,
-            _signature: '',
-            _computedAt: 0
-        };
-    }
-    const cache = CanvasState.__perfTotalStats;
-    const now = Date.now();
-
+    // Total columns = permanent (incl copies) + temp + markdown cards/groups.
     const permanentColumnCount = __getPermanentColumnCountForPerfTotals();
     const tempCount = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
-    const mdNodes = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes : [];
-    const mdNodeCount = mdNodes.filter(Boolean).length;
-
-    const signature = `${permanentColumnCount}|${tempCount}|${mdNodes.length}|${CanvasState.tempSectionCounter || 0}|${CanvasState.mdNodeCounter || 0}`;
-    const needsRecompute = (signature !== cache._signature) || ((now - (cache._computedAt || 0)) > 800);
-
-    if (!needsRecompute) return cache;
-
-    // Total columns = permanent (incl copies) + temp + markdown cards/groups.
-    const totalColumnCount = permanentColumnCount + tempCount + mdNodeCount;
-
-    // Total bookmarks/folders:
-    // - Permanent section copies render the same underlying tree multiple times, so totals should
-    //   reflect that (main + copies). We compute the permanent tree stats ONCE, then multiply by
-    //   the number of permanent columns.
-    // - Temporary sections are stored as independent canvas data, so count all of them.
-    const permBase = cache.permanentBase || { bookmarks: 0, folders: 0 };
-    const permBookmarks = (permBase.bookmarks || 0) * permanentColumnCount;
-    const permFolders = (permBase.folders || 0) * permanentColumnCount;
-
-    let tempBookmarks = 0;
-    let tempFolders = 0;
-    try {
-        (CanvasState.tempSections || []).forEach((section) => {
-            if (!section || !Array.isArray(section.items)) return;
-            const s = __getBookmarkAndFolderStats(section.items);
-            tempBookmarks += (s.bookmarks || 0);
-            tempFolders += (s.folders || 0);
-        });
-    } catch (_) { }
-
-    cache.totalColumnCount = totalColumnCount;
-    cache.totalBookmarkCount = permBookmarks + tempBookmarks;
-    cache.totalFolderCount = permFolders + tempFolders;
-    cache._signature = signature;
-    cache._computedAt = now;
-    return cache;
-}
-
-async function __refreshCanvasPermanentBaseStatsForPerfTotals() {
-    if (!CanvasState.__perfTotalStats) __getCanvasTotalDataStatsSync();
-    const cache = CanvasState.__perfTotalStats;
-
-    const now = Date.now();
-    if (cache.permanentFetchedAt && (now - cache.permanentFetchedAt) < 30000) return;
-
-    try {
-        const tree = await __readPermanentTreeSnapshotFromBcs();
-        const root = Array.isArray(tree) ? tree[0] : null;
-        const items = (root && Array.isArray(root.children)) ? root.children : tree;
-        const stats = __getBookmarkAndFolderStats(items);
-        cache.permanentBase = stats;
-        cache.permanentFetchedAt = Date.now();
-        cache._signature = '';
-
-        // If modal is open, refresh numbers immediately
-        try { updateCanvasPerfSettingsUI(); } catch (_) { }
-    } catch (_) { }
+    const mdNodeCount = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.filter(Boolean).length : 0;
+    return { totalColumnCount: permanentColumnCount + tempCount + mdNodeCount };
 }
 
 /**
@@ -35881,203 +35803,66 @@ function countVisibleDOMNodes(sectionId) {
         : sectionId;
     if (!secEl || !secEl.querySelectorAll) return { bookmarks: 0, folders: 0 };
 
-    // 尝试查询 .tree-item 并通过 data-node-type 区分
-    const items = secEl.querySelectorAll('.tree-item');
-    if (items.length > 0) {
-        let b = 0, f = 0;
-        items.forEach(item => {
-            // 只统计可见的（如果隐藏在折叠父级下，通常不渲染或 display:none）
-            if (item.dataset.nodeType === 'folder') f++;
-            else b++;
-        });
-        return { bookmarks: b, folders: f };
-    }
-
-    // Fallback: 尝试查询 class
-    const b = secEl.querySelectorAll('.bookmark-node, .tree-bookmark').length;
-    const f = secEl.querySelectorAll('.folder-node, .tree-folder').length;
-
-    // Fallback 2: 如果都找不到，默认全是书签混合
-    if (b === 0 && f === 0) {
-        const aggr = secEl.querySelectorAll('li').length;
-        return { bookmarks: aggr, folders: 0 };
-    }
-
+    // 只统计书签树节点（临时栏目与永久栏目的书签树都渲染为 .tree-item）；
+    // 不做 li 等兜底统计，否则备注/说明里的富文本列表会被误算成书签
+    let b = 0, f = 0;
+    secEl.querySelectorAll('.tree-item').forEach(item => {
+        if (item.dataset.nodeType === 'folder') f++;
+        else b++;
+    });
     return { bookmarks: b, folders: f };
 }
 
 
 
 /**
- * 计算当前视界窗口内的数据统计
- * @returns {{ visibleSectionCount: number, totalBookmarkCount: number, avgBookmarksPerSection: number }}
+ * 计算当前视口内可见的栏目/卡片数（临时栏目、永久栏目含副本、空白卡片与卡片组）
+ * @returns {number}
  */
-function getCanvasViewportDataStats() {
+function __countCanvasVisibleColumns() {
     const workspace = document.getElementById('canvasWorkspace');
-    if (!workspace) return {
-        visibleSectionCount: 0,
-        loadedSectionCount: 0,
-        totalVisibleNodeCount: 0,
-        visibleBookmarkCount: 0,
-        visibleFolderCount: 0,
-        loadedBookmarkCount: 0,
-        loadedFolderCount: 0,
-        avgBookmarksPerSection: 0
-    };
-
-    // 如果处于低细节模式（内容被简化/隐藏），则认为可视书签/文件夹数为 0
-    const isLowDetail = CanvasState.lowDetailEnabled && CanvasState.lowDetailActive;
-    if (isLowDetail) {
-        // 我们继续计算 visibleSectionCount，但不计算书签内容
-        // 所以不需要在这里立刻 return，而是下面的循环里跳过 countVisibleDOMNodes
-    }
+    if (!workspace) return 0;
 
     const rect = getCachedCanvasWorkspaceRect(workspace, true);
     const zoom = (CanvasState.zoom && CanvasState.zoom > 0) ? CanvasState.zoom : 1;
     const panX = CanvasState.panOffsetX || 0;
     const panY = CanvasState.panOffsetY || 0;
-
-    // 视口边界（canvas坐标系）
     const viewportLeft = (0 - panX) / zoom;
     const viewportRight = (rect.width - panX) / zoom;
     const viewportTop = (0 - panY) / zoom;
     const viewportBottom = (rect.height - panY) / zoom;
+    const isVisible = (x, y, w, h) => [x, y, w, h].every(v => typeof v === 'number' && isFinite(v)) && !(
+        x + w < viewportLeft ||
+        x > viewportRight ||
+        y + h < viewportTop ||
+        y > viewportBottom
+    );
 
-    let visibleSectionCount = 0;
-    let totalVisibleNodeCount = 0;
-    let visibleBookmarkCount = 0;
-    let visibleFolderCount = 0;
-    let loadedSectionCount = 0; // count of sections with DOM loaded
-    // 已加载书签/文件夹：统计所有 DOM 实际加载的栏目中的节点（不限于视口）
-    let loadedBookmarkCount = 0;
-    let loadedFolderCount = 0;
-
+    let count = 0;
     for (const section of (CanvasState.tempSections || [])) {
         if (!section || !section.id) continue;
         const baseSize = getTempSectionBaseSize(section);
-        const x = Number(section.x);
-        const y = Number(section.y);
-        const w = Number(section.width || baseSize.width);
-        const h = Number(section.height || baseSize.height);
-        if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
-
-        // 严格检查 DOM 是否存在（不限于视口范围——用于"已加载"计数）
-        const secEl = document.getElementById(section.id);
-        const isContentUnloaded = CanvasState.unloadedTempSectionTrees.has(section.id);
-        const isDomLoaded = !!(secEl && !isContentUnloaded);
-
-        // 统计已加载 DOM 节点（只查询一次，视口内的可视计数复用同一结果）
-        let counts = null;
-        if (isDomLoaded && !isLowDetail) {
-            counts = countVisibleDOMNodes(section.id);
-            loadedBookmarkCount += counts.bookmarks;
-            loadedFolderCount += counts.folders;
-        }
-
-        // 检测是否在视口内（有任意交集即算可见）
-        const inViewport = !(
-            x + w < viewportLeft ||
-            x > viewportRight ||
-            y + h < viewportTop ||
-            y > viewportBottom
-        );
-
-        if (inViewport) {
-            visibleSectionCount++;
-
-            if (isDomLoaded) {
-                loadedSectionCount++;
-
-                if (counts) {
-                    // 复用已计算的 counts，避免重复 DOM 查询
-                    visibleBookmarkCount += counts.bookmarks;
-                    visibleFolderCount += counts.folders;
-                    totalVisibleNodeCount += (counts.bookmarks + counts.folders);
-                }
-            }
-        }
+        if (isVisible(Number(section.x), Number(section.y), Number(section.width || baseSize.width), Number(section.height || baseSize.height))) count++;
     }
 
-    // 永久书签栏目（含副本）也算
     try {
-        const permSections = Array.from(document.querySelectorAll('.permanent-bookmark-section'));
-        permSections.forEach((permEl) => {
-            if (!permEl) return;
-            const x = parseFloat(permEl.style.left) || 0;
-            const y = parseFloat(permEl.style.top) || 0;
+        document.querySelectorAll('.permanent-bookmark-section').forEach((permEl) => {
             const w = parseFloat(permEl.style.width) || permEl.offsetWidth || 0;
             const h = parseFloat(permEl.style.height) || permEl.offsetHeight || 0;
             if (w <= 0 || h <= 0) return;
-
-            // 永久栏目 DOM 始终加载，只查询一次复用结果
-            let counts = null;
-            if (!isLowDetail) {
-                counts = countVisibleDOMNodes(permEl);
-                loadedBookmarkCount += counts.bookmarks;
-                loadedFolderCount += counts.folders;
-            }
-
-            const isPermVisible = !(
-                x + w < viewportLeft ||
-                x > viewportRight ||
-                y + h < viewportTop ||
-                y > viewportBottom
-            );
-            if (!isPermVisible) return;
-
-            visibleSectionCount++;
-            loadedSectionCount++;
-            if (counts) {
-                // 复用已计算的 counts
-                visibleBookmarkCount += counts.bookmarks;
-                visibleFolderCount += counts.folders;
-                totalVisibleNodeCount += (counts.bookmarks + counts.folders);
-            }
+            if (isVisible(parseFloat(permEl.style.left) || 0, parseFloat(permEl.style.top) || 0, w, h)) count++;
         });
     } catch (_) { }
 
-    // 空白栏目和卡片组也计入“可视栏目数”。
     try {
         const mdBaseSize = getBlankNodeDefaultSize();
         for (const node of (CanvasState.mdNodes || [])) {
             if (!node || !node.id) continue;
-            const x = Number(node.x);
-            const y = Number(node.y);
-            const w = Number(node.width || mdBaseSize.width);
-            const h = Number(node.height || mdBaseSize.height);
-            if (![x, y, w, h].every(v => typeof v === 'number' && isFinite(v))) continue;
-
-            const inViewport = !(
-                x + w < viewportLeft ||
-                x > viewportRight ||
-                y + h < viewportTop ||
-                y > viewportBottom
-            );
-            if (!inViewport) continue;
-
-            visibleSectionCount++;
+            if (isVisible(Number(node.x), Number(node.y), Number(node.width || mdBaseSize.width), Number(node.height || mdBaseSize.height))) count++;
         }
     } catch (_) { }
 
-    // 避免除以0
-    const avgBookmarksPerSection = loadedSectionCount > 0
-        ? Math.round(totalVisibleNodeCount / loadedSectionCount)
-        : 0;
-
-    // 同步更新缓存，避免运行时 __isViewportLowDetailEffective() 发起额外 DOM 查询
-    CanvasState._loadedNodeCount = loadedBookmarkCount + loadedFolderCount;
-    CanvasState._loadedNodeCountAt = Date.now();
-
-    return {
-        visibleSectionCount,
-        loadedSectionCount,
-        totalVisibleNodeCount,
-        visibleBookmarkCount,
-        visibleFolderCount,
-        loadedBookmarkCount,
-        loadedFolderCount,
-        avgBookmarksPerSection
-    };
+    return count;
 }
 
 /**
@@ -36132,21 +35917,13 @@ function isCanvasVirtualizationEnabled() {
     const mode = CanvasState.virtualizationEnabled;
     if (mode === 'off') return false;
     if (mode === 'on') return true;
-    // 'auto': 双轨混合判断（栏目数阈值 OR 节点数阈值）
+    // 'auto': 按本模式自己的「最小总栏目数 / 最小已加载数」任一满足
 
     try {
-        const totals = __getCanvasTotalDataStatsSync();
-        const minCols = (typeof CanvasState.virtualizationMinColumns === 'number' && Number.isFinite(CanvasState.virtualizationMinColumns))
-            ? CanvasState.virtualizationMinColumns
-            : 15;
-        const minNodes = (typeof CanvasState.virtualizationMinLoadedNodes === 'number' && Number.isFinite(CanvasState.virtualizationMinLoadedNodes))
-            ? CanvasState.virtualizationMinLoadedNodes
-            : 100;
-
-        const nodesHeavy = ((totals.totalBookmarkCount || 0) + (totals.totalFolderCount || 0)) >= minNodes;
-        const columnsHeavy = (totals.totalColumnCount || 0) >= minCols;
-
-        return nodesHeavy || columnsHeavy;
+        return __evaluateCanvasAutoTrigger(
+            __readPositiveIntSetting(CanvasState.virtualizationMinColumns, 15),
+            __readPositiveIntSetting(CanvasState.virtualizationMinLoadedNodes, 100)
+        );
     } catch (_) {}
 
     return true;
@@ -36613,23 +36390,86 @@ function __updateNodeOffScreenState(id, isOffScreen) {
     }
 }
 
+const CANVAS_AUTO_TRIGGER_STATS_TTL_MS = 1000;
+
 /**
- * 轻量级缓存：获取当前 DOM 中已加载的书签+文件夹节点总数
- * 使用 3 秒 TTL 缓存避免频繁 DOM 查询
+ * 统计画布 DOM 中已加载的书签+文件夹节点数（与性能面板「已加载」同口径：.tree-item 计数）。
+ * 被懒惰加载/低细节卸载的栏目沿用其卸载前最后一次的已加载数，
+ * 否则卸载会让计数下降 → 自动触发失效 → 全量恢复 → 再次触发，形成来回抖动。
  */
-function __getLoadedNodeCountFast() {
-    try {
-        const totals = __getCanvasTotalDataStatsSync();
-        return (totals.totalBookmarkCount || 0) + (totals.totalFolderCount || 0);
-    } catch (_) {
-        return 0;
+function __collectCanvasLoadedTreeNodeCount() {
+    if (!(CanvasState.__loadedTreeNodeMemo instanceof Map)) CanvasState.__loadedTreeNodeMemo = new Map();
+    const memo = CanvasState.__loadedTreeNodeMemo;
+    const liveIds = new Set();
+    const measure = (id, el, isUnloaded) => {
+        liveIds.add(id);
+        if (el && !isUnloaded) {
+            const counts = countVisibleDOMNodes(el);
+            const n = (counts.bookmarks || 0) + (counts.folders || 0);
+            memo.set(id, n);
+            return n;
+        }
+        return memo.get(id) || 0;
+    };
+
+    let total = 0;
+    for (const section of (CanvasState.tempSections || [])) {
+        if (!section || !section.id) continue;
+        const unloaded = !!(CanvasState.unloadedTempSectionTrees && CanvasState.unloadedTempSectionTrees.has(section.id));
+        total += measure(section.id, document.getElementById(section.id), unloaded);
     }
+
+    const permanentIds = new Set();
+    document.querySelectorAll('.permanent-bookmark-section').forEach((el) => { if (el.id) permanentIds.add(el.id); });
+    try {
+        (__readPermanentSectionCopies() || []).forEach((copy) => { if (copy && copy.id) permanentIds.add(copy.id); });
+    } catch (_) { }
+    permanentIds.forEach((id) => {
+        const el = document.getElementById(id);
+        total += measure(id, el, !!(el && el.classList.contains('permanent-tree-unloaded')));
+    });
+
+    Array.from(memo.keys()).forEach((id) => { if (!liveIds.has(id)) memo.delete(id); });
+    return total;
+}
+
+/**
+ * 视野外低细节 / 懒惰加载 自动触发所用的画布负载统计（带 TTL 缓存，交互中直接复用缓存，避免热路径 DOM 查询）。
+ * @returns {{ totalColumnCount: number, loadedNodeCount: number }}
+ */
+function __getCanvasAutoTriggerStats(force = false) {
+    const tempLen = Array.isArray(CanvasState.tempSections) ? CanvasState.tempSections.length : 0;
+    const mdLen = Array.isArray(CanvasState.mdNodes) ? CanvasState.mdNodes.length : 0;
+    const signature = `${tempLen}|${mdLen}`;
+    const cache = CanvasState.__autoTriggerStats;
+    const now = Date.now();
+    if (!force && cache && cache.signature === signature) {
+        if ((now - cache.computedAt) < CANVAS_AUTO_TRIGGER_STATS_TTL_MS) return cache;
+        try { if (__isCanvasInteractionActive()) return cache; } catch (_) { }
+    }
+
+    let totalColumnCount = 0;
+    let loadedNodeCount = 0;
+    try { totalColumnCount = __getCanvasTotalDataStatsSync().totalColumnCount || 0; } catch (_) { }
+    try { loadedNodeCount = __collectCanvasLoadedTreeNodeCount(); } catch (_) { }
+    CanvasState.__autoTriggerStats = { totalColumnCount, loadedNodeCount, signature, computedAt: now };
+    return CanvasState.__autoTriggerStats;
+}
+
+function __readPositiveIntSetting(value, fallback) {
+    return (typeof value === 'number' && Number.isFinite(value) && value >= 1) ? value : fallback;
+}
+
+/** 自动触发：总栏目数 >= minColumns 或 已加载书签+文件夹数 >= minLoadedNodes，任意满足即生效。 */
+function __evaluateCanvasAutoTrigger(minColumns, minLoadedNodes) {
+    const stats = __getCanvasAutoTriggerStats();
+    return (stats.totalColumnCount || 0) >= minColumns || (stats.loadedNodeCount || 0) >= minLoadedNodes;
 }
 
 /**
  * 判断视野外低细节模式是否在运行时实际生效：
- * - 用户开关必须打开
- * - 已加载节点数（书签+文件夹）必须 >= 自动触发阈值
+ * - 低细节总开关必须打开
+ * - 'auto' 时按本模式自己的「最小总栏目数 / 最小已加载数」任一满足
  */
 function __isViewportLowDetailEffective() {
     if (CanvasState.lowDetailEnabled === false) return false;
@@ -36638,19 +36478,14 @@ function __isViewportLowDetailEffective() {
     if (mode === 'off') return false;
     if (mode === 'on') return true;
 
-    // 双轨混合触发：满足任意高负载特征即开启视野外防护
-    const totals = __getCanvasTotalDataStatsSync();
-    const minNodes = (typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' && Number.isFinite(CanvasState.viewportLowDetailMinLoadedNodes))
-        ? CanvasState.viewportLowDetailMinLoadedNodes
-        : 100;
-    const minCols = (typeof CanvasState.viewportLowDetailMinColumns === 'number' && Number.isFinite(CanvasState.viewportLowDetailMinColumns))
-        ? CanvasState.viewportLowDetailMinColumns
-        : (typeof CanvasState.virtualizationMinColumns === 'number' ? CanvasState.virtualizationMinColumns : 15);
-
-    const nodesHeavy = ((totals.totalBookmarkCount || 0) + (totals.totalFolderCount || 0)) >= minNodes;
-    const columnsHeavy = (totals.totalColumnCount || 0) >= minCols;
-
-    return nodesHeavy || columnsHeavy;
+    try {
+        return __evaluateCanvasAutoTrigger(
+            __readPositiveIntSetting(CanvasState.viewportLowDetailMinColumns, 15),
+            __readPositiveIntSetting(CanvasState.viewportLowDetailMinLoadedNodes, 100)
+        );
+    } catch (_) {
+        return false;
+    }
 }
 
 function __shouldNodeBeLowDetail(id, defaultIsLowDetail) {
@@ -36734,15 +36569,17 @@ function __updateVirtualizationWakeupScheduler() {
     if (CanvasState.offScreenNodesTime && CanvasState.offScreenNodesTime.size > 0) {
         const lowDetailDelayMs = (CanvasState.viewportLowDetailDelayS || 3.0) * 1000;
         const unloadDelayMs = (CanvasState.virtualizationUnloadDelayS || 6.0) * 1000;
+        const viewportLowDetail = __isViewportLowDetailEffective();
+        const virtualize = isCanvasVirtualizationEnabled();
 
         for (const [id, offScreenTime] of CanvasState.offScreenNodesTime.entries()) {
             const elapsed = nowTime - offScreenTime;
 
-            if (__isViewportLowDetailEffective() && elapsed < lowDetailDelayMs) {
+            if (viewportLowDetail && elapsed < lowDetailDelayMs) {
                 const rem = lowDetailDelayMs - elapsed;
                 if (rem < minWakeup) minWakeup = rem;
             }
-            if (isCanvasVirtualizationEnabled() && elapsed < unloadDelayMs) {
+            if (virtualize && elapsed < unloadDelayMs) {
                 const rem = unloadDelayMs - elapsed;
                 if (rem < minWakeup) minWakeup = rem;
             }
@@ -51079,8 +50916,6 @@ function openCanvasPerfSettingsModal() {
     }
     if (perfFocus) CanvasState.perfSettingsFocus = null;
 
-    // Refresh totals (permanent tree needs async fetch)
-    try { __refreshCanvasPermanentBaseStatsForPerfTotals(); } catch (_) { }
     updateCanvasPerfSettingsUI();
 
     // 启动实时更新
@@ -51175,7 +51010,7 @@ function updateCanvasPerfSettingsUI() {
     try { updateDataIntensiveMode(true); } catch (_) { }
 
     const totals = __getCanvasTotalDataStatsSync();
-    const stats = getCanvasViewportDataStats(true); // force calc for UI
+    const visibleColumnCount = __countCanvasVisibleColumns();
     const fmt = (visible, total) => {
         const v = Number.isFinite(visible) ? visible : 0;
         const t = Number.isFinite(total) ? total : 0;
@@ -51202,13 +51037,8 @@ function updateCanvasPerfSettingsUI() {
 </span>`;
     };
 
-    // 更新数值显示：可视 / 已加载（替代原来的"总量"）
     const statVisSec = document.getElementById('perfStatVisSec');
-    const statVisBm = document.getElementById('perfStatVisBm');
-    const statAvg = document.getElementById('perfStatAvg');
-    if (statVisSec) statVisSec.innerHTML = fmt(stats.visibleSectionCount, totals.totalColumnCount);
-    if (statVisBm) statVisBm.innerHTML = fmt(stats.visibleBookmarkCount, stats.loadedBookmarkCount);
-    if (statAvg) statAvg.innerHTML = fmt(stats.visibleFolderCount, stats.loadedFolderCount);
+    if (statVisSec) statVisSec.innerHTML = fmt(visibleColumnCount, totals.totalColumnCount);
 
     const setTotalColor = (id, color) => {
         const el = document.getElementById(id);
@@ -51217,21 +51047,29 @@ function updateCanvasPerfSettingsUI() {
         if (totNum) totNum.style.color = color || 'var(--text-secondary)';
     };
 
-    // 超过用户设置的启用虚拟化的最小栏目数时，将总栏目数高亮显示为警告色（橙色）
-    const minColsLimit = (typeof CanvasState.virtualizationMinColumns === 'number' && Number.isFinite(CanvasState.virtualizationMinColumns))
-        ? CanvasState.virtualizationMinColumns
-        : 15;
-    const overTotalSec = (totals.totalColumnCount || 0) >= minColsLimit;
+    // 自动触发判定与面板口径一致：读取面板当前输入（未保存时也能即时预览），回退到已生效设置
+    const readIntInput = (id, fallback) => {
+        const input = document.getElementById(id);
+        const v = input ? parseInt(input.value, 10) : NaN;
+        return __readPositiveIntSetting(v, fallback);
+    };
+    const triggerStats = __getCanvasAutoTriggerStats(true);
+    const lodMinCols = readIntInput('perfInputViewportLowDetailMinCols', __readPositiveIntSetting(CanvasState.viewportLowDetailMinColumns, 15));
+    const lodMinNodes = readIntInput('perfInputViewportLowDetailMinLoadedNodes', __readPositiveIntSetting(CanvasState.viewportLowDetailMinLoadedNodes, 100));
+    const virtMinCols = readIntInput('perfInputVirtualizationMinCols', __readPositiveIntSetting(CanvasState.virtualizationMinColumns, 15));
+    const virtMinNodes = readIntInput('perfInputVirtualizationMinLoadedNodes', __readPositiveIntSetting(CanvasState.virtualizationMinLoadedNodes, 100));
+
+    // 达到任一模式的「最小总栏目数」时，总栏目数高亮为警告色（橙色）
+    const overTotalSec = (triggerStats.totalColumnCount || 0) >= Math.min(lodMinCols, virtMinCols);
     setTotalColor('perfStatVisSec', overTotalSec ? 'var(--warning)' : null);
 
-    // 已加载书签+文件夹超过视野外低细节自动触发阈值时，将已加载书签/文件夹数高亮为橙色
-    const minLoadedLimit = (typeof CanvasState.viewportLowDetailMinLoadedNodes === 'number' && Number.isFinite(CanvasState.viewportLowDetailMinLoadedNodes))
-        ? CanvasState.viewportLowDetailMinLoadedNodes
-        : 100;
-    const totalLoadedNodes = (stats.loadedBookmarkCount || 0) + (stats.loadedFolderCount || 0);
-    const overLoadedNodes = totalLoadedNodes >= minLoadedLimit;
-    setTotalColor('perfStatVisBm', overLoadedNodes ? 'var(--warning)' : null);
-    setTotalColor('perfStatAvg', overLoadedNodes ? 'var(--warning)' : null);
+    // 已加载书签+文件夹（与「最小已加载数」同口径）；达到任一模式的阈值时高亮为橙色
+    const statLoadedNodes = document.getElementById('perfStatLoadedNodes');
+    if (statLoadedNodes) {
+        const loadedNodes = triggerStats.loadedNodeCount || 0;
+        statLoadedNodes.textContent = String(loadedNodes);
+        statLoadedNodes.style.color = loadedNodes >= Math.min(lodMinNodes, virtMinNodes) ? 'var(--warning)' : 'var(--text-primary)';
+    }
 
     const midEl = document.getElementById('perfMagnetMidValue');
     if (midEl) {
@@ -51534,12 +51372,8 @@ function createCanvasPerfSettingsModal() {
                         <div class="perf-stat-label" style="font-size: 12px; color: var(--text-secondary);">${isEn ? 'Columns (V/T)' : '可视/总栏目'}</div>
                     </div>
                     <div class="perf-stats-card" style="flex: 1; display: flex; flex-direction: column; align-items: center; padding: 12px; background: var(--bg-tertiary); border-radius: 10px; border: 1px solid var(--border-color);">
-                        <div class="perf-stat-value" id="perfStatVisBm" style="font-size: 24px; font-weight: 700; line-height: 1.2; margin-bottom: 2px;">0</div>
-                        <div class="perf-stat-label" style="font-size: 12px; color: var(--text-secondary);">${isEn ? 'Bookmarks (V/L)' : '可视/已加载书签'}</div>
-                    </div>
-                    <div class="perf-stats-card" style="flex: 1; display: flex; flex-direction: column; align-items: center; padding: 12px; background: var(--bg-tertiary); border-radius: 10px; border: 1px solid var(--border-color);">
-                        <div class="perf-stat-value" id="perfStatAvg" style="font-size: 24px; font-weight: 700; line-height: 1.2; margin-bottom: 2px;">0</div>
-                        <div class="perf-stat-label" style="font-size: 12px; color: var(--text-secondary);">${isEn ? 'Folders (V/L)' : '可视/已加载文件夹'}</div>
+                        <div class="perf-stat-value" id="perfStatLoadedNodes" style="font-size: 24px; font-weight: 700; line-height: 1.2; margin-bottom: 2px;">0</div>
+                        <div class="perf-stat-label" style="font-size: 12px; color: var(--text-secondary);">${isEn ? 'Loaded Bookmarks + Folders' : '已加载书签+文件夹'}</div>
                     </div>
                 </div>
 
@@ -51676,8 +51510,9 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfViewportLowDetailHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Outside Viewport -- Low-Detail Mode</b>: When enabled, cards outside the current viewport automatically switch to low-detail mode (3s off-screen delay) to reduce DOM and vector rendering overhead.<br><br><b>Dual-track Auto-trigger</b>: In "Auto" mode, protection activates if <b>either</b> high-load condition is met:<br>1. Total loaded bookmarks + folders reaches the node threshold (deep bookmark board);<br>2. Total columns/cards (including Markdown nodes) reaches the "Min Total Columns" threshold below (flat mindmap board).'
-            : '<b>视野以外--低细节模式</b>：开启后，当前视口之外的卡片在离屏 3 秒后自动处于低细节（色块）状态，以减少视口外的图表重绘与 DOM 消耗。<br><br><b>双轨混合触发机制</b>：处于「自动」模式时，画板满足以下<b>任意一项</b>高负载条件即会自动激活：<br>1. 已加载书签与文件夹总数达到设定的最小节点阈值（深井型书签画板）；<br>2. 画板总栏目/卡片数（含纯 Markdown 卡片）达到下方设定的「最小总栏目数」阈值（平铺型思维导图画板）。'}
+            ? '<b>Outside Viewport -- Low-Detail Mode</b>: When enabled, cards that stay outside the viewport longer than "Delay before Entering Low-Detail" switch to low-detail (color block) mode, reducing off-screen DOM and vector rendering overhead.<br><br><b>Auto</b>: activates when <b>either</b> of this section\'s own thresholds is reached:<br>1. Total columns/cards (incl. blank Markdown cards) &ge; "Min Total Columns";<br>2. Loaded bookmarks + folders &ge; "Min Loaded Nodes". "Loaded" means nodes currently rendered in the canvas DOM (same as the stat cards above); cards unloaded by lazy loading keep their last loaded count so the mode does not flip back and forth.'
+            : '<b>视野以外--低细节模式</b>：开启后，离开视口超过「进入低细节的离屏延迟时间」的卡片会自动切换为低细节（色块）状态，以减少视口外的图表重绘与 DOM 消耗。<br><br><b>自动</b>：满足本项自己的以下<b>任意一项</b>阈值即生效：<br>1. 画板总栏目/卡片数（含空白 Markdown 卡片）&ge;「最小总栏目数」；<br>2. 已加载书签+文件夹数 &ge;「最小已加载数」。「已加载」指当前已渲染到画布 DOM 的节点数（与上方统计卡片同口径）；被懒惰加载卸载的栏目按卸载前的数量计入，避免来回切换。'}
+
             </div>
         </div>
 
@@ -51685,8 +51520,9 @@ function createCanvasPerfSettingsModal() {
         <div class="perf-help-popover" id="perfVirtualizationHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? '<b>Outside Viewport -- Lazy Loading (Virtualization)</b>: Dynamically loads visible column cards and unloads off-screen columns (6s off-screen delay), drastically reducing DOM element count and memory footprint.<br><br><b>Two-stage Pipeline</b>: Coordinates with Low-Detail mode on a unified timeline: cards off-screen for 3s enter low-detail mode, and at 6s their internal DOM is unmounted, keeping the canvas silky smooth.'
-            : '<b>视野以外--懒惰加载（虚拟化）</b>：启用后，系统仅渲染视口内可见及临近的栏目卡片，视口外较远的栏目在离屏 6 秒后动态卸载内部 DOM（仅保留轻量壳体），极大降低内存占用与重排耗时。<br><br><b>双阶梯协同流水线</b>：与上方的低细节模式形成完整的时序保护网（3 秒低细节轻量化 -> 6 秒深度卸载懒加载），当达到总栏目数阈值时全套协同生效。'}
+            ? '<b>Outside Viewport -- Lazy Loading (Virtualization)</b>: Only cards in or near the viewport stay fully rendered; cards that stay off-screen longer than "Delay before Lazy Loading" have their internal DOM unloaded (a lightweight shell is kept), greatly reducing memory and relayout cost.<br><br><b>Auto</b>: judged independently by this section\'s own "Min Total Columns" / "Min Loaded Nodes" (either one reached). When both modes are active, cards first enter low-detail and are unloaded later, as long as the low-detail delay is shorter than the lazy-loading delay (defaults 3s / 6s).'
+            : '<b>视野以外--懒惰加载（虚拟化）</b>：启用后，仅视口内及临近的卡片保持完整渲染；离屏超过「进入懒惰加载的离屏延迟时间」的卡片会卸载内部 DOM（仅保留轻量壳体），极大降低内存占用与重排耗时。<br><br><b>自动</b>：按本项自己的「最小总栏目数 / 最小已加载数」独立判断，任意一项达到即生效。两者同时生效且低细节延迟短于懒惰加载延迟时（默认 3 秒 / 6 秒），卡片会先进入低细节、再被卸载。'}
+
             </div>
         </div>
     `;
@@ -51830,24 +51666,6 @@ function createCanvasPerfSettingsModal() {
             btn.addEventListener('click', () => {
                 __setTriStateValue(container, btn.getAttribute('data-value'));
                 schedulePerfSave();
-
-                if (selector === '#perfTriStateVirtualization') {
-                    const val = __getTriStateValue(container);
-                    if (val !== 'off') {
-                        try {
-                            const totals = __getCanvasTotalDataStatsSync();
-                            const currentTotalCols = (totals && typeof totals.totalColumnCount === 'number') ? totals.totalColumnCount : 0;
-                            const minColsInput = document.getElementById('perfInputVirtualizationMinCols');
-                            if (minColsInput) {
-                                const v = parseInt(minColsInput.value, 10);
-                                if (Number.isFinite(v) && currentTotalCols < v) {
-                                    minColsInput.value = Math.max(1, currentTotalCols);
-                                    CanvasState.virtualizationMinColumns = Math.max(1, currentTotalCols);
-                                }
-                            }
-                        } catch (_) {}
-                    }
-                }
 
                 updateCanvasPerfSettingsUI();
             });

@@ -23,6 +23,25 @@ export default Extension.create({
         }
         return true;
       },
+      // 「恢复普通输入」在 Mermaid 代码块内：跳到图下方的一行继续普通输入；下方没有可输入的行时新建一个段落。
+      // 普通代码块不受影响（仍只清空待输入格式，不改块结构）。
+      exitCodeBlockBelow: () => ({ editor, tr, dispatch }) => {
+        if (!editor.isEditable || editor.view.composing) return false;
+        const { $from, $to } = tr.selection;
+        if (!$from.parent.type.spec.code || !$from.sameParent($to)) return false;
+        if (String($from.parent.attrs.language || '').toLowerCase() !== 'mermaid') return false;
+        const after = $from.after();
+        const next = tr.doc.nodeAt(after);
+        const fillType = (next && next.isTextblock)
+          ? null
+          : $from.node(-1).contentMatchAt($from.indexAfter(-1)).defaultType;
+        if (!(next && next.isTextblock) && !(fillType && fillType.isTextblock)) return false;
+        if (dispatch) {
+          if (fillType) tr.insert(after, fillType.createAndFill());
+          tr.setSelection(TextSelection.create(tr.doc, after + 1)).scrollIntoView();
+        }
+        return true;
+      },
       exitInlineFormatAtEnd: () => ({ editor, tr, dispatch }) => {
         const { selection, storedMarks } = tr;
         if (!editor.isEditable || editor.view.composing || !(selection instanceof TextSelection) || !selection.empty) return false;
@@ -47,7 +66,8 @@ export default Extension.create({
   },
   addProseMirrorPlugins() {
     const handleShortcut = keydownHandler({
-      'Mod-\\': () => this.editor.can().setPlainTyping() && this.editor.commands.setPlainTyping(),
+      'Mod-\\': () => (this.editor.can().exitCodeBlockBelow() && this.editor.commands.exitCodeBlockBelow())
+        || (this.editor.can().setPlainTyping() && this.editor.commands.setPlainTyping()),
     });
     return [new Plugin({
       props: {

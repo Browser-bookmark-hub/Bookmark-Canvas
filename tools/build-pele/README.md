@@ -3,8 +3,10 @@
 运行环境：Node.js 18+
 
 ```sh
-node build.js
+PELE_SRC=/path/to/pele node build.js
 ```
+
+`PELE_SRC` 可指向 pele 仓库根目录或其 `src/index.ts`；未设置时依次查找 `tools/build-pele/node_modules/@obsidianmd/pele` 与仓库根 `node_modules/@obsidianmd/pele`。
 
 产物路径：`Bookmark-Canvas-main/history_html/vendor/pele.min.js`
 

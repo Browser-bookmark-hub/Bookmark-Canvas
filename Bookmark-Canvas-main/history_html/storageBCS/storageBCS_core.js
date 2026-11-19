@@ -3537,6 +3537,9 @@ function __htmlToMarkdown(html, options = {}) {
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return '';
 
+        if (node.classList && (node.classList.contains('pele-diagram-error-badge') || node.classList.contains('pele-diagram-toolbar') || node.classList.contains('mermaid-live-preview'))) {
+            return '';
+        }
         if (node.hasAttribute && node.hasAttribute('data-mermaid-source')) {
             const raw = (node.getAttribute('data-mermaid-source') || '').trim();
             return `\`\`\`mermaid\n${raw}\n\`\`\`\n\n`;
