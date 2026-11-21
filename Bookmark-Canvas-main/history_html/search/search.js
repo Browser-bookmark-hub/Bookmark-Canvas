@@ -1596,6 +1596,27 @@ try {
     if (typeof window !== 'undefined') {
         window.addEventListener('canvas-other-settings-updated', (e) => {
             if (e && e.detail) {
+                if (typeof e.detail.bookmarkTreeNoteHighlightEnabled === 'boolean') {
+                    const nextEnabled = e.detail.bookmarkTreeNoteHighlightEnabled;
+                    const prevEnabled = canvasSearchNoteHighlightEnabledCache !== null
+                        ? canvasSearchNoteHighlightEnabledCache
+                        : isCanvasSearchNoteHighlightEnabled();
+                    canvasSearchNoteHighlightEnabledCache = nextEnabled;
+                    if (prevEnabled !== nextEnabled) {
+                        const resultsPanel = document.getElementById('searchResultsPanel');
+                        if (resultsPanel && !resultsPanel.hidden && resultsPanel.style.display !== 'none' && typeof searchUiState !== 'undefined' && searchUiState && searchUiState.resultAll && searchUiState.resultAll.length > 0) {
+                            if (typeof destroyCanvasSearchTabulator === 'function') {
+                                destroyCanvasSearchTabulator();
+                            }
+                            if (typeof renderCanvasSearchResults === 'function') {
+                                renderCanvasSearchResults(searchUiState.resultSource || searchUiState.resultAll, {
+                                    query: searchUiState.query || '',
+                                    preserveVisibleCount: true
+                                });
+                            }
+                        }
+                    }
+                }
                 const currentMode = getSearchPanelMode();
                 if (currentMode === 'root') {
                     if (typeof e.detail.searchPanelRootHeight === 'number') {
@@ -6001,10 +6022,13 @@ function showGridGroupPopover(targetBtn, groupId) {
                 ? highlightSearchKeywords(childTitle, query)
                 : escapeHtml(childTitle);
 
+            // Child Note Highlight
+            const childHighlight = getCanvasSearchNoteHighlightDisplay(child);
+
             // Child Icon
             let childIconHtml = '';
             if (child.nodeType === 'folder') {
-                childIconHtml = `<i class="fas fa-folder" style="color:#2563eb; font-size:11px;"></i>`;
+                childIconHtml = `<i class="fas fa-folder" style="color:${childHighlight.folderIconColor}; font-size:11px;"></i>`;
             } else {
                 const childUrl = String(child.url || item.url || '').trim();
                 const faviconSrc = (typeof getFaviconUrl === 'function' && childUrl) ? getFaviconUrl(childUrl) : '';
@@ -6131,7 +6155,7 @@ function showGridGroupPopover(targetBtn, groupId) {
                     <div class="canvas-grid-group-child-topline">
                         <span class="canvas-grid-group-child-index">${childIndex + 1}</span>
                         <span class="canvas-grid-group-child-icon">${childIconHtml}</span>
-                        <span class="canvas-grid-group-child-title">${highlightedTitle}</span>
+                        <span class="canvas-grid-group-child-title${childHighlight.className}"${childHighlight.styleAttr}>${highlightedTitle}</span>
                         <span class="canvas-grid-group-child-jump-badge">${isZh ? '定位' : 'Locate'} <i class="fas fa-arrow-right"></i></span>
                     </div>
                     <div class="canvas-grid-group-child-meta">
@@ -7020,6 +7044,8 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
                             const bmCopyId = bm.copyId || entry.copyId || null;
                             const bmColor = bm.color || entry.color || '#2563eb';
 
+                            const bmHighlight = getCanvasSearchNoteHighlightDisplay(bm);
+
                             return `<div class="search-result-folder-bookmark-row"
                                          role="button"
                                          tabindex="0"
@@ -7033,7 +7059,7 @@ function showGridItemDetailsBubble(targetBtn, itemId, itemIndex = -1) {
                                          style="--loc-color:${escapeHtml(bmColor)};"
                                          aria-label="${escapeHtml(isZh ? `定位至「${bmTitle}」` : `Locate "${bmTitle}"`)}">
                                 <span class="search-result-folder-bookmark-icon">${bmIconHtml}</span>
-                                <span class="search-result-folder-bookmark-title">${highlightedTitle}</span>
+                                <span class="search-result-folder-bookmark-title${bmHighlight.className}"${bmHighlight.styleAttr}>${highlightedTitle}</span>
                                 <span class="search-result-folder-bookmark-jump-badge">${isZh ? '定位' : 'Locate'}<i class="fas fa-arrow-right" style="font-size:8px; margin-left:3px;"></i></span>
                             </div>`;
                         }).join('');
@@ -7853,6 +7879,8 @@ function showSubdomainListPopover(targetBtn, domainKey) {
                     const bmCopyId = bm.copyId || null;
                     const bmColor = bm.color || (bmSource === 'permanent' ? '#059669' : '#2563eb');
 
+                    const bmHighlight = getCanvasSearchNoteHighlightDisplay(bm);
+
                     return `<div class="subdomain-bookmark-item-row"
                                  role="button"
                                  tabindex="0"
@@ -7867,7 +7895,7 @@ function showSubdomainListPopover(targetBtn, domainKey) {
                                  aria-label="${escapeHtml(isZh ? `定位至「${bmTitle}」` : `Locate "${bmTitle}"`)}">
                         <span class="subdomain-bookmark-index">${bIdx + 1}</span>
                         <span class="subdomain-bookmark-icon">${bmIconHtml}</span>
-                        <span class="subdomain-bookmark-title">${highlightedTitle}</span>
+                        <span class="subdomain-bookmark-title${bmHighlight.className}"${bmHighlight.styleAttr}>${highlightedTitle}</span>
                         <span class="subdomain-bookmark-jump-badge">${isZh ? '定位' : 'Locate'}<i class="fas fa-arrow-right" style="font-size:8px; margin-left:3px;"></i></span>
                     </div>`;
                 }).join('');
@@ -10161,28 +10189,47 @@ function renderSearchModeUI() {
 function getSearchHintHelpContent() {
     const isZh = getCurrentLangSafe() === 'zh_CN';
     const text = isZh
-        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换模式；空输入时直接 ↑/↓ 切换。类型筛选：在书签模式下按 → 切换「全部 / 书签 / 文件夹 / 域名」。标签/笔记：输入 # 浏览全部标签色块，输入 #标签 筛选打标书签；输入 * 浏览笔记，输入 *内容 检索书签笔记。最近/热度/创建：输入 @最近 按近 3 个月活跃时间倒序，输入 @热度 按近 3 个月访问频次排序，输入 @创建 按添加时间倒序。条目跳转：↑/↓ 选择，Enter 跳转。'
-        : 'Mode: ← to left mode button, ↑/↓ to switch modes; or press ↑/↓ directly when input is empty. Type Filter: In bookmark mode, press → to toggle All / Bookmarks / Folders / Domains. Tags/Notes: Type # to browse tags, #tag to filter bookmarks; type * to browse notes, *content to search notes. Recent/Hot/Create: @recent sorts by active time (last 3 months), @hot sorts by visit frequency (last 3 months), @created sorts by creation date. Actions: ↑/↓ to select, Enter to jump.';
+        ? '模式切换：← 到左侧模式按钮，↑/↓ 切换模式；空输入时直接 ↑/↓ 切换。类型筛选：在书签模式下按 → 切换「全部 / 书签 /文件夹 / 域名」。候选条目：↑/↓ 选择，Enter 直达跳转。'
+        : 'Mode: ← to left mode button, ↑/↓ to switch modes; or press ↑/↓ directly when input is empty. Type Filter: In bookmark mode, press → to toggle All / Bookmarks / Folders / Domains. Results: ↑/↓ to navigate, Enter to jump.';
     const rows = isZh
         ? [
             ['模式切换：', '← 焦点到左侧模式图标，↑/↓ 切换模式；空输入时也可按 ↑/↓ 直接切换。'],
             ['类型筛选：', '在书签模式下，按 → 或点击切换「全部 / 书签 / 文件夹 / 域名」。'],
-            ['# 标签：', '输入 # 进入标签色块总览；输入 #标签名（如 #工作）快速过滤打标书签。'],
-            ['* 笔记：', '输入 * 进入书签笔记总览；输入 *内容（如 *待办）即时检索书签备注与笔记。'],
-            ['@最近：', '输入 @最近（或 @time / @recent），按书签近 3 个月的最近访问活跃时间倒序排列。'],
-            ['@热度：', '输入 @热度（或 @hot / @click），按书签近 3 个月的历史访问频次由高到低排列。'],
-            ['@创建：', '输入 @创建（或 @created），按书签初次添加收藏的时间倒序排列。'],
             ['候选条目：', '↑/↓ 键盘选择，Enter 直达跳转。']
         ]
         : [
             ['Modes:', '← to left mode icon, ↑/↓ to switch; or press ↑/↓ directly when input is empty.'],
             ['Type Filter:', 'In bookmark mode, press → or click to toggle All / Bookmarks / Folders / Domains.'],
+            ['Results:', '↑/↓ to navigate, Enter to jump.']
+        ];
+    const html = rows.map(([label, value]) => `
+        <div class="search-hint-help-row">
+            <span class="search-hint-help-label">${escapeHtml(label)}</span>
+            <span class="search-hint-help-value">${escapeHtml(value)}</span>
+        </div>
+    `).join('');
+    return { text, html };
+}
+
+function getBookmarkFilterHelpContent() {
+    const isZh = getCurrentLangSafe() === 'zh_CN';
+    const text = isZh
+        ? '标签/笔记：输入 # 浏览全部标签色块，输入 #标签 筛选打标书签；输入 * 浏览笔记，输入 *内容 检索书签笔记。最近/热度/创建：输入 @最近 按近 3 个月活跃时间倒序，输入 @热度 按近 3 个月访问频次排序，输入 @创建 按添加时间倒序。'
+        : 'Tags/Notes: Type # to browse tags, #tag to filter bookmarks; type * to browse notes, *content to search notes. Recent/Hot/Create: @recent sorts by active time (last 3 months), @hot sorts by visit frequency (last 3 months), @created sorts by creation date.';
+    const rows = isZh
+        ? [
+            ['# 标签：', '输入 # 进入标签色块总览；输入 #标签名（如 #工作）快速过滤打标书签。'],
+            ['* 笔记：', '输入 * 进入书签笔记总览；输入 *内容（如 *待办）即时检索书签备注与笔记。'],
+            ['@最近：', '输入 @最近（或 @time / @recent），按书签近 3 个月的最近访问活跃时间倒序排列。'],
+            ['@热度：', '输入 @热度（或 @hot / @click），按书签近 3 个月的历史访问频次由高到低排列。'],
+            ['@创建：', '输入 @创建（或 @created），按书签初次添加收藏的时间倒序排列。']
+        ]
+        : [
             ['# Tags:', 'Type # to browse tag colors; type #tag (e.g. #work) to filter tagged bookmarks.'],
             ['* Notes:', 'Type * to browse notes; type *content (e.g. *todo) to search bookmark notes.'],
             ['@recent:', 'Type @recent (or @time), sort bookmarks descending by last visited time in the last 3 months.'],
             ['@hot:', 'Type @hot (or @click), sort bookmarks descending by visit frequency in the last 3 months.'],
-            ['@created:', 'Type @created, sort bookmarks descending by bookmark addition/creation date.'],
-            ['Results:', '↑/↓ to navigate, Enter to jump.']
+            ['@created:', 'Type @created, sort bookmarks descending by bookmark addition/creation date.']
         ];
     const html = rows.map(([label, value]) => `
         <div class="search-hint-help-row">
@@ -10582,6 +10629,7 @@ function renderSearchModeMenu() {
     const modeTitle = isZh ? '模式切换' : 'Switch Mode';
     const closeBtnTitle = isZh ? '关闭' : 'Close';
     const hintHelp = getSearchHintHelpContent();
+    const bookmarkFilterHelp = getBookmarkFilterHelpContent();
     const activeMode = searchUiState.activeMode || 'bookmark';
 
     // 模式选择面板（常驻入口，标题右侧保留帮助问号与关闭按钮）
@@ -10589,13 +10637,17 @@ function renderSearchModeMenu() {
     const modesListHtml = modes.map(mode => {
         const isActive = mode.key === activeMode;
         const desc = isZh ? mode.desc : mode.descEn;
+        const isBookmarkMode = mode.key === 'bookmark';
+        const bookmarkHelpBtnHtml = isBookmarkMode
+            ? `<button type="button" class="search-hint-help-btn search-bookmark-filter-help-btn perf-help-btn" aria-label="${escapeHtml(bookmarkFilterHelp.text)}" title="${isZh ? '书签检索语法说明' : 'Bookmark filter syntax'}"><i class="fas fa-question-circle"></i></button>`
+            : '';
 
         return `
             <div class="search-mode-menu-item ${isActive ? 'active' : ''}" data-mode-key="${mode.key}">
                 <div class="mode-icon"><i class="fas ${mode.icon} ${mode.color}"></i></div>
                 <div class="mode-info">
                     <div class="mode-name">${isZh ? mode.label : mode.labelEn}</div>
-                    <div class="mode-desc">${desc}</div>
+                    <div class="mode-desc">${desc}${bookmarkHelpBtnHtml}</div>
                 </div>
             </div>
         `;
@@ -10627,6 +10679,10 @@ function renderSearchModeMenu() {
 
     // 事件绑定
     bindSearchHintHelpButton(menu.querySelector('.search-mode-hint-help-btn'), hintHelp.html);
+    const bookmarkFilterHelpBtn = menu.querySelector('.search-bookmark-filter-help-btn');
+    if (bookmarkFilterHelpBtn) {
+        bindSearchHintHelpButton(bookmarkFilterHelpBtn, bookmarkFilterHelp.html, 'searchBookmarkFilterHelpPopover');
+    }
 }
 
 function initSearchModeUI() {
@@ -16446,11 +16502,28 @@ function isCanvasNoteSearchQuery(query) {
 
 let canvasNoteSearchCacheRevision = 0;
 let canvasNoteBrowseRootCache = null;
+let canvasSearchNoteHighlightEnabledCache = null;
 const canvasBookmarkNoteSearchStateCache = new WeakMap();
 
 function invalidateCanvasNoteSearchCaches() {
     canvasNoteSearchCacheRevision += 1;
     canvasNoteBrowseRootCache = null;
+}
+
+function isCanvasSearchNoteHighlightEnabled() {
+    if (canvasSearchNoteHighlightEnabledCache !== null) {
+        return canvasSearchNoteHighlightEnabledCache;
+    }
+    try {
+        if (typeof window !== 'undefined' && window.CanvasModule && typeof window.CanvasModule.getCanvasOtherSettings === 'function') {
+            const settings = window.CanvasModule.getCanvasOtherSettings();
+            if (settings && typeof settings.bookmarkTreeNoteHighlightEnabled === 'boolean') {
+                canvasSearchNoteHighlightEnabledCache = settings.bookmarkTreeNoteHighlightEnabled;
+                return canvasSearchNoteHighlightEnabledCache;
+            }
+        }
+    } catch (_) {}
+    return true;
 }
 
 function getCanvasBookmarkNoteSearchState(item) {
@@ -16480,6 +16553,74 @@ function getCanvasBookmarkNoteForSearchCached(item) {
 function getCanvasBookmarkNoteMetaForSearchCached(item) {
     const state = getCanvasBookmarkNoteSearchState(item);
     return { note: state.note, color: state.color || NOTE_COLOR_DEFAULT };
+}
+
+function getCanvasSearchNoteHighlightInfo(item) {
+    if (!item || !isCanvasSearchNoteHighlightEnabled()) return null;
+
+    let meta = null;
+    if (typeof getCanvasBookmarkNoteMetaForSearchCached === 'function') {
+        if (item.note && typeof item.note === 'object') {
+            const trimmedNote = normalizeNoteForSearch(item.note);
+            if (trimmedNote) {
+                const colorProp = item.note.color || item.noteColor || (item.rawItem && (item.rawItem.noteColor || (item.rawItem.note && item.rawItem.note.color)));
+                meta = {
+                    note: trimmedNote,
+                    color: normalizeNoteColorForSearch(colorProp)
+                };
+            }
+        }
+
+        if (!meta || !meta.note) {
+            const candidates = [];
+            if (item.rawItem) candidates.push(item.rawItem);
+            candidates.push(item);
+            if (Array.isArray(item.targetItems)) {
+                for (let i = 0; i < item.targetItems.length; i++) {
+                    const t = item.targetItems[i];
+                    if (t && t !== item && t !== item.rawItem) candidates.push(t);
+                }
+            }
+
+            for (let i = 0; i < candidates.length; i++) {
+                const candidateMeta = getCanvasBookmarkNoteMetaForSearchCached(candidates[i]);
+                if (candidateMeta && candidateMeta.note) {
+                    meta = candidateMeta;
+                    break;
+                }
+            }
+        }
+    }
+    if (meta && meta.note) {
+        const colorKey = normalizeNoteColorForSearch(meta.color);
+        const colorCss = `var(--search-note-text-${colorKey}, ${NOTE_COLOR_MAP[colorKey] || NOTE_COLOR_MAP[NOTE_COLOR_DEFAULT]})`;
+        return {
+            colorKey,
+            colorCss
+        };
+    }
+    return null;
+}
+
+function getCanvasSearchNoteHighlightDisplay(item) {
+    const info = typeof getCanvasSearchNoteHighlightInfo === 'function' ? getCanvasSearchNoteHighlightInfo(item) : null;
+    if (!info) {
+        return {
+            info: null,
+            className: '',
+            styleAttr: '',
+            inlineStyle: '',
+            folderIconColor: '#2563eb'
+        };
+    }
+    const colorVar = `var(--search-note-text-${info.colorKey}, ${info.colorCss})`;
+    return {
+        info,
+        className: ' has-note-title-highlight',
+        styleAttr: ` style="--search-note-title-color:${colorVar};"`,
+        inlineStyle: `--search-note-title-color:${colorVar};`,
+        folderIconColor: colorVar
+    };
 }
 
 function doesCanvasBookmarkItemNoteMatchQuery(item, query) {
@@ -21431,12 +21572,20 @@ function getCanvasDirectoryItemIconHtml(type, item = {}) {
 /**
  * 严格按照网格与书签树 FaviconCache 统一缓存系统渲染书签 Favicon 或其对应 Fallback 图标
  */
-function renderCanvasTableBookmarkFaviconHtml(d) {
+function renderCanvasTableBookmarkFaviconHtml(d, noteHighlight = null) {
     if (!d) return '';
-    const isFolder = !!(d.isFolder || (d.rawItem && d.rawItem.nodeType === 'folder'));
+    const isFolder = !!(
+        d.isFolder ||
+        d.nodeType === 'folder' ||
+        d.type === 'folder' ||
+        (d.rawItem && (d.rawItem.isFolder || d.rawItem.nodeType === 'folder' || d.rawItem.type === 'folder'))
+    );
     if (isFolder) {
+        const hl = (noteHighlight && noteHighlight.folderIconColor)
+            ? noteHighlight
+            : getCanvasSearchNoteHighlightDisplay(d);
         return `<span class="search-result-icon-box-inline" style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:6px; flex-shrink:0;">
-            <i class="fas fa-folder" style="color:#2563eb; font-size:14px;"></i>
+            <i class="fas fa-folder" style="color:${hl.folderIconColor}; font-size:14px;"></i>
         </span>`;
     }
 
@@ -22773,12 +22922,13 @@ function getCanvasTabulatorColumns(isZh, mode = 'bookmark', tableData = []) {
             },
             formatter: (cell) => {
                 const d = cell.getData();
-                const iconHtml = renderCanvasTableBookmarkFaviconHtml(d);
+                const noteHighlight = getCanvasSearchNoteHighlightDisplay(d);
+                const iconHtml = renderCanvasTableBookmarkFaviconHtml(d, noteHighlight);
                 const query = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.query) || '';
                 const titleHtml = (typeof highlightSearchKeywords === 'function' && query)
                     ? highlightSearchKeywords(d.title, query)
                     : (d.titleHtml || escapeHtml(d.title));
-                return `<div class="canvas-table-cell-title" data-raw-title="${escapeHtml(d.title)}" data-full-title="${escapeHtml(d.title)}" style="display:flex; align-items:center; width:100%; min-width:0; overflow:hidden; cursor:pointer;">${iconHtml}<span class="canvas-table-title-text" data-raw-title="${escapeHtml(d.title)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; cursor:pointer;">${titleHtml}</span></div>`;
+                return `<div class="canvas-table-cell-title" data-raw-title="${escapeHtml(d.title)}" data-full-title="${escapeHtml(d.title)}" style="display:flex; align-items:center; width:100%; min-width:0; overflow:hidden; cursor:pointer;">${iconHtml}<span class="canvas-table-title-text${noteHighlight.className}" data-raw-title="${escapeHtml(d.title)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; cursor:pointer; ${noteHighlight.inlineStyle}">${titleHtml}</span></div>`;
             }
         },
         {
@@ -24834,11 +24984,14 @@ function renderCanvasSearchResults(results, options = {}) {
             <div class="canvas-bookmark-location-chip-row">${renderBookmarkLocationInlineChip(escapeHtml(copyLabel), '#059669', copyLabel)}</div>
         </div>`;
     };
-    const renderBookmarkChildIconHtml = (child) => {
+    const renderBookmarkChildIconHtml = (child, noteHighlight = null) => {
         const iconWrapStyle = 'display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; flex-shrink:0;';
         if (child && child.nodeType === 'folder') {
+            const hl = (noteHighlight && noteHighlight.folderIconColor)
+                ? noteHighlight
+                : getCanvasSearchNoteHighlightDisplay(child);
             return `<span class="search-result-icon-box-inline" style="${iconWrapStyle}">
-                <i class="fas fa-folder" style="color:#2563eb; font-size:11px;"></i>
+                <i class="fas fa-folder" style="color:${hl.folderIconColor}; font-size:11px;"></i>
             </span>`;
         }
         const fallbackHtml = `<span class="search-result-icon-box-inline" style="${iconWrapStyle}">
@@ -24989,6 +25142,8 @@ function renderCanvasSearchResults(results, options = {}) {
             </div>
         `;
 
+        const childHighlight = getCanvasSearchNoteHighlightDisplay(child);
+
         return `
             <div class="canvas-bookmark-group-child-item ${child.nodeType === 'folder' ? 'is-folder' : 'is-bookmark'}" role="button" tabindex="0"
                 data-bookmark-group-id="${escapeHtml(groupId)}"
@@ -24996,8 +25151,8 @@ function renderCanvasSearchResults(results, options = {}) {
                 data-bookmark-child-key="${escapeHtml(childKey)}"${childTruncatedAttr}>
                 <div class="canvas-bookmark-group-child-topline">
                     <span class="canvas-bookmark-group-child-index">${childIndex + 1}</span>
-                    ${renderBookmarkChildIconHtml(child)}
-                    <span class="canvas-bookmark-group-child-title" data-raw-title="${escapeHtml(formattedChild.fullTitle)}">${titleHtml}</span>
+                    ${renderBookmarkChildIconHtml(child, childHighlight)}
+                    <span class="canvas-bookmark-group-child-title${childHighlight.className}" data-raw-title="${escapeHtml(formattedChild.fullTitle)}"${childHighlight.styleAttr}>${titleHtml}</span>
                     ${childNoteMarkerHtml ? `<span class="canvas-bookmark-group-child-note">${childNoteMarkerHtml}</span>` : ''}
                 </div>
                 <div class="canvas-bookmark-group-child-meta">
@@ -25830,12 +25985,13 @@ function renderCanvasSearchResults(results, options = {}) {
 
                 // 1. Icon (Folder=Blue, Bookmark=Gold or Favicon)
                 const isFolder = item.nodeType === 'folder';
+                const groupHighlight = getCanvasSearchNoteHighlightDisplay(item);
 
                 let iconHtml = '';
                 if (isFolder) {
-                    // 文件夹：使用蓝色文件夹图标
+                    // 文件夹：使用蓝色文件夹图标（有笔记时高亮）
                     iconHtml = `<div style="${bookmarkIconWrapStyle}">
-                        <i class="fas fa-folder" style="color:#2563eb; font-size:16px;"></i>
+                        <i class="fas fa-folder" style="color:${groupHighlight.folderIconColor}; font-size:16px;"></i>
                     </div>`;
                 } else if (item.url) {
                     // 书签：优先尝试加载 favicon，fallback 到黄色书签图标
@@ -25912,7 +26068,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const groupActionsHtml = countHtml || toggleHtml
                     ? `<div class="canvas-bookmark-group-actions">${countHtml}${toggleHtml}</div>`
                     : '';
-                title = `<div class="search-result-bookmark-title-text" data-raw-title="${escapeHtml(formatted.fullTitle)}">${titleText}</div>${noteMarkerHtml}${groupActionsHtml}`;
+                title = `<div class="search-result-bookmark-title-text${groupHighlight.className}" data-raw-title="${escapeHtml(formatted.fullTitle)}"${groupHighlight.styleAttr}>${titleText}</div>${noteMarkerHtml}${groupActionsHtml}`;
                 const rootLabel = isZh ? '根目录' : 'Root';
                 const parentPathListRaw = Array.isArray(item.parentPaths) ? item.parentPaths : [];
                 const parentPathList = parentPathListRaw.length
@@ -26020,11 +26176,12 @@ function renderCanvasSearchResults(results, options = {}) {
             }
 
             case 'bookmark-item': {
+                const itemHighlight = getCanvasSearchNoteHighlightDisplay(item);
                 // Child item under a bookmark-group
                 if (item.isChild) {
                     const childDotClass = item.domainChild ? 'search-child-dot search-domain-child-dot' : 'search-child-dot';
                     if (item.nodeType === 'folder') {
-                        indexLabel = `<span class="${childDotClass}"><i class="fas fa-folder" style="color:#2563eb;"></i></span>`;
+                        indexLabel = `<span class="${childDotClass}"><i class="fas fa-folder" style="color:${itemHighlight.folderIconColor};"></i></span>`;
                     } else if (item.url) {
                         const iconColor = '#f59e0b';
                         if (typeof getFaviconUrl === 'function') {
@@ -26065,7 +26222,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 if (formattedItemTitle.isTruncated) {
                     extraItemAttrs += ` data-has-ellipsis="true" data-full-title="${escapeHtml(formattedItemTitle.fullTitle)}"`;
                 }
-                title = `<span class="search-result-bookmark-title-text" data-raw-title="${escapeHtml(formattedItemTitle.fullTitle)}">${formattedItemTitle.html}</span>${itemNoteMarkerHtml}`;
+                title = `<span class="search-result-bookmark-title-text${itemHighlight.className}" data-raw-title="${escapeHtml(formattedItemTitle.fullTitle)}"${itemHighlight.styleAttr}>${formattedItemTitle.html}</span>${itemNoteMarkerHtml}`;
                 if (item.domainChild) {
                     const hostText = String(item.domainHost || '').trim().toLowerCase();
                     const showHost = hostText && (String(item.groupLevel || '') === 'root' || hostText !== String(item.domain || '').trim().toLowerCase());
@@ -29676,6 +29833,8 @@ if (typeof window !== 'undefined') {
     window.invalidateCanvasNoteSearchCaches = invalidateCanvasNoteSearchCaches;
     window.getCanvasBookmarkNoteForSearchCached = getCanvasBookmarkNoteForSearchCached;
     window.getCanvasBookmarkNoteMetaForSearchCached = getCanvasBookmarkNoteMetaForSearchCached;
+    window.getCanvasSearchNoteHighlightInfo = getCanvasSearchNoteHighlightInfo;
+    window.getCanvasSearchNoteHighlightDisplay = getCanvasSearchNoteHighlightDisplay;
     window.doesCanvasBookmarkItemNoteMatchQuery = doesCanvasBookmarkItemNoteMatchQuery;
     window.locateCanvasElement = locateCanvasElement;
     window.locateCanvasBookmarkTreeItem = locateCanvasBookmarkTreeItem;

@@ -8,11 +8,29 @@
 :root {
     --search-candidate-divider: rgba(0, 0, 0, 0.18);
     --border-color-light: rgba(0, 0, 0, 0.18);
+
+    /* 搜索笔记高亮色系（浅色/明亮模式：保证文字在白色/浅色背景上有足够的对比度，WCAG AA 对比度 >= 4.5:1） */
+    --search-note-text-red: #dc2626;
+    --search-note-text-orange: #d97706;
+    --search-note-text-yellow: #b45309;
+    --search-note-text-green: #15803d;
+    --search-note-text-blue: #1d4ed8;
+    --search-note-text-purple: #7e22ce;
+    --search-note-text-gray: #4b5563;
 }
 
 [data-theme="dark"] {
     --search-candidate-divider: rgba(255, 255, 255, 0.22);
     --border-color-light: rgba(255, 255, 255, 0.22);
+
+    /* 搜索笔记高亮色系（深色模式：回退至鲜明醒目的原生 Tag 荧光色值） */
+    --search-note-text-red: var(--tag-red, #ff453a);
+    --search-note-text-orange: var(--tag-orange, #ff9f0a);
+    --search-note-text-yellow: var(--tag-yellow, #ffd60a);
+    --search-note-text-green: var(--tag-green, #30d158);
+    --search-note-text-blue: var(--tag-blue, #0a84ff);
+    --search-note-text-purple: var(--tag-purple, #bf5af2);
+    --search-note-text-gray: var(--tag-gray, #8e8e93);
 }
 
 /* ==================== 搜索结果面板容器 ==================== */
@@ -404,6 +422,47 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
 
 .search-hint-help-value {
     min-width: 0;
+}
+
+.search-hint-help-divider {
+    height: 1px;
+    background: var(--search-candidate-divider, rgba(128, 128, 128, 0.18));
+    margin: 5px 0 4px;
+}
+
+.search-bookmark-filter-help-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 4px;
+    padding: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    opacity: 0.85;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    vertical-align: middle;
+    transition: color 0.15s ease, opacity 0.15s ease;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.search-bookmark-filter-help-btn i {
+    font-size: 11px;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.search-bookmark-filter-help-btn:hover {
+    color: var(--text-primary);
+    opacity: 1;
 }
 
 .canvas-bookmark-to-temp-btn {
@@ -4574,6 +4633,29 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     flex: 0 0 auto;
     color: var(--text-tertiary);
     font-size: 10px;
+}
+
+/* 笔记高亮搜索标题（网格视图、表格视图、子项与气泡列表） */
+.has-note-title-highlight,
+.search-result-bookmark-title-text.has-note-title-highlight,
+.canvas-table-title-text.has-note-title-highlight,
+.canvas-grid-group-child-title.has-note-title-highlight,
+.canvas-bookmark-group-child-title.has-note-title-highlight,
+.subdomain-bookmark-title.has-note-title-highlight,
+.search-result-folder-bookmark-title.has-note-title-highlight {
+    color: var(--search-note-title-color) !important;
+    font-weight: 600 !important;
+    text-shadow: 0 0 2px color-mix(in srgb, var(--search-note-title-color) 35%, transparent);
+}
+
+.has-note-title-highlight:hover,
+.search-result-bookmark-title-text.has-note-title-highlight:hover,
+.canvas-table-title-text.has-note-title-highlight:hover,
+.canvas-grid-group-child-title.has-note-title-highlight:hover,
+.canvas-bookmark-group-child-title.has-note-title-highlight:hover,
+.subdomain-bookmark-title.has-note-title-highlight:hover,
+.search-result-folder-bookmark-title.has-note-title-highlight:hover {
+    filter: brightness(1.15);
 }
 
 .search-result-item.bookmark-group[data-expanded="true"] {

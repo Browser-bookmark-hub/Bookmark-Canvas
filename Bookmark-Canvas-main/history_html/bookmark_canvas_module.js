@@ -47608,8 +47608,8 @@ function createCanvasAppearanceSettingsModal() {
         <div class="perf-help-popover" id="otherBookmarkNoteHighlightHelpPopover">
             <div class="perf-help-popover-content">
                 ${isEn
-            ? 'When enabled, a bookmark or folder with a note uses the note color for its title and folder icon. The most recently applied Note or Temporary Trace highlight wins when both are present.'
-            : '开启后，有笔记的书签或文件夹会使用笔记颜色高亮标题和文件夹图标。笔记与临时溯源同时存在时，后应用的高亮覆盖先应用的高亮。'}
+            ? 'When enabled, bookmarks and folders with notes use the note color for their title and folder icon in the bookmark tree and search results (grid and table views). In the bookmark tree, the most recently applied Note or Temporary Trace highlight wins when both are present.'
+            : '开启后，有笔记的书签或文件夹在书签树以及搜索面板（网格和表格视图）中会使用笔记颜色高亮标题与图标。书签树中笔记与临时溯源同时存在时，后应用的高亮覆盖先应用的高亮。'}
             </div>
         </div>
         <div class="perf-help-popover" id="otherGridSnapHelpPopover">
