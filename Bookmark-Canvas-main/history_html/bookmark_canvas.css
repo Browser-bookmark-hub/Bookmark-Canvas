@@ -6458,7 +6458,7 @@ html[lang="en"] .canvas-zoom-indicator #zoomLocateBtn>span {
     background: #1e1e20;
     border: 1.5px solid #3b82f6;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
-    z-index: 9999999;
+    z-index: 2147483647 !important;
     pointer-events: none !important;
     max-width: min(460px, calc(100vw - 24px));
     box-sizing: border-box;
@@ -6655,12 +6655,79 @@ body.header-dock-bottom .app-toast.pos-top-right {
     line-height: 1.35;
     display: inline-block;
     text-align: left;
+    text-wrap: balance;
+    text-wrap: pretty;
 }
 
 .toast-message.multiline {
     white-space: normal;
     line-height: 1.35;
     display: block;
+    text-wrap: balance;
+    text-wrap: pretty;
+}
+
+/* 长文本 / 紧凑型 Toast 字号微调：长文本自动降为 11px，增加容纳字数并防止意外折行 */
+.canvas-toast.toast-dense .toast-message,
+.history-toast.toast-dense .toast-message,
+.app-toast.toast-dense .toast-message {
+    font-size: 11px;
+}
+
+/* 侧边栏模式 (html.side-panel-mode) 与超窄屏幕 (<=480px) 专属紧凑排版优化：
+   释放横向内边距与间隙，微调图标与徽标尺寸，单行中文字符容量提升约 30%，彻底消除孤行孤字 */
+html.side-panel-mode .canvas-toast,
+html.side-panel-mode .history-toast,
+html.side-panel-mode .app-toast {
+    padding: 5px 10px;
+    gap: 5.5px;
+    font-size: 11px;
+    max-width: min(460px, calc(100vw - 12px));
+}
+
+html.side-panel-mode .canvas-toast .toast-icon,
+html.side-panel-mode .history-toast .toast-icon,
+html.side-panel-mode .app-toast .toast-icon {
+    font-size: 12px;
+    width: 13px;
+    height: 13px;
+}
+
+html.side-panel-mode .canvas-toast .toast-slot-badge,
+html.side-panel-mode .history-toast .toast-slot-badge,
+html.side-panel-mode .app-toast .toast-slot-badge {
+    font-size: 10px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3.5px;
+}
+
+@media (max-width: 480px) {
+    .canvas-toast,
+    .history-toast,
+    .app-toast {
+        padding: 5px 10px;
+        gap: 5.5px;
+        font-size: 11px;
+        max-width: min(460px, calc(100vw - 12px));
+    }
+
+    .canvas-toast .toast-icon,
+    .history-toast .toast-icon,
+    .app-toast .toast-icon {
+        font-size: 12px;
+        width: 13px;
+        height: 13px;
+    }
+
+    .canvas-toast .toast-slot-badge,
+    .history-toast .toast-slot-badge,
+    .app-toast .toast-slot-badge {
+        font-size: 10px;
+        min-width: 15px;
+        height: 15px;
+        padding: 0 3.5px;
+    }
 }
 
 /* 顶部居中进入/离开动画 */

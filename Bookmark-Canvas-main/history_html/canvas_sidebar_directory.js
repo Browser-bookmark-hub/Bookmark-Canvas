@@ -5997,7 +5997,12 @@
       const toast = document.createElement('div');
       toast.className = `canvas-toast history-toast app-toast toast-type-${type}${isWarn ? ' toast-shake' : ''}`;
       const borderColor = isWarn ? '#f59e0b' : (isSuccess ? '#10b981' : '#3b82f6');
-      toast.style.cssText = `position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:9999999;display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:500;color:#ffffff;background:#1e1e20;border:1.5px solid ${borderColor};box-shadow:0 4px 14px rgba(0,0,0,0.28);pointer-events:none;max-width:min(420px, calc(100vw - 24px));`;
+      const isSidePanel = (typeof document !== 'undefined' && document.documentElement && document.documentElement.classList.contains('side-panel-mode')) || (typeof window !== 'undefined' && window.innerWidth <= 480);
+      const toastPadding = isSidePanel ? '5px 10px' : '6px 14px';
+      const toastGap = isSidePanel ? '5.5px' : '7px';
+      const toastFontSize = isSidePanel ? '11px' : '12px';
+      const toastMaxWidth = isSidePanel ? 'min(460px, calc(100vw - 12px))' : 'min(460px, calc(100vw - 24px))';
+      toast.style.cssText = `position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:2147483647;display:inline-flex;align-items:center;gap:${toastGap};padding:${toastPadding};border-radius:8px;font-size:${toastFontSize};font-weight:500;color:#ffffff;background:#1e1e20;border:1.5px solid ${borderColor};box-shadow:0 4px 14px rgba(0,0,0,0.28);pointer-events:none;max-width:${toastMaxWidth};`;
       
       const iconEl = document.createElement('i');
       iconEl.className = `toast-icon ${icon}`;
@@ -6012,6 +6017,7 @@
 
       const textEl = document.createElement('span');
       textEl.className = 'toast-message';
+      textEl.style.cssText = 'text-wrap:balance;text-wrap:pretty;line-height:1.35;word-break:break-word;';
       textEl.textContent = safeMsg;
       toast.appendChild(textEl);
       (document.body || document.documentElement).appendChild(toast);

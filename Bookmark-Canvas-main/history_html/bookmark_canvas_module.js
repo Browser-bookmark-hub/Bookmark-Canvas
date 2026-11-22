@@ -5092,6 +5092,7 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
         }
     }
     const isMultiline = safeMessage.includes('\n') || safeMessage.length > 36 || (/[^\x00-\xff]/.test(safeMessage) && safeMessage.length > 22);
+    const isDenseText = safeMessage.length > 20 || (/[^\x00-\xff]/.test(safeMessage) && safeMessage.length > 15);
 
     const targetParent = (typeof getOverlayContainer === 'function')
         ? getOverlayContainer()
@@ -5114,7 +5115,7 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
     } catch (_) {}
 
     const toast = document.createElement('div');
-    toast.className = `canvas-toast history-toast app-toast${position !== 'top-center' ? ' pos-' + position : ''}`;
+    toast.className = `canvas-toast history-toast app-toast${position !== 'top-center' ? ' pos-' + position : ''}${isDenseText ? ' toast-dense' : ''}`;
 
     // 1. 说明图标（最左边展示）
     const iconEl = document.createElement('i');
@@ -5207,6 +5208,8 @@ function showCanvasToast(message, typeOrOptions = 'info', durationOverride = und
             messageEl.textContent = String(newMsg ?? '');
             const newMultiline = messageEl.textContent.includes('\n') || messageEl.textContent.length > 36 || (/[^\x00-\xff]/.test(messageEl.textContent) && messageEl.textContent.length > 22);
             messageEl.classList.toggle('multiline', newMultiline);
+            const newDense = messageEl.textContent.length > 20 || (/[^\x00-\xff]/.test(messageEl.textContent) && messageEl.textContent.length > 15);
+            toast.classList.toggle('toast-dense', newDense);
             applyType(newType);
             applyIcon(newType, newIcon, newSpin);
 
