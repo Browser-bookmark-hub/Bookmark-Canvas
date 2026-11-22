@@ -5480,6 +5480,9 @@ function applyLanguage() {
     if (quickAddTempLastText) quickAddTempLastText.textContent = i18n.quickAddLastText[currentLang];
     const quickAddBlankLastText = document.getElementById('quickAddBlankLastText');
     if (quickAddBlankLastText) quickAddBlankLastText.textContent = i18n.quickAddLastText[currentLang];
+    if (typeof updateQuickAddLastButtonTooltips === 'function') {
+        updateQuickAddLastButtonTooltips();
+    }
     const quickAddCurrentViewText = document.getElementById('quickAddCurrentViewText');
     if (quickAddCurrentViewText) quickAddCurrentViewText.textContent = i18n.quickAddCurrentViewText[currentLang];
     const quickAddWindowViewText = document.getElementById('quickAddWindowViewText');
@@ -7862,8 +7865,26 @@ function setupQuickAddMenu() {
         });
     }
 
+    menu.addEventListener('mousedown', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.quick-add-last-clear-btn')) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    });
+
     menu.addEventListener('click', async (e) => {
         if (e.target && e.target.closest && e.target.closest('.quick-add-window-folder-checkbox')) {
+            return;
+        }
+        const clearBtn = e.target && e.target.closest ? e.target.closest('.quick-add-last-clear-btn') : null;
+        if (clearBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const parentBtn = clearBtn.closest('.quick-add-last-button');
+            const kind = parentBtn ? parentBtn.dataset.kind : null;
+            if (kind) {
+                clearQuickAddLastTargetId(kind);
+            }
             return;
         }
         const item = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
@@ -7875,6 +7896,19 @@ function setupQuickAddMenu() {
         } catch (err) {
             const msg = currentLang === 'en' ? 'Add failed' : '添加失败';
             try { showToast(`${msg}: ${err && err.message ? err.message : String(err)}`); } catch (_) { }
+        }
+    });
+
+    menu.addEventListener('keydown', (e) => {
+        const clearBtn = e.target && e.target.closest ? e.target.closest('.quick-add-last-clear-btn') : null;
+        if (clearBtn && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const parentBtn = clearBtn.closest('.quick-add-last-button');
+            const kind = parentBtn ? parentBtn.dataset.kind : null;
+            if (kind) {
+                clearQuickAddLastTargetId(kind);
+            }
         }
     });
 
@@ -8034,7 +8068,170 @@ function getQuickAddLastTargetId(kind) {
     return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function getQuickAddLastTargetDetails(kind) {
+    const targetId = getQuickAddLastTargetId(kind);
+    if (!targetId) return null;
+    const isZh = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN') === 'zh_CN';
+
+    try {
+        if (kind === 'temp') {
+            const sections = (window.CanvasModule && window.CanvasModule.CanvasState && Array.isArray(window.CanvasModule.CanvasState.tempSections))
+                ? window.CanvasModule.CanvasState.tempSections
+                : [];
+            const target = sections.find((s) => s && s.id === targetId);
+            if (target) {
+                const rawLabel = (typeof target.label === 'string' && target.label.trim())
+                    ? target.label.trim()
+                    : '';
+                const seq = rawLabel || (isZh ? '添加' : 'Add');
+                const rawTitle = (typeof target.title === 'string' && target.title.trim())
+                    ? target.title.trim()
+                    : (typeof target.name === 'string' && target.name.trim() ? target.name.trim() : '');
+                const name = rawTitle || (isZh ? '未命名临时栏目' : 'Untitled section');
+                return { seq, name, kind: 'temp', exists: true };
+            }
+            return {
+                seq: isZh ? '添加' : 'Add',
+                name: isZh ? '未命名临时栏目' : 'Untitled section',
+                kind: 'temp',
+                exists: false
+            };
+        } else if (kind === 'blank') {
+            const allNodes = (window.CanvasModule && window.CanvasModule.CanvasState && Array.isArray(window.CanvasModule.CanvasState.mdNodes))
+                ? window.CanvasModule.CanvasState.mdNodes
+                : [];
+            const blankNodes = allNodes.filter(n => n && n.subtype !== 'card-group');
+            const nodeIndex = blankNodes.findIndex((n) => n && n.id === targetId);
+            if (nodeIndex >= 0) {
+                const target = blankNodes[nodeIndex];
+                const seq = `#${nodeIndex + 1}`;
+                let rawTitle = (typeof target.title === 'string' && target.title.trim()) ? target.title.trim() : '';
+                if (!rawTitle) {
+                    const src = typeof target.markdownSource === 'string' ? target.markdownSource : (target.text || '');
+                    const firstLine = String(src).trim().split('\n')[0].replace(/^[#\s*->]+/, '').trim();
+                    if (firstLine) rawTitle = firstLine;
+                }
+                const name = rawTitle || (isZh ? '未命名空白栏目' : 'Untitled blank card');
+                return { seq, name, kind: 'blank', exists: true };
+            }
+            return {
+                seq: '#1',
+                name: isZh ? '未命名空白栏目' : 'Untitled blank card',
+                kind: 'blank',
+                exists: false
+            };
+        }
+    } catch (_) { }
+
+    return {
+        seq: kind === 'blank' ? '#1' : (isZh ? '添加' : 'Add'),
+        name: kind === 'blank' ? (isZh ? '未命名空白栏目' : 'Untitled blank card') : (isZh ? '未命名临时栏目' : 'Untitled section'),
+        kind,
+        exists: false
+    };
+}
+
+function updateQuickAddLastButtonTooltips() {
+    const lang = (typeof currentLang !== 'undefined' ? currentLang : 'zh_CN');
+    const isZh = lang === 'zh_CN';
+    const seqLabel = isZh ? '序号：' : 'Index: ';
+    const nameLabel = isZh ? '名字：' : 'Name: ';
+    const clearLabel = isZh ? '清除此项记忆' : 'Clear remembered target';
+
+    document.querySelectorAll('.quick-add-last-clear-btn').forEach((btn) => {
+        btn.setAttribute('title', clearLabel);
+        btn.setAttribute('aria-label', clearLabel);
+    });
+
+    // Temp
+    const tempBtn = document.querySelector('[data-action="add-current-temp-last"]');
+    const tempTooltip = document.getElementById('quickAddTempLastTooltip');
+    if (tempBtn && tempTooltip) {
+        const details = getQuickAddLastTargetDetails('temp');
+        if (details) {
+            tempTooltip.innerHTML = `
+                <div class="quick-add-last-tooltip-row">
+                    <span class="quick-add-last-tooltip-label">${escapeHtml(seqLabel)}</span>
+                    <span class="quick-add-last-tooltip-val"><span class="quick-add-last-seq-badge quick-add-last-seq-badge-temp">${escapeHtml(details.seq)}</span></span>
+                </div>
+                <div class="quick-add-last-tooltip-row">
+                    <span class="quick-add-last-tooltip-label">${escapeHtml(nameLabel)}</span>
+                    <span class="quick-add-last-tooltip-val" title="${escapeHtml(details.name)}">${escapeHtml(details.name)}</span>
+                </div>
+            `;
+            tempBtn.setAttribute('aria-label', `${seqLabel}${details.seq}, ${nameLabel}${details.name}`);
+        }
+    }
+
+    // Blank
+    const blankBtn = document.querySelector('[data-action="add-current-blank-last"]');
+    const blankTooltip = document.getElementById('quickAddBlankLastTooltip');
+    if (blankBtn && blankTooltip) {
+        const details = getQuickAddLastTargetDetails('blank');
+        if (details) {
+            blankTooltip.innerHTML = `
+                <div class="quick-add-last-tooltip-row">
+                    <span class="quick-add-last-tooltip-label">${escapeHtml(seqLabel)}</span>
+                    <span class="quick-add-last-tooltip-val"><span class="quick-add-last-seq-badge quick-add-last-seq-badge-blank">${escapeHtml(details.seq)}</span></span>
+                </div>
+                <div class="quick-add-last-tooltip-row">
+                    <span class="quick-add-last-tooltip-label">${escapeHtml(nameLabel)}</span>
+                    <span class="quick-add-last-tooltip-val" title="${escapeHtml(details.name)}">${escapeHtml(details.name)}</span>
+                </div>
+            `;
+            blankBtn.setAttribute('aria-label', `${seqLabel}${details.seq}, ${nameLabel}${details.name}`);
+        }
+    }
+}
+
+function isCanvasStateDataReady() {
+    try {
+        if (typeof window !== 'undefined' && window.__bookmarkCanvasSearchStateReady === true) return true;
+        const canvasView = document.getElementById('canvasView');
+        if (canvasView && canvasView.dataset.initialized === 'true') return true;
+        const state = window.CanvasModule && window.CanvasModule.CanvasState;
+        if (state && ((Array.isArray(state.tempSections) && state.tempSections.length > 0) || (Array.isArray(state.mdNodes) && state.mdNodes.length > 0))) {
+            return true;
+        }
+    } catch (_) { }
+    return false;
+}
+
+function clearQuickAddLastTargetId(kind) {
+    if (!kind) return;
+    const key = kind === 'blank' ? 'blankNodeId' : 'specialTempSectionId';
+    const targets = readQuickAddLastTargets();
+    if (targets[key]) {
+        delete targets[key];
+        try {
+            localStorage.setItem(QUICK_ADD_LAST_TARGET_STORAGE_KEY, JSON.stringify(targets));
+        } catch (_) { }
+    }
+    refreshQuickAddLastTargetButtons();
+}
+
+function pruneDeadQuickAddLastTargets() {
+    if (!isCanvasStateDataReady()) return;
+    const kinds = ['temp', 'blank'];
+    kinds.forEach((kind) => {
+        const targetId = getQuickAddLastTargetId(kind);
+        if (!targetId) return;
+        const details = getQuickAddLastTargetDetails(kind);
+        if (details && details.exists === false) {
+            const key = kind === 'blank' ? 'blankNodeId' : 'specialTempSectionId';
+            const targets = readQuickAddLastTargets();
+            if (targets[key]) {
+                delete targets[key];
+                try {
+                    localStorage.setItem(QUICK_ADD_LAST_TARGET_STORAGE_KEY, JSON.stringify(targets));
+                } catch (_) { }
+            }
+        }
+    });
+}
+
 function refreshQuickAddLastTargetButtons() {
+    pruneDeadQuickAddLastTargets();
     const buttons = [
         { selector: '[data-action="add-current-temp-last"]', kind: 'temp' },
         { selector: '[data-action="add-current-blank-last"]', kind: 'blank' }
@@ -8043,6 +8240,7 @@ function refreshQuickAddLastTargetButtons() {
         const button = document.querySelector(selector);
         if (button) button.hidden = !getQuickAddLastTargetId(kind);
     });
+    updateQuickAddLastButtonTooltips();
 }
 
 function saveQuickAddLastTargetId(kind, id) {
@@ -8994,6 +9192,8 @@ async function addTabsToTempSection(tabs, scope, options = {}) {
                 const targetSection = matchingSections.length === 1 ? matchingSections[0] : null;
                 if (targetSection && String(targetSection.tempKind || '').toLowerCase() === 'special') {
                     sectionId = targetId;
+                } else {
+                    clearQuickAddLastTargetId('temp');
                 }
             } else {
                 const targetSection = matchingSections[0] || null;
@@ -9056,9 +9256,14 @@ async function addTabsToBlankNode(tabs, scope, options = {}) {
                     showToast(msg);
                 } catch (_) { }
                 return;
+            } else if (useLastTarget) {
+                clearQuickAddLastTargetId('blank');
             }
         } catch (error) {
             console.error('[Quick Add] Failed to append to blank node:', error);
+            if (useLastTarget) {
+                clearQuickAddLastTargetId('blank');
+            }
             try {
                 const msg = currentLang === 'en' ? 'Could not save to blank node' : '写入空白栏目失败';
                 showToast(msg);
