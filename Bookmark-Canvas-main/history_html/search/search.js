@@ -2244,7 +2244,7 @@ function hideSearchResultsPanel() {
             searchUiState.resultHasMore = false;
             searchUiState.selectedIndex = -1;
 
-            // 5分钟防抖延迟卸载内存物理索引，防范频繁开关搜索导致的磁盘 I/O 轰炸
+            // 10分钟防抖延迟卸载内存物理索引，防范频繁开关搜索导致的磁盘 I/O 轰炸
             if (typeof scheduleReleaseSearchMemoryDebounced === 'function') {
                 scheduleReleaseSearchMemoryDebounced();
             }
@@ -3086,14 +3086,113 @@ function handleSearchKeydown(e) {
 /**
  * 搜索输入框聚焦处理
  */
+let searchIdleWarmupRafId = null;
+let searchIdleWarmupIdleId = null;
+let searchIdleWarmupTimeoutId = null;
+let searchIdleWarmupCancelled = false;
+
+function cancelCanvasSearchIdleWarmup() {
+    searchIdleWarmupCancelled = true;
+    if (searchIdleWarmupRafId !== null && typeof cancelAnimationFrame === 'function') {
+        try { cancelAnimationFrame(searchIdleWarmupRafId); } catch (_) { }
+    }
+    searchIdleWarmupRafId = null;
+    if (searchIdleWarmupIdleId !== null && typeof cancelIdleCallback === 'function') {
+        try { cancelIdleCallback(searchIdleWarmupIdleId); } catch (_) { }
+    }
+    searchIdleWarmupIdleId = null;
+    if (searchIdleWarmupTimeoutId !== null) {
+        clearTimeout(searchIdleWarmupTimeoutId);
+    }
+    searchIdleWarmupTimeoutId = null;
+}
+
+function scheduleCanvasSearchIdleWarmup(cachedLiveSig = '') {
+    if (searchIdleWarmupCancelled) return;
+    if (searchIdleWarmupRafId !== null || searchIdleWarmupIdleId !== null || searchIdleWarmupTimeoutId !== null) {
+        return;
+    }
+
+    const inputEl = typeof document !== 'undefined' ? document.getElementById('searchInput') : null;
+    if (inputEl && typeof document !== 'undefined' && document.activeElement === inputEl) {
+        return;
+    }
+
+    const runWarmup = () => {
+        if (searchIdleWarmupCancelled) return;
+        if (typeof isCanvasSearchPageVisible === 'function' && !isCanvasSearchPageVisible()) {
+            return;
+        }
+        const activeInput = typeof document !== 'undefined' ? document.getElementById('searchInput') : null;
+        if (activeInput && typeof document !== 'undefined' && document.activeElement === activeInput) {
+            return;
+        }
+        const activeMode = normalizeCanvasSearchModeKey(
+            (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark'
+        );
+
+        const loadPromise = (!canvasSearchLoadedModes.has(activeMode) || !canvasSearchDb.signature) &&
+            typeof ensureIndexForModeLoaded === 'function'
+            ? ensureIndexForModeLoaded(activeMode, cachedLiveSig ? { liveSig: cachedLiveSig } : {}).catch(() => {})
+            : Promise.resolve();
+
+        loadPromise.then(() => {
+            if (searchIdleWarmupCancelled) return;
+            warmupBookmarkHistoryStatsIfNeeded(activeMode);
+        }).catch(() => {});
+    };
+
+    const scheduleAfterSettledFrames = (remainingFrames) => {
+        if (searchIdleWarmupCancelled) return;
+        if (remainingFrames > 0 && typeof requestAnimationFrame === 'function') {
+            searchIdleWarmupRafId = requestAnimationFrame(() => {
+                searchIdleWarmupRafId = null;
+                scheduleAfterSettledFrames(remainingFrames - 1);
+            });
+            return;
+        }
+        if (typeof requestIdleCallback === 'function') {
+            searchIdleWarmupIdleId = requestIdleCallback(() => {
+                searchIdleWarmupIdleId = null;
+                runWarmup();
+            }, { timeout: 1500 });
+        } else {
+            searchIdleWarmupTimeoutId = setTimeout(() => {
+                searchIdleWarmupTimeoutId = null;
+                runWarmup();
+            }, 120);
+        }
+    };
+
+    // 首帧及布局稳定 3 帧后再趁浏览器空闲静默加载当前激活模式索引
+    scheduleAfterSettledFrames(3);
+}
+
+/**
+ * 仅在书签搜索模式下预热历史访问统计账本
+ */
+function warmupBookmarkHistoryStatsIfNeeded(modeKey) {
+    if (normalizeCanvasSearchModeKey(modeKey) !== 'bookmark') return;
+    if (typeof window !== 'undefined' && window.HistoryStatsService &&
+        typeof window.HistoryStatsService.ensureHistoryStatsIndex === 'function') {
+        window.HistoryStatsService.ensureHistoryStatsIndex().catch(() => {});
+    }
+}
+
 async function handleSearchInputFocus(e) {
     try {
-        // 取消由于搜索框关闭触发的 5 分钟延迟卸载内存缓存定时器，直接复用当前内存索引
+        cancelCanvasSearchIdleWarmup();
+        // 取消由于搜索框关闭触发的 10 分钟延迟卸载内存缓存定时器，直接复用当前内存索引
         if (typeof cancelReleaseSearchMemory === 'function') {
             cancelReleaseSearchMemory();
         }
         const input = e && e.target ? e.target : document.getElementById('searchInput');
         if (!input) return;
+
+        const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
+
+        // 纯按需并行预热：仅书签模式聚焦瞬间并行拉起历史统计快照，利用击键 100~200ms 间隙 0 阻塞就绪
+        warmupBookmarkHistoryStatsIfNeeded(activeMode);
 
         // 输入框聚焦时，自动关闭模式菜单与帮助面板
         if (typeof toggleSearchModeMenu === 'function') {
@@ -3111,15 +3210,8 @@ async function handleSearchInputFocus(e) {
             setSidePanelSearchExpanded(true);
         }
         // 确保主动加载当前激活模式的索引和坐标映射
-        const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
         if (typeof ensureIndexForModeLoaded === 'function') {
             await ensureIndexForModeLoaded(activeMode);
-        }
-
-        // 纯按需预热与微切片增量检查：书签模式下聚焦输入框时，轻量异步触发就绪检查（遵从 30 秒节流，杜绝频繁 IPC）
-        if (activeMode === 'bookmark' && typeof window !== 'undefined' && window.HistoryStatsService &&
-            typeof window.HistoryStatsService.ensureHistoryStatsIndex === 'function') {
-            window.HistoryStatsService.ensureHistoryStatsIndex().catch(() => {});
         }
 
         const q = (input.value || '').trim().toLowerCase();
@@ -8721,10 +8813,6 @@ function initSearchEvents() {
                 return null;
             });
         }
-        // 注册完成后，趁主线程空闲静默预热历史统计（冷启动完全无感）
-        if (typeof SearchIndexManager !== 'undefined' && typeof SearchIndexManager.scheduleHistoryStatsPrewarm === 'function') {
-            SearchIndexManager.scheduleHistoryStatsPrewarm();
-        }
     }
 
     if (!document.documentElement.hasAttribute('data-search-history-stats-bound')) {
@@ -8732,17 +8820,20 @@ function initSearchEvents() {
             if (typeof invalidateCanvasBookmarkVisitStatsCache === 'function') {
                 invalidateCanvasBookmarkVisitStatsCache();
             }
+            if (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.domainIndexCache) {
+                searchUiState.domainIndexCache = null;
+            }
             try {
                 const currentQuery = String(searchUiState && searchUiState.query || '').trim();
                 const currentMode = searchUiState && searchUiState.activeMode;
                 const panel = typeof getSearchResultsPanel === 'function' ? getSearchResultsPanel() : null;
                 const isPanelVisible = panel && panel.classList.contains('visible');
-                // 当历史统计更新后，若当前正打开着面板且处于书签普通关键词搜索状态，平滑重刷打分与排名，解决 P14 排序前后不一致
+                // 当历史统计更新后，若当前正打开着面板且处于书签搜索模式，平滑重刷打分与排名（包含普通搜索及 @热度/@最近 排序）
                 if (currentMode === 'bookmark' && currentQuery && isPanelVisible) {
-                    const isRankQuery = (typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(currentQuery)) ||
-                                        (typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(currentQuery)) ||
-                                        (typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(currentQuery));
-                    if (!isRankQuery && typeof searchCanvasAndRender === 'function') {
+                    if (searchUiState && searchUiState._awaitingHistoryStatsRender) {
+                        return;
+                    }
+                    if (typeof searchCanvasAndRender === 'function') {
                         searchCanvasAndRender(currentQuery, { source: 'stats-update', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
                     }
                 }
@@ -9794,6 +9885,13 @@ async function setSearchMode(modeKey, options = {}) {
         renderSearchModeMenu();
     }
 
+    // 交互式切换至书签模式时，打断空闲等待并并行按需预热历史统计账本（卡片/说明模式不触碰历史接口）
+    if (!(options && options.skipIndexLoad === true) &&
+        (source === 'user' || (document.activeElement && document.activeElement.id === 'searchInput'))) {
+        cancelCanvasSearchIdleWarmup();
+        warmupBookmarkHistoryStatsIfNeeded(modeKey);
+    }
+
     // 确保异步加载目标模式的分片索引，加载完成后再触发搜索渲染，避免回退到同步内存构建
     if (typeof ensureIndexForModeLoaded === 'function' && !(options && options.skipIndexLoad === true)) {
         try {
@@ -10214,21 +10312,21 @@ function getSearchHintHelpContent() {
 function getBookmarkFilterHelpContent() {
     const isZh = getCurrentLangSafe() === 'zh_CN';
     const text = isZh
-        ? '标签/笔记：输入 # 浏览全部标签色块，输入 #标签 筛选打标书签；输入 * 浏览笔记，输入 *内容 检索书签笔记。最近/热度/创建：输入 @最近 按近 3 个月活跃时间倒序，输入 @热度 按近 3 个月访问频次排序，输入 @创建 按添加时间倒序。'
-        : 'Tags/Notes: Type # to browse tags, #tag to filter bookmarks; type * to browse notes, *content to search notes. Recent/Hot/Create: @recent sorts by active time (last 3 months), @hot sorts by visit frequency (last 3 months), @created sorts by creation date.';
+        ? '标签/笔记：输入 # 浏览全部标签色块，输入 #标签 筛选打标书签；输入 * 浏览笔记，输入 *内容 检索书签笔记。最近/热度/创建：输入 @最近 按最近访问活跃时间倒序，输入 @热度 按历史访问频次排序，输入 @创建 按添加时间倒序。'
+        : 'Tags/Notes: Type # to browse tags, #tag to filter bookmarks; type * to browse notes, *content to search notes. Recent/Hot/Create: @recent sorts by active time, @hot sorts by visit frequency, @created sorts by creation date.';
     const rows = isZh
         ? [
             ['# 标签：', '输入 # 进入标签色块总览；输入 #标签名（如 #工作）快速过滤打标书签。'],
             ['* 笔记：', '输入 * 进入书签笔记总览；输入 *内容（如 *待办）即时检索书签备注与笔记。'],
-            ['@最近：', '输入 @最近（或 @time / @recent），按书签近 3 个月的最近访问活跃时间倒序排列。'],
-            ['@热度：', '输入 @热度（或 @hot / @click），按书签近 3 个月的历史访问频次由高到低排列。'],
+            ['@最近：', '输入 @最近（或 @time / @recent），按书签最近访问活跃时间倒序排列。'],
+            ['@热度：', '输入 @热度（或 @hot / @click），按书签历史访问频次由高到低排列。'],
             ['@创建：', '输入 @创建（或 @created），按书签初次添加收藏的时间倒序排列。']
         ]
         : [
             ['# Tags:', 'Type # to browse tag colors; type #tag (e.g. #work) to filter tagged bookmarks.'],
             ['* Notes:', 'Type * to browse notes; type *content (e.g. *todo) to search bookmark notes.'],
-            ['@recent:', 'Type @recent (or @time), sort bookmarks descending by last visited time in the last 3 months.'],
-            ['@hot:', 'Type @hot (or @click), sort bookmarks descending by visit frequency in the last 3 months.'],
+            ['@recent:', 'Type @recent (or @time), sort bookmarks descending by last visited time.'],
+            ['@hot:', 'Type @hot (or @click), sort bookmarks descending by visit frequency.'],
             ['@created:', 'Type @created, sort bookmarks descending by bookmark addition/creation date.']
         ];
     const html = rows.map(([label, value]) => `
@@ -10964,6 +11062,31 @@ const canvasSearchHighlightState = {
 
 // ==================== Phase 3: 缓存管理 ====================
 
+function hashCanvasSearchSignatureString(rawText) {
+    const str = typeof rawText === 'string' ? rawText : '';
+    const len = str.length;
+    let h1 = 0x811c9dc5 ^ len;
+    let h2 = 0x9e3779b9 ^ len;
+    let i = 0;
+    const limit = len - 3;
+    for (; i < limit; i += 4) {
+        const w0 = str.charCodeAt(i) | (str.charCodeAt(i + 1) << 16);
+        const w1 = str.charCodeAt(i + 2) | (str.charCodeAt(i + 3) << 16);
+        h1 = Math.imul(h1 ^ w0 ^ (i & 0xffff), 0x85ebca6b);
+        h2 = Math.imul(h2 ^ w1 ^ h1, 0xc2b2ae35);
+        h1 ^= (h1 >>> 13);
+        h2 ^= (h2 >>> 15);
+    }
+    for (; i < len; i++) {
+        const c = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ c, 0x01000193);
+        h2 = Math.imul(h2 ^ (c + i) ^ h1, 0x85ebca77);
+    }
+    h1 = Math.imul(h1 ^ (h2 >>> 11), 0x85ebca6b);
+    h2 = Math.imul(h2 ^ (h1 >>> 13), 0xc2b2ae35);
+    return `v5:${len}:${(h1 >>> 0).toString(36)}-${(h2 >>> 0).toString(36)}`;
+}
+
 /**
  * 获取画布搜索签名（用于缓存失效判断）
  */
@@ -10971,7 +11094,9 @@ function getCanvasSearchSignature() {
     const activeCanvasState = getActiveCanvasState();
     if (!activeCanvasState) return '';
 
-    return `v4:${stringifyCanvasSearchSignaturePayload(buildCanvasSearchSignaturePayload(activeCanvasState))}`;
+    return hashCanvasSearchSignatureString(
+        stringifyCanvasSearchSignaturePayload(buildCanvasSearchSignaturePayload(activeCanvasState))
+    );
 }
 
 /**
@@ -11482,14 +11607,9 @@ function collectTempSectionSearchItemSnapshots(section) {
     const snapshots = [];
     if (!section || !Array.isArray(section.items)) return snapshots;
 
-    const sectionTitle = typeof section.title === 'string' ? section.title : (typeof section.name === 'string' ? section.name : '');
-    const sectionLabel = getTempSectionSearchLabel(section);
-    const sectionPrefix = [sectionLabel, sectionTitle].filter(Boolean).join(' ');
-    const pathStack = sectionPrefix ? [sectionPrefix] : [];
     const stack = [];
-
     for (let i = section.items.length - 1; i >= 0; i--) {
-        stack.push({ item: section.items[i], parentId: '', stage: 0 });
+        stack.push({ item: section.items[i], parentId: '' });
     }
 
     while (stack.length) {
@@ -11502,13 +11622,7 @@ function collectTempSectionSearchItemSnapshots(section) {
         const rawTitle = typeof it.title === 'string' ? it.title : '';
         const itemTitle = (itemNodeType === 'bookmark') ? (rawTitle || itemUrl || '') : rawTitle;
 
-        if (frame.stage === 1) {
-            if (itemTitle) pathStack.pop();
-            continue;
-        }
-
-        if (itemTitle) pathStack.push(itemTitle);
-
+        // 不序列化 rawItem 与重复组装的 namedPath（父节点自身 id/title/parentId 已在签名快照内）
         if (itemUrl || itemTitle) {
             snapshots.push({
                 id: String(it.id),
@@ -11516,20 +11630,16 @@ function collectTempSectionSearchItemSnapshots(section) {
                 title: itemTitle,
                 url: itemUrl,
                 parentId: frame.parentId ? String(frame.parentId) : '',
-                namedPath: pathStack.length ? pathStack.join(' > ') : '',
                 tags: getInlineTagSearchSignature(it.tags),
                 note: normalizeNoteForSearch(it.note),
                 noteColor: normalizeNoteColorForSearch(it.noteColor),
-                dateAdded: (typeof it.dateAdded !== 'undefined' && it.dateAdded !== null) ? it.dateAdded : null,
-                rawItem: it
+                dateAdded: (typeof it.dateAdded !== 'undefined' && it.dateAdded !== null) ? it.dateAdded : null
             });
         }
 
-        stack.push({ item: it, parentId: frame.parentId, stage: 1 });
-
         if (Array.isArray(it.children) && it.children.length) {
             for (let j = it.children.length - 1; j >= 0; j--) {
-                stack.push({ item: it.children[j], parentId: it.id, stage: 0 });
+                stack.push({ item: it.children[j], parentId: it.id });
             }
         }
     }
@@ -11580,6 +11690,10 @@ function parseTempSectionSlice(section, db, coords, isMultiColumnMode, bookmarkO
         h: metrics.h,
         color: color,
         dateAdded: (typeof section.dateAdded !== 'undefined' && section.dateAdded !== null) ? section.dateAdded : (section.createdAt || null),
+        tempKind: typeof section.tempKind === 'string' ? section.tempKind : '',
+        source: typeof section.source === 'string' ? section.source : '',
+        isSnapshot: section.isSnapshot === true,
+        isSpecial: section.isSpecial === true,
         rawItem: section,
         bookmarkCount: Array.isArray(section.items) ? section.items.length : 0,
         __title: title.toLowerCase(),
@@ -12269,6 +12383,185 @@ function mergeCoordinatesIntoItemById(db, coords) {
     }
 }
 
+/**
+ * Restore live rawItem object references in memory for records loaded from IndexedDB
+ * (since IndexedDB omits rawItem/children to avoid storing multi-MB duplicate subtrees).
+ */
+function rehydrateSearchDbRawItems(lists = []) {
+    const safeLists = (Array.isArray(lists) ? lists : [lists]).filter(Array.isArray);
+    if (safeLists.length === 0) return;
+
+    let needTemp = false;
+    let needPerm = false;
+    for (let i = 0; i < safeLists.length; i++) {
+        const list = safeLists[i];
+        for (let j = 0; j < list.length; j++) {
+            const item = list[j];
+            if (!item || item.rawItem) continue;
+            if (item.type === 'temp-section' || (item.type === 'bookmark-item' && item.source === 'temporary')) {
+                needTemp = true;
+            } else if (item.type === 'bookmark-item' && item.source === 'permanent') {
+                needPerm = true;
+            }
+            if (needTemp && needPerm) break;
+        }
+        if (needTemp && needPerm) break;
+    }
+
+    if (!needTemp && !needPerm) return;
+
+    let tempSectionById = null;
+    let tempNodeByKey = null;
+    if (needTemp) {
+        tempSectionById = new Map();
+        tempNodeByKey = new Map();
+        const activeCanvasState = getActiveCanvasState();
+        const sections = Array.isArray(activeCanvasState && activeCanvasState.tempSections)
+            ? activeCanvasState.tempSections
+            : [];
+        for (let i = 0; i < sections.length; i++) {
+            const sec = sections[i];
+            if (!sec || !sec.id) continue;
+            const secId = String(sec.id);
+            tempSectionById.set(secId, sec);
+            if (!Array.isArray(sec.items) || sec.items.length === 0) continue;
+            const stack = sec.items.slice();
+            while (stack.length) {
+                const node = stack.pop();
+                if (!node || !node.id) continue;
+                tempNodeByKey.set(`${secId}::${String(node.id)}`, node);
+                if (Array.isArray(node.children) && node.children.length) {
+                    for (let k = node.children.length - 1; k >= 0; k--) {
+                        stack.push(node.children[k]);
+                    }
+                }
+            }
+        }
+    }
+
+    let permNodeById = null;
+    if (needPerm) {
+        permNodeById = new Map();
+        let permanentTree = null;
+        try {
+            if (typeof cachedCurrentTree !== 'undefined' && Array.isArray(cachedCurrentTree)) {
+                permanentTree = cachedCurrentTree;
+            } else if (typeof window !== 'undefined' && Array.isArray(window.cachedCurrentTree)) {
+                permanentTree = window.cachedCurrentTree;
+            }
+        } catch (_) { }
+        if (permanentTree && permanentTree[0]) {
+            const stack = [permanentTree[0]];
+            while (stack.length) {
+                const node = stack.pop();
+                if (!node || node.id === undefined || node.id === null) continue;
+                permNodeById.set(String(node.id), node);
+                if (Array.isArray(node.children) && node.children.length) {
+                    for (let k = node.children.length - 1; k >= 0; k--) {
+                        stack.push(node.children[k]);
+                    }
+                }
+            }
+        }
+    }
+
+    for (let i = 0; i < safeLists.length; i++) {
+        const list = safeLists[i];
+        for (let j = 0; j < list.length; j++) {
+            const item = list[j];
+            if (!item || item.rawItem) continue;
+            if (item.type === 'temp-section' && tempSectionById) {
+                item.rawItem = tempSectionById.get(String(item.id)) || null;
+            } else if (item.type === 'bookmark-item') {
+                if (item.source === 'temporary' && tempNodeByKey && item.sectionId) {
+                    item.rawItem = tempNodeByKey.get(`${String(item.sectionId)}::${String(item.id)}`) || null;
+                } else if (item.source === 'permanent' && permNodeById) {
+                    item.rawItem = permNodeById.get(String(item.id)) || null;
+                }
+            }
+        }
+    }
+}
+
+function isCanvasSearchPageVisible() {
+    return typeof document === 'undefined' || document.visibilityState === 'visible';
+}
+
+function hasWarmCanvasSearchCache() {
+    return Boolean(
+        canvasSearchDb &&
+        (canvasSearchDb.signature ||
+            (typeof canvasSearchLoadedModes !== 'undefined' &&
+                canvasSearchLoadedModes instanceof Set &&
+                canvasSearchLoadedModes.size > 0))
+    );
+}
+
+function isCanvasSearchUiActive() {
+    if (typeof document === 'undefined') return false;
+    const inputEl = document.getElementById('searchInput');
+    if (inputEl && document.activeElement === inputEl) return true;
+    const panel = typeof getSearchResultsPanel === 'function'
+        ? getSearchResultsPanel()
+        : document.getElementById('searchResultsPanel');
+    return Boolean(panel && panel.classList && panel.classList.contains('visible'));
+}
+
+function syncOrInvalidateSearchCacheOnPeerClean(modeKey, options = {}) {
+    const normalizedMode = normalizeCanvasSearchModeKey(modeKey || (searchUiState && searchUiState.activeMode) || 'bookmark');
+    const visible = isCanvasSearchPageVisible();
+    const uiActive = isCanvasSearchUiActive();
+    const warmLoaded = hasWarmCanvasSearchCache();
+
+    // Keep unloaded or background pages quiet until the user actually brings them into focus/search.
+    if (!warmLoaded && !uiActive) {
+        return Promise.resolve(false);
+    }
+
+    const hasFocus = typeof document !== 'undefined' && typeof document.hasFocus === 'function'
+        ? document.hasFocus()
+        : true;
+    const shouldReload = visible && (uiActive || (warmLoaded && hasFocus));
+
+    if (!shouldReload) {
+        if (warmLoaded && typeof resetCanvasSearchDb === 'function') {
+            resetCanvasSearchDb((options && options.reason) || 'peer-index-updated');
+            if (typeof searchUiState !== 'undefined' && searchUiState) {
+                searchUiState.results = [];
+                searchUiState.resultSource = [];
+                searchUiState.resultAll = [];
+            }
+        }
+        return Promise.resolve(false);
+    }
+
+    if (typeof ensureIndexForModeLoaded !== 'function') {
+        return Promise.resolve(false);
+    }
+    const loadOptions = options && options.liveSig ? { liveSig: options.liveSig } : {};
+    return ensureIndexForModeLoaded(normalizedMode, loadOptions);
+}
+
+async function runWithCrossTabIdleIndexLock(task) {
+    const locksApi = (typeof navigator !== 'undefined' && navigator && navigator.locks &&
+        typeof navigator.locks.request === 'function')
+        ? navigator.locks
+        : null;
+    if (!locksApi) {
+        return { acquired: true, result: await task() };
+    }
+    try {
+        return await locksApi.request('bcs_canvas_search_idle_index_v1', { ifAvailable: true }, async (lock) => {
+            if (!lock) {
+                return { acquired: false, result: undefined };
+            }
+            return { acquired: true, result: await task() };
+        });
+    } catch (_) {
+        return { acquired: true, result: await task() };
+    }
+}
+
 const SearchIndexManager = {
     isDirty: false,
     needsFullUpdate: false,
@@ -12300,7 +12593,7 @@ const SearchIndexManager = {
             try {
                 chrome.idle.setDetectionInterval(15);
                 this.idleListener = (state) => {
-                    if (state === 'idle') {
+                    if (state === 'idle' && isCanvasSearchPageVisible()) {
                         ;
                         this.triggerIdleIndexing();
                     }
@@ -12574,113 +12867,108 @@ const SearchIndexManager = {
     },
 
     async triggerIdleIndexing() {
+        if (!isCanvasSearchPageVisible()) return;
         try {
             await this.refreshDirtyStateFromStorage();
         } catch (err) {
             console.warn('[SearchIndexManager] Failed to refresh dirty state before idle indexing:', err);
         }
-        if (!this.isDirty) return;
+        if (!this.isDirty || !isCanvasSearchPageVisible()) return;
         if (this.isIndexing) return;
         if (!isCanvasSearchStateReady()) {
             ;
             await waitForCanvasSearchStateReady();
-            if (this.isIndexing) return;
+            if (!isCanvasSearchPageVisible() || this.isIndexing) return;
             try {
                 await this.refreshDirtyStateFromStorage();
             } catch (err) {
                 console.warn('[SearchIndexManager] Failed to refresh dirty state after canvas ready:', err);
             }
-            if (!this.isDirty) return;
+            if (!this.isDirty || !isCanvasSearchPageVisible()) return;
         }
-        this.isIndexing = true;
-        this.snapshotDirtyState();
 
-        // Before rebuilding, check if another tab/end already wrote a fresh IndexedDB index.
-        try {
-            const liveSig = getCanvasSearchSignature();
-            if (window.SearchIndexDb && !shouldBypassFreshIndexShortcutForProcessingDirty() && await window.SearchIndexDb.hasFreshIndex(liveSig)) {
-                ;
-                await this.clearProcessedDirtyState();
+        const lockOutcome = await runWithCrossTabIdleIndexLock(async () => {
+            if (!isCanvasSearchPageVisible() || this.isIndexing) return;
+            try {
+                await this.refreshDirtyStateFromStorage();
+            } catch (err) {
+                console.warn('[SearchIndexManager] Failed to refresh dirty state inside idle lock:', err);
+            }
+            if (!this.isDirty) return;
 
-                if (typeof ensureIndexForModeLoaded === 'function') {
+            this.isIndexing = true;
+            this.snapshotDirtyState();
+
+            // Before rebuilding, check if another tab/end already wrote a fresh IndexedDB index.
+            let idleLiveSig = '';
+            try {
+                idleLiveSig = getCanvasSearchSignature();
+                if (window.SearchIndexDb && !shouldBypassFreshIndexShortcutForProcessingDirty() && await window.SearchIndexDb.hasFreshIndex(idleLiveSig)) {
+                    ;
+                    await this.clearProcessedDirtyState();
+
                     const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
-                    ensureIndexForModeLoaded(activeMode).catch(err => {
+                    syncOrInvalidateSearchCacheOnPeerClean(activeMode, { liveSig: idleLiveSig, reason: 'idle-skip-fresh' }).catch(err => {
                         console.error('[SearchIndexManager] Failed to preload updated index on skip:', err);
                     });
-                }
 
-                this.isIndexing = false;
-                this.scheduleHistoryStatsPrewarm();
-                return;
+                    this.isIndexing = false;
+                    return;
+                }
+            } catch (err) {
+                console.error('[SearchIndexManager] Failed to check IndexedDB before idle indexing:', err);
             }
-        } catch (err) {
-            console.error('[SearchIndexManager] Failed to check IndexedDB before idle indexing:', err);
-        }
 
-        ;
+            ;
 
-        const runTask = () => {
-            return new Promise((resolve, reject) => {
-                const checkFull = () => {
-                    return this.processingFullUpdate || this.needsFullUpdate;
-                };
+            const runTask = () => {
+                return new Promise((resolve, reject) => {
+                    const checkFull = () => {
+                        return this.processingFullUpdate || this.needsFullUpdate;
+                    };
 
-                if (typeof window.requestIdleCallback === 'function') {
-                    window.requestIdleCallback(async (deadline) => {
-                        try {
-                            if (checkFull()) {
-                                buildCanvasSearchDbSync();
-                            } else {
-                                await buildCanvasSearchDbIncrementallyInMemory();
+                    if (typeof window.requestIdleCallback === 'function') {
+                        window.requestIdleCallback(async (deadline) => {
+                            try {
+                                if (checkFull()) {
+                                    buildCanvasSearchDbSync({ liveSig: idleLiveSig });
+                                } else {
+                                    await buildCanvasSearchDbIncrementallyInMemory({ liveSig: idleLiveSig });
+                                }
+                                await saveMemoryIndexToIndexedDb({ liveSig: idleLiveSig });
+                                resolve();
+                            } catch (err) {
+                                reject(err);
                             }
-                            await saveMemoryIndexToIndexedDb();
-                            this.scheduleHistoryStatsPrewarm();
-                            resolve();
-                        } catch (err) {
-                            reject(err);
-                        }
-                    }, { timeout: 2000 });
-                } else {
-                    (async () => {
-                        try {
-                            if (checkFull()) {
-                                buildCanvasSearchDbSync();
-                            } else {
-                                await buildCanvasSearchDbIncrementallyInMemory();
+                        }, { timeout: 2000 });
+                    } else {
+                        (async () => {
+                            try {
+                                if (checkFull()) {
+                                    buildCanvasSearchDbSync({ liveSig: idleLiveSig });
+                                } else {
+                                    await buildCanvasSearchDbIncrementallyInMemory({ liveSig: idleLiveSig });
+                                }
+                                await saveMemoryIndexToIndexedDb({ liveSig: idleLiveSig });
+                                resolve();
+                            } catch (err) {
+                                reject(err);
                             }
-                            await saveMemoryIndexToIndexedDb();
-                            this.scheduleHistoryStatsPrewarm();
-                            resolve();
-                        } catch (err) {
-                            reject(err);
-                        }
-                    })();
-                }
-            });
-        };
+                        })();
+                    }
+                });
+            };
 
-        try {
-            await runTask();
-        } catch (err) {
-            console.error('[SearchIndexManager] Idle indexing failed:', err);
-        } finally {
-            this.isIndexing = false;
-        }
-    },
-
-    scheduleHistoryStatsPrewarm() {
-        if (typeof window === 'undefined' || !window.HistoryStatsService || typeof window.HistoryStatsService.ensureHistoryStatsIndex !== 'function') return;
-        const prewarm = () => {
             try {
-                window.HistoryStatsService.ensureHistoryStatsIndex().catch(() => {});
-            } catch (_) {}
-        };
-        // 极速微秒级静默恢复：由于从 IndexedDB 读取仅需 ~0.6ms，直接以微任务或零延迟启动预热
-        // 杜绝 1000~3000ms 的空闲等待空档，确保用户交互时内存 Map 已就绪
-        if (typeof queueMicrotask === 'function') {
-            queueMicrotask(prewarm);
-        } else {
-            setTimeout(prewarm, 0);
+                await runTask();
+            } catch (err) {
+                console.error('[SearchIndexManager] Idle indexing failed:', err);
+            } finally {
+                this.isIndexing = false;
+            }
+        });
+        if (lockOutcome && lockOutcome.acquired === false) {
+            return;
         }
     },
 
@@ -12699,9 +12987,10 @@ const SearchIndexManager = {
         }
         try {
             let hasIndex = false;
+            let initLiveSig = '';
             try {
-                const liveSig = getCanvasSearchSignature();
-                hasIndex = !!(window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(liveSig));
+                initLiveSig = getCanvasSearchSignature();
+                hasIndex = !!(window.SearchIndexDb && await window.SearchIndexDb.hasFreshIndex(initLiveSig));
                 if (window.SearchIndexDb && typeof window.SearchIndexDb.clearLegacyChromeStorageIndex === 'function') {
                     window.SearchIndexDb.clearLegacyChromeStorageIndex().catch(() => { });
                 }
@@ -12710,6 +12999,8 @@ const SearchIndexManager = {
             await this.refreshDirtyStateFromStorage();
             if (!hasIndex && !this.isDirty) {
                 await this.markDirty({ full: true });
+            } else if (hasIndex && !this.isDirty) {
+                scheduleCanvasSearchIdleWarmup(initLiveSig);
             }
 
             this.bindActivityListeners();
@@ -12734,9 +13025,9 @@ function handleSearchStorageChange(changes, areaName) {
         changes['canvas_search_index_needs_full'] !== undefined ||
         changes['canvas_search_index_dirty_revision'] !== undefined) {
         SearchIndexManager.refreshDirtyStateFromStorage().then(() => {
-            if (!SearchIndexManager.isDirty && typeof ensureIndexForModeLoaded === 'function') {
+            if (!SearchIndexManager.isDirty) {
                 const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
-                ensureIndexForModeLoaded(activeMode).catch(err => {
+                syncOrInvalidateSearchCacheOnPeerClean(activeMode, { reason: 'storage-peer-clean' }).catch(err => {
                     console.error('[Search] Failed to preload updated index in background:', err);
                 });
             }
@@ -12931,9 +13222,9 @@ function shouldBypassFreshIndexShortcutForProcessingDirty() {
     return getSearchIndexOwnerKeysFromDirtyKeys(SearchIndexManager.processingKeys).has('bcs:perm:main');
 }
 
-async function saveMemoryIndexToIndexedDb() {
+async function saveMemoryIndexToIndexedDb(options = {}) {
     const startTime = performance.now();
-    const liveSig = getCanvasSearchSignature();
+    const liveSig = (options && options.liveSig) || getCanvasSearchSignature();
 
     if (!window.SearchIndexDb || typeof window.SearchIndexDb.saveSnapshot !== 'function') {
         throw new Error('SearchIndexDb is not available');
@@ -12945,19 +13236,17 @@ async function saveMemoryIndexToIndexedDb() {
             ;
             await SearchIndexManager.clearProcessedDirtyState();
 
-            // Preload the updated index from IndexedDB to ensure local memory DB is not stale.
-            if (typeof ensureIndexForModeLoaded === 'function') {
-                const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
-                ensureIndexForModeLoaded(activeMode).catch(err => {
-                    console.error('[Search] Failed to preload updated index on skip write-back:', err);
-                });
-            }
+            // Preload the updated index from IndexedDB only if this page actively holds/uses search memory.
+            const activeMode = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.activeMode) || 'bookmark';
+            syncOrInvalidateSearchCacheOnPeerClean(activeMode, { liveSig, reason: 'save-skip-fresh' }).catch(err => {
+                console.error('[Search] Failed to preload updated index on skip write-back:', err);
+            });
             return;
         }
     } catch (_) { }
 
     if (!canvasSearchDb.signature) {
-        buildCanvasSearchDbSync();
+        buildCanvasSearchDbSync({ liveSig });
     }
 
     try {
@@ -12981,8 +13270,10 @@ async function saveMemoryIndexToIndexedDb() {
         }
 
         if (!meta) {
-            if (incrementalFallbackReason === 'base-signature-mismatch' || canvasSearchDb.signature !== liveSig) {
-                buildCanvasSearchDbSync();
+            if (incrementalFallbackReason === 'base-signature-mismatch' ||
+                canvasSearchDb.signature !== liveSig ||
+                !isCanvasSearchMemoryCompleteForSignature(canvasSearchDb.signature || liveSig)) {
+                buildCanvasSearchDbSync({ liveSig });
             }
             const snapshotPayload = buildSearchIndexPersistencePayload(canvasSearchDb.signature || liveSig);
             meta = await window.SearchIndexDb.saveSnapshot(snapshotPayload);
@@ -13001,18 +13292,20 @@ async function saveMemoryIndexToIndexedDb() {
     }
 }
 
-async function loadIndexForMode(mode) {
+async function loadIndexForMode(mode, options = {}) {
     if (!window.SearchIndexDb || typeof window.SearchIndexDb.loadModeSnapshot !== 'function') {
         return null;
     }
 
     try {
-        const liveSig = getCanvasSearchSignature();
+        const liveSig = (options && options.liveSig) || getCanvasSearchSignature();
         const normalizedMode = mode === 'tag' ? 'bookmark' : mode;
         const snapshot = await window.SearchIndexDb.loadModeSnapshot(normalizedMode, liveSig);
         if (!snapshot) {
             return null;
         }
+
+        rehydrateSearchDbRawItems([snapshot.list]);
 
         if (canvasSearchDb.signature !== snapshot.signature) {
             canvasSearchDb.signature = snapshot.signature;
@@ -13054,7 +13347,6 @@ async function loadAllIndexShardsFromIndexedDb(options = {}) {
 
     try {
         const allowStale = !!(options && options.allowStale === true);
-        const liveSig = getCanvasSearchSignature();
         const hasAllMemoryShards = Array.isArray(canvasSearchDb.bookmarkIndex) &&
             Array.isArray(canvasSearchDb.structureIndex) &&
             Array.isArray(canvasSearchDb.descriptionIndex) &&
@@ -13062,7 +13354,10 @@ async function loadAllIndexShardsFromIndexedDb(options = {}) {
             canvasSearchLoadedModes.has('structure') &&
             canvasSearchLoadedModes.has('description');
 
-        if (hasAllMemoryShards && (canvasSearchDb.signature === liveSig || (allowStale && canvasSearchDb.signature))) {
+        const liveSig = (options && options.liveSig)
+            || (allowStale ? (canvasSearchDb.signature || '') : getCanvasSearchSignature());
+
+        if (hasAllMemoryShards && (allowStale ? canvasSearchDb.signature : canvasSearchDb.signature === liveSig)) {
             return true;
         }
 
@@ -13072,6 +13367,8 @@ async function loadAllIndexShardsFromIndexedDb(options = {}) {
         if (!snapshot) {
             return false;
         }
+
+        rehydrateSearchDbRawItems([snapshot.bookmark, snapshot.card, snapshot.description]);
 
         canvasSearchDb.signature = snapshot.signature;
         canvasSearchDb.bookmarkIndex = snapshot.bookmark;
@@ -13227,24 +13524,26 @@ function applyIncrementalUpdatesToMemory(dirtyKeys) {
     }
 }
 
-async function buildCanvasSearchDbIncrementallyInMemory() {
+async function buildCanvasSearchDbIncrementallyInMemory(options = {}) {
+    let waitedForReady = false;
     if (!isCanvasSearchStateReady()) {
+        waitedForReady = true;
         await waitForCanvasSearchStateReady();
     }
 
-    const liveSig = getCanvasSearchSignature();
+    const liveSig = (!waitedForReady && options && options.liveSig) || getCanvasSearchSignature();
 
     // Bypass incremental updates and do a full sync rebuild if a full rebuild is requested
     if (SearchIndexManager.needsFullUpdate) {
         SearchIndexManager.processingBaseSignature = null;
-        buildCanvasSearchDbSync();
+        buildCanvasSearchDbSync({ liveSig });
         return;
     }
 
-    const baseLoaded = await loadAllIndexShardsFromIndexedDb({ allowStale: true });
+    const baseLoaded = await loadAllIndexShardsFromIndexedDb({ allowStale: true, liveSig });
     if (!baseLoaded) {
         SearchIndexManager.processingBaseSignature = null;
-        buildCanvasSearchDbSync();
+        buildCanvasSearchDbSync({ liveSig });
         return;
     }
     SearchIndexManager.processingBaseSignature = canvasSearchDb.signature || null;
@@ -13257,7 +13556,7 @@ async function buildCanvasSearchDbIncrementallyInMemory() {
         // path (for example a canvas manifest edit). Preserve correctness with
         // one full fallback rebuild; normal section edits never enter this path.
         SearchIndexManager.processingBaseSignature = null;
-        buildCanvasSearchDbSync();
+        buildCanvasSearchDbSync({ liveSig });
         return;
     }
 
@@ -13275,6 +13574,10 @@ async function buildCanvasSearchDbIncrementallyInMemory() {
             }
         });
         applyIncrementalUpdatesToMemory(keysToApply);
+        if (typeof window !== 'undefined' && window.HistoryStatsService &&
+            typeof window.HistoryStatsService.setBookmarkTargets === 'function' && Array.isArray(canvasSearchDb.bookmarkIndex)) {
+            window.HistoryStatsService.setBookmarkTargets(canvasSearchDb.bookmarkIndex);
+        }
     }
 
     canvasSearchDb.signature = liveSig;
@@ -13282,9 +13585,11 @@ async function buildCanvasSearchDbIncrementallyInMemory() {
 
 let ensureIndexPromiseChain = Promise.resolve();
 
-async function ensureIndexForModeLoaded(modeKey) {
+async function ensureIndexForModeLoaded(modeKey, options = {}) {
     const run = async () => {
+        let waitedForReady = false;
         if (!isCanvasSearchStateReady()) {
+            waitedForReady = true;
             await waitForCanvasSearchStateReady();
         }
 
@@ -13294,14 +13599,14 @@ async function ensureIndexForModeLoaded(modeKey) {
             console.warn('[Search] Failed to refresh stored dirty state before loading index:', err);
         }
 
-        const liveSig = getCanvasSearchSignature();
+        const liveSig = (!waitedForReady && options && options.liveSig) || getCanvasSearchSignature();
 
         // If we are dirty or signatures mismatch, first check if IndexedDB has already been updated.
         if (SearchIndexManager.isDirty || canvasSearchDb.signature !== liveSig) {
             if (SearchIndexManager.isDirty && !SearchIndexManager.processingKeys) {
                 SearchIndexManager.snapshotDirtyState();
             }
-            const result = await loadIndexForMode(modeKey);
+            const result = await loadIndexForMode(modeKey, { liveSig });
             if (result) {
                 // IndexedDB is already up-to-date. Clear only the dirty revisions observed before this check.
                 await SearchIndexManager.clearProcessedDirtyState();
@@ -13312,7 +13617,7 @@ async function ensureIndexForModeLoaded(modeKey) {
         if (SearchIndexManager.isDirty) {
             ;
             SearchIndexManager.snapshotDirtyState();
-            await buildCanvasSearchDbIncrementallyInMemory();
+            await buildCanvasSearchDbIncrementallyInMemory({ liveSig });
             SearchIndexManager.hasPendingSyncWriteBack = true;
             return;
         }
@@ -13326,11 +13631,11 @@ async function ensureIndexForModeLoaded(modeKey) {
             }
         }
 
-        const result = await loadIndexForMode(modeKey);
+        const result = await loadIndexForMode(modeKey, { liveSig });
         if (!result) {
             ;
             SearchIndexManager.snapshotDirtyState();
-            await buildCanvasSearchDbIncrementallyInMemory();
+            await buildCanvasSearchDbIncrementallyInMemory({ liveSig });
             SearchIndexManager.hasPendingSyncWriteBack = true;
         }
     };
@@ -13352,6 +13657,12 @@ function releaseSearchMemory() {
     canvasSearchLoadedModes = new Set();
     invalidateCanvasTagSearchCaches();
     invalidateCanvasNoteSearchCaches();
+    if (typeof invalidateCanvasBookmarkVisitStatsCache === 'function') {
+        invalidateCanvasBookmarkVisitStatsCache();
+    }
+    if (typeof window !== 'undefined' && window.HistoryStatsService && typeof window.HistoryStatsService.releaseMemory === 'function') {
+        window.HistoryStatsService.releaseMemory();
+    }
     if (searchUiState) {
         searchUiState.results = [];
         searchUiState.resultSource = [];
@@ -13367,7 +13678,7 @@ function scheduleReleaseSearchMemoryDebounced() {
     releaseSearchMemoryTimer = setTimeout(() => {
         releaseSearchMemoryTimer = null;
         releaseSearchMemory();
-    }, 300000); // 5 minutes
+    }, 600000); // 10 minutes
 }
 
 function cancelReleaseSearchMemory() {
@@ -13411,13 +13722,12 @@ function buildCanvasSearchDb() {
             SearchIndexManager.snapshotDirtyState();
         }
 
-        const rebuilt = buildCanvasSearchDbSync();
+        const rebuilt = buildCanvasSearchDbSync({ liveSig: liveSignature });
         SearchIndexManager.hasPendingSyncWriteBack = true;
         return rebuilt;
     }
 
-    const signature = canvasSearchDb.signature || liveSignature;
-    if (canvasSearchDb.signature === signature) {
+    if (canvasSearchDb.signature === liveSignature) {
         const mode = searchUiState.activeMode;
         const indexList = mode === 'bookmark' ? canvasSearchDb.bookmarkIndex :
             mode === 'description' ? canvasSearchDb.descriptionIndex :
@@ -13427,15 +13737,15 @@ function buildCanvasSearchDb() {
             return canvasSearchDb;
         }
     }
-    const rebuilt = buildCanvasSearchDbSync();
+    const rebuilt = buildCanvasSearchDbSync({ liveSig: liveSignature });
     if (previousSignature !== rebuilt.signature) {
         SearchIndexManager.hasPendingSyncWriteBack = true;
     }
     return rebuilt;
 }
 
-function buildCanvasSearchDbSync() {
-    const signature = getCanvasSearchSignature();
+function buildCanvasSearchDbSync(options = {}) {
+    const signature = (options && options.liveSig) || getCanvasSearchSignature();
     if (isCanvasSearchMemoryCompleteForSignature(signature)) {
         return canvasSearchDb;
     }
@@ -13476,15 +13786,6 @@ function buildCanvasSearchDbSync() {
 
     canvasSearchDb = db;
     markAllCanvasSearchModesLoaded();
-
-    if (typeof window !== 'undefined' && window.HistoryStatsService && Array.isArray(db.bookmarkIndex) && db.bookmarkIndex.length > 0) {
-        if (typeof window.HistoryStatsService.setBookmarkTargets === 'function') {
-            window.HistoryStatsService.setBookmarkTargets(db.bookmarkIndex);
-        }
-        if (typeof SearchIndexManager !== 'undefined' && typeof SearchIndexManager.scheduleHistoryStatsPrewarm === 'function') {
-            SearchIndexManager.scheduleHistoryStatsPrewarm();
-        }
-    }
 
     const count = db.structureIndex.length + db.descriptionIndex.length + db.bookmarkIndex.length;
     ;
@@ -15852,12 +16153,29 @@ function buildCanvasBookmarkGroupModel(scoredPairs, options = {}) {
         g.header.lastVisitTime = maxLastVisit;
 
         if (g.header.nodeType === 'folder') {
+            const hss = (typeof window !== 'undefined') ? window.HistoryStatsService : null;
+            if (hss && typeof hss.extractLeafBookmarks === 'function' && typeof hss.computeFolderAggregatedStats === 'function') {
+                const allLeaves = [];
+                for (let i = 0; i < g.children.length; i++) {
+                    const fItem = g.children[i] && g.children[i].item;
+                    const leaves = hss.extractLeafBookmarks(fItem && (fItem.rawItem || fItem));
+                    for (let j = 0; j < leaves.length; j++) {
+                        allLeaves.push(leaves[j]);
+                    }
+                }
+                const folderStats = hss.computeFolderAggregatedStats(allLeaves);
+                g.header.visitCount = folderStats.totalVisits || 0;
+                if ((folderStats.lastVisitTime || 0) > g.header.lastVisitTime) {
+                    g.header.lastVisitTime = folderStats.lastVisitTime || 0;
+                }
+            } else {
+                g.header.visitCount = 0;
+            }
             const primeChildPair = g.firstChild || g.children[0];
             const primeChild = primeChildPair && primeChildPair.item;
             const primeVisits = (primeChildPair && primeChildPair.visitCount !== undefined)
                 ? Number(primeChildPair.visitCount)
                 : (primeChild ? getCanvasBookmarkVisitStats(primeChild).visitCount : 0);
-            g.header.visitCount = groupTotalVisits;
             g.header.topChildVisitCount = primeVisits;
         } else {
             const primeChildPair = g.firstChild || g.children[0];
@@ -17556,23 +17874,62 @@ function getCanvasSearchItemSortTier(item) {
 }
 
 /**
+ * 根据查询语法自动将搜索模式切换至书签模式并返回关键语法标记
+ * @param {string} trimmedQuery
+ * @returns {{ isTimeSearch: boolean, isClickSearch: boolean, isHistorySearch: boolean }}
+ */
+function classifyAndApplyAutoSearchModeForQuery(trimmedQuery) {
+    if (!trimmedQuery || !searchUiState) {
+        return { isTimeSearch: false, isClickSearch: false, isHistorySearch: false };
+    }
+    const hasBrowseDetail = (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.active === true)
+        || (searchUiState.noteBrowseDetail && searchUiState.noteBrowseDetail.active === true);
+    const isTagBrowseRoot = typeof isTagBrowseRootQuery === 'function' && isTagBrowseRootQuery(trimmedQuery);
+    const isNoteBrowseRoot = typeof isNoteBrowseRootQuery === 'function' && isNoteBrowseRootQuery(trimmedQuery);
+    const isTimeBrowseRoot = typeof isTimeBrowseRootQuery === 'function' && isTimeBrowseRootQuery(trimmedQuery);
+    const isClickBrowseRoot = typeof isClickBrowseRootQuery === 'function' && isClickBrowseRootQuery(trimmedQuery);
+    const isHistoryBrowseRoot = typeof isHistoryBrowseRootQuery === 'function' && isHistoryBrowseRootQuery(trimmedQuery);
+    const isTagSearch = typeof isCanvasTagSearchQuery === 'function' && isCanvasTagSearchQuery(trimmedQuery)
+        && (typeof parsePermanentSectionQuery !== 'function' || parsePermanentSectionQuery(trimmedQuery) === null);
+    const isNoteSearch = typeof isCanvasNoteSearchQuery === 'function' && isCanvasNoteSearchQuery(trimmedQuery);
+    const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(trimmedQuery);
+    const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(trimmedQuery);
+    const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(trimmedQuery);
+
+    if (hasBrowseDetail || isTagBrowseRoot || isNoteBrowseRoot || isTimeBrowseRoot || isClickBrowseRoot || isHistoryBrowseRoot || isTagSearch || isNoteSearch || isTimeSearch || isClickSearch || isHistorySearch) {
+        if (searchUiState.activeMode !== 'bookmark') {
+            searchUiState.activeMode = 'bookmark';
+            if (typeof renderSearchModeUI === 'function') {
+                try { renderSearchModeUI(); } catch (_) { }
+            }
+        }
+    }
+    return { isTimeSearch, isClickSearch, isHistorySearch };
+}
+
+let activeSearchRenderDb = null;
+
+/**
  * 执行画布搜索并渲染结果
  * @param {string} query - 搜索关键词
  * @param {Object} options - 触发选项（source/keepTagBrowseDetail/keepNoteBrowseDetail）
  */
 function searchCanvasAndRender(query, options = {}) {
-    const db = buildCanvasSearchDb();
+    return (function runSearchCanvasAndRender() {
+        try {
+            return _searchCanvasAndRenderImpl(query, options);
+        } finally {
+            activeSearchRenderDb = null;
+        }
+    })();
+}
+
+function _searchCanvasAndRenderImpl(query, options = {}) {
     const triggerSource = options && typeof options === 'object'
         ? String(options.source || 'system')
         : 'system';
     const keepTagBrowseDetail = !!(options && typeof options === 'object' && options.keepTagBrowseDetail === true);
     const keepNoteBrowseDetail = !!(options && typeof options === 'object' && options.keepNoteBrowseDetail === true);
-
-    // Check if entire DB is broken
-    if (!db.itemById) {
-        renderSearchResultsPanel([], { view: 'canvas', query, emptyText: i18n.searchNoResults[currentLang] });
-        return;
-    }
 
     const trimmedQuery = String(query).trim();
     if (!trimmedQuery) {
@@ -17650,28 +18007,13 @@ function searchCanvasAndRender(query, options = {}) {
         }
     }
 
-    // Auto-align mode for Tag / Note / Time / Click browse or queries
-    const hasBrowseDetail = (searchUiState.tagBrowseDetail && searchUiState.tagBrowseDetail.active === true)
-        || (searchUiState.noteBrowseDetail && searchUiState.noteBrowseDetail.active === true);
-    const isTagBrowseRoot = typeof isTagBrowseRootQuery === 'function' && isTagBrowseRootQuery(trimmedQuery);
-    const isNoteBrowseRoot = typeof isNoteBrowseRootQuery === 'function' && isNoteBrowseRootQuery(trimmedQuery);
-    const isTimeBrowseRoot = typeof isTimeBrowseRootQuery === 'function' && isTimeBrowseRootQuery(trimmedQuery);
-    const isClickBrowseRoot = typeof isClickBrowseRootQuery === 'function' && isClickBrowseRootQuery(trimmedQuery);
-    const isHistoryBrowseRoot = typeof isHistoryBrowseRootQuery === 'function' && isHistoryBrowseRootQuery(trimmedQuery);
-    const isTagSearch = typeof isCanvasTagSearchQuery === 'function' && isCanvasTagSearchQuery(trimmedQuery)
-        && (typeof parsePermanentSectionQuery !== 'function' || parsePermanentSectionQuery(trimmedQuery) === null);
-    const isNoteSearch = typeof isCanvasNoteSearchQuery === 'function' && isCanvasNoteSearchQuery(trimmedQuery);
-    const isTimeSearch = typeof isCanvasTimeSearchQuery === 'function' && isCanvasTimeSearchQuery(trimmedQuery);
-    const isClickSearch = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(trimmedQuery);
-    const isHistorySearch = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(trimmedQuery);
-
-    if (hasBrowseDetail || isTagBrowseRoot || isNoteBrowseRoot || isTimeBrowseRoot || isClickBrowseRoot || isHistoryBrowseRoot || isTagSearch || isNoteSearch || isTimeSearch || isClickSearch || isHistorySearch) {
-        if (searchUiState.activeMode !== 'bookmark') {
-            searchUiState.activeMode = 'bookmark';
-            if (typeof renderSearchModeUI === 'function') {
-                try { renderSearchModeUI(); } catch (_) { }
-            }
-        }
+    // Auto-align mode BEFORE resolving/building search DB so mode switches load the right index shard first
+    const { isTimeSearch, isClickSearch, isHistorySearch } = classifyAndApplyAutoSearchModeForQuery(trimmedQuery);
+    const db = buildCanvasSearchDb();
+    activeSearchRenderDb = db;
+    if (!db.itemById) {
+        renderSearchResultsPanel([], { view: 'canvas', query, emptyText: i18n.searchNoResults[currentLang] });
+        return;
     }
 
     // Determine Source Index based on Active Mode
@@ -17679,26 +18021,47 @@ function searchCanvasAndRender(query, options = {}) {
     const mode = searchUiState.activeMode;
     const queryContext = createCanvasSearchQueryContext(trimmedQuery, mode);
     const isHistoryStatsRelevant = isTimeSearch || isClickSearch;
+    if (mode === 'bookmark' && typeof window !== 'undefined' && window.HistoryStatsService &&
+        typeof window.HistoryStatsService.isCacheReady === 'function' && window.HistoryStatsService.isCacheReady() &&
+        typeof window.HistoryStatsService.touchMemory === 'function') {
+        window.HistoryStatsService.touchMemory();
+    }
     if (mode === 'bookmark' && isHistoryStatsRelevant &&
         typeof window !== 'undefined' && window.HistoryStatsService &&
         typeof window.HistoryStatsService.ensureHistoryStatsIndex === 'function' &&
         !window.HistoryStatsService.isCacheReady()) {
         const isFromHistoryCache = options && (options.source === 'history-cache' || options.source === 'history-cache-fallback');
         if (!isFromHistoryCache) {
+            searchUiState._awaitingHistoryStatsRender = true;
             window.HistoryStatsService.ensureHistoryStatsIndex().then(() => {
+                searchUiState._awaitingHistoryStatsRender = false;
                 try {
                     if (typeof invalidateCanvasBookmarkVisitStatsCache === 'function') {
                         invalidateCanvasBookmarkVisitStatsCache();
                     }
+                    if (searchUiState && searchUiState.domainIndexCache) {
+                        searchUiState.domainIndexCache = null;
+                    }
                     const currentQuery = String(searchUiState && searchUiState.query || '').trim();
                     const currentMode = searchUiState && searchUiState.activeMode;
-                    if (currentMode === 'bookmark' && currentQuery.toLowerCase() === trimmedQuery.toLowerCase()) {
-                        searchCanvasAndRender(trimmedQuery, { source: 'history-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                    const panel = typeof getSearchResultsPanel === 'function' ? getSearchResultsPanel() : null;
+                    const isPanelVisible = panel && panel.classList.contains('visible');
+                    if (currentMode === 'bookmark' && currentQuery) {
+                        if (currentQuery.toLowerCase() === trimmedQuery.toLowerCase()) {
+                            searchCanvasAndRender(trimmedQuery, { source: 'history-cache', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                        } else if (isPanelVisible) {
+                            searchCanvasAndRender(currentQuery, { source: 'stats-update', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                        }
                     }
                 } catch (_) { }
             }).catch(() => {
+                searchUiState._awaitingHistoryStatsRender = false;
                 try {
-                    searchCanvasAndRender(trimmedQuery, { source: 'history-cache-fallback', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                    const currentQuery = String(searchUiState && searchUiState.query || '').trim();
+                    const currentMode = searchUiState && searchUiState.activeMode;
+                    if (currentMode === 'bookmark' && currentQuery.toLowerCase() === trimmedQuery.toLowerCase()) {
+                        searchCanvasAndRender(trimmedQuery, { source: 'history-cache-fallback', keepTagBrowseDetail: true, keepNoteBrowseDetail: true });
+                    }
                 } catch (_) { }
             });
             // 核心阻断双重渲染风暴：从 IndexedDB 恢复仅需 ~0.6ms，首帧拒绝拿 0 访问量进行数百毫秒的无谓全量重排与撕毁重画
@@ -18593,7 +18956,7 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
         && cache.tagBrowseDetailKey === tagBrowseDetailKey
         && cache.noteBrowseDetailKey === noteBrowseDetailKey) return cache;
 
-    const db = buildCanvasSearchDb();
+    const db = activeSearchRenderDb || buildCanvasSearchDb();
     const items = Array.isArray(db.bookmarkIndex) ? db.bookmarkIndex : [];
     const map = new Map();
 
@@ -18742,9 +19105,15 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             let latestTimestamp = 0;
             let latestActiveTimestamp = 0;
             let latestVisitTime = 0;
+            let domainTotalVisits = 0;
             if (Array.isArray(targetItems) && targetItems.length) {
+                const seenCanonical = new Set();
+                const normalizeFn = (typeof window !== 'undefined' && window.HistoryStatsService && typeof window.HistoryStatsService.normalizeHistoryUrl === 'function')
+                    ? window.HistoryStatsService.normalizeHistoryUrl
+                    : null;
                 for (let i = 0; i < targetItems.length; i++) {
                     const t = targetItems[i];
+                    if (useMatchedStats && !t.matched) continue;
                     const ts = Number(t.dateAdded) || 0;
                     if (ts > latestTimestamp) latestTimestamp = ts;
                     const vStats = (typeof getCanvasBookmarkVisitStats === 'function') ? getCanvasBookmarkVisitStats(t) : null;
@@ -18752,11 +19121,16 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
                     if (vt > latestVisitTime) latestVisitTime = vt;
                     const actTs = Math.max(ts, vt);
                     if (actTs > latestActiveTimestamp) latestActiveTimestamp = actTs;
+
+                    const rawUrl = t && (t.url || t.__url);
+                    if (rawUrl) {
+                        const cUrl = normalizeFn ? normalizeFn(rawUrl) : rawUrl;
+                        if (cUrl && !seenCanonical.has(cUrl)) {
+                            seenCanonical.add(cUrl);
+                            domainTotalVisits += (vStats && Number(vStats.visitCount)) || 0;
+                        }
+                    }
                 }
-            }
-            let domainTotalVisits = 0;
-            if (window.HistoryStatsService && typeof window.HistoryStatsService.getDomainStats === 'function') {
-                domainTotalVisits = window.HistoryStatsService.getDomainStats(entry.domain).visitCount || 0;
             }
             return {
                 id: `domain:${entry.domain}`,
@@ -18795,9 +19169,12 @@ function ensureDomainCacheForQuery(query, scopeInput = null) {
             return String(a.domain || '').localeCompare(String(b.domain || ''));
         }
         if (isTimeSearch) {
-            const timeA = Number(a.activeTime || a.dateAdded) || 0;
-            const timeB = Number(b.activeTime || b.dateAdded) || 0;
+            const timeA = Number(a.lastVisitTime) || 0;
+            const timeB = Number(b.lastVisitTime) || 0;
             if (timeB !== timeA) return timeB - timeA;
+            const addedA = Number(a.dateAdded) || 0;
+            const addedB = Number(b.dateAdded) || 0;
+            if (addedB !== addedA) return addedB - addedA;
             return String(a.domain || '').localeCompare(String(b.domain || ''));
         }
         if (isHistorySearch) {
@@ -25949,7 +26326,7 @@ function renderCanvasSearchResults(results, options = {}) {
                 const isClickQuery = typeof isCanvasClickSearchQuery === 'function' && isCanvasClickSearchQuery(searchUiState.query);
                 const isHistoryQuery = typeof isCanvasHistorySearchQuery === 'function' && isCanvasHistorySearchQuery(searchUiState.query);
                 let domainDateHtml = '';
-                const domainTs = (isTimeQuery ? (item.activeTime || item.dateAdded) : item.dateAdded);
+                const domainTs = (isTimeQuery ? (item.lastVisitTime || item.dateAdded) : item.dateAdded);
                 if ((isTimeQuery || isHistoryQuery) && domainTs) {
                     try {
                         const d = new Date(Number(domainTs));
@@ -29844,6 +30221,17 @@ if (typeof window !== 'undefined') {
     window.ensureCanvasSearchIndexForModeLoaded = ensureIndexForModeLoaded;
     window.ensureCanvasSearchIndexForActiveMode = function () {
         const activeMode = (window.searchUiState && window.searchUiState.activeMode) || 'bookmark';
+        return ensureIndexForModeLoaded(activeMode);
+    };
+    window.ensureCanvasSearchIndexForQuery = function (query) {
+        cancelCanvasSearchIdleWarmup();
+        classifyAndApplyAutoSearchModeForQuery(String(query || '').trim());
+        const activeMode = (window.searchUiState && window.searchUiState.activeMode) || 'bookmark';
+        const modeKey = normalizeCanvasSearchModeKey(activeMode);
+        const liveSig = typeof getCanvasSearchSignature === 'function' ? getCanvasSearchSignature() : '';
+        if (!SearchIndexManager.isDirty && canvasSearchLoadedModes.has(modeKey) && liveSig && canvasSearchDb.signature === liveSig) {
+            return Promise.resolve(canvasSearchDb);
+        }
         return ensureIndexForModeLoaded(activeMode);
     };
 

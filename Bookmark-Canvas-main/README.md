@@ -91,7 +91,7 @@ When an empty canvas first opens, three guide cards are visible: **Canvas Basics
   - **`setting.json` and Companion Context File Planning**:
     - Planned standalone `setting.json` export and persistence for environment appearance, layout preferences, and anchor slots, decoupled from pure bookmark canvas data.
     - **Export optional companion read-only "spatiotemporal and user interaction context" file**: e.g., `用户时空上下文（只读）.json` (or `runtime_context_readonly.json`), representing another layer of temporal and spatial context shaped by user interaction:
-      - **Temporal Context**: Normalized URL, 3-month visit count, last visited timestamp, generation timestamp;
+      - **Temporal Context**: Normalized URL, visit count, last visited timestamp, generation timestamp;
       - **Spatial & Viewport Context**: Sidebar anchor slots (camera coordinates, zoom level, visible bounding rectangle `visibleRange`);
       - **Interaction & Operational State**: User-pinned section cards (pin status), folder-collapse states, and other daily workflow traces;
       - Dynamically generated on-the-fly on export, ignored on import, selectable via an export checkbox. Section files (`.canvas`/`.json`) and search storage remain completely untouched and clean.

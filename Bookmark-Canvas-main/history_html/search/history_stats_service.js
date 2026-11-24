@@ -1,44 +1,446 @@
 /**
- * Bookmark-Canvas: 浏览历史点击与访问统计服务 (HistoryStatsService)
- * 
- * 极简设计原则（基于书签白名单与时间戳水位线增量）：
- * 1. 严格按需触发：页面加载 0 开销，仅在用户点击/聚焦搜索框或右键信息面板时激活。
- * 2. 严格书签反向白名单：以书签为唯一靶心，非书签网页直接丢弃，无白名单时绝对终止（防穿透）。
- * 3. 单源永久存储：以 IndexedDB (SearchIndexDb) 为唯一持久化，冷启动 < 1ms 直接还原。
- * 4. 水位线增量同步 (Watermark Delta Sync)：以上次同步时间戳（lastSyncTime）为基准，只检索该时间戳以来的最新访问进行填补更新。
- * 5. 多 URL 变体求和模型：书签内部按原始 URL 变体分别记录，增量直接覆盖变体，总数实时求和（彻底解决热度卡死 P4）。
- * 6. 域名热度动态汇总：域名统计不单独存储，由书签数据实时汇总，天然支持主域名与子域名层级，根除重复累加（P1/P9）。
- * 7. 删除对账与版本持久化：已处理版本号存入快照元数据，开箱即用，避免每次重新拉取 5 万条（P2）。
- * 8. 跳转书签与新书签补查：冷启动对零命中书签用原网址 getVisits 补查，触发时补查新书签（P8/P11）。
- * 9. 精确单书签查询：右键单书签使用原网址精确查询，限定近 90 天，绝不拿无关记录凑数（P6）。
- * 10. 标题匹配护栏：单页应用通用标题多 URL 防护，原网址已有记录不叠加，杜绝误收非书签网页（P7）。
+ * Bookmark-Canvas: 浏览历史访问统计服务 (HistoryStatsService, schemaVersion: 4)
+ *
+ * 设计原则：
+ * 1. 打开后空闲预热：打开画布后趁浏览器空闲加载快照与增量同步，数据无变化不写盘；搜索与右键文件夹「信息」按需对齐。
+ * 2. 两段式瘦身长期账本：
+ *    - archiveMap：超过 95 天滚动封存线的历史累计底数。
+ *    - recentDayBuckets：近 95 天按 UTC 天分桶（dayNum -> canonicalUrl -> [visitCount, lastVisitTime]）。
+ *    - variantsMap：顶层变体原始 URL 表（每规范化地址最多保留 15 个原始变体）。
+ *    - missingSinceMap：移出书签白名单后的 30 天软保留宽限期记录，防止剪切/粘贴或误删恢复丢失老账。
+ *    - urlMap：仅存在于内存的 O(1) 运行时投影（不落盘）。
+ * 3. 统一明细汇总与去重：
+ *    - 剔除 reload 与 auto_subframe；
+ *    - 同规范化 URL 重定向链去重（referringVisitId 命中且时间差 < 500ms 仅保留链尾）；
+ *    - 异常未来时间戳钳制至 anchorTime。
+ * 4. 删除分级对账（沿用 background.js 500 条溢出阈值）：
+ *    - allHistory (purged_at)：彻底清空并仅补拉 purgedAt 之后的新访问。
+ *    - 溢出 > 500 条 (overflow_at)：保留 archiveMap 与 < rebuildStartDay 老桶，仅重算近 89 个完整天。
+ *    - 零星删 URL (deleted_urls)：前台只读并在落盘后更新 synced_at 供后台裁剪已消费元组，命中账本且在 85 天护栏内的条目重算近端天桶。
+ * 5. 单书签独立直查：右键单个书签「信息」绝不触发全库扫描，按「老账底数 + 近端实时 getVisits」精确合算。
+ * 6. 多端防覆盖同步：BroadcastChannel('bcs_visit_stats_v4') + savedAt 写前对齐，避免主页面与侧边栏互相覆盖。
  */
 
 (function (root) {
     'use strict';
 
-    const DEFAULT_HISTORY_DAYS = 90; // 首次拉取近 90 天（约 3 个月）
-    const MAX_INDEX_ITEMS = 10000;    // 经反向过滤后通常仅数百条书签记录
-    const WATERMARK_CHECK_INTERVAL_MS = 30 * 1000; // 水位线检查间隔：30秒（平滑轻量，杜绝频繁调用）
+    const DAY_MS = 864e5;
+    const DEFAULT_HISTORY_DAYS = 90;
+    const RECENT_REBUILD_DAYS = 89;
+    const ARCHIVE_ROLLUP_DAYS = 95;
+    const DELTA_OVERLAP_MS = DAY_MS;
+    const DELTA_DIRECT_REBUILD_DAYS = 21;
+    const UNBOOKMARKED_RETENTION_DAYS = 30;
+    const UNBOOKMARKED_RETENTION_MS = UNBOOKMARKED_RETENTION_DAYS * DAY_MS;
+    const OLD_LEDGER_PROTECT_DAYS = 85;
+    const MAX_VARIANTS_PER_CANONICAL = 15;
+    const REDIRECT_DEDUP_WINDOW_MS = 500;
+    const WATERMARK_INTERVAL_MS = 30 * 1000;
+    const WATERMARK_PERSIST_INTERVAL_MS = 60 * 60 * 1000;
+    const IDLE_UNLOAD_MS = 10 * 60 * 1000;
+    const SAVE_DEBOUNCE_MS = 500;
+    const NEW_BOOKMARK_SEED_THRESHOLD = 50;
+    const SMALL_TARGET_DIRECT_URLS_MAX = 3500;
+    const HISTORY_SIZE_PROBE_LIMIT = 3000;
+    const DIRECT_GETVISITS_URL_CAP = 10000;
+    const GET_VISITS_BATCH_SIZE = 100;
+    const HISTORY_SCAN_YIELD_INTERVAL = 250;
+    const LONG_TASK_BUDGET_MS = 10;
+    const SCHEMA_VERSION = 4;
+    const BROADCAST_CHANNEL_NAME = 'bcs_visit_stats_v4';
 
-    // 单页应用常见通用页面标题（护栏白名单：这些标题绝不用于跨 URL 模糊匹配，防止 P7 离谱乱配）
-    const GENERIC_SPA_TITLES = new Set([
-        // 英文通用标题
-        'home', 'index', 'login', 'signin', 'sign in', 'signup', 'sign up', 'register',
-        'dashboard', 'loading', '404', 'not found', 'error', 'untitled', 'notion', 'github',
-        'overview', 'welcome', 'app', 'portal', 'account', 'profile', 'search', 'settings',
-        'workspace', 'console', 'help', 'about', 'document', 'documents', 'docs',
-        // 中文通用页面标题
-        '首页', '主页', '登录', '登陆', '注册', '控制台', '仪表盘', '工作台', '未命名',
-        '加载中', '未找到', '错误', '搜索', '个人中心', '我的', '设置', '系统设置',
-        '概览', '欢迎', '账号', '详情', '帮助', '帮助中心', '关于'
-    ]);
+    const STORAGE_KEY_PURGED_AT = 'canvas_history_purged_at';
+    const STORAGE_KEY_OVERFLOW_AT = 'canvas_history_overflow_at';
+    const STORAGE_KEY_DELETED_URLS = 'canvas_history_deleted_urls';
+    const STORAGE_KEY_SYNCED_AT = 'canvas_history_stats_synced_at';
+
+    const INSTANCE_ID = `hss_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
     let registeredBookmarkProvider = null;
 
+    const internalCache = {
+        archiveMap: null,        // Map<canonicalUrl, { visitCount, lastVisitTime, domain, title }>
+        recentDayBuckets: null,  // Map<dayNum, Map<canonicalUrl, [visitCount, lastVisitTime]>>
+        variantsMap: null,       // Map<canonicalUrl, Set<rawUrl>>
+        missingSinceMap: null,   // Map<canonicalUrl, timestampMs>
+        knownTargets: null,      // Set<canonicalUrl>
+        urlMap: null,            // Map<canonicalUrl, { visitCount, lastVisitTime, domain, title }>
+        lastSyncTime: 0,
+        lastPurgedAt: 0,
+        lastPersistedSyncTime: 0,
+        lastKnownSavedAt: 0,
+        peerLatestSavedAt: 0,
+        staleByPeer: false,
+        syncedWithCompleteWhitelist: false,
+        hasUnsavedDataChanges: false,
+        loadingPromise: null,
+        idleUnloadTimer: null
+    };
+
+    let saveDebounceTimer = null;
+    let persistWriteChain = Promise.resolve();
+    let statsBroadcastChannel = null;
+
+    function initBroadcastChannel() {
+        if (statsBroadcastChannel) return statsBroadcastChannel;
+        if (typeof BroadcastChannel !== 'function') return null;
+        try {
+            const channel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+            channel.addEventListener('message', (event) => {
+                const data = event && event.data;
+                if (!data || typeof data !== 'object') return;
+                if (data.senderId === INSTANCE_ID) return;
+
+                if (data.type === 'stats-snapshot-saved') {
+                    const savedAt = Math.max(0, Number(data.savedAt) || 0);
+                    if (savedAt > (internalCache.lastKnownSavedAt || 0)) {
+                        internalCache.staleByPeer = true;
+                        if (savedAt > (internalCache.peerLatestSavedAt || 0)) {
+                            internalCache.peerLatestSavedAt = savedAt;
+                        }
+                    }
+                } else if (data.type === 'stats-snapshot-cleared') {
+                    internalCache.staleByPeer = true;
+                }
+            });
+            statsBroadcastChannel = channel;
+        } catch (_) {
+            statsBroadcastChannel = null;
+        }
+        return statsBroadcastChannel;
+    }
+
+    initBroadcastChannel();
+
+    function broadcastPeerNotice(payload) {
+        const channel = initBroadcastChannel();
+        if (!channel) return;
+        try {
+            channel.postMessage({
+                ...payload,
+                senderId: INSTANCE_ID
+            });
+        } catch (_) {}
+    }
+
+    function getChromeApi(namespace) {
+        if (typeof chrome !== 'undefined' && (!namespace || chrome[namespace])) return chrome;
+        if (typeof browser !== 'undefined' && (!namespace || browser[namespace])) return browser;
+        return null;
+    }
+
+    function storageLocalGet(keys) {
+        const api = getChromeApi('storage');
+        if (!api?.storage?.local?.get) return Promise.resolve({});
+        return new Promise((resolve) => {
+            try {
+                api.storage.local.get(keys, (res) => {
+                    if (api.runtime?.lastError) {
+                        resolve({});
+                        return;
+                    }
+                    resolve(res || {});
+                });
+            } catch (_) {
+                resolve({});
+            }
+        });
+    }
+
+    function storageLocalSet(values) {
+        const api = getChromeApi('storage');
+        if (!api?.storage?.local?.set || !values || typeof values !== 'object') return Promise.resolve(false);
+        return new Promise((resolve) => {
+            try {
+                api.storage.local.set(values, () => {
+                    resolve(!api.runtime?.lastError);
+                });
+            } catch (_) {
+                resolve(false);
+            }
+        });
+    }
+
+    function historySearch(query) {
+        const api = getChromeApi('history');
+        if (!api?.history?.search) return Promise.resolve([]);
+        return new Promise((resolve) => {
+            try {
+                api.history.search(query, (results) => {
+                    if (api.runtime?.lastError) {
+                        resolve([]);
+                        return;
+                    }
+                    resolve(Array.isArray(results) ? results : []);
+                });
+            } catch (_) {
+                resolve([]);
+            }
+        });
+    }
+
+    function historyGetVisits(url) {
+        const api = getChromeApi('history');
+        if (!api?.history?.getVisits || !url) return Promise.resolve([]);
+        return new Promise((resolve) => {
+            try {
+                api.history.getVisits({ url }, (visits) => {
+                    if (api.runtime?.lastError) {
+                        resolve([]);
+                        return;
+                    }
+                    resolve(Array.isArray(visits) ? visits : []);
+                });
+            } catch (_) {
+                resolve([]);
+            }
+        });
+    }
+
+    function fetchBookmarkTree() {
+        const api = getChromeApi('bookmarks');
+        if (!api?.bookmarks?.getTree) return Promise.resolve(null);
+        return new Promise((resolve) => {
+            try {
+                api.bookmarks.getTree((tree) => {
+                    if (api.runtime?.lastError) {
+                        resolve(null);
+                        return;
+                    }
+                    resolve(Array.isArray(tree) ? tree : null);
+                });
+            } catch (_) {
+                resolve(null);
+            }
+        });
+    }
+
+    async function yieldToMainThread() {
+        try {
+            if (typeof scheduler !== 'undefined' && typeof scheduler.yield === 'function') {
+                await scheduler.yield();
+                return;
+            }
+        } catch (_) {}
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    function getPerfNow() {
+        return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+    }
+
+    function getDayNum(timestampMs) {
+        return Math.floor(timestampMs / DAY_MS);
+    }
+
+    function getRebuildStartDay(anchorTime) {
+        return Math.max(0, Math.floor((anchorTime - (DEFAULT_HISTORY_DAYS * DAY_MS)) / DAY_MS) + 1);
+    }
+
+    function getArchiveCutoffDay(anchorTime) {
+        return Math.max(0, Math.floor((anchorTime - (ARCHIVE_ROLLUP_DAYS * DAY_MS)) / DAY_MS));
+    }
+
     /**
-     * 安全分发统计更新事件
+     * 极速 URL 规范化解析器（生成协议无关的 Canonical Key）
+     * 规则：
+     * 1. http:// 与 https:// 统一剥离协议头，仅保留 cleanHost + pathname + search
+     * 2. 域名去 www.，严格小写；路径去除结尾 /
+     * 3. 剥离 utm_*、spm、from、ref、fbclid 等常见跟踪参数
+     * 4. file:// 等特殊协议保留协议前缀
      */
+    function parseCanonicalUrl(rawUrl) {
+        if (!rawUrl || typeof rawUrl !== 'string') return null;
+        const trimmed = rawUrl.trim();
+        if (!trimmed) return null;
+
+        try {
+            const u = new URL(trimmed);
+            u.hash = '';
+
+            const hostnameLower = (u.hostname || '').toLowerCase();
+            const hostLower = (u.host || hostnameLower).toLowerCase();
+            const cleanHost = hostLower.startsWith('www.') ? hostLower.slice(4) : hostLower;
+            const domain = hostnameLower.startsWith('www.') ? hostnameLower.slice(4) : hostnameLower;
+
+            if (u.search && (u.search.includes('utm_') || u.search.includes('spm') || u.search.includes('fbclid') ||
+                u.search.includes('gclid') || u.search.includes('_ga') || u.search.includes('from=') || u.search.includes('ref=') || u.search.includes('feature='))) {
+                const isCodeRepoHost = cleanHost === 'github.com' || cleanHost.endsWith('.github.com') || cleanHost === 'gitlab.com' || cleanHost.endsWith('.gitlab.com');
+                const trackingParams = [
+                    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+                    'spm', 'from', 'feature', 'fbclid', 'gclid', '_ga'
+                ];
+                if (!isCodeRepoHost) {
+                    trackingParams.push('ref');
+                }
+                for (let i = 0; i < trackingParams.length; i++) {
+                    u.searchParams.delete(trackingParams[i]);
+                }
+            }
+
+            let path = u.pathname;
+            if (path.length > 1 && path.endsWith('/')) {
+                path = path.slice(0, -1);
+            } else if (path === '/') {
+                path = '';
+            }
+            const query = u.search ? u.search : '';
+
+            let canonicalUrl = '';
+            if (u.protocol === 'http:' || u.protocol === 'https:') {
+                canonicalUrl = cleanHost + path + query;
+            } else if (u.protocol === 'file:') {
+                canonicalUrl = 'file://' + path + query;
+            } else {
+                canonicalUrl = (u.protocol ? u.protocol.toLowerCase() + '//' : '') + cleanHost + path + query;
+            }
+
+            return { canonicalUrl, domain };
+        } catch (_) {
+            let clean = trimmed.replace(/#.*$/, '');
+            if (clean.length > 8 && clean.endsWith('/')) {
+                clean = clean.slice(0, -1);
+            }
+            const canonicalUrl = clean.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/+$/, '');
+            let domain = '';
+            try {
+                domain = canonicalUrl.split('/')[0].split('?')[0].split(':')[0].toLowerCase();
+            } catch (_) {}
+            return { canonicalUrl, domain };
+        }
+    }
+
+    function normalizeHistoryUrl(rawUrl) {
+        const parsed = parseCanonicalUrl(rawUrl);
+        return parsed ? parsed.canonicalUrl : '';
+    }
+
+    function extractHostname(url) {
+        const parsed = parseCanonicalUrl(url);
+        return parsed ? parsed.domain : '';
+    }
+
+    /**
+     * 过滤无效访问并执行同规范化 URL 重定向链去重，再按 UTC 天分桶汇总
+     */
+    function dedupeAndBucketVisits(visitLists, anchorTime = Date.now(), minVisitTime = 0) {
+        const safeMinTime = Math.max(0, Number(minVisitTime) || 0);
+        const visitById = new Map();
+        const untrackedVisits = [];
+
+        for (let l = 0; l < visitLists.length; l++) {
+            const visits = visitLists[l];
+            if (!Array.isArray(visits)) continue;
+            for (let i = 0; i < visits.length; i++) {
+                const v = visits[i];
+                if (!v || v.transition === 'reload' || v.transition === 'auto_subframe') continue;
+                const vt = Number(v.visitTime);
+                if (!(vt > 0) || !Number.isFinite(vt)) continue;
+                if (safeMinTime > 0 && vt < safeMinTime) continue;
+
+                const rawVisitId = v.visitId;
+                const visitId = (rawVisitId !== undefined && rawVisitId !== null && String(rawVisitId) !== '' && String(rawVisitId) !== '0')
+                    ? String(rawVisitId)
+                    : '';
+
+                if (visitId) {
+                    if (!visitById.has(visitId)) {
+                        visitById.set(visitId, v);
+                    }
+                } else {
+                    untrackedVisits.push(v);
+                }
+            }
+        }
+
+        const supersededVisitIds = new Set();
+        for (const [visitId, v] of visitById.entries()) {
+            const rawRefId = v.referringVisitId;
+            const refId = (rawRefId !== undefined && rawRefId !== null && String(rawRefId) !== '' && String(rawRefId) !== '0')
+                ? String(rawRefId)
+                : '';
+            if (!refId || refId === visitId) continue;
+
+            const parent = visitById.get(refId);
+            if (!parent) continue;
+
+            const dt = Math.abs(Number(v.visitTime) - Number(parent.visitTime));
+            if (dt < REDIRECT_DEDUP_WINDOW_MS) {
+                supersededVisitIds.add(refId);
+            }
+        }
+
+        const dayBuckets = new Map();
+        let totalCount = 0;
+        let maxTime = 0;
+
+        const recordValidVisit = (v) => {
+            const clampedTime = Math.min(Number(v.visitTime), anchorTime);
+            if (!(clampedTime > 0) || !Number.isFinite(clampedTime)) return;
+            const dayNum = Math.max(0, getDayNum(clampedTime));
+            let tuple = dayBuckets.get(dayNum);
+            if (!tuple) {
+                tuple = [0, 0];
+                dayBuckets.set(dayNum, tuple);
+            }
+            tuple[0] += 1;
+            if (clampedTime > tuple[1]) {
+                tuple[1] = clampedTime;
+            }
+            totalCount += 1;
+            if (clampedTime > maxTime) {
+                maxTime = clampedTime;
+            }
+        };
+
+        for (const [visitId, v] of visitById.entries()) {
+            if (supersededVisitIds.has(visitId)) continue;
+            recordValidVisit(v);
+        }
+        for (let i = 0; i < untrackedVisits.length; i++) {
+            recordValidVisit(untrackedVisits[i]);
+        }
+
+        return { dayBuckets, totalCount, maxTime };
+    }
+
+    async function collectBucketedVisitsForCanonical(rawUrls, anchorTime = Date.now(), minVisitTime = 0) {
+        const uniqueUrls = Array.from(new Set(
+            (Array.isArray(rawUrls) ? rawUrls : [rawUrls])
+                .filter((u) => typeof u === 'string' && u.length > 0)
+        ));
+        if (uniqueUrls.length === 0) {
+            return { dayBuckets: new Map(), totalCount: 0, maxTime: 0 };
+        }
+        const visitLists = await Promise.all(uniqueUrls.map((url) => historyGetVisits(url)));
+        return dedupeAndBucketVisits(visitLists, anchorTime, minVisitTime);
+    }
+
+    function scheduleIdleUnload() {
+        if (internalCache.idleUnloadTimer) {
+            clearTimeout(internalCache.idleUnloadTimer);
+            internalCache.idleUnloadTimer = null;
+        }
+        internalCache.idleUnloadTimer = setTimeout(() => {
+            if (typeof document !== 'undefined') {
+                const panel = document.getElementById('searchResultsPanel') || document.querySelector('.search-results-panel');
+                if (panel && (panel.classList.contains('visible') || (panel.style && panel.style.display !== 'none' && panel.style.display !== ''))) {
+                    scheduleIdleUnload();
+                    return;
+                }
+            }
+            releaseMemory();
+        }, IDLE_UNLOAD_MS);
+    }
+
+    function touchMemory() {
+        if (internalCache.urlMap instanceof Map) {
+            scheduleIdleUnload();
+        }
+    }
+
     function dispatchStatsUpdatedEvent() {
         if (typeof window === 'undefined') return;
         try {
@@ -49,336 +451,18 @@
         } catch (_) {}
     }
 
-    /**
-     * 注册画布书签获取提供者函数
-     */
-    function registerBookmarkProvider(provider) {
-        if (typeof provider === 'function') {
-            registeredBookmarkProvider = provider;
-        }
+    function extractBookmarkRawUrl(item) {
+        if (!item) return '';
+        return item.url || item.__url || (item.rawItem && (item.rawItem.url || item.rawItem.__url)) || '';
     }
 
-    // 内部缓存状态
-    const internalCache = {
-        loadedAt: 0,
-        lastSyncTime: 0,
-        lastAppliedVersion: 0,
-        urlMap: null,            // Map<normalizedUrl, { visitCount: number, lastVisitTime: number, domain: string, title: string, hasExactMatch?: boolean, variants: Map<rawUrl, { visitCount: number, lastVisitTime: number }> }>
-        protoAgnosticMap: null,  // Map<cleanProtoAgnosticUrl, { visitCount: number, lastVisitTime: number }>
-        titleDomainMap: null,    // Map<domain:::title, { visitCount: number, lastVisitTime: number }>
-        domainAggregatesCache: null, // Map<domain, { visitCount: number, lastVisitTime: number }>
-        redirectBookmarkUrls: null, // Set<string> 确认有访问的跳转类书签原始 URL 名单
-        zeroVisitNormUrls: null,    // Set<string> 确认为 0 访问的书签规范化 URL 集合（杜绝每次水位线增量重复轮询）
-        targetInfo: null,        // { targetUrlSet, targetCleanProtoMap, targetDomainSet, targetTitleDomainMap, rawUrlToNormUrlMap, normUrlToRawUrlsMap, allBookmarkRawUrls, hasTargets }
-        fetchingPromise: null
-    };
-
-    /**
-     * 清理域名聚合缓存
-     */
-    function invalidateDomainAggregatesCache() {
-        internalCache.domainAggregatesCache = null;
+    function extractBookmarkTitle(item) {
+        if (!item) return '';
+        return item.title || item.__title || (item.rawItem && (item.rawItem.title || item.rawItem.__title)) || '';
     }
 
     /**
-     * 构建域名访问统计聚合缓存（从 urlMap 动态生成，支持主域名与子域名层级）
-     */
-    function buildDomainAggregatesCache() {
-        const cache = new Map();
-        if (!(internalCache.urlMap instanceof Map)) return cache;
-
-        for (const data of internalCache.urlMap.values()) {
-            if (!data || !data.domain || !data.visitCount) continue;
-            const visits = data.visitCount || 0;
-            const lastTime = data.lastVisitTime || 0;
-            const itemDomain = data.domain.toLowerCase().replace(/^www\./i, '');
-
-            // 拆解域名层级，例如 a.b.example.com -> a.b.example.com, b.example.com, example.com
-            const parts = itemDomain.split('.');
-            for (let i = 0; i < parts.length - 1; i++) {
-                const sub = parts.slice(i).join('.');
-                if (!sub) continue;
-                const existing = cache.get(sub);
-                if (existing) {
-                    existing.visitCount += visits;
-                    if (lastTime > existing.lastVisitTime) existing.lastVisitTime = lastTime;
-                } else {
-                    cache.set(sub, { visitCount: visits, lastVisitTime: lastTime });
-                }
-            }
-        }
-        return cache;
-    }
-
-    /**
-     * 从给定的书签列表提取靶向哈希白名单
-     */
-    function extractTargetBookmarkSets(bookmarks) {
-        const targetUrlSet = new Set();
-        const targetCleanProtoMap = new Map();
-        const targetDomainSet = new Set();
-        const targetTitleDomainMap = new Map();
-        const rawUrlToNormUrlMap = new Map();
-        const normUrlToRawUrlsMap = new Map();
-        const allBookmarkRawUrls = [];
-
-        if (!Array.isArray(bookmarks) || bookmarks.length === 0) {
-            return {
-                targetUrlSet,
-                targetCleanProtoMap,
-                targetDomainSet,
-                targetTitleDomainMap,
-                rawUrlToNormUrlMap,
-                normUrlToRawUrlsMap,
-                allBookmarkRawUrls,
-                hasTargets: false
-            };
-        }
-
-        // 检测同一 domain:::cleanTitle 是否对应多个不同书签 URL（单页应用护栏）
-        const titleDomainCount = new Map();
-
-        for (let i = 0; i < bookmarks.length; i++) {
-            const bm = bookmarks[i];
-            if (!bm) continue;
-            const rawUrl = bm.url || bm.__url || (bm.rawItem && (bm.rawItem.url || bm.rawItem.__url));
-            if (!rawUrl || typeof rawUrl !== 'string') continue;
-
-            allBookmarkRawUrls.push(rawUrl);
-
-            const parsed = parseUrlFast(rawUrl);
-            if (!parsed) continue;
-
-            const { normUrl, cleanProto, domain } = parsed;
-            if (normUrl) {
-                targetUrlSet.add(normUrl);
-                rawUrlToNormUrlMap.set(rawUrl, normUrl);
-                if (!normUrlToRawUrlsMap.has(normUrl)) {
-                    normUrlToRawUrlsMap.set(normUrl, new Set());
-                }
-                normUrlToRawUrlsMap.get(normUrl).add(rawUrl);
-            }
-            if (cleanProto && normUrl) targetCleanProtoMap.set(cleanProto, normUrl);
-            if (domain) targetDomainSet.add(domain);
-
-            const title = bm.title || bm.__title || (bm.rawItem && (bm.rawItem.title || bm.rawItem.__title)) || '';
-            const cleanTitle = typeof title === 'string' ? title.trim().toLowerCase() : '';
-            if (domain && cleanTitle && cleanTitle.length >= 3 && !GENERIC_SPA_TITLES.has(cleanTitle)) {
-                const key = `${domain}:::${cleanTitle}`;
-                titleDomainCount.set(key, (titleDomainCount.get(key) || 0) + 1);
-                if (!targetTitleDomainMap.has(key)) {
-                    targetTitleDomainMap.set(key, normUrl);
-                }
-            }
-        }
-
-        // 护栏：若同一个 domain:::title 对应多个不同书签，放弃该标题匹配（避免混淆）
-        for (const [key, count] of titleDomainCount.entries()) {
-            if (count > 1) {
-                targetTitleDomainMap.delete(key);
-            }
-        }
-
-        return {
-            targetUrlSet,
-            targetCleanProtoMap,
-            targetDomainSet,
-            targetTitleDomainMap,
-            rawUrlToNormUrlMap,
-            normUrlToRawUrlsMap,
-            allBookmarkRawUrls,
-            hasTargets: targetUrlSet.size > 0
-        };
-    }
-
-    /**
-     * 设置/更新书签靶心名单
-     */
-    function setBookmarkTargets(bookmarks) {
-        if (Array.isArray(bookmarks) && bookmarks.length > 0) {
-            internalCache.targetInfo = extractTargetBookmarkSets(bookmarks);
-            if (internalCache.zeroVisitNormUrls) {
-                internalCache.zeroVisitNormUrls.clear();
-            }
-        }
-    }
-
-    /**
-     * 安全提取靶心书签列表
-     * 优先采用全局已注册的书签提供者（保证全库完整靶心），其次回退至局部传入
-     */
-    function getTargetBookmarksSafe(options = {}) {
-        if (typeof registeredBookmarkProvider === 'function') {
-            try {
-                const bms = registeredBookmarkProvider();
-                if (Array.isArray(bms) && bms.length > 0) return bms;
-            } catch (_) {}
-        }
-        if (Array.isArray(options.bookmarks) && options.bookmarks.length > 0) {
-            return options.bookmarks;
-        }
-        return null;
-    }
-
-    /**
-     * 从 IndexedDB 恢复持久化书签访问统计（同时恢复上次已对账消费的版本号与跳转名单）
-     */
-    async function loadIndexFromPersistentStorage() {
-        try {
-            if (typeof window !== 'undefined' && window.SearchIndexDb && typeof window.SearchIndexDb.getBookmarkVisitStats === 'function') {
-                const data = await window.SearchIndexDb.getBookmarkVisitStats();
-                if (data && Array.isArray(data.compactItems) && data.compactItems.length > 0) {
-                    return data;
-                }
-            }
-        } catch (_) {}
-        return null;
-    }
-
-    /**
-     * 防抖持久化到 IndexedDB（SearchIndexDb STORE_META）
-     * 彻底移除 domainStats 字段（改为实时计算，防止 P1 恢复快照重复累加）
-     * 同时将 lastAppliedVersion 持久化在 meta 中，彻底解决每次刷新重拉 5 万条历史（P2）
-     */
-    let persistentSaveTimer = null;
-    function saveIndexToPersistentStorage(urlMap, lastSyncTime) {
-        if (persistentSaveTimer) clearTimeout(persistentSaveTimer);
-        persistentSaveTimer = setTimeout(async () => {
-            persistentSaveTimer = null;
-            if (!(urlMap instanceof Map)) return;
-
-            const compactItems = [];
-            for (const [normUrl, data] of urlMap.entries()) {
-                if (!normUrl || !data) continue;
-                // 保存每个书签的变体详情列表（若存在）
-                const variantsList = (data.variants instanceof Map && data.variants.size > 0)
-                    ? Array.from(data.variants.entries()).map(([vUrl, vData]) => [
-                        vUrl,
-                        Math.floor(vData.visitCount || 1),
-                        Math.round(vData.lastVisitTime || 0)
-                    ])
-                    : null;
-
-                compactItems.push([
-                    normUrl,
-                    typeof data.title === 'string' ? data.title.slice(0, 100) : '',
-                    Math.floor(data.visitCount || 1),
-                    Math.round(data.lastVisitTime || 0),
-                    variantsList
-                ]);
-                if (compactItems.length >= MAX_INDEX_ITEMS) break;
-            }
-
-            const meta = {
-                lastSyncTime: lastSyncTime || Date.now(),
-                totalCount: compactItems.length,
-                savedAt: Date.now(),
-                lastAppliedVersion: internalCache.lastAppliedVersion || 0,
-                redirectUrls: Array.from(internalCache.redirectBookmarkUrls || [])
-            };
-
-            try {
-                if (typeof window !== 'undefined' && window.SearchIndexDb && typeof window.SearchIndexDb.saveBookmarkVisitStats === 'function') {
-                    // domainStats 置 null，永不单独持久化
-                    await window.SearchIndexDb.saveBookmarkVisitStats({ compactItems, domainStats: null, meta });
-                }
-            } catch (err) {
-                console.warn('[HistoryStatsService] 写入 IndexedDB 失败:', err);
-            }
-        }, 500);
-    }
-
-    /**
-     * 高性能 URL 组合解析器
-     * 单次 new URL() 提取归一化 URL、协议无关 URL、主域名
-     * 严格保留端口号（localhost:3000）与非 http 协议（file://）
-     */
-    function parseUrlFast(rawUrl) {
-        if (!rawUrl || typeof rawUrl !== 'string') return null;
-        const trimmed = rawUrl.trim();
-        if (!trimmed) return null;
-
-        try {
-            const u = new URL(trimmed);
-            u.hash = '';
-
-            // 仅在包含查询参数且可能存在追踪参数时才遍历删除
-            if (u.search && (u.search.includes('utm_') || u.search.includes('spm') || u.search.includes('fbclid') || u.search.includes('gclid') || u.search.includes('_ga') || u.search.includes('from=') || u.search.includes('ref='))) {
-                const trackingParams = [
-                    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-                    'spm', 'from', 'ref', 'feature', 'fbclid', 'gclid', '_ga'
-                ];
-                for (let i = 0; i < trackingParams.length; i++) {
-                    u.searchParams.delete(trackingParams[i]);
-                }
-            }
-
-            let path = u.pathname;
-            if (path.length > 1 && path.endsWith('/')) {
-                path = path.slice(0, -1);
-            }
-
-            const hostnameLower = (u.hostname || '').toLowerCase();
-            const hostLower = (u.host || hostnameLower).toLowerCase(); // 严格保留端口号（如 localhost:3000）
-            const domain = hostnameLower.startsWith('www.') ? hostnameLower.slice(4) : hostnameLower;
-            const cleanHost = hostLower.startsWith('www.') ? hostLower.slice(4) : hostLower;
-            const query = u.search ? u.search : '';
-
-            let normUrl = '';
-            if (u.origin && u.origin !== 'null') {
-                normUrl = u.origin.toLowerCase() + path + query;
-            } else if (u.protocol === 'file:') {
-                normUrl = 'file://' + path + query;
-            } else {
-                normUrl = (u.protocol ? u.protocol.toLowerCase() + '//' : '') + cleanHost + path + query;
-            }
-
-            const cleanProto = (cleanHost + path + query).replace(/\/+$/, '');
-
-            return { normUrl, cleanProto, domain };
-        } catch (_) {
-            let clean = trimmed.replace(/#.*$/, '');
-            if (clean.length > 8 && clean.endsWith('/')) {
-                clean = clean.slice(0, -1);
-            }
-            const cleanProto = clean.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/+$/, '');
-            let domain = '';
-            try {
-                domain = cleanProto.split('/')[0].split('?')[0].split(':')[0].toLowerCase();
-            } catch (_) {}
-            return { normUrl: clean, cleanProto, domain };
-        }
-    }
-
-    /**
-     * URL 归一化清洗函数
-     */
-    function normalizeHistoryUrl(rawUrl) {
-        const parsed = parseUrlFast(rawUrl);
-        return parsed ? parsed.normUrl : '';
-    }
-
-    /**
-     * 协议与 www 无关的清洗函数
-     */
-    function getProtoAgnosticUrl(normUrl) {
-        if (!normUrl || typeof normUrl !== 'string') return '';
-        return normUrl
-            .replace(/^https?:\/\//i, '')
-            .replace(/^www\./i, '')
-            .replace(/\/+$/, '');
-    }
-
-    /**
-     * 提取主域名/主机名（去除 www.）
-     */
-    function extractHostname(url) {
-        const parsed = parseUrlFast(url);
-        return parsed ? parsed.domain : '';
-    }
-
-    /**
-     * 提取文件夹或节点下的所有叶子书签（使用显式栈循环，杜绝函数调用栈溢出）
+     * 提取文件夹或节点下的所有叶子书签（显式栈，O(N) 极速展开）
      */
     function extractLeafBookmarks(node, maxLeaves = Infinity) {
         const leaves = [];
@@ -389,12 +473,12 @@
             const curr = stack.pop();
             if (!curr) continue;
 
-            const url = curr.url || curr.__url || (curr.rawItem && (curr.rawItem.url || curr.rawItem.__url));
+            const url = extractBookmarkRawUrl(curr);
             if (url) {
                 leaves.push({
                     id: curr.id,
-                    title: curr.title || curr.__title || (curr.rawItem && (curr.rawItem.title || curr.rawItem.__title)) || '',
-                    url: url
+                    title: extractBookmarkTitle(curr),
+                    url
                 });
             }
 
@@ -408,978 +492,2235 @@
         return leaves;
     }
 
-    /**
-     * 从 Chrome API 拉取近 N 天的历史记录（仅在 IndexedDB 全空冷启动时调用一次）
-     */
-    async function fetchRecentHistoryItems(days = DEFAULT_HISTORY_DAYS) {
-        const browserAPI = (typeof chrome !== 'undefined' && chrome.history) ? chrome : ((typeof browser !== 'undefined' && browser.history) ? browser : null);
-        if (!browserAPI || typeof browserAPI.history?.search !== 'function') {
-            return [];
-        }
+    function indexBookmarkList(list, targetSet, entriesByCanonical, rawUrlsByCanonical) {
+        if (!Array.isArray(list)) return;
+        for (let i = 0; i < list.length; i++) {
+            const item = list[i];
+            const rawUrl = extractBookmarkRawUrl(item);
+            if (!rawUrl) continue;
+            const parsed = parseCanonicalUrl(rawUrl);
+            if (!parsed || !parsed.canonicalUrl) continue;
 
-        const safeDays = Math.max(1, Math.min(365, Number(days) || DEFAULT_HISTORY_DAYS));
-        const startTime = Date.now() - (safeDays * 24 * 60 * 60 * 1000);
+            const canonicalUrl = parsed.canonicalUrl;
+            targetSet.add(canonicalUrl);
 
-        return new Promise((resolve) => {
-            try {
-                browserAPI.history.search({
-                    text: '',
-                    startTime: startTime,
-                    maxResults: 50000
-                }, (results) => {
-                    if (browserAPI.runtime?.lastError || !Array.isArray(results)) {
-                        resolve([]);
-                    } else {
-                        resolve(results);
-                    }
-                });
-            } catch (err) {
-                resolve([]);
+            let rawSet = rawUrlsByCanonical.get(canonicalUrl);
+            if (!rawSet) {
+                rawSet = new Set();
+                rawUrlsByCanonical.set(canonicalUrl, rawSet);
             }
-        });
+            rawSet.add(rawUrl);
+
+            if (!entriesByCanonical.has(canonicalUrl)) {
+                entriesByCanonical.set(canonicalUrl, {
+                    canonicalUrl,
+                    parsed,
+                    url: rawUrl,
+                    title: extractBookmarkTitle(item)
+                });
+            }
+        }
+    }
+
+    function isTempSectionsReady() {
+        try {
+            if (typeof isCanvasSearchStateReady === 'function') {
+                return isCanvasSearchStateReady() === true;
+            }
+            if (typeof window !== 'undefined' && window.__bookmarkCanvasSearchStateReady === true) {
+                return true;
+            }
+            const hasCanvasLifecycle = (typeof window !== 'undefined' && (window.CanvasModule?.CanvasState || window.SearchIndexDb))
+                || typeof CanvasState !== 'undefined';
+            if (!hasCanvasLifecycle && typeof registeredBookmarkProvider === 'function') {
+                return true;
+            }
+        } catch (_) {}
+        return false;
+    }
+
+    function appendTempSectionsToBookmarkIndex(targetSet, entriesByCanonical, rawUrlsByCanonical) {
+        try {
+            const activeState = (typeof getActiveCanvasState === 'function' ? getActiveCanvasState() : null)
+                || (typeof window !== 'undefined' && window.CanvasModule?.CanvasState)
+                || (typeof CanvasState !== 'undefined' ? CanvasState : null);
+            const sections = Array.isArray(activeState?.tempSections) ? activeState.tempSections : [];
+            for (let i = 0; i < sections.length; i++) {
+                const sec = sections[i];
+                if (!sec) continue;
+                const items = Array.isArray(sec.items) ? sec.items : (Array.isArray(sec.children) ? sec.children : []);
+                if (items.length > 0) {
+                    const leaves = extractLeafBookmarks({ children: items });
+                    indexBookmarkList(leaves, targetSet, entriesByCanonical, rawUrlsByCanonical);
+                }
+            }
+        } catch (_) {}
     }
 
     /**
-     * 构建哈希索引（严格书签白名单反向过滤，时间切片 Chunking）
-     * 支持变体多 URL 聚合，带单页应用通用标题护栏
+     * 从权威数据源解析实时全量书签白名单（优先实时 chrome.bookmarks.getTree + 临时栏目，回退 cachedCurrentTree）
+     * 双源完整性判定：仅当永久书签树成功返回且临时栏目已完成 BCS 初始化时，isCompleteWhitelist 才为 true。
      */
-    async function buildHistoryIndexChunked(rawItems, targetInfo = null) {
-        const urlMap = new Map();
-        const protoAgnosticMap = new Map();
-        const titleDomainMap = new Map();
+    async function resolveLiveBookmarkData() {
+        const targetSet = new Set();
+        const entriesByCanonical = new Map();
+        const rawUrlsByCanonical = new Map();
+        let hasAuthoritativeTree = false;
+        let hasPermanentTree = false;
 
-        if (!Array.isArray(rawItems) || !rawItems.length) {
-            return { urlMap, protoAgnosticMap, titleDomainMap };
-        }
+        const fetchedTree = await fetchBookmarkTree();
+        if (fetchedTree && fetchedTree[0]) {
+            hasAuthoritativeTree = true;
+            hasPermanentTree = true;
+            indexBookmarkList(extractLeafBookmarks(fetchedTree[0]), targetSet, entriesByCanonical, rawUrlsByCanonical);
+        } else {
+            const envTree = (typeof cachedCurrentTree !== 'undefined' && Array.isArray(cachedCurrentTree))
+                ? cachedCurrentTree
+                : ((typeof window !== 'undefined' && Array.isArray(window.cachedCurrentTree)) ? window.cachedCurrentTree : null);
 
-        const targets = targetInfo || internalCache.targetInfo;
-        const hasTargets = !!(targets && targets.hasTargets);
-
-        // 核心安全闸门：无有效书签白名单时绝对终止构建，防止穿透
-        if (!hasTargets) {
-            console.warn('[HistoryStatsService] 无有效书签白名单，跳过历史反向过滤构建（防穿透）');
-            return { urlMap, protoAgnosticMap, titleDomainMap };
-        }
-
-        const targetUrls = targets.targetUrlSet;
-        const targetCleanProtos = targets.targetCleanProtoMap;
-        const targetTitleDomainMap = targets.targetTitleDomainMap;
-        const CHUNK_SIZE = 2500;
-
-        for (let i = 0; i < rawItems.length; i++) {
-            const item = rawItems[i];
-            if (!item) continue;
-            const isTuple = Array.isArray(item);
-            const url = isTuple ? item[0] : item.url;
-            if (!url) continue;
-
-            const parsed = parseUrlFast(url);
-            if (!parsed) continue;
-
-            const { normUrl, cleanProto, domain } = parsed;
-
-            const rawTitle = isTuple
-                ? (typeof item[1] === 'string' ? item[1].trim().toLowerCase() : '')
-                : (typeof item.title === 'string' ? item.title.trim().toLowerCase() : '');
-
-            let isBookmarkHit = false;
-            let canonicalNormUrl = normUrl;
-            let isExactOrProtoHit = false;
-
-            if (normUrl && targetUrls.has(normUrl)) {
-                isBookmarkHit = true;
-                isExactOrProtoHit = true;
-            } else if (cleanProto && targetCleanProtos.has(cleanProto)) {
-                isBookmarkHit = true;
-                isExactOrProtoHit = true;
-                canonicalNormUrl = targetCleanProtos.get(cleanProto);
-            } else if (domain && rawTitle && targetTitleDomainMap && targetTitleDomainMap.has(`${domain}:::${rawTitle}`)) {
-                canonicalNormUrl = targetTitleDomainMap.get(`${domain}:::${rawTitle}`);
-                // 护栏机制（保留约 80% 的模糊命中抓跳转，堵住离谱错配）：
-                // 1. 若书签尚未建档，直接命中并建档（抓短链/302/JS 跳转落地页）；
-                // 2. 若书签已存在但此前仅由标题匹配记录，继续吸收同标题的变体；
-                // 3. 若书签已有原生精确 URL 匹配（hasExactMatch === true）：
-                //    - 若原 URL 只有极少访问（如跳转源只有 1 次）且此落地页访问显著更高，允许以较大值吸收；
-                //    - 否则不再盲目叠加，防止单次点击重复计算。
-                const currentEntry = urlMap.get(canonicalNormUrl);
-                if (!currentEntry || !currentEntry.hasExactMatch) {
-                    isBookmarkHit = true;
-                } else if (currentEntry && currentEntry.hasExactMatch) {
-                    const itemVisits = isTuple ? (item[2] || 1) : (item.visitCount || 1);
-                    if (itemVisits > (currentEntry.visitCount || 0)) {
-                        isBookmarkHit = true;
-                    }
+            if (envTree && envTree[0]) {
+                hasAuthoritativeTree = true;
+                hasPermanentTree = true;
+                indexBookmarkList(extractLeafBookmarks(envTree[0]), targetSet, entriesByCanonical, rawUrlsByCanonical);
+            } else if (typeof registeredBookmarkProvider === 'function') {
+                const provided = registeredBookmarkProvider();
+                if (Array.isArray(provided) && provided.length > 0) {
+                    hasAuthoritativeTree = true;
+                    indexBookmarkList(provided, targetSet, entriesByCanonical, rawUrlsByCanonical);
                 }
             }
+        }
 
-            // 核心纯反向白名单：不是书签直接丢弃
-            if (!isBookmarkHit || !canonicalNormUrl) {
+        appendTempSectionsToBookmarkIndex(targetSet, entriesByCanonical, rawUrlsByCanonical);
+        const tempReady = isTempSectionsReady();
+        const isCompleteWhitelist = Boolean(hasPermanentTree && tempReady);
+
+        return {
+            targetSet,
+            entriesByCanonical,
+            rawUrlsByCanonical,
+            hasAuthoritativeTree,
+            hasPermanentTree,
+            isCompleteWhitelist
+        };
+    }
+
+    function registerBookmarkProvider(provider) {
+        if (typeof provider === 'function') {
+            registeredBookmarkProvider = provider;
+        }
+    }
+
+    function createEmptyLedgerState() {
+        return {
+            archiveMap: new Map(),
+            recentDayBuckets: new Map(),
+            variantsMap: new Map(),
+            missingSinceMap: new Map(),
+            knownTargets: new Set(),
+            urlMap: new Map(),
+            lastSyncTime: 0,
+            lastPurgedAt: 0,
+            lastPersistedSyncTime: 0,
+            lastKnownSavedAt: 0,
+            syncedWithCompleteWhitelist: false,
+            hasUnsavedDataChanges: false
+        };
+    }
+
+    function addVariantsForCanonical(variantsMap, canonicalUrl, rawUrls) {
+        if (!(variantsMap instanceof Map) || !canonicalUrl || !rawUrls) return false;
+        let set = variantsMap.get(canonicalUrl);
+        let added = false;
+        const list = Array.isArray(rawUrls) ? rawUrls : (rawUrls instanceof Set ? Array.from(rawUrls) : [rawUrls]);
+        for (let i = 0; i < list.length; i++) {
+            const u = list[i];
+            if (typeof u !== 'string' || !u) continue;
+            if (!set) {
+                set = new Set();
+                variantsMap.set(canonicalUrl, set);
+            }
+            if (set.has(u)) continue;
+            if (set.size >= MAX_VARIANTS_PER_CANONICAL) break;
+            set.add(u);
+            added = true;
+        }
+        return added;
+    }
+
+    function collectCandidateUrlsForCanonical(state, canonicalUrl, liveData = null, extraRawUrls = null) {
+        const set = new Set();
+        const addAll = (items) => {
+            if (!items) return;
+            for (const u of items) {
+                if (typeof u === 'string' && u) set.add(u);
+            }
+        };
+        if (liveData?.rawUrlsByCanonical instanceof Map) {
+            addAll(liveData.rawUrlsByCanonical.get(canonicalUrl));
+        }
+        if (state?.variantsMap instanceof Map) {
+            addAll(state.variantsMap.get(canonicalUrl));
+        }
+        if (extraRawUrls) {
+            addAll(Array.isArray(extraRawUrls) || extraRawUrls instanceof Set ? extraRawUrls : [extraRawUrls]);
+        }
+        return Array.from(set);
+    }
+
+    function clearCanonicalRecentBuckets(recentDayBuckets, canonicalUrl, minDayNum = 0) {
+        if (!(recentDayBuckets instanceof Map) || !canonicalUrl) return false;
+        let removed = false;
+        for (const [dayNum, dayMap] of recentDayBuckets.entries()) {
+            if (dayNum < minDayNum) continue;
+            if (dayMap.delete(canonicalUrl)) {
+                removed = true;
+                if (dayMap.size === 0) {
+                    recentDayBuckets.delete(dayNum);
+                }
+            }
+        }
+        return removed;
+    }
+
+    function addBucketToDayMap(recentDayBuckets, dayNum, canonicalUrl, count, maxTime) {
+        if (!(count > 0) || !canonicalUrl) return;
+        let dayMap = recentDayBuckets.get(dayNum);
+        if (!dayMap) {
+            dayMap = new Map();
+            recentDayBuckets.set(dayNum, dayMap);
+        }
+        const prev = dayMap.get(canonicalUrl);
+        if (!prev) {
+            dayMap.set(canonicalUrl, [count, maxTime]);
+        } else {
+            prev[0] += count;
+            if (maxTime > prev[1]) prev[1] = maxTime;
+        }
+    }
+
+    function addArchiveCount(archiveMap, canonicalUrl, count, maxTime, domain = '', title = '') {
+        if (!(count > 0) || !canonicalUrl) return;
+        let entry = archiveMap.get(canonicalUrl);
+        if (!entry) {
+            archiveMap.set(canonicalUrl, {
+                visitCount: count,
+                lastVisitTime: maxTime,
+                domain: domain || extractHostname(canonicalUrl),
+                title: typeof title === 'string' ? title : ''
+            });
+        } else {
+            entry.visitCount += count;
+            if (maxTime > entry.lastVisitTime) entry.lastVisitTime = maxTime;
+            if (!entry.domain && domain) entry.domain = domain;
+            if (!entry.title && title) entry.title = title;
+        }
+    }
+
+    function writeBucketsForCanonical(state, canonicalUrl, dayBuckets, {
+        minDayNum = 0,
+        archiveCutoffDay = 0,
+        allowArchiveWrite = false,
+        domain = '',
+        title = ''
+    } = {}) {
+        if (!(dayBuckets instanceof Map) || dayBuckets.size === 0) return false;
+        let wrote = false;
+        for (const [dayNum, tuple] of dayBuckets.entries()) {
+            if (dayNum < minDayNum) continue;
+            const count = Math.max(0, Math.floor(Number(tuple?.[0]) || 0));
+            const maxTime = Math.max(0, Number(tuple?.[1]) || 0);
+            if (count <= 0) continue;
+
+            if (dayNum < archiveCutoffDay) {
+                if (allowArchiveWrite) {
+                    addArchiveCount(state.archiveMap, canonicalUrl, count, maxTime, domain, title);
+                    wrote = true;
+                }
+            } else {
+                addBucketToDayMap(state.recentDayBuckets, dayNum, canonicalUrl, count, maxTime);
+                wrote = true;
+            }
+        }
+        return wrote;
+    }
+
+    function rollupExpiredDayBuckets(state, archiveCutoffDay, liveData = null) {
+        if (!(state.recentDayBuckets instanceof Map) || state.recentDayBuckets.size === 0) return false;
+        let rolledUp = false;
+        for (const [dayNum, dayMap] of Array.from(state.recentDayBuckets.entries())) {
+            if (dayNum >= archiveCutoffDay) continue;
+            for (const [canonicalUrl, tuple] of dayMap.entries()) {
+                const count = Math.max(0, Math.floor(Number(tuple?.[0]) || 0));
+                const maxTime = Math.max(0, Number(tuple?.[1]) || 0);
+                if (count <= 0) continue;
+                const liveEntry = liveData?.entriesByCanonical?.get(canonicalUrl);
+                addArchiveCount(
+                    state.archiveMap,
+                    canonicalUrl,
+                    count,
+                    maxTime,
+                    liveEntry?.parsed?.domain || '',
+                    liveEntry?.title || ''
+                );
+            }
+            state.recentDayBuckets.delete(dayNum);
+            rolledUp = true;
+        }
+        return rolledUp;
+    }
+
+    function hasCanonicalInBucketRange(recentDayBuckets, canonicalUrl, minDayNum = 0, maxDayNum = Infinity) {
+        if (!(recentDayBuckets instanceof Map) || !canonicalUrl) return false;
+        for (const [dayNum, dayMap] of recentDayBuckets.entries()) {
+            if (dayNum < minDayNum || dayNum > maxDayNum) continue;
+            const tuple = dayMap.get(canonicalUrl);
+            if (tuple && Number(tuple[0]) > 0) return true;
+        }
+        return false;
+    }
+
+    function getLedgerMaxLastVisitTime(state, canonicalUrl) {
+        let maxTime = 0;
+        const archived = state.archiveMap?.get(canonicalUrl);
+        if (archived && archived.lastVisitTime > maxTime) {
+            maxTime = archived.lastVisitTime;
+        }
+        if (state.recentDayBuckets instanceof Map) {
+            for (const dayMap of state.recentDayBuckets.values()) {
+                const tuple = dayMap.get(canonicalUrl);
+                if (tuple && Number(tuple[1]) > maxTime) {
+                    maxTime = Number(tuple[1]);
+                }
+            }
+        }
+        return maxTime;
+    }
+
+    function hasLedgerEntry(state, canonicalUrl) {
+        if (!state || !canonicalUrl) return false;
+        if (state.archiveMap instanceof Map && state.archiveMap.has(canonicalUrl)) return true;
+        if (state.recentDayBuckets instanceof Map) {
+            for (const dayMap of state.recentDayBuckets.values()) {
+                if (dayMap.has(canonicalUrl)) return true;
+            }
+        }
+        return false;
+    }
+
+    function collectAllLedgerCanonicals(state) {
+        const all = new Set();
+        if (state.archiveMap instanceof Map) {
+            for (const key of state.archiveMap.keys()) all.add(key);
+        }
+        if (state.recentDayBuckets instanceof Map) {
+            for (const dayMap of state.recentDayBuckets.values()) {
+                for (const key of dayMap.keys()) all.add(key);
+            }
+        }
+        if (state.variantsMap instanceof Map) {
+            for (const key of state.variantsMap.keys()) all.add(key);
+        }
+        if (state.missingSinceMap instanceof Map) {
+            for (const key of state.missingSinceMap.keys()) all.add(key);
+        }
+        return all;
+    }
+
+    function isCanonicalVisibleInProjection(state, canonicalUrl, liveData) {
+        if (!canonicalUrl) return false;
+        if (state.missingSinceMap?.has(canonicalUrl)) return false;
+        if (!liveData) return true;
+        if (liveData.isCompleteWhitelist) {
+            return liveData.targetSet.has(canonicalUrl);
+        }
+        if (liveData.hasAuthoritativeTree) {
+            return liveData.targetSet.has(canonicalUrl) || !state.missingSinceMap?.has(canonicalUrl);
+        }
+        return false;
+    }
+
+    function computeCanonicalTotals(state, canonicalUrl, liveData = null, titleHints = null) {
+        let visitCount = 0;
+        let lastVisitTime = 0;
+
+        const archived = state.archiveMap?.get(canonicalUrl);
+        if (archived) {
+            visitCount += Math.max(0, Math.floor(Number(archived.visitCount) || 0));
+            if (archived.lastVisitTime > lastVisitTime) {
+                lastVisitTime = archived.lastVisitTime;
+            }
+        }
+
+        if (state.recentDayBuckets instanceof Map) {
+            for (const dayMap of state.recentDayBuckets.values()) {
+                const tuple = dayMap.get(canonicalUrl);
+                if (!tuple) continue;
+                visitCount += Math.max(0, Math.floor(Number(tuple[0]) || 0));
+                const vt = Number(tuple[1]) || 0;
+                if (vt > lastVisitTime) lastVisitTime = vt;
+            }
+        }
+
+        if (visitCount <= 0) return null;
+
+        const liveEntry = liveData?.entriesByCanonical?.get(canonicalUrl);
+        const domain = liveEntry?.parsed?.domain || archived?.domain || extractHostname(canonicalUrl);
+        const title = liveEntry?.title || archived?.title || (titleHints?.get(canonicalUrl)) || '';
+        return { visitCount, lastVisitTime, domain, title };
+    }
+
+    function recomputeProjectionForUrls(state, canonicalUrls, liveData = null, titleHints = null) {
+        if (!(state.urlMap instanceof Map)) {
+            state.urlMap = new Map();
+        }
+        for (const canonicalUrl of canonicalUrls) {
+            if (!isCanonicalVisibleInProjection(state, canonicalUrl, liveData)) {
+                state.urlMap.delete(canonicalUrl);
                 continue;
             }
-
-            const visitCount = isTuple
-                ? (Number.isFinite(item[2]) && item[2] > 0 ? Math.floor(item[2]) : 1)
-                : (Number.isFinite(item.visitCount) && item.visitCount > 0 ? Math.floor(item.visitCount) : 1);
-            const lastVisitTime = isTuple
-                ? (Number.isFinite(item[3]) && item[3] > 0 ? item[3] : 0)
-                : (Number.isFinite(item.lastVisitTime) && item.lastVisitTime > 0 ? item.lastVisitTime : 0);
-
-            // 从快照恢复时可能附带的变体列表 (tuple[4])
-            const savedVariants = isTuple && Array.isArray(item[4]) ? item[4] : null;
-
-            let existing = urlMap.get(canonicalNormUrl);
-            if (!existing) {
-                existing = {
-                    visitCount: 0,
-                    lastVisitTime: 0,
-                    title: rawTitle,
-                    domain,
-                    hasExactMatch: isExactOrProtoHit,
-                    variants: new Map() // Map<url, { visitCount, lastVisitTime }>
-                };
-                urlMap.set(canonicalNormUrl, existing);
-            } else if (isExactOrProtoHit) {
-                existing.hasExactMatch = true;
-            }
-
-            if (savedVariants) {
-                for (let k = 0; k < savedVariants.length; k++) {
-                    const v = savedVariants[k];
-                    if (Array.isArray(v) && v[0]) {
-                        existing.variants.set(v[0], { visitCount: v[1] || 1, lastVisitTime: v[2] || 0 });
-                    }
-                }
+            const summary = computeCanonicalTotals(state, canonicalUrl, liveData, titleHints);
+            if (summary && summary.visitCount > 0) {
+                state.urlMap.set(canonicalUrl, summary);
             } else {
-                const vEntry = existing.variants.get(url) || { visitCount: 0, lastVisitTime: 0 };
-                vEntry.visitCount = Math.max(vEntry.visitCount, visitCount);
-                vEntry.lastVisitTime = Math.max(vEntry.lastVisitTime, lastVisitTime);
-                existing.variants.set(url, vEntry);
+                state.urlMap.delete(canonicalUrl);
             }
+        }
+    }
 
-            // 重新汇总该书签的所有变体总访问量
-            let totalVisits = 0;
-            let maxTime = 0;
-            for (const vData of existing.variants.values()) {
-                totalVisits += (vData.visitCount || 0);
-                if (vData.lastVisitTime > maxTime) maxTime = vData.lastVisitTime;
-            }
-            existing.visitCount = Math.max(totalVisits, existing.visitCount || 0);
-            existing.lastVisitTime = Math.max(maxTime, existing.lastVisitTime || 0);
-            if (!existing.title && rawTitle) existing.title = rawTitle;
+    function rebuildAllUrlProjections(state, liveData = null, titleHints = null) {
+        const nextUrlMap = new Map();
+        const totalsByCanonical = new Map();
 
-            if (cleanProto) {
-                const existProto = protoAgnosticMap.get(cleanProto);
-                if (existProto) {
-                    existProto.visitCount = existing.visitCount;
-                    existProto.lastVisitTime = Math.max(existProto.lastVisitTime, existing.lastVisitTime);
-                } else {
-                    protoAgnosticMap.set(cleanProto, { visitCount: existing.visitCount, lastVisitTime: existing.lastVisitTime });
-                }
-            }
-
-            if (domain && rawTitle) {
-                const compositeKey = `${domain}:::${rawTitle}`;
-                const existTitle = titleDomainMap.get(compositeKey);
-                if (existTitle) {
-                    existTitle.visitCount = existing.visitCount;
-                    existTitle.lastVisitTime = Math.max(existTitle.lastVisitTime, existing.lastVisitTime);
-                } else {
-                    titleDomainMap.set(compositeKey, { visitCount: existing.visitCount, lastVisitTime: existing.lastVisitTime });
-                }
-            }
-
-            if (i > 0 && i % CHUNK_SIZE === 0 && i < rawItems.length - 1) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
+        if (state.archiveMap instanceof Map) {
+            for (const [canonicalUrl, archived] of state.archiveMap.entries()) {
+                if (!archived || !isCanonicalVisibleInProjection(state, canonicalUrl, liveData)) continue;
+                const count = Math.max(0, Math.floor(Number(archived.visitCount) || 0));
+                if (count <= 0) continue;
+                totalsByCanonical.set(canonicalUrl, {
+                    visitCount: count,
+                    lastVisitTime: Math.max(0, Number(archived.lastVisitTime) || 0),
+                    archived
+                });
             }
         }
 
-        return { urlMap, protoAgnosticMap, titleDomainMap };
+        if (state.recentDayBuckets instanceof Map) {
+            for (const dayMap of state.recentDayBuckets.values()) {
+                for (const [canonicalUrl, tuple] of dayMap.entries()) {
+                    if (!isCanonicalVisibleInProjection(state, canonicalUrl, liveData)) continue;
+                    const count = Math.max(0, Math.floor(Number(tuple?.[0]) || 0));
+                    if (count <= 0) continue;
+                    const vt = Math.max(0, Number(tuple?.[1]) || 0);
+                    let agg = totalsByCanonical.get(canonicalUrl);
+                    if (!agg) {
+                        agg = {
+                            visitCount: count,
+                            lastVisitTime: vt,
+                            archived: state.archiveMap?.get(canonicalUrl) || null
+                        };
+                        totalsByCanonical.set(canonicalUrl, agg);
+                    } else {
+                        agg.visitCount += count;
+                        if (vt > agg.lastVisitTime) agg.lastVisitTime = vt;
+                    }
+                }
+            }
+        }
+
+        for (const [canonicalUrl, agg] of totalsByCanonical.entries()) {
+            const liveEntry = liveData?.entriesByCanonical?.get(canonicalUrl);
+            const domain = liveEntry?.parsed?.domain || agg.archived?.domain || extractHostname(canonicalUrl);
+            const title = liveEntry?.title || agg.archived?.title || (titleHints?.get(canonicalUrl)) || '';
+            nextUrlMap.set(canonicalUrl, {
+                visitCount: agg.visitCount,
+                lastVisitTime: agg.lastVisitTime,
+                domain,
+                title
+            });
+        }
+
+        state.urlMap = nextUrlMap;
+        return nextUrlMap;
     }
 
     /**
-     * 对全量冷启动时零命中的书签用原网址执行 getVisits 补查
-     * 解决 302、短链、JS 跳转在 history.search 中没有原始 URL 记录的问题（P8）
+     * 共享分批明细查询器（每批 100 条并发 getVisits，批间让出主线程防卡顿）
      */
-    async function supplementZeroHitBookmarks(urlMap, protoAgnosticMap, targetInfo) {
-        const browserAPI = (typeof chrome !== 'undefined' && chrome.history) ? chrome : ((typeof browser !== 'undefined' && browser.history) ? browser : null);
-        if (!browserAPI || typeof browserAPI.history?.getVisits !== 'function' || !targetInfo) return;
-
-        const allRawUrls = targetInfo.allBookmarkRawUrls || [];
-        const ninetyDaysAgo = Date.now() - (DEFAULT_HISTORY_DAYS * 24 * 60 * 60 * 1000);
-        const zeroHitUrls = [];
-
-        for (let i = 0; i < allRawUrls.length; i++) {
-            const rawUrl = allRawUrls[i];
-            const parsed = parseUrlFast(rawUrl);
-            const normUrl = parsed ? parsed.normUrl : rawUrl;
-            if (!urlMap.has(normUrl) || (urlMap.get(normUrl)?.visitCount || 0) === 0) {
-                zeroHitUrls.push({ rawUrl, normUrl, domain: parsed ? parsed.domain : '', cleanProto: parsed ? parsed.cleanProto : '' });
-            }
+    function syncVisitedVariantsAfterBucket(state, canonicalUrl, visitTotalCount, liveData = null, extraRaw = null) {
+        if (!state || !canonicalUrl || !(state.variantsMap instanceof Map)) return;
+        if (!hasLedgerEntry(state, canonicalUrl)) {
+            state.variantsMap.delete(canonicalUrl);
+            return;
         }
+        if (liveData?.rawUrlsByCanonical instanceof Map) {
+            addVariantsForCanonical(state.variantsMap, canonicalUrl, liveData.rawUrlsByCanonical.get(canonicalUrl));
+        }
+        if (visitTotalCount > 0 && extraRaw) {
+            addVariantsForCanonical(state.variantsMap, canonicalUrl, extraRaw);
+        }
+    }
 
-        if (zeroHitUrls.length === 0) return;
+    async function queryAndApplyBucketedBatch(state, canonicalList, {
+        anchorTime,
+        minVisitTime = 0,
+        minDayNum = 0,
+        archiveCutoffDay = 0,
+        allowArchiveWrite = false,
+        clearMinDayNum = null,
+        liveData = null,
+        extraRawUrlsByCanonical = null,
+        titleHints = null
+    }) {
+        if (!Array.isArray(canonicalList) || canonicalList.length === 0) return false;
+        let changed = false;
 
-        // 分批并行补查（每批 50 个），让出微任务杜绝长任务
-        const BATCH_SIZE = 50;
-        for (let i = 0; i < zeroHitUrls.length; i += BATCH_SIZE) {
-            const batch = zeroHitUrls.slice(i, i + BATCH_SIZE);
-            await Promise.all(batch.map(async ({ rawUrl, normUrl, domain, cleanProto }) => {
-                try {
-                    const visits = await new Promise((resolve) => {
-                        browserAPI.history.getVisits({ url: rawUrl }, (items) => {
-                            if (browserAPI.runtime?.lastError || !Array.isArray(items)) resolve([]);
-                            else resolve(items);
-                        });
-                    });
-                    const validVisits = visits.filter(v => v && v.visitTime >= ninetyDaysAgo);
-                    if (validVisits.length > 0) {
-                        let maxTime = 0;
-                        for (let j = 0; j < validVisits.length; j++) {
-                            if (validVisits[j].visitTime > maxTime) maxTime = validVisits[j].visitTime;
-                        }
-                        const vEntry = { visitCount: validVisits.length, lastVisitTime: maxTime };
-                        const existing = urlMap.get(normUrl) || {
-                            visitCount: 0,
-                            lastVisitTime: 0,
-                            title: '',
-                            domain,
-                            variants: new Map()
-                        };
-                        existing.variants.set(rawUrl, vEntry);
-                        existing.visitCount = validVisits.length;
-                        existing.lastVisitTime = maxTime;
-                        urlMap.set(normUrl, existing);
+        for (let start = 0; start < canonicalList.length; start += GET_VISITS_BATCH_SIZE) {
+            const slice = canonicalList.slice(start, start + GET_VISITS_BATCH_SIZE);
+            await Promise.all(slice.map(async (canonicalUrl) => {
+                const extraRaw = extraRawUrlsByCanonical instanceof Map ? extraRawUrlsByCanonical.get(canonicalUrl) : null;
+                const candidateUrls = collectCandidateUrlsForCanonical(state, canonicalUrl, liveData, extraRaw);
 
-                        if (cleanProto) {
-                            protoAgnosticMap.set(cleanProto, { visitCount: existing.visitCount, lastVisitTime: maxTime });
-                        }
-
-                        // 记入跳转书签名单
-                        if (!internalCache.redirectBookmarkUrls) {
-                            internalCache.redirectBookmarkUrls = new Set();
-                        }
-                        internalCache.redirectBookmarkUrls.add(rawUrl);
+                if (clearMinDayNum !== null) {
+                    if (clearCanonicalRecentBuckets(state.recentDayBuckets, canonicalUrl, clearMinDayNum)) {
+                        changed = true;
                     }
-                } catch (_) {}
+                }
+
+                if (candidateUrls.length === 0) {
+                    if (!hasLedgerEntry(state, canonicalUrl)) {
+                        state.variantsMap?.delete(canonicalUrl);
+                    }
+                    return;
+                }
+                const bucketed = await collectBucketedVisitsForCanonical(candidateUrls, anchorTime, minVisitTime);
+                if (bucketed.totalCount > 0) {
+                    const liveEntry = liveData?.entriesByCanonical?.get(canonicalUrl);
+                    const wrote = writeBucketsForCanonical(state, canonicalUrl, bucketed.dayBuckets, {
+                        minDayNum,
+                        archiveCutoffDay,
+                        allowArchiveWrite,
+                        domain: liveEntry?.parsed?.domain || '',
+                        title: liveEntry?.title || (titleHints?.get(canonicalUrl)) || ''
+                    });
+                    if (wrote) changed = true;
+                }
+                syncVisitedVariantsAfterBucket(state, canonicalUrl, bucketed.totalCount, liveData, extraRaw);
             }));
-            await new Promise(r => setTimeout(r, 0));
+
+            if (start + GET_VISITS_BATCH_SIZE < canonicalList.length) {
+                await yieldToMainThread();
+            }
         }
+
+        return changed;
     }
 
-    /**
-     * 水位线增量同步 (Watermark Delta Sync)
-     * 以上次同步时间戳为基线，仅索取增量时间段流水，并对各变体精准覆盖求和
-     */
-    let isWatermarkSyncing = false;
-    async function performWatermarkSync(lastSyncTime) {
-        if (isWatermarkSyncing) return;
-        const browserAPI = (typeof chrome !== 'undefined' && chrome.history) ? chrome : ((typeof browser !== 'undefined' && browser.history) ? browser : null);
-        if (!browserAPI || typeof browserAPI.history?.search !== 'function') return;
+    async function seedCanonicalEntries(state, entries, {
+        anchorTime,
+        minVisitTime = 0,
+        liveData = null,
+        extraRawUrlsByCanonical = null,
+        titleHints = null
+    }) {
+        if (!Array.isArray(entries) || entries.length === 0) return { changed: false, touched: [] };
+        const archiveCutoffDay = getArchiveCutoffDay(anchorTime);
+        const rebuildStartDay = getRebuildStartDay(anchorTime);
+        let changed = false;
+        const touched = [];
 
-        const targets = internalCache.targetInfo;
-        if (!targets || !targets.hasTargets) return;
+        for (let start = 0; start < entries.length; start += GET_VISITS_BATCH_SIZE) {
+            const slice = entries.slice(start, start + GET_VISITS_BATCH_SIZE);
+            await Promise.all(slice.map(async (item) => {
+                const canonicalUrl = typeof item === 'string' ? item : item?.canonicalUrl;
+                if (!canonicalUrl) return;
+                const extraRaw = extraRawUrlsByCanonical instanceof Map ? extraRawUrlsByCanonical.get(canonicalUrl) : null;
+                const candidateUrls = collectCandidateUrlsForCanonical(state, canonicalUrl, liveData, extraRaw);
+                if (candidateUrls.length === 0) return;
 
-        isWatermarkSyncing = true;
-        const now = Date.now();
-        // 留 5 秒安全重叠时间差，防边界时钟微差
-        const startTime = Math.max(0, (lastSyncTime || now) - 5000);
-
-        try {
-            const deltaItems = await new Promise((resolve) => {
-                browserAPI.history.search({
-                    text: '',
-                    startTime: startTime,
-                    endTime: now,
-                    maxResults: 50000
-                }, (results) => {
-                    if (browserAPI.runtime?.lastError || !Array.isArray(results)) {
-                        resolve([]);
-                    } else {
-                        resolve(results);
-                    }
-                });
-            });
-
-            let hasChanges = false;
-            const targetUrls = targets.targetUrlSet;
-            const targetCleanProtos = targets.targetCleanProtoMap;
-
-            if (Array.isArray(deltaItems) && deltaItems.length > 0) {
-                for (let i = 0; i < deltaItems.length; i++) {
-                    const item = deltaItems[i];
-                    if (!item || !item.url) continue;
-
-                    const parsed = parseUrlFast(item.url);
-                    if (!parsed) continue;
-
-                    const { normUrl, cleanProto, domain } = parsed;
-
-                    let canonicalNormUrl = null;
-                    if (normUrl && targetUrls.has(normUrl)) {
-                        canonicalNormUrl = normUrl;
-                    } else if (cleanProto && targetCleanProtos.has(cleanProto)) {
-                        canonicalNormUrl = targetCleanProtos.get(cleanProto);
-                    } else if (domain && item.title && targets.targetTitleDomainMap) {
-                        const rawTitle = typeof item.title === 'string' ? item.title.trim().toLowerCase() : '';
-                        if (rawTitle && targets.targetTitleDomainMap.has(`${domain}:::${rawTitle}`)) {
-                            canonicalNormUrl = targets.targetTitleDomainMap.get(`${domain}:::${rawTitle}`);
-                        }
-                    }
-
-                    if (!canonicalNormUrl) continue;
-
-                    const visitCount = (Number.isFinite(item.visitCount) && item.visitCount > 0) ? Math.floor(item.visitCount) : 1;
-                    const lastVisitTime = (Number.isFinite(item.lastVisitTime) && item.lastVisitTime > 0) ? item.lastVisitTime : 0;
-
-                    let existing = internalCache.urlMap.get(canonicalNormUrl);
-                    if (!existing) {
-                        existing = {
-                            visitCount: 0,
-                            lastVisitTime: 0,
-                            domain,
-                            title: typeof item.title === 'string' ? item.title.trim() : '',
-                            variants: new Map()
-                        };
-                        internalCache.urlMap.set(canonicalNormUrl, existing);
-                    }
-
-                    // 覆盖该变体 URL 的当前最新总访问量（Chrome 返回的 item.visitCount 即为该具体 URL 的当前总访问量）
-                    const vEntry = existing.variants.get(item.url) || { visitCount: 0, lastVisitTime: 0 };
-                    if (vEntry.visitCount !== visitCount || lastVisitTime > vEntry.lastVisitTime) {
-                        vEntry.visitCount = visitCount;
-                        vEntry.lastVisitTime = Math.max(vEntry.lastVisitTime, lastVisitTime);
-                        existing.variants.set(item.url, vEntry);
-
-                        // 重新求和各变体
-                        let totalVisits = 0;
-                        let maxTime = 0;
-                        for (const vData of existing.variants.values()) {
-                            totalVisits += (vData.visitCount || 0);
-                            if (vData.lastVisitTime > maxTime) maxTime = vData.lastVisitTime;
-                        }
-                        existing.visitCount = totalVisits;
-                        existing.lastVisitTime = Math.max(maxTime, existing.lastVisitTime);
-                        hasChanges = true;
-                    }
-
-                    if (cleanProto && internalCache.protoAgnosticMap) {
-                        internalCache.protoAgnosticMap.set(cleanProto, {
-                            visitCount: existing.visitCount,
-                            lastVisitTime: existing.lastVisitTime
-                        });
-                    }
+                const bucketed = await collectBucketedVisitsForCanonical(candidateUrls, anchorTime, minVisitTime);
+                const hasExistingArchive = state.archiveMap?.has(canonicalUrl)
+                    || hasCanonicalInBucketRange(state.recentDayBuckets, canonicalUrl, 0, rebuildStartDay - 1);
+                const seedMinDay = hasExistingArchive ? rebuildStartDay : 0;
+                if (clearCanonicalRecentBuckets(state.recentDayBuckets, canonicalUrl, seedMinDay)) {
+                    changed = true;
                 }
-            }
-
-            // 增量核对跳转书签名单
-            if (internalCache.redirectBookmarkUrls && internalCache.redirectBookmarkUrls.size > 0 && typeof browserAPI.history?.getVisits === 'function') {
-                const ninetyDaysAgo = Date.now() - (DEFAULT_HISTORY_DAYS * 24 * 60 * 60 * 1000);
-                for (const rUrl of internalCache.redirectBookmarkUrls) {
-                    try {
-                        const visits = await new Promise((res) => {
-                            browserAPI.history.getVisits({ url: rUrl }, (items) => res(items || []));
-                        });
-                        const validVisits = visits.filter(v => v && v.visitTime >= ninetyDaysAgo);
-                        const parsed = parseUrlFast(rUrl);
-                        const norm = parsed ? parsed.normUrl : rUrl;
-                        const existing = internalCache.urlMap.get(norm);
-                        if (existing) {
-                            let maxTime = 0;
-                            for (let j = 0; j < validVisits.length; j++) {
-                                if (validVisits[j].visitTime > maxTime) maxTime = validVisits[j].visitTime;
-                            }
-                            if (existing.visitCount !== validVisits.length || (maxTime > 0 && maxTime > existing.lastVisitTime)) {
-                                existing.visitCount = validVisits.length;
-                                if (maxTime > 0) existing.lastVisitTime = Math.max(existing.lastVisitTime, maxTime);
-                                if (!existing.variants) existing.variants = new Map();
-                                existing.variants.set(rUrl, { visitCount: validVisits.length, lastVisitTime: maxTime || existing.lastVisitTime || 0 });
-                                if (parsed && parsed.cleanProto && internalCache.protoAgnosticMap) {
-                                    internalCache.protoAgnosticMap.set(parsed.cleanProto, { visitCount: existing.visitCount, lastVisitTime: existing.lastVisitTime });
-                                }
-                                hasChanges = true;
-                            }
-                        }
-                    } catch (_) {}
-                }
-            }
-
-            // 新收藏书签补查：检查是否有当前在书签名单里但从未被缓存过的网址（P11）
-            // 引入 zeroVisitNormUrls 记忆集合，彻底消灭未访问书签每 30 秒重复串行 IPC 轮询
-            if (targets.allBookmarkRawUrls && targets.allBookmarkRawUrls.length > 0 && typeof browserAPI.history?.getVisits === 'function') {
-                if (!internalCache.zeroVisitNormUrls) {
-                    internalCache.zeroVisitNormUrls = new Set();
-                }
-                const missingUrls = [];
-                for (let k = 0; k < targets.allBookmarkRawUrls.length; k++) {
-                    const bUrl = targets.allBookmarkRawUrls[k];
-                    const parsed = parseUrlFast(bUrl);
-                    const norm = parsed ? parsed.normUrl : bUrl;
-                    if (!internalCache.urlMap.has(norm) && !internalCache.zeroVisitNormUrls.has(norm)) {
-                        missingUrls.push({ rawUrl: bUrl, normUrl: norm, domain: parsed ? parsed.domain : '', cleanProto: parsed ? parsed.cleanProto : '' });
-                    }
-                }
-                if (missingUrls.length > 0) {
-                    const ninetyDaysAgo = Date.now() - (DEFAULT_HISTORY_DAYS * 24 * 60 * 60 * 1000);
-                    const BATCH_SIZE = 25;
-                    for (let m = 0; m < missingUrls.length; m += BATCH_SIZE) {
-                        const batch = missingUrls.slice(m, m + BATCH_SIZE);
-                        await Promise.all(batch.map(async ({ rawUrl, normUrl, domain, cleanProto }) => {
-                            try {
-                                const visits = await new Promise((res) => {
-                                    browserAPI.history.getVisits({ url: rawUrl }, (items) => res(items || []));
-                                });
-                                const validVisits = visits.filter(v => v && v.visitTime >= ninetyDaysAgo);
-                                if (validVisits.length > 0) {
-                                    let maxTime = 0;
-                                    for (let j = 0; j < validVisits.length; j++) {
-                                        if (validVisits[j].visitTime > maxTime) maxTime = validVisits[j].visitTime;
-                                    }
-                                    const item = {
-                                        visitCount: validVisits.length,
-                                        lastVisitTime: maxTime,
-                                        title: '',
-                                        domain,
-                                        hasExactMatch: true,
-                                        variants: new Map([[rawUrl, { visitCount: validVisits.length, lastVisitTime: maxTime }]])
-                                    };
-                                    internalCache.urlMap.set(normUrl, item);
-                                    if (cleanProto && internalCache.protoAgnosticMap) {
-                                        internalCache.protoAgnosticMap.set(cleanProto, { visitCount: item.visitCount, lastVisitTime: maxTime });
-                                    }
-                                    hasChanges = true;
-                                } else {
-                                    internalCache.zeroVisitNormUrls.add(normUrl);
-                                }
-                            } catch (_) {
-                                internalCache.zeroVisitNormUrls.add(normUrl);
-                            }
-                        }));
-                    }
-                }
-            }
-
-            internalCache.lastSyncTime = now;
-
-            if (hasChanges) {
-                invalidateDomainAggregatesCache();
-                saveIndexToPersistentStorage(internalCache.urlMap, now);
-                dispatchStatsUpdatedEvent();
-            }
-        } catch (err) {
-            console.warn('[HistoryStatsService] 水位线增量同步异常:', err);
-        } finally {
-            isWatermarkSyncing = false;
-        }
-    }
-
-    /**
-     * 单点极速同步单个书签的历史访问统计（按书签原网址精确查询，限定 90 天，杜绝误删清零 P5）
-     */
-    async function syncSingleBookmarkStats(rawBookmarkUrl) {
-        const browserAPI = (typeof chrome !== 'undefined' && chrome.history) ? chrome : ((typeof browser !== 'undefined' && browser.history) ? browser : null);
-        if (!browserAPI || typeof browserAPI.history?.getVisits !== 'function' || !rawBookmarkUrl) return;
-
-        const queryUrl = String(rawBookmarkUrl).trim();
-        const ninetyDaysAgo = Date.now() - (DEFAULT_HISTORY_DAYS * 24 * 60 * 60 * 1000);
-
-        try {
-            const visits = await new Promise((resolve) => {
-                browserAPI.history.getVisits({ url: queryUrl }, (items) => {
-                    if (browserAPI.runtime?.lastError || !Array.isArray(items)) resolve([]);
-                    else resolve(items);
-                });
-            });
-
-            const parsed = parseUrlFast(queryUrl);
-            const normUrl = parsed ? parsed.normUrl : queryUrl;
-            const validVisits = visits.filter(v => v && v.visitTime >= ninetyDaysAgo);
-
-            if (validVisits.length > 0) {
-                let lastVisitTime = 0;
-                for (let i = 0; i < validVisits.length; i++) {
-                    if (validVisits[i].visitTime > lastVisitTime) {
-                        lastVisitTime = validVisits[i].visitTime;
-                    }
-                }
-                if (internalCache.urlMap instanceof Map && normUrl) {
-                    let existing = internalCache.urlMap.get(normUrl);
-                    if (!existing) {
-                        existing = {
-                            visitCount: 0,
-                            lastVisitTime: 0,
-                            domain: parsed ? parsed.domain : extractHostname(queryUrl),
-                            title: '',
-                            variants: new Map()
-                        };
-                        internalCache.urlMap.set(normUrl, existing);
-                    }
-                    existing.variants.set(queryUrl, { visitCount: validVisits.length, lastVisitTime });
-                    let totalVisits = 0;
-                    let maxTime = 0;
-                    for (const vData of existing.variants.values()) {
-                        totalVisits += (vData.visitCount || 0);
-                        if (vData.lastVisitTime > maxTime) maxTime = vData.lastVisitTime;
-                    }
-                    existing.visitCount = totalVisits;
-                    existing.lastVisitTime = maxTime;
-
-                    if (parsed && parsed.cleanProto && internalCache.protoAgnosticMap instanceof Map) {
-                        internalCache.protoAgnosticMap.set(parsed.cleanProto, { visitCount: existing.visitCount, lastVisitTime: maxTime });
-                    }
-                }
-            } else {
-                if (internalCache.urlMap instanceof Map && normUrl) {
-                    const existing = internalCache.urlMap.get(normUrl);
-                    if (existing && existing.variants instanceof Map) {
-                        existing.variants.delete(queryUrl);
-                        if (existing.variants.size === 0) {
-                            internalCache.urlMap.delete(normUrl);
-                            if (parsed && parsed.cleanProto && internalCache.protoAgnosticMap instanceof Map) {
-                                internalCache.protoAgnosticMap.delete(parsed.cleanProto);
-                            }
-                        } else {
-                            let totalVisits = 0;
-                            let maxTime = 0;
-                            for (const vData of existing.variants.values()) {
-                                totalVisits += (vData.visitCount || 0);
-                                if (vData.lastVisitTime > maxTime) maxTime = vData.lastVisitTime;
-                            }
-                            existing.visitCount = totalVisits;
-                            existing.lastVisitTime = maxTime;
-                        }
-                    } else {
-                        internalCache.urlMap.delete(normUrl);
-                        if (parsed && parsed.cleanProto && internalCache.protoAgnosticMap instanceof Map) {
-                            internalCache.protoAgnosticMap.delete(parsed.cleanProto);
-                        }
-                    }
-                }
-            }
-            invalidateDomainAggregatesCache();
-        } catch (_) {}
-    }
-
-    /**
-     * 检查并应用后台记录的历史记录脏标记
-     * 使用书签原网址修补（杜绝 P5），持久化已对账版本号（杜绝 P2）
-     */
-    async function checkAndApplyHistoryDirtyState() {
-        const browserAPI = (typeof chrome !== 'undefined' && chrome.storage?.local) ? chrome : ((typeof browser !== 'undefined' && browser.storage?.local) ? browser : null);
-        if (!browserAPI) return { shouldForceRebuild: false };
-
-        try {
-            const data = await new Promise((resolve) => {
-                browserAPI.storage.local.get([
-                    'canvasHistoryStatsDirty',
-                    'canvasHistoryStatsVersion',
-                    'canvasHistoryStatsRemovedAll',
-                    'canvasHistoryStatsPrunedAt',
-                    'canvasHistoryStatsRemovedUrls'
-                ], (res) => resolve(res || {}));
-            });
-
-            if (data && (data.canvasHistoryStatsDirty || data.canvasHistoryStatsVersion)) {
-                const currentVersion = Number(data.canvasHistoryStatsVersion) || (data.canvasHistoryStatsDirty ? 1 : 0);
-                if (currentVersion && currentVersion <= internalCache.lastAppliedVersion) {
-                    return { shouldForceRebuild: false };
-                }
-
-                let shouldForceRebuild = false;
-                if (data.canvasHistoryStatsRemovedAll) {
-                    HistoryStatsService.clearCache();
-                    internalCache.lastAppliedVersion = currentVersion;
-                } else if (Array.isArray(data.canvasHistoryStatsRemovedUrls) && data.canvasHistoryStatsRemovedUrls.length > 0) {
-                    const targets = internalCache.targetInfo;
-                    const removedUrls = data.canvasHistoryStatsRemovedUrls;
-                    const hitBookmarkRawUrls = new Set();
-
-                    if (targets && targets.hasTargets) {
-                        for (let i = 0; i < removedUrls.length; i++) {
-                            const u = removedUrls[i];
-                            const parsed = parseUrlFast(u);
-                            if (!parsed) continue;
-
-                            let canon = null;
-                            if (parsed.normUrl && targets.targetUrlSet.has(parsed.normUrl)) {
-                                canon = parsed.normUrl;
-                            } else if (parsed.cleanProto && targets.targetCleanProtoMap.has(parsed.cleanProto)) {
-                                canon = targets.targetCleanProtoMap.get(parsed.cleanProto);
-                            }
-
-                            if (canon && targets.normUrlToRawUrlsMap?.has(canon)) {
-                                for (const raw of targets.normUrlToRawUrlsMap.get(canon)) {
-                                    hitBookmarkRawUrls.add(raw);
-                                }
-                            } else if (targets.rawUrlToNormUrlMap?.has(u)) {
-                                hitBookmarkRawUrls.add(u);
-                            }
-                        }
-                    }
-
-                    if (hitBookmarkRawUrls.size === 0) {
-                        // 删的都是普通网页（非书签），直接 0ms 忽略，绝不重拉 10 万条历史
-                        internalCache.lastAppliedVersion = currentVersion;
-                        shouldForceRebuild = false;
-                        saveIndexToPersistentStorage(internalCache.urlMap, internalCache.lastSyncTime);
-                    } else if (hitBookmarkRawUrls.size <= 50) {
-                        // 命中书签数量 <= 50 条：使用书签原网址精确修补！
-                        for (const rawUrl of hitBookmarkRawUrls) {
-                            await syncSingleBookmarkStats(rawUrl);
-                        }
-                        internalCache.lastAppliedVersion = currentVersion;
-                        saveIndexToPersistentStorage(internalCache.urlMap, Date.now());
-                        shouldForceRebuild = false;
-                        dispatchStatsUpdatedEvent();
-                    } else {
-                        shouldForceRebuild = true;
-                    }
-                } else if (data.canvasHistoryStatsPrunedAt) {
-                    shouldForceRebuild = true;
-                }
-                return { shouldForceRebuild, pendingVersion: shouldForceRebuild ? currentVersion : 0 };
-            }
-        } catch (_) {}
-        return { shouldForceRebuild: false };
-    }
-
-    /**
-     * 微秒级健康自检：若本地有历史缓存但系统历史数据库完全被清空，则立即清空本地缓存
-     */
-    async function checkHistoryEmptySanity() {
-        const browserAPI = (typeof chrome !== 'undefined' && chrome.history) ? chrome : ((typeof browser !== 'undefined' && browser.history) ? browser : null);
-        if (!browserAPI || typeof browserAPI.history?.search !== 'function') return;
-
-        try {
-            if (internalCache.urlMap && internalCache.urlMap.size > 0) {
-                const sample = await new Promise((resolve) => {
-                    browserAPI.history.search({ text: '', startTime: 0, maxResults: 1 }, (items) => {
-                        if (browserAPI.runtime?.lastError) {
-                            resolve(null);
-                        } else {
-                            resolve(items || []);
-                        }
+                if (bucketed.totalCount > 0) {
+                    const liveEntry = liveData?.entriesByCanonical?.get(canonicalUrl);
+                    const entryObj = typeof item === 'object' ? item : null;
+                    const domain = liveEntry?.parsed?.domain || entryObj?.parsed?.domain || extractHostname(canonicalUrl);
+                    const title = liveEntry?.title || entryObj?.title || (titleHints?.get(canonicalUrl)) || '';
+                    const wrote = writeBucketsForCanonical(state, canonicalUrl, bucketed.dayBuckets, {
+                        minDayNum: seedMinDay,
+                        archiveCutoffDay,
+                        allowArchiveWrite: !hasExistingArchive,
+                        domain,
+                        title
                     });
-                });
-                if (Array.isArray(sample) && sample.length === 0) {
-                    HistoryStatsService.clearCache();
+                    if (wrote) changed = true;
                 }
-            }
-        } catch (_) {}
-    }
+                syncVisitedVariantsAfterBucket(state, canonicalUrl, bucketed.totalCount, liveData, extraRaw);
+                touched.push(canonicalUrl);
+            }));
 
-    /**
-     * 确保内存历史索引就绪（纯按需触发，带水位线增量与并发保护）
-     */
-    async function ensureHistoryStatsIndex(options = {}) {
-        let force = options.force === true;
-        const forceSync = options.forceSync === true;
-        const days = Number(options.days) || DEFAULT_HISTORY_DAYS;
-        const now = Date.now();
-
-        // 尝试提取书签白名单：若未就绪且宿主有异步载入接口，先尝试等待载入
-        if (!internalCache.targetInfo || !internalCache.targetInfo.hasTargets || options.overrideTargets === true) {
-            let targetBookmarks = getTargetBookmarksSafe(options);
-            if (!targetBookmarks && typeof window !== 'undefined' && typeof window.ensureCanvasSearchIndexForModeLoaded === 'function') {
-                try {
-                    await window.ensureCanvasSearchIndexForModeLoaded('bookmark');
-                    targetBookmarks = getTargetBookmarksSafe(options);
-                } catch (_) {}
-            }
-            if (targetBookmarks) {
-                internalCache.targetInfo = extractTargetBookmarkSets(targetBookmarks);
+            if (start + GET_VISITS_BATCH_SIZE < entries.length) {
+                await yieldToMainThread();
             }
         }
 
-        // 核心安全防线：若书签白名单尚未就绪，拒绝构建（杜绝无白名单穿透）
-        if (!internalCache.targetInfo || !internalCache.targetInfo.hasTargets) {
+        return { changed, touched };
+    }
+
+    async function filterHistoryItemsToMatches(rawItems, targetSet) {
+        const matchedCanonicals = new Set();
+        const extraRawUrlsByCanonical = new Map();
+        const titleHints = new Map();
+
+        if (!Array.isArray(rawItems) || rawItems.length === 0 || !(targetSet instanceof Set) || targetSet.size === 0) {
+            return { matchedCanonicals, extraRawUrlsByCanonical, titleHints };
+        }
+
+        // 大包反序列化后先让出一次主线程，避免 Mojo IPC 拆包与 JS 解析叠在同一帧
+        if (rawItems.length >= 500) {
+            await yieldToMainThread();
+        }
+
+        let deadline = getPerfNow() + LONG_TASK_BUDGET_MS;
+        for (let i = 0; i < rawItems.length; i++) {
+            const it = rawItems[i];
+            if (it && it.url) {
+                const parsed = parseCanonicalUrl(it.url);
+                if (parsed && parsed.canonicalUrl && targetSet.has(parsed.canonicalUrl)) {
+                    const canonicalUrl = parsed.canonicalUrl;
+                    matchedCanonicals.add(canonicalUrl);
+                    let rawSet = extraRawUrlsByCanonical.get(canonicalUrl);
+                    if (!rawSet) {
+                        rawSet = new Set();
+                        extraRawUrlsByCanonical.set(canonicalUrl, rawSet);
+                    }
+                    rawSet.add(it.url);
+                    if (typeof it.title === 'string' && it.title && !titleHints.has(canonicalUrl)) {
+                        titleHints.set(canonicalUrl, it.title);
+                    }
+                }
+            }
+            if ((i + 1) % HISTORY_SCAN_YIELD_INTERVAL === 0 && getPerfNow() >= deadline) {
+                await yieldToMainThread();
+                deadline = getPerfNow() + LONG_TASK_BUDGET_MS;
+            }
+        }
+
+        return { matchedCanonicals, extraRawUrlsByCanonical, titleHints };
+    }
+
+    async function scanHistoryMatches(targetSet, startTime, anchorTime) {
+        if (!(targetSet instanceof Set) || targetSet.size === 0) {
+            return { matchedCanonicals: new Set(), extraRawUrlsByCanonical: new Map(), titleHints: new Map() };
+        }
+
+        const clampedStart = Math.min(Math.max(0, Number(startTime) || 0), anchorTime);
+        const rawItems = await historySearch({
+            text: '',
+            startTime: clampedStart,
+            maxResults: 0
+        });
+        return filterHistoryItemsToMatches(rawItems, targetSet);
+    }
+
+    /**
+     * 自适应双引擎扫描调度：小目标先 0.8ms 判空后直查 getVisits；大目标先做有限探针决定分批直查或全拉过滤
+     */
+    async function resolveAdaptiveHistoryScanPlan(state, targetCanonicals, scanStart, anchorTime, liveData = null) {
+        const list = Array.isArray(targetCanonicals) ? targetCanonicals : Array.from(targetCanonicals || []);
+        const targetSet = new Set();
+        const distinctUrls = new Set();
+
+        for (let i = 0; i < list.length; i++) {
+            const item = list[i];
+            const c = typeof item === 'string' ? item : item?.canonicalUrl;
+            if (!c) continue;
+            targetSet.add(c);
+            const urls = collectCandidateUrlsForCanonical(state, c, liveData);
+            for (let j = 0; j < urls.length; j++) {
+                distinctUrls.add(urls[j]);
+            }
+        }
+
+        const candidateUrlCount = distinctUrls.size;
+        if (targetSet.size === 0 || candidateUrlCount === 0) {
             return {
-                urlMap: internalCache.urlMap || new Map(),
-                protoAgnosticMap: internalCache.protoAgnosticMap || new Map(),
-                titleDomainMap: internalCache.titleDomainMap || new Map()
+                mode: 'empty',
+                emptyHistory: true,
+                targetSet,
+                matchedCanonicals: new Set(),
+                extraRawUrlsByCanonical: null,
+                titleHints: new Map(),
+                coveredAllTargets: true
             };
         }
 
-        // 0. 消费后台记录的历史记录清除/脏标记
-        const dirtyState = await checkAndApplyHistoryDirtyState();
-        if (dirtyState && dirtyState.shouldForceRebuild) {
-            force = true;
+        const clampedStart = Math.min(Math.max(0, Number(scanStart) || 0), anchorTime);
+
+        if (candidateUrlCount <= SMALL_TARGET_DIRECT_URLS_MAX) {
+            const probe = await historySearch({
+                text: '',
+                startTime: clampedStart,
+                maxResults: 1
+            });
+            if (!Array.isArray(probe) || probe.length === 0) {
+                return {
+                    mode: 'empty',
+                    emptyHistory: true,
+                    targetSet,
+                    matchedCanonicals: new Set(),
+                    extraRawUrlsByCanonical: null,
+                    titleHints: new Map(),
+                    coveredAllTargets: true
+                };
+            }
+            return {
+                mode: 'direct-visits',
+                emptyHistory: false,
+                targetSet,
+                matchedCanonicals: targetSet,
+                extraRawUrlsByCanonical: null,
+                titleHints: new Map(),
+                coveredAllTargets: true
+            };
         }
 
-        // 1. 内存已有数据：自检后检查是否需要根据水位线补齐增量
-        if (!force && internalCache.urlMap instanceof Map) {
-            await checkHistoryEmptySanity();
-            if (internalCache.urlMap instanceof Map) {
-                // 水位线检查：若超过30秒或指定强制同步，静默增量拉取微切片（耗时 < 1ms）
-                if ((forceSync || (now - (internalCache.lastSyncTime || 0) > WATERMARK_CHECK_INTERVAL_MS)) && !isWatermarkSyncing) {
-                    performWatermarkSync(internalCache.lastSyncTime).catch(() => {});
+        const probe = await historySearch({
+            text: '',
+            startTime: clampedStart,
+            maxResults: HISTORY_SIZE_PROBE_LIMIT
+        });
+        if (!Array.isArray(probe) || probe.length === 0) {
+            return {
+                mode: 'empty',
+                emptyHistory: true,
+                targetSet,
+                matchedCanonicals: new Set(),
+                extraRawUrlsByCanonical: null,
+                titleHints: new Map(),
+                coveredAllTargets: true
+            };
+        }
+
+        if (probe.length < HISTORY_SIZE_PROBE_LIMIT) {
+            const scan = await filterHistoryItemsToMatches(probe, targetSet);
+            return {
+                mode: 'filtered-matches',
+                emptyHistory: false,
+                targetSet,
+                matchedCanonicals: scan.matchedCanonicals,
+                extraRawUrlsByCanonical: scan.extraRawUrlsByCanonical,
+                titleHints: scan.titleHints,
+                coveredAllTargets: false
+            };
+        }
+
+        if (candidateUrlCount <= DIRECT_GETVISITS_URL_CAP) {
+            return {
+                mode: 'direct-visits',
+                emptyHistory: false,
+                targetSet,
+                matchedCanonicals: targetSet,
+                extraRawUrlsByCanonical: null,
+                titleHints: new Map(),
+                coveredAllTargets: true
+            };
+        }
+
+        const scan = await scanHistoryMatches(targetSet, clampedStart, anchorTime);
+        return {
+            mode: 'filtered-matches',
+            emptyHistory: false,
+            targetSet,
+            matchedCanonicals: scan.matchedCanonicals,
+            extraRawUrlsByCanonical: scan.extraRawUrlsByCanonical,
+            titleHints: scan.titleHints,
+            coveredAllTargets: false
+        };
+    }
+
+    function collectRebuildTargetPlan(state, liveData) {
+        const unionSet = new Set(liveData.targetSet);
+        if (state.missingSinceMap instanceof Map) {
+            for (const c of state.missingSinceMap.keys()) unionSet.add(c);
+        }
+        if (!liveData.isCompleteWhitelist && state.knownTargets instanceof Set) {
+            for (const c of state.knownTargets) unionSet.add(c);
+        }
+
+        const queriableCanonicals = [];
+        const queriableSet = new Set();
+        const preserveBucketsCanonicals = new Set();
+        const droppedUnknownTempCanonicals = [];
+
+        for (const canonicalUrl of unionSet) {
+            const urls = collectCandidateUrlsForCanonical(state, canonicalUrl, liveData);
+            if (!liveData.isCompleteWhitelist && !liveData.targetSet.has(canonicalUrl) && urls.length === 0) {
+                if (!hasLedgerEntry(state, canonicalUrl)) {
+                    droppedUnknownTempCanonicals.push(canonicalUrl);
+                } else {
+                    preserveBucketsCanonicals.add(canonicalUrl);
                 }
-                return {
-                    urlMap: internalCache.urlMap,
-                    protoAgnosticMap: internalCache.protoAgnosticMap,
-                    titleDomainMap: internalCache.titleDomainMap
-                };
+                continue;
+            }
+            if (urls.length === 0) {
+                if (hasLedgerEntry(state, canonicalUrl)) {
+                    preserveBucketsCanonicals.add(canonicalUrl);
+                }
+                continue;
+            }
+            queriableCanonicals.push(canonicalUrl);
+            queriableSet.add(canonicalUrl);
+        }
+
+        return {
+            queriableCanonicals,
+            queriableSet,
+            preserveBucketsCanonicals,
+            droppedUnknownTempCanonicals
+        };
+    }
+
+    function captureBucketRangeDigest(recentDayBuckets, minDayNum) {
+        const digest = new Map();
+        if (!(recentDayBuckets instanceof Map)) return digest;
+        for (const [dayNum, dayMap] of recentDayBuckets.entries()) {
+            if (dayNum < minDayNum) continue;
+            const snap = new Map();
+            for (const [k, tuple] of dayMap.entries()) {
+                snap.set(k, [Number(tuple?.[0]) || 0, Math.round(Number(tuple?.[1]) || 0)]);
+            }
+            if (snap.size > 0) digest.set(dayNum, snap);
+        }
+        return digest;
+    }
+
+    function didBucketRangeDigestChange(beforeDigest, recentDayBuckets, minDayNum) {
+        let afterDayCount = 0;
+        if (recentDayBuckets instanceof Map) {
+            for (const [dayNum, dayMap] of recentDayBuckets.entries()) {
+                if (dayNum < minDayNum || !(dayMap instanceof Map) || dayMap.size === 0) continue;
+                afterDayCount++;
+                const beforeDay = beforeDigest.get(dayNum);
+                if (!beforeDay || beforeDay.size !== dayMap.size) return true;
+                for (const [k, tuple] of dayMap.entries()) {
+                    const prev = beforeDay.get(k);
+                    const c = Number(tuple?.[0]) || 0;
+                    const t = Math.round(Number(tuple?.[1]) || 0);
+                    if (!prev || prev[0] !== c || prev[1] !== t) return true;
+                }
+            }
+        }
+        return afterDayCount !== beforeDigest.size;
+    }
+
+    function buildSnapshotPayload(state, savedAtOverride = 0) {
+        const archiveItems = [];
+        if (state.archiveMap instanceof Map) {
+            for (const [canonicalUrl, entry] of state.archiveMap.entries()) {
+                if (!canonicalUrl || !entry) continue;
+                const count = Math.max(0, Math.floor(Number(entry.visitCount) || 0));
+                if (count <= 0) continue;
+                archiveItems.push([
+                    canonicalUrl,
+                    count,
+                    Math.max(0, Math.round(Number(entry.lastVisitTime) || 0)),
+                    entry.domain || '',
+                    typeof entry.title === 'string' ? entry.title.slice(0, 100) : ''
+                ]);
             }
         }
 
-        // 2. 复用进行中的拉取/构建请求，防止并发击穿
-        if (!force && internalCache.fetchingPromise) {
-            return internalCache.fetchingPromise;
+        const dayBuckets = [];
+        if (state.recentDayBuckets instanceof Map) {
+            const sortedDays = Array.from(state.recentDayBuckets.keys()).sort((a, b) => a - b);
+            for (let i = 0; i < sortedDays.length; i++) {
+                const dayNum = sortedDays[i];
+                const dayMap = state.recentDayBuckets.get(dayNum);
+                if (!(dayMap instanceof Map) || dayMap.size === 0) continue;
+                const rows = [];
+                for (const [canonicalUrl, tuple] of dayMap.entries()) {
+                    const count = Math.max(0, Math.floor(Number(tuple?.[0]) || 0));
+                    if (!canonicalUrl || count <= 0) continue;
+                    rows.push([
+                        canonicalUrl,
+                        count,
+                        Math.max(0, Math.round(Number(tuple?.[1]) || 0))
+                    ]);
+                }
+                if (rows.length > 0) {
+                    dayBuckets.push([dayNum, rows]);
+                }
+            }
         }
 
-        internalCache.fetchingPromise = (async () => {
-            try {
-                // 3. 优先从 IndexedDB 永久存储极速恢复（<1ms）
-                if (!force) {
-                    const savedData = await loadIndexFromPersistentStorage();
-                    const isExpired = savedData && savedData.meta && (now - Number(savedData.meta.lastSyncTime || 0)) > (DEFAULT_HISTORY_DAYS * 24 * 60 * 60 * 1000);
-                    if (savedData && !isExpired && Array.isArray(savedData.compactItems) && savedData.compactItems.length > 0) {
-                        // 恢复上次已处理版本号，杜绝反复判定为脏并全量重拉（P2）
-                        internalCache.lastAppliedVersion = Number(savedData.meta?.lastAppliedVersion) || 0;
-                        internalCache.redirectBookmarkUrls = new Set(Array.isArray(savedData.meta?.redirectUrls) ? savedData.meta.redirectUrls : []);
+        const variants = [];
+        if (state.variantsMap instanceof Map) {
+            for (const [canonicalUrl, rawSet] of state.variantsMap.entries()) {
+                if (!canonicalUrl || !(rawSet instanceof Set) || rawSet.size === 0) continue;
+                variants.push([canonicalUrl, Array.from(rawSet).slice(0, MAX_VARIANTS_PER_CANONICAL)]);
+            }
+        }
 
-                        let itemsToBuild = savedData.compactItems;
-                        const { urlMap, protoAgnosticMap, titleDomainMap } = await buildHistoryIndexChunked(
-                            itemsToBuild,
-                            internalCache.targetInfo
-                        );
-                        internalCache.urlMap = urlMap;
-                        internalCache.protoAgnosticMap = protoAgnosticMap;
-                        internalCache.titleDomainMap = titleDomainMap;
-                        internalCache.loadedAt = Date.now();
-                        internalCache.lastSyncTime = savedData.meta?.lastSyncTime || Date.now();
-                        invalidateDomainAggregatesCache();
+        const missingTargets = [];
+        if (state.missingSinceMap instanceof Map) {
+            for (const [canonicalUrl, missingSinceMs] of state.missingSinceMap.entries()) {
+                const ts = Math.round(Number(missingSinceMs) || 0);
+                if (canonicalUrl && ts > 0) {
+                    missingTargets.push([canonicalUrl, ts]);
+                }
+            }
+        }
 
-                        // 兜底自检：若浏览器实际历史已被清空，立即清空本地缓存
-                        await checkHistoryEmptySanity();
-                        if (!internalCache.urlMap) {
-                            return {
-                                urlMap: new Map(),
-                                protoAgnosticMap: new Map(),
-                                titleDomainMap: new Map()
-                            };
+        const knownTargets = state.knownTargets instanceof Set ? Array.from(state.knownTargets) : [];
+        const syncTs = Math.max(0, Math.round(Number(state.lastSyncTime) || Date.now()));
+        const lastPurgedAt = Math.max(0, Math.round(Number(state.lastPurgedAt) || 0));
+        const savedAt = Math.max(Date.now(), Number(savedAtOverride) || 0);
+
+        return {
+            archiveItems,
+            dayBuckets,
+            variants,
+            missingTargets,
+            knownTargets,
+            meta: {
+                schemaVersion: SCHEMA_VERSION,
+                lastSyncTime: syncTs,
+                lastPurgedAt,
+                savedAt,
+                syncedWithCompleteWhitelist: Boolean(state.syncedWithCompleteWhitelist),
+                archiveCount: archiveItems.length,
+                bucketDaysCount: dayBuckets.length,
+                knownTargetsCount: knownTargets.length
+            }
+        };
+    }
+
+    function isValidV4RawSnapshot(data) {
+        return Boolean(
+            data &&
+            typeof data === 'object' &&
+            data.meta &&
+            typeof data.meta === 'object' &&
+            Number(data.meta.schemaVersion) === SCHEMA_VERSION &&
+            Array.isArray(data.archiveItems) &&
+            Array.isArray(data.dayBuckets) &&
+            Array.isArray(data.variants) &&
+            Array.isArray(data.missingTargets) &&
+            Array.isArray(data.knownTargets)
+        );
+    }
+
+    function parseV4Snapshot(data) {
+        if (!isValidV4RawSnapshot(data)) return null;
+
+        const archiveMap = new Map();
+        for (let i = 0; i < data.archiveItems.length; i++) {
+            const row = data.archiveItems[i];
+            if (!Array.isArray(row) || typeof row[0] !== 'string' || !row[0]) continue;
+            const visitCount = Math.max(0, Math.floor(Number(row[1]) || 0));
+            if (visitCount <= 0) continue;
+            archiveMap.set(row[0], {
+                visitCount,
+                lastVisitTime: Math.max(0, Number(row[2]) || 0),
+                domain: typeof row[3] === 'string' ? row[3] : '',
+                title: typeof row[4] === 'string' ? row[4] : ''
+            });
+        }
+
+        const recentDayBuckets = new Map();
+        for (let i = 0; i < data.dayBuckets.length; i++) {
+            const bucket = data.dayBuckets[i];
+            if (!Array.isArray(bucket)) continue;
+            const dayNum = Number(bucket[0]);
+            const rows = bucket[1];
+            if (!Number.isInteger(dayNum) || dayNum < 0 || !Array.isArray(rows)) continue;
+            const dayMap = new Map();
+            for (let j = 0; j < rows.length; j++) {
+                const row = rows[j];
+                if (!Array.isArray(row) || typeof row[0] !== 'string' || !row[0]) continue;
+                const count = Math.max(0, Math.floor(Number(row[1]) || 0));
+                if (count <= 0) continue;
+                dayMap.set(row[0], [count, Math.max(0, Number(row[2]) || 0)]);
+            }
+            if (dayMap.size > 0) {
+                recentDayBuckets.set(dayNum, dayMap);
+            }
+        }
+
+        const variantsMap = new Map();
+        for (let i = 0; i < data.variants.length; i++) {
+            const row = data.variants[i];
+            if (!Array.isArray(row) || typeof row[0] !== 'string' || !row[0] || !Array.isArray(row[1])) continue;
+            addVariantsForCanonical(variantsMap, row[0], row[1]);
+        }
+
+        const missingSinceMap = new Map();
+        for (let i = 0; i < data.missingTargets.length; i++) {
+            const row = data.missingTargets[i];
+            if (!Array.isArray(row) || typeof row[0] !== 'string' || !row[0]) continue;
+            const ts = Math.max(0, Number(row[1]) || 0);
+            if (ts > 0) {
+                missingSinceMap.set(row[0], ts);
+            }
+        }
+
+        const knownTargets = new Set();
+        for (let i = 0; i < data.knownTargets.length; i++) {
+            const u = data.knownTargets[i];
+            if (typeof u === 'string' && u) {
+                knownTargets.add(u);
+            }
+        }
+
+        const lastSyncTime = Math.max(0, Number(data.meta.lastSyncTime) || 0);
+        const lastPurgedAt = Math.max(0, Number(data.meta.lastPurgedAt) || 0);
+        const savedAt = Math.max(0, Number(data.meta.savedAt) || 0);
+
+        return {
+            archiveMap,
+            recentDayBuckets,
+            variantsMap,
+            missingSinceMap,
+            knownTargets,
+            urlMap: null,
+            lastSyncTime,
+            lastPurgedAt,
+            lastPersistedSyncTime: lastSyncTime,
+            lastKnownSavedAt: savedAt,
+            syncedWithCompleteWhitelist: Boolean(data.meta.syncedWithCompleteWhitelist),
+            hasUnsavedDataChanges: false
+        };
+    }
+
+    async function loadSnapshotFromStorage() {
+        try {
+            if (typeof window !== 'undefined' && typeof window.SearchIndexDb?.getBookmarkVisitStats === 'function') {
+                const raw = await window.SearchIndexDb.getBookmarkVisitStats();
+                return parseV4Snapshot(raw);
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    function mergeSeedAdditionsIntoPeerSnapshot(peerState, localState) {
+        const anchorTime = Date.now();
+        const archiveCutoffDay = getArchiveCutoffDay(anchorTime);
+        const rebuildStartDay = getRebuildStartDay(anchorTime);
+        const merged = {
+            archiveMap: peerState.archiveMap,
+            recentDayBuckets: peerState.recentDayBuckets,
+            variantsMap: peerState.variantsMap,
+            missingSinceMap: peerState.missingSinceMap,
+            knownTargets: peerState.knownTargets,
+            urlMap: peerState.urlMap,
+            lastSyncTime: Math.max(peerState.lastSyncTime || 0, localState.lastSyncTime || 0),
+            lastPurgedAt: Math.max(peerState.lastPurgedAt || 0, localState.lastPurgedAt || 0),
+            lastPersistedSyncTime: peerState.lastPersistedSyncTime || 0,
+            lastKnownSavedAt: peerState.lastKnownSavedAt || 0,
+            syncedWithCompleteWhitelist: Boolean(peerState.syncedWithCompleteWhitelist),
+            hasUnsavedDataChanges: Boolean(localState.hasUnsavedDataChanges)
+        };
+
+        if (merged.lastPurgedAt > (peerState.lastPurgedAt || 0)) {
+            return localState;
+        }
+
+        if (localState.knownTargets instanceof Set) {
+            for (const target of localState.knownTargets) {
+                merged.knownTargets.add(target);
+                merged.missingSinceMap.delete(target);
+            }
+        }
+        if (localState.variantsMap instanceof Map) {
+            for (const [canonicalUrl, rawSet] of localState.variantsMap.entries()) {
+                addVariantsForCanonical(merged.variantsMap, canonicalUrl, rawSet);
+            }
+        }
+        if (localState.archiveMap instanceof Map) {
+            for (const [canonicalUrl, entry] of localState.archiveMap.entries()) {
+                if (!merged.archiveMap.has(canonicalUrl) && entry && entry.visitCount > 0) {
+                    merged.archiveMap.set(canonicalUrl, { ...entry });
+                }
+            }
+        }
+        if (localState.recentDayBuckets instanceof Map) {
+            for (const [dayNum, dayMap] of localState.recentDayBuckets.entries()) {
+                if (dayNum < archiveCutoffDay && dayNum < rebuildStartDay) continue;
+                for (const [canonicalUrl, tuple] of dayMap.entries()) {
+                    const count = Math.max(0, Math.floor(Number(tuple?.[0]) || 0));
+                    const maxTime = Math.max(0, Number(tuple?.[1]) || 0);
+                    if (count <= 0) continue;
+                    const peerDayMap = merged.recentDayBuckets.get(dayNum);
+                    const peerTuple = peerDayMap?.get(canonicalUrl);
+                    if (!peerTuple || maxTime > (Number(peerTuple[1]) || 0)) {
+                        if (!peerDayMap) {
+                            const nextDayMap = new Map();
+                            nextDayMap.set(canonicalUrl, [count, maxTime]);
+                            merged.recentDayBuckets.set(dayNum, nextDayMap);
+                        } else {
+                            peerDayMap.set(canonicalUrl, [count, maxTime]);
                         }
-
-                        // 若已持久化的水位线距离当前时间超过间隔，立刻按水位线补齐增量
-                        if (Date.now() - internalCache.lastSyncTime > WATERMARK_CHECK_INTERVAL_MS) {
-                            performWatermarkSync(internalCache.lastSyncTime).catch(() => {});
-                        }
-
-                        dispatchStatsUpdatedEvent();
-
-                        return { urlMap, protoAgnosticMap, titleDomainMap };
                     }
                 }
+            }
+        }
+        return merged;
+    }
 
-                // 4. 首次使用（冷启动）：向 Chrome API 全量拉取 90 天历史并反向过滤
-                const rawItems = await fetchRecentHistoryItems(days);
-                const { urlMap, protoAgnosticMap, titleDomainMap } = await buildHistoryIndexChunked(rawItems, internalCache.targetInfo);
+    function commitReconciledState(state, nextSync) {
+        internalCache.archiveMap = state.archiveMap;
+        internalCache.recentDayBuckets = state.recentDayBuckets;
+        internalCache.variantsMap = state.variantsMap;
+        internalCache.missingSinceMap = state.missingSinceMap;
+        internalCache.knownTargets = state.knownTargets;
+        internalCache.urlMap = state.urlMap;
+        internalCache.lastSyncTime = nextSync;
+        internalCache.lastPurgedAt = Math.max(0, Number(state.lastPurgedAt) || 0);
+        internalCache.staleByPeer = false;
+        internalCache.hasUnsavedDataChanges = Boolean(state.hasUnsavedDataChanges);
+        if (typeof state.syncedWithCompleteWhitelist === 'boolean') {
+            internalCache.syncedWithCompleteWhitelist = state.syncedWithCompleteWhitelist;
+        }
+        if (typeof state.lastPersistedSyncTime === 'number' && state.lastPersistedSyncTime > (internalCache.lastPersistedSyncTime || 0)) {
+            internalCache.lastPersistedSyncTime = state.lastPersistedSyncTime;
+        }
+        if (typeof state.lastKnownSavedAt === 'number' && state.lastKnownSavedAt > (internalCache.lastKnownSavedAt || 0)) {
+            internalCache.lastKnownSavedAt = state.lastKnownSavedAt;
+        }
+    }
 
-                // 对零命中的书签用原网址执行 getVisits 补查（解决短链/302/JS跳转 P8）
-                await supplementZeroHitBookmarks(urlMap, protoAgnosticMap, internalCache.targetInfo);
+    function hasValidLedgerContainers(state) {
+        return Boolean(
+            state &&
+            state.archiveMap instanceof Map &&
+            state.recentDayBuckets instanceof Map &&
+            state.variantsMap instanceof Map &&
+            state.missingSinceMap instanceof Map &&
+            state.knownTargets instanceof Set
+        );
+    }
 
-                internalCache.urlMap = urlMap;
-                internalCache.protoAgnosticMap = protoAgnosticMap;
-                internalCache.titleDomainMap = titleDomainMap;
-                internalCache.loadedAt = Date.now();
-                internalCache.lastSyncTime = Date.now();
-                invalidateDomainAggregatesCache();
+    function persistSnapshotNow(stateToSave = internalCache, options = {}) {
+        if (saveDebounceTimer) {
+            clearTimeout(saveDebounceTimer);
+            saveDebounceTimer = null;
+        }
+        if (!(stateToSave?.urlMap instanceof Map)) return Promise.resolve(false);
+        if (typeof window === 'undefined' || typeof window.SearchIndexDb?.saveBookmarkVisitStats !== 'function') {
+            return Promise.resolve(false);
+        }
 
-                if (dirtyState && dirtyState.pendingVersion) {
-                    internalCache.lastAppliedVersion = dirtyState.pendingVersion;
+        const expectedSavedAt = Math.max(0, Number(options.expectedSavedAt ?? stateToSave.lastKnownSavedAt) || 0);
+        const allowPeerRealign = options.allowPeerRealign !== false;
+        const requireDataMutation = Boolean(options.requireDataMutation);
+
+        persistWriteChain = persistWriteChain.then(async () => {
+            if (typeof window === 'undefined' || typeof window.SearchIndexDb?.saveBookmarkVisitStats !== 'function') {
+                return false;
+            }
+
+            let targetState = stateToSave;
+            let latestRaw = null;
+            if (typeof window.SearchIndexDb.getBookmarkVisitStats === 'function') {
+                latestRaw = await window.SearchIndexDb.getBookmarkVisitStats();
+            }
+            if (!hasValidLedgerContainers(targetState)) {
+                return false;
+            }
+            const latestSavedAt = Math.max(0, Number(latestRaw?.meta?.savedAt) || 0);
+
+            if (latestSavedAt > expectedSavedAt) {
+                if (requireDataMutation && !targetState.hasUnsavedDataChanges && !options.forceWrite) {
+                    const peerState = parseV4Snapshot(latestRaw);
+                    if (peerState) {
+                        internalCache.staleByPeer = true;
+                        internalCache.lastKnownSavedAt = latestSavedAt;
+                    }
+                    return false;
+                }
+                if (allowPeerRealign) {
+                    const peerState = parseV4Snapshot(latestRaw);
+                    if (peerState) {
+                        if (typeof options.onPeerConflict === 'function') {
+                            const realigned = await options.onPeerConflict(peerState);
+                            if (realigned) {
+                                targetState = realigned;
+                            }
+                        } else {
+                            targetState = mergeSeedAdditionsIntoPeerSnapshot(peerState, targetState);
+                            const liveData = await resolveLiveBookmarkData().catch(() => null);
+                            rebuildAllUrlProjections(targetState, liveData);
+                            if (targetState === internalCache || stateToSave === internalCache) {
+                                commitReconciledState(targetState, targetState.lastSyncTime);
+                                dispatchStatsUpdatedEvent();
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!hasValidLedgerContainers(targetState)) {
+                return false;
+            }
+
+            const payload = buildSnapshotPayload(targetState, latestSavedAt + 1);
+            const saved = await window.SearchIndexDb.saveBookmarkVisitStats(payload);
+            if (!saved) return false;
+
+            await storageLocalSet({ [STORAGE_KEY_SYNCED_AT]: payload.meta.lastSyncTime });
+
+            const savedAt = payload.meta.savedAt;
+            targetState.lastPersistedSyncTime = payload.meta.lastSyncTime;
+            targetState.lastKnownSavedAt = savedAt;
+            targetState.hasUnsavedDataChanges = false;
+            if (targetState !== internalCache && internalCache.urlMap instanceof Map) {
+                internalCache.lastPersistedSyncTime = payload.meta.lastSyncTime;
+                internalCache.lastKnownSavedAt = savedAt;
+                internalCache.hasUnsavedDataChanges = false;
+            }
+            if (savedAt > (internalCache.peerLatestSavedAt || 0)) {
+                internalCache.peerLatestSavedAt = savedAt;
+            }
+            broadcastPeerNotice({
+                type: 'stats-snapshot-saved',
+                savedAt,
+                lastSyncTime: payload.meta.lastSyncTime
+            });
+            return true;
+        }).catch(() => false);
+
+        return persistWriteChain;
+    }
+
+    function saveSnapshotToStorage(stateToSave = internalCache, options = {}) {
+        if (options && options.immediate) {
+            return persistSnapshotNow(stateToSave, options);
+        }
+        if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+        saveDebounceTimer = setTimeout(() => {
+            saveDebounceTimer = null;
+            persistSnapshotNow(internalCache, {
+                expectedSavedAt: internalCache.lastKnownSavedAt,
+                requireDataMutation: true
+            }).catch(() => {});
+        }, SAVE_DEBOUNCE_MS);
+        return Promise.resolve();
+    }
+
+    function flushSavePending() {
+        if (!saveDebounceTimer) return;
+        clearTimeout(saveDebounceTimer);
+        saveDebounceTimer = null;
+        const detachedState = { ...internalCache };
+        persistSnapshotNow(detachedState, {
+            expectedSavedAt: detachedState.lastKnownSavedAt,
+            requireDataMutation: true,
+            allowPeerRealign: false
+        }).catch(() => {});
+    }
+
+    function hasUnprocessedDeletionSignal(stored, lastSyncTime, state = internalCache) {
+        if (!stored || typeof stored !== 'object') return false;
+        const syncTs = Number(lastSyncTime) || 0;
+        if ((Number(stored[STORAGE_KEY_PURGED_AT]) || 0) > syncTs) return true;
+        if ((Number(stored[STORAGE_KEY_OVERFLOW_AT]) || 0) > syncTs) return true;
+        const deletedUrls = stored[STORAGE_KEY_DELETED_URLS];
+        if (Array.isArray(deletedUrls)) {
+            for (let i = 0; i < deletedUrls.length; i++) {
+                const item = deletedUrls[i];
+                if (!Array.isArray(item) || (Number(item[1]) || 0) <= syncTs) continue;
+                const canonicalUrl = normalizeHistoryUrl(item[0]);
+                if (canonicalUrl && hasLedgerEntry(state, canonicalUrl)) return true;
+            }
+        }
+        return false;
+    }
+
+    function cloneStateForStaging(source) {
+        const archiveMap = new Map();
+        if (source.archiveMap instanceof Map) {
+            for (const [k, v] of source.archiveMap.entries()) {
+                archiveMap.set(k, { ...v });
+            }
+        }
+        const recentDayBuckets = new Map();
+        if (source.recentDayBuckets instanceof Map) {
+            for (const [dayNum, dayMap] of source.recentDayBuckets.entries()) {
+                const clonedDayMap = new Map();
+                for (const [k, tuple] of dayMap.entries()) {
+                    clonedDayMap.set(k, [tuple[0], tuple[1]]);
+                }
+                recentDayBuckets.set(dayNum, clonedDayMap);
+            }
+        }
+        const variantsMap = new Map();
+        if (source.variantsMap instanceof Map) {
+            for (const [k, set] of source.variantsMap.entries()) {
+                variantsMap.set(k, new Set(set));
+            }
+        }
+        const missingSinceMap = new Map(source.missingSinceMap instanceof Map ? source.missingSinceMap : undefined);
+        const knownTargets = source.knownTargets instanceof Set ? new Set(source.knownTargets) : null;
+        const urlMap = new Map();
+        if (source.urlMap instanceof Map) {
+            for (const [k, v] of source.urlMap.entries()) {
+                urlMap.set(k, { ...v });
+            }
+        }
+        return {
+            archiveMap,
+            recentDayBuckets,
+            variantsMap,
+            missingSinceMap,
+            knownTargets,
+            urlMap,
+            lastSyncTime: source.lastSyncTime || 0,
+            lastPurgedAt: source.lastPurgedAt || 0,
+            lastPersistedSyncTime: source.lastPersistedSyncTime || 0,
+            lastKnownSavedAt: source.lastKnownSavedAt || 0,
+            syncedWithCompleteWhitelist: Boolean(source.syncedWithCompleteWhitelist),
+            hasUnsavedDataChanges: Boolean(source.hasUnsavedDataChanges)
+        };
+    }
+
+    async function runReconciliationPipeline(state, liveData, { anchorTime = Date.now(), skipStep3Seed = false } = {}) {
+        const prevSyncTime = Number(state.lastSyncTime) || 0;
+        const rebuildStartDay = getRebuildStartDay(anchorTime);
+        const archiveCutoffDay = getArchiveCutoffDay(anchorTime);
+        const expectedSavedAt = Number(state.lastKnownSavedAt) || 0;
+
+        let dataChanged = false;
+        let metaChanged = false;
+        let forceImmediatePersist = false;
+        const titleHints = new Map();
+
+        // 第一步（铁律先执行）：先将 >= 95 天的老天桶滚动封存进 archiveMap，再进行任何对账或覆写
+        if (rollupExpiredDayBuckets(state, archiveCutoffDay, liveData)) {
+            dataChanged = true;
+            metaChanged = true;
+        }
+
+        const stored = await storageLocalGet([
+            STORAGE_KEY_PURGED_AT,
+            STORAGE_KEY_OVERFLOW_AT,
+            STORAGE_KEY_DELETED_URLS
+        ]);
+
+        const purgedAt = Math.max(0, Number(stored[STORAGE_KEY_PURGED_AT]) || 0);
+        const overflowAt = Math.max(0, Number(stored[STORAGE_KEY_OVERFLOW_AT]) || 0);
+        const deletedUrls = Array.isArray(stored[STORAGE_KEY_DELETED_URLS]) ? stored[STORAGE_KEY_DELETED_URLS] : [];
+
+        let maxSeenDeletedTs = 0;
+        for (let i = 0; i < deletedUrls.length; i++) {
+            const ts = Array.isArray(deletedUrls[i]) ? (Number(deletedUrls[i][1]) || 0) : 0;
+            if (ts > maxSeenDeletedTs) maxSeenDeletedTs = ts;
+        }
+
+        // 第二步：分级处理后台删除信号
+        // 情况 A：清空全部历史 (allHistory: true -> purged_at)
+        if (purgedAt > prevSyncTime) {
+            state.archiveMap.clear();
+            state.recentDayBuckets.clear();
+            state.variantsMap.clear();
+            state.missingSinceMap.clear();
+            state.lastPurgedAt = purgedAt;
+            state.knownTargets = new Set(liveData.targetSet);
+
+            if (purgedAt < anchorTime && liveData.targetSet.size > 0) {
+                const scan = await scanHistoryMatches(liveData.targetSet, purgedAt, anchorTime);
+                for (const [k, t] of scan.titleHints.entries()) titleHints.set(k, t);
+                if (scan.matchedCanonicals.size > 0) {
+                    await queryAndApplyBucketedBatch(state, Array.from(scan.matchedCanonicals), {
+                        anchorTime,
+                        minVisitTime: purgedAt,
+                        minDayNum: 0,
+                        archiveCutoffDay,
+                        allowArchiveWrite: true,
+                        liveData,
+                        extraRawUrlsByCanonical: scan.extraRawUrlsByCanonical,
+                        titleHints
+                    });
+                }
+            }
+
+            state.syncedWithCompleteWhitelist = Boolean(liveData.isCompleteWhitelist);
+            rebuildAllUrlProjections(state, liveData, titleHints);
+            const nextSync = Math.max(anchorTime, purgedAt, overflowAt, maxSeenDeletedTs);
+            state.hasUnsavedDataChanges = true;
+            return {
+                state,
+                nextSync,
+                dataChanged: true,
+                metaChanged: true,
+                forceImmediatePersist: true,
+                expectedSavedAt
+            };
+        }
+
+        const minVisitTime = Math.max(0, Number(state.lastPurgedAt) || 0);
+        const isLongGapDelta = prevSyncTime > 0 && (anchorTime - prevSyncTime) >= (DELTA_DIRECT_REBUILD_DAYS * DAY_MS);
+        let ranFull90dScan = false;
+        let queriedInCaseB = null;
+
+        // 情况 B：大批量删除溢出 > 500 条 (overflow_at) 或滞留 >= 21 天触发自适应近 89 天重建
+        if (overflowAt > prevSyncTime || isLongGapDelta) {
+            const rebuildPlan = collectRebuildTargetPlan(state, liveData);
+            if (rebuildPlan.droppedUnknownTempCanonicals.length > 0 && state.knownTargets instanceof Set) {
+                for (let i = 0; i < rebuildPlan.droppedUnknownTempCanonicals.length; i++) {
+                    state.knownTargets.delete(rebuildPlan.droppedUnknownTempCanonicals[i]);
+                }
+                metaChanged = true;
+            }
+
+            const beforeDigest = overflowAt > prevSyncTime
+                ? null
+                : captureBucketRangeDigest(state.recentDayBuckets, rebuildStartDay);
+
+            for (const [dayNum, dayMap] of Array.from(state.recentDayBuckets.entries())) {
+                if (dayNum < rebuildStartDay) continue;
+                if (liveData.isCompleteWhitelist && rebuildPlan.preserveBucketsCanonicals.size === 0) {
+                    state.recentDayBuckets.delete(dayNum);
+                } else {
+                    for (const key of Array.from(dayMap.keys())) {
+                        if (rebuildPlan.preserveBucketsCanonicals.has(key)) continue;
+                        if (liveData.isCompleteWhitelist || rebuildPlan.queriableSet.has(key) || !state.knownTargets?.has(key)) {
+                            dayMap.delete(key);
+                        }
+                    }
+                    if (dayMap.size === 0) {
+                        state.recentDayBuckets.delete(dayNum);
+                    }
+                }
+            }
+
+            queriedInCaseB = new Set();
+            if (rebuildPlan.queriableCanonicals.length > 0) {
+                const scanStart = Math.max(0, anchorTime - (DEFAULT_HISTORY_DAYS * DAY_MS), minVisitTime);
+                const plan = await resolveAdaptiveHistoryScanPlan(
+                    state,
+                    rebuildPlan.queriableCanonicals,
+                    scanStart,
+                    anchorTime,
+                    liveData
+                );
+                for (const [k, t] of plan.titleHints.entries()) titleHints.set(k, t);
+
+                if (plan.emptyHistory) {
+                    if (state.variantsMap instanceof Map) {
+                        for (const canonicalUrl of rebuildPlan.queriableSet) {
+                            if (!hasLedgerEntry(state, canonicalUrl)) {
+                                state.variantsMap.delete(canonicalUrl);
+                            }
+                        }
+                    }
+                    queriedInCaseB = new Set(liveData.targetSet);
+                } else if (plan.matchedCanonicals.size > 0) {
+                    await queryAndApplyBucketedBatch(state, Array.from(plan.matchedCanonicals), {
+                        anchorTime,
+                        minVisitTime,
+                        minDayNum: rebuildStartDay,
+                        archiveCutoffDay,
+                        allowArchiveWrite: false,
+                        liveData,
+                        extraRawUrlsByCanonical: plan.extraRawUrlsByCanonical,
+                        titleHints
+                    });
+                    if (plan.mode === 'filtered-matches' && state.variantsMap instanceof Map) {
+                        for (const canonicalUrl of rebuildPlan.queriableSet) {
+                            if (!plan.matchedCanonicals.has(canonicalUrl) && !hasLedgerEntry(state, canonicalUrl)) {
+                                state.variantsMap.delete(canonicalUrl);
+                            }
+                        }
+                    }
+                    queriedInCaseB = plan.coveredAllTargets
+                        ? new Set(liveData.targetSet)
+                        : plan.matchedCanonicals;
+                } else {
+                    queriedInCaseB = plan.coveredAllTargets ? new Set(liveData.targetSet) : new Set();
+                }
+            } else {
+                queriedInCaseB = new Set(liveData.targetSet);
+            }
+
+            ranFull90dScan = true;
+            if (overflowAt > prevSyncTime || didBucketRangeDigestChange(beforeDigest, state.recentDayBuckets, rebuildStartDay)) {
+                dataChanged = true;
+            }
+            metaChanged = true;
+            forceImmediatePersist = true;
+        } else {
+            // 情况 C：零星单条 / 小批量删除 (deleted_urls <= 500，前台只读不清空)
+            const affectedCandidates = new Map();
+            const protectCutoff = anchorTime - (OLD_LEDGER_PROTECT_DAYS * DAY_MS);
+
+            for (let i = 0; i < deletedUrls.length; i++) {
+                const item = deletedUrls[i];
+                if (!Array.isArray(item) || typeof item[0] !== 'string' || !item[0]) continue;
+                const rawUrl = item[0];
+                const deletedAt = Number(item[1]) || 0;
+                if (deletedAt <= prevSyncTime) continue;
+
+                const parsed = parseCanonicalUrl(rawUrl);
+                if (!parsed || !parsed.canonicalUrl) continue;
+                const canonicalUrl = parsed.canonicalUrl;
+
+                const isRelevantTarget = liveData.targetSet.has(canonicalUrl)
+                    || state.missingSinceMap.has(canonicalUrl)
+                    || (!liveData.isCompleteWhitelist && hasLedgerEntry(state, canonicalUrl));
+                if (!isRelevantTarget) continue;
+
+                const hasRecent = hasCanonicalInBucketRange(state.recentDayBuckets, canonicalUrl, rebuildStartDay, Infinity);
+                const maxLastVt = getLedgerMaxLastVisitTime(state, canonicalUrl);
+                if (!hasRecent && maxLastVt > 0 && maxLastVt < protectCutoff) {
+                    continue;
+                }
+                if (!hasRecent && maxLastVt === 0) {
+                    continue;
                 }
 
-                // 持久化到 IndexedDB（体积仅约 50KB）
-                saveIndexToPersistentStorage(urlMap, internalCache.lastSyncTime);
+                let extraSet = affectedCandidates.get(canonicalUrl);
+                if (!extraSet) {
+                    extraSet = new Set();
+                    affectedCandidates.set(canonicalUrl, extraSet);
+                }
+                extraSet.add(rawUrl);
+            }
 
-                dispatchStatsUpdatedEvent();
+            if (affectedCandidates.size > 0) {
+                const changedDel = await queryAndApplyBucketedBatch(state, Array.from(affectedCandidates.keys()), {
+                    anchorTime,
+                    minVisitTime,
+                    minDayNum: rebuildStartDay,
+                    archiveCutoffDay,
+                    allowArchiveWrite: false,
+                    clearMinDayNum: rebuildStartDay,
+                    liveData,
+                    extraRawUrlsByCanonical: affectedCandidates,
+                    titleHints
+                });
+                if (changedDel) {
+                    dataChanged = true;
+                    forceImmediatePersist = true;
+                }
+            }
+        }
 
-                return { urlMap, protoAgnosticMap, titleDomainMap };
-            } catch (err) {
-                console.warn('[HistoryStatsService] 构建历史索引异常:', err);
-                return {
-                    urlMap: internalCache.urlMap || new Map(),
-                    protoAgnosticMap: internalCache.protoAgnosticMap || new Map(),
-                    titleDomainMap: internalCache.titleDomainMap || new Map()
-                };
+        // 第三步：白名单对齐、30 天软保留回收与新书签补种
+        const prevKnown = state.knownTargets;
+        if (liveData.isCompleteWhitelist) {
+            for (const canonicalUrl of liveData.targetSet) {
+                if (state.missingSinceMap.delete(canonicalUrl)) {
+                    dataChanged = true;
+                    metaChanged = true;
+                }
+            }
+
+            const ledgerKeys = collectAllLedgerCanonicals(state);
+            for (const canonicalUrl of ledgerKeys) {
+                if (liveData.targetSet.has(canonicalUrl)) continue;
+                const missingSince = state.missingSinceMap.get(canonicalUrl);
+                if (!missingSince) {
+                    state.missingSinceMap.set(canonicalUrl, anchorTime);
+                    dataChanged = true;
+                    metaChanged = true;
+                } else if (anchorTime - missingSince >= UNBOOKMARKED_RETENTION_MS) {
+                    state.archiveMap.delete(canonicalUrl);
+                    clearCanonicalRecentBuckets(state.recentDayBuckets, canonicalUrl, 0);
+                    state.variantsMap.delete(canonicalUrl);
+                    state.missingSinceMap.delete(canonicalUrl);
+                    dataChanged = true;
+                    metaChanged = true;
+                }
+            }
+        }
+
+        const newlyAddedEntries = [];
+        if (prevKnown instanceof Set) {
+            for (const [canonicalUrl, entry] of liveData.entriesByCanonical.entries()) {
+                if (!prevKnown.has(canonicalUrl)) {
+                    newlyAddedEntries.push(entry);
+                }
+            }
+        }
+
+        if (liveData.isCompleteWhitelist) {
+            if (!(prevKnown instanceof Set) || setsDiffer(prevKnown, liveData.targetSet)) {
+                state.knownTargets = new Set(liveData.targetSet);
+                metaChanged = true;
+            }
+        } else {
+            if (!(prevKnown instanceof Set)) {
+                state.knownTargets = new Set(liveData.targetSet);
+                metaChanged = true;
+            } else {
+                for (let i = 0; i < newlyAddedEntries.length; i++) {
+                    if (!prevKnown.has(newlyAddedEntries[i].canonicalUrl)) {
+                        prevKnown.add(newlyAddedEntries[i].canonicalUrl);
+                        metaChanged = true;
+                    }
+                }
+            }
+        }
+
+        if (!skipStep3Seed && newlyAddedEntries.length > 0) {
+            const unhitNewCanonicals = [];
+            for (let i = 0; i < newlyAddedEntries.length; i++) {
+                const c = newlyAddedEntries[i].canonicalUrl;
+                if (ranFull90dScan && queriedInCaseB && queriedInCaseB.has(c)) continue;
+                unhitNewCanonicals.push(c);
+            }
+
+            if (ranFull90dScan) {
+                if (unhitNewCanonicals.length > 0 && unhitNewCanonicals.length <= NEW_BOOKMARK_SEED_THRESHOLD) {
+                    const res = await seedCanonicalEntries(state, unhitNewCanonicals, {
+                        anchorTime,
+                        minVisitTime,
+                        liveData,
+                        titleHints
+                    });
+                    if (res.changed) dataChanged = true;
+                }
+            } else if (unhitNewCanonicals.length > NEW_BOOKMARK_SEED_THRESHOLD) {
+                const scanStart = Math.max(0, anchorTime - (DEFAULT_HISTORY_DAYS * DAY_MS), minVisitTime);
+                const plan = await resolveAdaptiveHistoryScanPlan(state, unhitNewCanonicals, scanStart, anchorTime, liveData);
+                for (const [k, t] of plan.titleHints.entries()) titleHints.set(k, t);
+                if (!plan.emptyHistory && plan.matchedCanonicals.size > 0) {
+                    const res = await seedCanonicalEntries(state, Array.from(plan.matchedCanonicals), {
+                        anchorTime,
+                        minVisitTime,
+                        liveData,
+                        extraRawUrlsByCanonical: plan.extraRawUrlsByCanonical,
+                        titleHints
+                    });
+                    if (res.changed) dataChanged = true;
+                }
+            } else if (unhitNewCanonicals.length > 0) {
+                const res = await seedCanonicalEntries(state, unhitNewCanonicals, {
+                    anchorTime,
+                    minVisitTime,
+                    liveData,
+                    titleHints
+                });
+                if (res.changed) dataChanged = true;
+            }
+        }
+
+        // 第四步：时间窗增量同步（情况 B 已全扫时跳过）
+        if (!ranFull90dScan && liveData.targetSet.size > 0) {
+            const queryStartTime = Math.max(0, prevSyncTime - DELTA_OVERLAP_MS, minVisitTime);
+            const effectiveMinSyncDay = Math.max(getDayNum(queryStartTime), rebuildStartDay);
+            const scan = await scanHistoryMatches(liveData.targetSet, queryStartTime, anchorTime);
+            for (const [k, t] of scan.titleHints.entries()) titleHints.set(k, t);
+
+            if (scan.matchedCanonicals.size > 0) {
+                const touchedList = Array.from(scan.matchedCanonicals);
+                for (let start = 0; start < touchedList.length; start += GET_VISITS_BATCH_SIZE) {
+                    const slice = touchedList.slice(start, start + GET_VISITS_BATCH_SIZE);
+                    await Promise.all(slice.map(async (canonicalUrl) => {
+                        const extraRaw = scan.extraRawUrlsByCanonical.get(canonicalUrl);
+                        const candidateUrls = collectCandidateUrlsForCanonical(state, canonicalUrl, liveData, extraRaw);
+
+                        // 快照旧计数比对：仅在天桶实际发生变化时标记 dataChanged
+                        const prevBucketsSnapshot = new Map();
+                        for (const [dNum, dMap] of state.recentDayBuckets.entries()) {
+                            if (dNum >= effectiveMinSyncDay && dMap.has(canonicalUrl)) {
+                                const t = dMap.get(canonicalUrl);
+                                prevBucketsSnapshot.set(dNum, [t[0], t[1]]);
+                            }
+                        }
+
+                        clearCanonicalRecentBuckets(state.recentDayBuckets, canonicalUrl, effectiveMinSyncDay);
+                        const bucketed = await collectBucketedVisitsForCanonical(candidateUrls, anchorTime, minVisitTime);
+                        const liveEntry = liveData.entriesByCanonical.get(canonicalUrl);
+
+                        if (bucketed.totalCount > 0) {
+                            writeBucketsForCanonical(state, canonicalUrl, bucketed.dayBuckets, {
+                                minDayNum: effectiveMinSyncDay,
+                                archiveCutoffDay,
+                                allowArchiveWrite: false,
+                                domain: liveEntry?.parsed?.domain || '',
+                                title: liveEntry?.title || (titleHints.get(canonicalUrl)) || ''
+                            });
+                        }
+                        syncVisitedVariantsAfterBucket(state, canonicalUrl, bucketed.totalCount, liveData, extraRaw);
+
+                        let bucketDiffers = false;
+                        const newDaysCounted = new Set();
+                        for (const [dNum, dMap] of state.recentDayBuckets.entries()) {
+                            if (dNum < effectiveMinSyncDay || !dMap.has(canonicalUrl)) continue;
+                            newDaysCounted.add(dNum);
+                            const nextT = dMap.get(canonicalUrl);
+                            const oldT = prevBucketsSnapshot.get(dNum);
+                            if (!oldT || oldT[0] !== nextT[0] || Math.round(oldT[1]) !== Math.round(nextT[1])) {
+                                bucketDiffers = true;
+                                break;
+                            }
+                        }
+                        if (!bucketDiffers && newDaysCounted.size !== prevBucketsSnapshot.size) {
+                            bucketDiffers = true;
+                        }
+                        if (bucketDiffers) {
+                            dataChanged = true;
+                        }
+                    }));
+                    if (start + GET_VISITS_BATCH_SIZE < touchedList.length) {
+                        await yieldToMainThread();
+                    }
+                }
+            }
+        }
+
+        const nextCompleteWhitelist = Boolean(liveData.isCompleteWhitelist);
+        if (!state.syncedWithCompleteWhitelist && nextCompleteWhitelist) {
+            metaChanged = true;
+        }
+        state.syncedWithCompleteWhitelist = nextCompleteWhitelist;
+        rebuildAllUrlProjections(state, liveData, titleHints);
+
+        const nextSync = Math.max(anchorTime, overflowAt, maxSeenDeletedTs);
+        if (dataChanged || metaChanged) {
+            state.hasUnsavedDataChanges = true;
+        }
+        return {
+            state,
+            nextSync,
+            dataChanged,
+            metaChanged,
+            forceImmediatePersist,
+            expectedSavedAt
+        };
+    }
+
+    async function reconcileLoadedState(liveData, stagedState = null) {
+        if (!liveData?.hasAuthoritativeTree) {
+            if (!(internalCache.urlMap instanceof Map)) {
+                internalCache.urlMap = new Map();
+            }
+            return { changed: false };
+        }
+
+        const baseState = stagedState || cloneStateForStaging(internalCache);
+        const result = await runReconciliationPipeline(baseState, liveData);
+
+        commitReconciledState(result.state, result.nextSync);
+
+        if (result.dataChanged || result.metaChanged || result.forceImmediatePersist) {
+            await persistSnapshotNow(internalCache, {
+                expectedSavedAt: result.expectedSavedAt,
+                forceWrite: true,
+                onPeerConflict: async (peerState) => {
+                    const freshLive = await resolveLiveBookmarkData().catch(() => liveData);
+                    const realigned = await runReconciliationPipeline(peerState, freshLive);
+                    commitReconciledState(realigned.state, realigned.nextSync);
+                    return internalCache;
+                }
+            });
+        } else if (result.nextSync - (internalCache.lastPersistedSyncTime || 0) >= WATERMARK_PERSIST_INTERVAL_MS) {
+            saveSnapshotToStorage(internalCache, { immediate: false });
+        }
+
+        if (result.dataChanged) {
+            dispatchStatsUpdatedEvent();
+        }
+        return { changed: result.dataChanged };
+    }
+
+    async function performColdBuild(liveData, { force = false } = {}) {
+        const anchorTime = Date.now();
+        if (!liveData?.hasAuthoritativeTree) {
+            internalCache.urlMap = new Map();
+            return internalCache.urlMap;
+        }
+
+        const stored = await storageLocalGet([STORAGE_KEY_PURGED_AT, STORAGE_KEY_OVERFLOW_AT]);
+        const purgedAt = Math.max(0, Number(stored[STORAGE_KEY_PURGED_AT]) || 0);
+        const overflowAt = Math.max(0, Number(stored[STORAGE_KEY_OVERFLOW_AT]) || 0);
+        const minSignalTs = Math.max(purgedAt, overflowAt);
+
+        const state = createEmptyLedgerState();
+        state.lastPurgedAt = purgedAt;
+        state.knownTargets = new Set(liveData.targetSet);
+        state.syncedWithCompleteWhitelist = Boolean(liveData.isCompleteWhitelist);
+        state.hasUnsavedDataChanges = true;
+
+        const titleHints = new Map();
+        const archiveCutoffDay = getArchiveCutoffDay(anchorTime);
+
+        if (liveData.targetSet.size > 0) {
+            const scanStart = Math.max(0, anchorTime - (DEFAULT_HISTORY_DAYS * DAY_MS), purgedAt);
+            const plan = await resolveAdaptiveHistoryScanPlan(
+                state,
+                Array.from(liveData.targetSet),
+                scanStart,
+                anchorTime,
+                liveData
+            );
+            for (const [k, t] of plan.titleHints.entries()) titleHints.set(k, t);
+
+            if (!plan.emptyHistory && plan.matchedCanonicals.size > 0) {
+                await queryAndApplyBucketedBatch(state, Array.from(plan.matchedCanonicals), {
+                    anchorTime,
+                    minVisitTime: purgedAt,
+                    minDayNum: 0,
+                    archiveCutoffDay,
+                    allowArchiveWrite: true,
+                    liveData,
+                    extraRawUrlsByCanonical: plan.extraRawUrlsByCanonical,
+                    titleHints
+                });
+            }
+        }
+
+        rebuildAllUrlProjections(state, liveData, titleHints);
+        const nextSync = Math.max(anchorTime, minSignalTs);
+        commitReconciledState(state, nextSync);
+
+        await persistSnapshotNow(internalCache, {
+            expectedSavedAt: force ? Infinity : 0,
+            forceWrite: true,
+            allowPeerRealign: !force
+        });
+        dispatchStatsUpdatedEvent();
+        return internalCache.urlMap;
+    }
+
+    function setsDiffer(a, b) {
+        if (!(a instanceof Set) || !(b instanceof Set)) return true;
+        if (a.size !== b.size) return true;
+        for (const item of a) {
+            if (!b.has(item)) return true;
+        }
+        return false;
+    }
+
+    function runWarmReconcile() {
+        internalCache.loadingPromise = (async () => {
+            try {
+                const liveDataPromise = resolveLiveBookmarkData();
+                let staged = null;
+                if (internalCache.staleByPeer) {
+                    const peerSnap = await loadSnapshotFromStorage();
+                    if (peerSnap && (peerSnap.lastKnownSavedAt || 0) >= (internalCache.lastKnownSavedAt || 0)) {
+                        staged = peerSnap;
+                    }
+                }
+                const liveData = await liveDataPromise;
+                await reconcileLoadedState(liveData, staged);
+                touchMemory();
+                return { urlMap: internalCache.urlMap || new Map() };
             } finally {
-                internalCache.fetchingPromise = null;
+                internalCache.loadingPromise = null;
             }
         })();
-
-        return internalCache.fetchingPromise;
+        return internalCache.loadingPromise;
     }
 
     /**
-     * 获取单个书签或文件夹的统计（查表，0.001ms 响应）
+     * 确保内存大库就绪（按需调用，序列化防并发重入）
+     * 刷新后优先直接 1~2ms 还原 IndexedDB 已有投影，仅在超水位或未全量白名单时后台静默对齐，不阻断首帧。
+     */
+    async function ensureMemoryLoaded(options = {}) {
+        touchMemory();
+
+        if (internalCache.loadingPromise) {
+            return internalCache.loadingPromise;
+        }
+
+        const force = Boolean(options && options.force);
+        const awaitSync = Boolean(options && options.awaitSync);
+
+        if (internalCache.urlMap instanceof Map && !force) {
+            const now = Date.now();
+            const whitelistStillIncomplete = !internalCache.syncedWithCompleteWhitelist && isTempSectionsReady();
+            if (!internalCache.staleByPeer && !whitelistStillIncomplete &&
+                now - (internalCache.lastSyncTime || 0) <= WATERMARK_INTERVAL_MS) {
+                const stored = await storageLocalGet([
+                    STORAGE_KEY_PURGED_AT,
+                    STORAGE_KEY_OVERFLOW_AT,
+                    STORAGE_KEY_DELETED_URLS
+                ]);
+                if ((internalCache.urlMap instanceof Map) &&
+                    !hasUnprocessedDeletionSignal(stored, internalCache.lastSyncTime)) {
+                    return { urlMap: internalCache.urlMap };
+                }
+            }
+
+            if (internalCache.urlMap instanceof Map) {
+                if (awaitSync) {
+                    return runWarmReconcile();
+                }
+                // 热态已有旧数据：立即返回内存命中，增量同步后台异步追齐（不卡当前搜索渲染）
+                runWarmReconcile().catch(() => {});
+                return { urlMap: internalCache.urlMap };
+            }
+        }
+
+        let needBackgroundReconcile = false;
+        internalCache.loadingPromise = (async () => {
+            try {
+                if (!force) {
+                    const [snapshot, stored] = await Promise.all([
+                        loadSnapshotFromStorage(),
+                        storageLocalGet([
+                            STORAGE_KEY_PURGED_AT,
+                            STORAGE_KEY_OVERFLOW_AT,
+                            STORAGE_KEY_DELETED_URLS
+                        ])
+                    ]);
+                    if (snapshot) {
+                        const snapSyncTime = Number(snapshot.lastSyncTime) || 0;
+                        const purgedAt = Math.max(0, Number(stored[STORAGE_KEY_PURGED_AT]) || 0);
+                        const overflowAt = Math.max(0, Number(stored[STORAGE_KEY_OVERFLOW_AT]) || 0);
+                        const hasContent = snapshot.knownTargets.size > 0 ||
+                            snapshot.archiveMap.size > 0 ||
+                            snapshot.recentDayBuckets.size > 0 ||
+                            (snapSyncTime > 0 && snapshot.syncedWithCompleteWhitelist);
+                        const cleanSignals = purgedAt <= snapSyncTime &&
+                            overflowAt <= snapSyncTime &&
+                            !hasUnprocessedDeletionSignal(stored, snapSyncTime, snapshot);
+
+                        if (hasContent && cleanSignals) {
+                            rebuildAllUrlProjections(snapshot, null);
+                            commitReconciledState(snapshot, snapSyncTime);
+                            touchMemory();
+                            const whitelistStillIncomplete = !internalCache.syncedWithCompleteWhitelist && isTempSectionsReady();
+                            const expiredWatermark = (Date.now() - snapSyncTime) > WATERMARK_INTERVAL_MS;
+                            if (awaitSync && (expiredWatermark || whitelistStillIncomplete)) {
+                                const liveData = await resolveLiveBookmarkData();
+                                await reconcileLoadedState(liveData, cloneStateForStaging(internalCache));
+                            } else if (expiredWatermark || whitelistStillIncomplete) {
+                                needBackgroundReconcile = true;
+                            }
+                            return { urlMap: internalCache.urlMap || new Map() };
+                        }
+
+                        const liveData = await resolveLiveBookmarkData();
+                        await reconcileLoadedState(liveData, snapshot);
+                        touchMemory();
+                        return { urlMap: internalCache.urlMap || new Map() };
+                    }
+                }
+
+                const liveData = await resolveLiveBookmarkData();
+                await performColdBuild(liveData, { force });
+                touchMemory();
+                return { urlMap: internalCache.urlMap || new Map() };
+            } finally {
+                internalCache.loadingPromise = null;
+            }
+        })();
+
+        const result = await internalCache.loadingPromise;
+        if (needBackgroundReconcile && !internalCache.loadingPromise) {
+            runWarmReconcile().catch(() => {});
+        }
+        return result;
+    }
+
+    async function performIncrementalDeltaSync() {
+        if (!(internalCache.urlMap instanceof Map)) {
+            return ensureMemoryLoaded();
+        }
+        if (internalCache.loadingPromise) {
+            return internalCache.loadingPromise;
+        }
+        return runWarmReconcile();
+    }
+
+    /**
+     * 对实时新增书签异步补查 Chrome 既有访问，作为长期账本初始底数存入
+     */
+    async function seedNewBookmarks(bookmarks) {
+        if (!Array.isArray(bookmarks) || bookmarks.length === 0 || !(internalCache.urlMap instanceof Map)) {
+            return false;
+        }
+
+        if (internalCache.loadingPromise) {
+            try {
+                await internalCache.loadingPromise;
+            } catch (_) {}
+            if (!(internalCache.urlMap instanceof Map)) return false;
+        }
+
+        const entries = [];
+        const rawUrlsByCanonical = new Map();
+        const seen = new Set();
+        let resurrected = false;
+
+        for (let i = 0; i < bookmarks.length; i++) {
+            const b = bookmarks[i];
+            const rawUrl = extractBookmarkRawUrl(b);
+            if (!rawUrl) continue;
+            const parsed = parseCanonicalUrl(rawUrl);
+            if (!parsed || !parsed.canonicalUrl) continue;
+
+            const canonicalUrl = parsed.canonicalUrl;
+            if (internalCache.knownTargets instanceof Set) {
+                internalCache.knownTargets.add(canonicalUrl);
+            }
+            if (internalCache.missingSinceMap instanceof Map && internalCache.missingSinceMap.delete(canonicalUrl)) {
+                resurrected = true;
+            }
+
+            let rawSet = rawUrlsByCanonical.get(canonicalUrl);
+            if (!rawSet) {
+                rawSet = new Set();
+                rawUrlsByCanonical.set(canonicalUrl, rawSet);
+            }
+            rawSet.add(rawUrl);
+            if (internalCache.urlMap.has(canonicalUrl) && internalCache.variantsMap instanceof Map) {
+                addVariantsForCanonical(internalCache.variantsMap, canonicalUrl, rawUrl);
+            }
+
+            if (!internalCache.urlMap.has(canonicalUrl) && !seen.has(canonicalUrl)) {
+                seen.add(canonicalUrl);
+                entries.push({
+                    canonicalUrl,
+                    parsed,
+                    url: rawUrl,
+                    title: extractBookmarkTitle(b)
+                });
+            }
+        }
+
+        if (entries.length === 0 && !resurrected) return false;
+
+        const anchorTime = Date.now();
+        const minVisitTime = Math.max(0, Number(internalCache.lastPurgedAt) || 0);
+        let changed = resurrected;
+        const touchedCanonicals = new Set();
+        const titleHints = new Map();
+
+        for (let i = 0; i < entries.length; i++) {
+            if (entries[i].title) {
+                titleHints.set(entries[i].canonicalUrl, entries[i].title);
+            }
+        }
+
+        if (entries.length > NEW_BOOKMARK_SEED_THRESHOLD) {
+            const scanStart = Math.max(0, anchorTime - (DEFAULT_HISTORY_DAYS * DAY_MS), minVisitTime);
+            const plan = await resolveAdaptiveHistoryScanPlan(
+                internalCache,
+                entries,
+                scanStart,
+                anchorTime,
+                { rawUrlsByCanonical }
+            );
+            for (const [k, t] of plan.titleHints.entries()) {
+                if (!titleHints.has(k)) titleHints.set(k, t);
+            }
+            if (!plan.emptyHistory && plan.matchedCanonicals.size > 0) {
+                const seedInput = plan.mode === 'direct-visits'
+                    ? entries
+                    : Array.from(plan.matchedCanonicals);
+                const res = await seedCanonicalEntries(internalCache, seedInput, {
+                    anchorTime,
+                    minVisitTime,
+                    liveData: { rawUrlsByCanonical },
+                    extraRawUrlsByCanonical: plan.extraRawUrlsByCanonical,
+                    titleHints
+                });
+                if (res.changed) changed = true;
+                for (let i = 0; i < res.touched.length; i++) touchedCanonicals.add(res.touched[i]);
+            }
+        } else if (entries.length > 0) {
+            const res = await seedCanonicalEntries(internalCache, entries, {
+                anchorTime,
+                minVisitTime,
+                liveData: { rawUrlsByCanonical },
+                titleHints
+            });
+            if (res.changed) changed = true;
+            for (let i = 0; i < res.touched.length; i++) touchedCanonicals.add(res.touched[i]);
+        }
+
+        if (changed) {
+            for (let i = 0; i < entries.length; i++) {
+                touchedCanonicals.add(entries[i].canonicalUrl);
+            }
+            recomputeProjectionForUrls(internalCache, touchedCanonicals, null, titleHints);
+            internalCache.hasUnsavedDataChanges = true;
+            saveSnapshotToStorage(internalCache, { immediate: false });
+            dispatchStatsUpdatedEvent();
+        }
+        touchMemory();
+        return changed;
+    }
+
+    /**
+     * 兼容接口：仅在内存大库已就绪时安全补种真正未建档的新书签，避免对已知零访问书签反复扫描
+     */
+    function setBookmarkTargets(bookmarks) {
+        if (!Array.isArray(bookmarks) || bookmarks.length === 0 || !(internalCache.urlMap instanceof Map)) {
+            return;
+        }
+        const unknownOnly = [];
+        for (let i = 0; i < bookmarks.length; i++) {
+            const b = bookmarks[i];
+            const rawUrl = extractBookmarkRawUrl(b);
+            if (!rawUrl) continue;
+            const canonicalUrl = normalizeHistoryUrl(rawUrl);
+            if (!canonicalUrl) continue;
+            const isKnown = internalCache.knownTargets instanceof Set && internalCache.knownTargets.has(canonicalUrl);
+            const isMissing = internalCache.missingSinceMap instanceof Map && internalCache.missingSinceMap.has(canonicalUrl);
+            if (!isKnown || isMissing) {
+                unknownOnly.push(b);
+            }
+        }
+        if (unknownOnly.length > 0) {
+            seedNewBookmarks(unknownOnly).catch(() => {});
+        }
+    }
+
+    function getDomainStats() {
+        return { visitCount: 0, lastVisitTime: 0 };
+    }
+
+    /**
+     * 释放内存引用（搜索面板关闭 10 分钟后 GC 彻底回收）
+     */
+    function releaseMemory() {
+        if (internalCache.idleUnloadTimer) {
+            clearTimeout(internalCache.idleUnloadTimer);
+            internalCache.idleUnloadTimer = null;
+        }
+        flushSavePending();
+        internalCache.archiveMap = null;
+        internalCache.recentDayBuckets = null;
+        internalCache.variantsMap = null;
+        internalCache.missingSinceMap = null;
+        internalCache.knownTargets = null;
+        internalCache.urlMap = null;
+        internalCache.loadingPromise = null;
+        internalCache.lastSyncTime = 0;
+        internalCache.lastPurgedAt = 0;
+        internalCache.lastPersistedSyncTime = 0;
+        internalCache.lastKnownSavedAt = 0;
+        internalCache.peerLatestSavedAt = 0;
+        internalCache.staleByPeer = false;
+        internalCache.syncedWithCompleteWhitelist = false;
+        internalCache.hasUnsavedDataChanges = false;
+    }
+
+    /**
+     * 彻底清空缓存（包含删除 IndexedDB 存储）
+     */
+    function clearCache() {
+        if (internalCache.idleUnloadTimer) {
+            clearTimeout(internalCache.idleUnloadTimer);
+            internalCache.idleUnloadTimer = null;
+        }
+        if (saveDebounceTimer) {
+            clearTimeout(saveDebounceTimer);
+            saveDebounceTimer = null;
+        }
+        internalCache.archiveMap = null;
+        internalCache.recentDayBuckets = null;
+        internalCache.variantsMap = null;
+        internalCache.missingSinceMap = null;
+        internalCache.knownTargets = null;
+        internalCache.urlMap = null;
+        internalCache.loadingPromise = null;
+        internalCache.lastSyncTime = 0;
+        internalCache.lastPurgedAt = 0;
+        internalCache.lastPersistedSyncTime = 0;
+        internalCache.lastKnownSavedAt = 0;
+        internalCache.peerLatestSavedAt = 0;
+        internalCache.staleByPeer = false;
+        internalCache.syncedWithCompleteWhitelist = false;
+        internalCache.hasUnsavedDataChanges = false;
+
+        if (typeof window !== 'undefined' && typeof window.SearchIndexDb?.saveBookmarkVisitStats === 'function') {
+            window.SearchIndexDb.saveBookmarkVisitStats(null).catch(() => {});
+        }
+        broadcastPeerNotice({ type: 'stats-snapshot-cleared' });
+        dispatchStatsUpdatedEvent();
+    }
+
+    /**
+     * 获取单个书签或文件夹的统计（O(1) 查表；热循环中不反复重置空闲定时器）
      */
     function getBookmarkStatsFromIndex(bookmark, index = null) {
-        const idx = index || internalCache;
-        if (!bookmark || !idx || !(idx.urlMap instanceof Map)) {
+        const map = (index && index.urlMap instanceof Map) ? index.urlMap : (index instanceof Map ? index : internalCache.urlMap);
+        if (!bookmark || !(map instanceof Map)) {
             return { visitCount: 0, lastVisitTime: 0 };
         }
 
         const nodeType = bookmark.nodeType || (bookmark.rawItem && bookmark.rawItem.nodeType);
-        const url = bookmark.url || bookmark.__url || (bookmark.rawItem && (bookmark.rawItem.url || bookmark.rawItem.__url)) || '';
+        const url = extractBookmarkRawUrl(bookmark);
 
-        // 如果是文件夹或无 URL 节点，穿透聚合其子书签
         if (nodeType === 'folder' || !url) {
             const leaves = extractLeafBookmarks(bookmark.rawItem || bookmark);
             if (leaves.length > 0) {
-                const folderStats = computeFolderAggregatedStats(leaves, idx);
+                const folderStats = computeFolderAggregatedStats(leaves, { urlMap: map });
                 return {
                     visitCount: folderStats.totalVisits || 0,
-                    lastVisitTime: folderStats.lastVisitTime || (folderStats.topBookmark ? (folderStats.topBookmark.lastVisitTime || 0) : 0),
+                    lastVisitTime: folderStats.lastVisitTime || (folderStats.topBookmark ? folderStats.topBookmark.lastVisitTime : 0),
                     folderStats
                 };
             }
             return { visitCount: 0, lastVisitTime: 0 };
         }
 
-        // 1. URL 主索引精确匹配
-        const normUrl = normalizeHistoryUrl(url);
-        if (normUrl && idx.urlMap.has(normUrl)) {
-            return idx.urlMap.get(normUrl);
-        }
-
-        // 2. 协议与 www 无关匹配
-        const cleanProto = getProtoAgnosticUrl(normUrl);
-        if (cleanProto && idx.protoAgnosticMap instanceof Map && idx.protoAgnosticMap.has(cleanProto)) {
-            return idx.protoAgnosticMap.get(cleanProto);
-        }
-
-        // 3. 域名 + 标题 辅索引匹配
-        const title = bookmark.title || bookmark.__title || (bookmark.rawItem && (bookmark.rawItem.title || bookmark.rawItem.__title)) || '';
-        const cleanTitle = typeof title === 'string' ? title.trim().toLowerCase() : '';
-        const domain = extractHostname(url);
-        if (domain && cleanTitle && idx.titleDomainMap instanceof Map) {
-            const key = `${domain}:::${cleanTitle}`;
-            if (idx.titleDomainMap.has(key)) {
-                return idx.titleDomainMap.get(key);
-            }
+        const canonicalUrl = normalizeHistoryUrl(url);
+        if (canonicalUrl && map.has(canonicalUrl)) {
+            return map.get(canonicalUrl);
         }
 
         return { visitCount: 0, lastVisitTime: 0 };
     }
 
     /**
-     * 单 URL 精确查询（专用于打开右键详情弹窗时按需单点获取，无需加载全量大库）
-     * 优先直接按原网址调用 Chrome getVisits（耗时 <0.1ms），获取秒级最新的真实访问量，并回刷内存
-     */
-    async function getSingleUrlHistoryStats(targetUrl, targetTitle = '') {
-        if (!targetUrl || typeof targetUrl !== 'string') {
-            return { visitCount: 0, lastVisitTime: 0 };
-        }
-
-        const browserAPI = (typeof chrome !== 'undefined' && chrome.history) ? chrome : ((typeof browser !== 'undefined' && browser.history) ? browser : null);
-        const ninetyDaysAgo = Date.now() - (DEFAULT_HISTORY_DAYS * 24 * 60 * 60 * 1000);
-
-        // 1. 优先直接调 Chrome getVisits 精确查询原网址（单条极速耗时 <0.1ms，获取秒级最新权威数据）
-        if (browserAPI && typeof browserAPI.history?.getVisits === 'function') {
-            try {
-                const visits = await new Promise((resolve) => {
-                    browserAPI.history.getVisits({ url: targetUrl }, (items) => {
-                        if (browserAPI.runtime?.lastError || !Array.isArray(items)) {
-                            resolve(null);
-                        } else {
-                            resolve(items);
-                        }
-                    });
-                });
-
-                if (Array.isArray(visits) && visits.length > 0) {
-                    const validVisits = visits.filter(v => v && v.visitTime >= ninetyDaysAgo);
-                    if (validVisits.length > 0) {
-                        let maxTime = 0;
-                        for (let i = 0; i < validVisits.length; i++) {
-                            if (validVisits[i].visitTime > maxTime) maxTime = validVisits[i].visitTime;
-                        }
-                        const result = {
-                            visitCount: validVisits.length,
-                            lastVisitTime: maxTime
-                        };
-
-                        // 同步刷新进内存缓存，保持内存数据时刻最新
-                        if (internalCache.urlMap instanceof Map) {
-                            const parsed = parseUrlFast(targetUrl);
-                            const norm = parsed ? parsed.normUrl : targetUrl;
-                            if (norm) {
-                                let existing = internalCache.urlMap.get(norm);
-                                if (!existing && validVisits.length > 0) {
-                                    existing = {
-                                        visitCount: validVisits.length,
-                                        lastVisitTime: maxTime,
-                                        domain: parsed ? parsed.domain : extractHostname(targetUrl),
-                                        title: targetTitle,
-                                        variants: new Map([[targetUrl, { visitCount: validVisits.length, lastVisitTime: maxTime }]])
-                                    };
-                                    internalCache.urlMap.set(norm, existing);
-                                    invalidateDomainAggregatesCache();
-                                } else if (existing) {
-                                    existing.variants.set(targetUrl, { visitCount: validVisits.length, lastVisitTime: maxTime });
-                                    let totalVisits = 0;
-                                    let mTime = 0;
-                                    for (const vData of existing.variants.values()) {
-                                        totalVisits += (vData.visitCount || 0);
-                                        if (vData.lastVisitTime > mTime) mTime = vData.lastVisitTime;
-                                    }
-                                    existing.visitCount = totalVisits;
-                                    existing.lastVisitTime = mTime;
-                                    invalidateDomainAggregatesCache();
-                                }
-                            }
-                        }
-
-                        return result;
-                    }
-                }
-            } catch (_) {}
-        }
-
-        // 2. 若直接原网址未命中，平滑回退至内存快照与变体聚合（例如书签包含追踪参数变体或跳转落地页）
-        if (internalCache.urlMap instanceof Map) {
-            const stats = getBookmarkStatsFromIndex({ url: targetUrl, title: targetTitle });
-            if (stats && stats.visitCount > 0) {
-                return stats;
-            }
-        }
-
-        return { visitCount: 0, lastVisitTime: 0 };
-    }
-
-    /**
-     * 计算文件夹的聚合访问统计
+     * 计算文件夹的聚合访问统计（按 canonicalUrl 去重累加，防止重复书签虚高总访问量）
      */
     function computeFolderAggregatedStats(childBookmarks, index = null) {
         if (!Array.isArray(childBookmarks) || childBookmarks.length === 0) {
-            return { totalVisits: 0, bookmarkCount: 0, topBookmark: null };
+            return { totalVisits: 0, lastVisitTime: 0, bookmarkCount: 0, topBookmark: null };
         }
 
-        const idx = index || internalCache;
+        const map = (index && index.urlMap instanceof Map) ? index.urlMap : (index instanceof Map ? index : internalCache.urlMap);
+        if (!(map instanceof Map)) {
+            return { totalVisits: 0, lastVisitTime: 0, bookmarkCount: childBookmarks.length, topBookmark: null };
+        }
+
         let totalVisits = 0;
         let topBookmark = null;
         let maxVisits = 0;
+        let maxTopTime = 0;
         let validBookmarkCount = 0;
         let maxLastVisit = 0;
+        const seenCanonical = new Set();
 
         for (let i = 0; i < childBookmarks.length; i++) {
             const bm = childBookmarks[i];
-            if (!bm || (!bm.url && !bm.__url)) continue;
+            const rawUrl = extractBookmarkRawUrl(bm);
+            if (!rawUrl) continue;
             validBookmarkCount++;
 
-            const stats = getBookmarkStatsFromIndex(bm, idx);
+            const canonicalUrl = normalizeHistoryUrl(rawUrl);
+            const stats = canonicalUrl ? map.get(canonicalUrl) : null;
             const visits = stats ? (stats.visitCount || 0) : 0;
-            totalVisits += visits;
-            if (stats && stats.lastVisitTime > maxLastVisit) {
-                maxLastVisit = stats.lastVisitTime;
-            }
+            const time = stats ? (stats.lastVisitTime || 0) : 0;
 
-            if (visits > maxVisits) {
+            if (!canonicalUrl || !seenCanonical.has(canonicalUrl)) {
+                if (canonicalUrl) seenCanonical.add(canonicalUrl);
+                totalVisits += visits;
+            }
+            if (time > maxLastVisit) maxLastVisit = time;
+
+            if (visits > maxVisits || (visits > 0 && visits === maxVisits && time > maxTopTime)) {
                 maxVisits = visits;
+                maxTopTime = time;
                 topBookmark = {
-                    title: bm.title || bm.__title || bm.url || '',
+                    title: extractBookmarkTitle(bm) || rawUrl || '',
                     visitCount: visits,
-                    url: bm.url || bm.__url || '',
-                    lastVisitTime: stats ? (stats.lastVisitTime || 0) : 0
+                    url: rawUrl,
+                    lastVisitTime: time
                 };
             }
         }
@@ -1392,123 +2733,347 @@
         };
     }
 
+    function extractOldLedgerBasesFromRawSnapshot(rawSnapshot, canonicalSet, rebuildStartDay) {
+        const resultMap = new Map();
+        if (!isValidV4RawSnapshot(rawSnapshot) || !(canonicalSet instanceof Set) || canonicalSet.size === 0) {
+            return resultMap;
+        }
+
+        const ensureEntry = (canonicalUrl) => {
+            let entry = resultMap.get(canonicalUrl);
+            if (!entry) {
+                entry = { baseCount: 0, baseLastVisitTime: 0, knownVariants: [] };
+                resultMap.set(canonicalUrl, entry);
+            }
+            return entry;
+        };
+
+        const archiveItems = rawSnapshot.archiveItems;
+        for (let i = 0; i < archiveItems.length; i++) {
+            const row = archiveItems[i];
+            if (Array.isArray(row) && typeof row[0] === 'string' && canonicalSet.has(row[0])) {
+                const entry = ensureEntry(row[0]);
+                const count = Math.max(0, Math.floor(Number(row[1]) || 0));
+                const vt = Math.max(0, Number(row[2]) || 0);
+                entry.baseCount += count;
+                if (vt > entry.baseLastVisitTime) entry.baseLastVisitTime = vt;
+            }
+        }
+
+        const dayBuckets = rawSnapshot.dayBuckets;
+        for (let i = 0; i < dayBuckets.length; i++) {
+            const bucket = dayBuckets[i];
+            if (!Array.isArray(bucket)) continue;
+            const dayNum = Number(bucket[0]);
+            if (!Number.isInteger(dayNum) || dayNum >= rebuildStartDay) continue;
+            const rows = bucket[1];
+            if (!Array.isArray(rows)) continue;
+            for (let j = 0; j < rows.length; j++) {
+                const row = rows[j];
+                if (Array.isArray(row) && typeof row[0] === 'string' && canonicalSet.has(row[0])) {
+                    const entry = ensureEntry(row[0]);
+                    const count = Math.max(0, Math.floor(Number(row[1]) || 0));
+                    const vt = Math.max(0, Number(row[2]) || 0);
+                    entry.baseCount += count;
+                    if (vt > entry.baseLastVisitTime) entry.baseLastVisitTime = vt;
+                }
+            }
+        }
+
+        const variants = rawSnapshot.variants;
+        for (let i = 0; i < variants.length; i++) {
+            const row = variants[i];
+            if (Array.isArray(row) && typeof row[0] === 'string' && canonicalSet.has(row[0]) && Array.isArray(row[1])) {
+                const entry = ensureEntry(row[0]);
+                for (let j = 0; j < row[1].length && entry.knownVariants.length < MAX_VARIANTS_PER_CANONICAL; j++) {
+                    if (typeof row[1][j] === 'string' && row[1][j]) {
+                        entry.knownVariants.push(row[1][j]);
+                    }
+                }
+            }
+        }
+
+        return resultMap;
+    }
+
+    function extractOldLedgerBaseFromRawSnapshot(rawSnapshot, canonicalUrl, rebuildStartDay) {
+        if (!canonicalUrl) {
+            return { baseCount: 0, baseLastVisitTime: 0, knownVariants: [] };
+        }
+        const map = extractOldLedgerBasesFromRawSnapshot(rawSnapshot, new Set([canonicalUrl]), rebuildStartDay);
+        return map.get(canonicalUrl) || { baseCount: 0, baseLastVisitTime: 0, knownVariants: [] };
+    }
+
+    function extractOldLedgerBaseFromWarmMemory(canonicalUrl, rebuildStartDay) {
+        let baseCount = 0;
+        let baseLastVisitTime = 0;
+        const knownVariants = [];
+
+        if (!canonicalUrl) return { baseCount, baseLastVisitTime, knownVariants };
+
+        const archived = internalCache.archiveMap?.get(canonicalUrl);
+        if (archived) {
+            baseCount += Math.max(0, Math.floor(Number(archived.visitCount) || 0));
+            if (archived.lastVisitTime > baseLastVisitTime) {
+                baseLastVisitTime = archived.lastVisitTime;
+            }
+        }
+
+        if (internalCache.recentDayBuckets instanceof Map) {
+            for (const [dayNum, dayMap] of internalCache.recentDayBuckets.entries()) {
+                if (dayNum >= rebuildStartDay) continue;
+                const tuple = dayMap.get(canonicalUrl);
+                if (!tuple) continue;
+                baseCount += Math.max(0, Math.floor(Number(tuple[0]) || 0));
+                const vt = Number(tuple[1]) || 0;
+                if (vt > baseLastVisitTime) baseLastVisitTime = vt;
+            }
+        }
+
+        const varSet = internalCache.variantsMap?.get(canonicalUrl);
+        if (varSet instanceof Set) {
+            for (const u of varSet) {
+                if (typeof u === 'string' && u) knownVariants.push(u);
+            }
+        }
+
+        return { baseCount, baseLastVisitTime, knownVariants };
+    }
+
+    function mergeBucketedVisitsWithBase(bucketed, baseCount, baseLastVisitTime, rebuildStartDay) {
+        if (baseCount > 0) {
+            let recentCount = 0;
+            let recentMaxTime = 0;
+            for (const [dayNum, tuple] of bucketed.dayBuckets.entries()) {
+                if (dayNum < rebuildStartDay) continue;
+                recentCount += Math.max(0, Math.floor(Number(tuple?.[0]) || 0));
+                const vt = Number(tuple?.[1]) || 0;
+                if (vt > recentMaxTime) recentMaxTime = vt;
+            }
+            return {
+                visitCount: baseCount + recentCount,
+                lastVisitTime: Math.max(baseLastVisitTime, recentMaxTime)
+            };
+        }
+
+        return {
+            visitCount: bucketed.totalCount,
+            lastVisitTime: bucketed.maxTime
+        };
+    }
+
     /**
-     * 获取指定域名的累计访问量（动态从书签统计汇总，天然支持主域名与子域名，解决 P1/P9）
+     * 单 URL 统计查询：绝不调用 ensureMemoryLoaded() 或 history.search 全量扫描。
+     * 按「老账底数 (< rebuildStartDay) + 近端实时 getVisits (>= rebuildStartDay)」精确合算，
+     * 并校验 canvas_history_purged_at 防止清库后冷态右键残余旧账。
      */
-    function getDomainStats(domain) {
-        if (!domain || !(internalCache.urlMap instanceof Map)) {
+    async function getSingleUrlHistoryStats(targetUrl, targetTitle = '') {
+        if (!targetUrl || typeof targetUrl !== 'string') {
             return { visitCount: 0, lastVisitTime: 0 };
         }
-        const clean = String(domain).toLowerCase().replace(/^www\./i, '');
-        if (!internalCache.domainAggregatesCache) {
-            internalCache.domainAggregatesCache = buildDomainAggregatesCache();
+
+        const anchorTime = Date.now();
+        const rebuildStartDay = getRebuildStartDay(anchorTime);
+        const parsed = parseCanonicalUrl(targetUrl);
+        const canonicalUrl = parsed ? parsed.canonicalUrl : '';
+
+        const canUseWarmMemory = (internalCache.urlMap instanceof Map) && !internalCache.staleByPeer;
+        if (canUseWarmMemory) {
+            touchMemory();
         }
-        return internalCache.domainAggregatesCache.get(clean) || { visitCount: 0, lastVisitTime: 0 };
+
+        const rawSnapshotPromise = (!canUseWarmMemory && typeof window !== 'undefined' && typeof window.SearchIndexDb?.getBookmarkVisitStats === 'function')
+            ? window.SearchIndexDb.getBookmarkVisitStats().catch(() => null)
+            : Promise.resolve(null);
+
+        const [primaryVisits, stored, rawSnapshot] = await Promise.all([
+            historyGetVisits(targetUrl),
+            storageLocalGet([STORAGE_KEY_PURGED_AT]),
+            rawSnapshotPromise
+        ]);
+
+        const purgedAt = Math.max(0, Number(stored[STORAGE_KEY_PURGED_AT]) || 0);
+        let baseCount = 0;
+        let baseLastVisitTime = 0;
+        let knownVariants = [];
+        let effectivePurgedAt = purgedAt;
+
+        if (canUseWarmMemory) {
+            const memSyncTime = Number(internalCache.lastSyncTime) || 0;
+            const memPurged = purgedAt > memSyncTime;
+            effectivePurgedAt = memPurged ? purgedAt : Math.max(purgedAt, Number(internalCache.lastPurgedAt) || 0);
+            if (!memPurged && canonicalUrl) {
+                const memBase = extractOldLedgerBaseFromWarmMemory(canonicalUrl, rebuildStartDay);
+                baseCount = memBase.baseCount;
+                baseLastVisitTime = memBase.baseLastVisitTime;
+                knownVariants = memBase.knownVariants;
+            }
+        } else if (isValidV4RawSnapshot(rawSnapshot)) {
+            const snapSyncTime = Number(rawSnapshot.meta?.lastSyncTime) || 0;
+            const snapPurged = purgedAt > snapSyncTime;
+            effectivePurgedAt = snapPurged ? purgedAt : Math.max(purgedAt, Number(rawSnapshot.meta?.lastPurgedAt) || 0);
+            if (!snapPurged && canonicalUrl) {
+                const snapBase = extractOldLedgerBaseFromRawSnapshot(rawSnapshot, canonicalUrl, rebuildStartDay);
+                baseCount = snapBase.baseCount;
+                baseLastVisitTime = snapBase.baseLastVisitTime;
+                knownVariants = snapBase.knownVariants;
+            }
+        }
+
+        const extraUrls = [];
+        for (let i = 0; i < knownVariants.length; i++) {
+            const vUrl = knownVariants[i];
+            if (vUrl && vUrl !== targetUrl && !extraUrls.includes(vUrl)) {
+                extraUrls.push(vUrl);
+            }
+        }
+
+        const extraVisitLists = extraUrls.length > 0
+            ? await Promise.all(extraUrls.map((u) => historyGetVisits(u)))
+            : [];
+
+        const bucketed = dedupeAndBucketVisits([primaryVisits, ...extraVisitLists], anchorTime, effectivePurgedAt);
+        return mergeBucketedVisitsWithBase(bucketed, baseCount, baseLastVisitTime, rebuildStartDay);
     }
 
     /**
-     * 监听后台分发的历史记录变更通知（基于单调递增版本号与 Storage 驱动）
+     * 文件夹聚合统计查询：热索引未过水位且无删除信号时 O(1) 读内存；
+     * 否则仅针对该文件夹去重后的书签 URL 队列直查 getVisits 并叠加既有老账底数，
+     * 绝不因右键一个文件夹而唤醒/重建全库 3000+ 书签索引。
      */
-    function setupStorageSyncListener() {
-        const browserAPI = (typeof chrome !== 'undefined' && chrome.storage?.local) ? chrome : ((typeof browser !== 'undefined' && browser.storage?.local) ? browser : null);
-        if (!browserAPI) return;
-
-        try {
-            if (typeof browserAPI.storage?.onChanged?.addListener === 'function') {
-                browserAPI.storage.onChanged.addListener((changes, areaName) => {
-                    if (areaName === 'local' && (changes.canvasHistoryStatsVersion || changes.canvasHistoryStatsDirty)) {
-                        checkAndApplyHistoryDirtyState().then((res) => {
-                            if (res && res.shouldForceRebuild) {
-                                ensureHistoryStatsIndex({ force: true }).catch(() => {});
-                            }
-                        }).catch(() => {});
-                    }
-                });
-            }
-        } catch (_) {}
-
-        // 当用户从其他应用切回当前标签页或侧边栏时，按需轻量检查（静默懒更新）
-        if (typeof window !== 'undefined') {
-            window.addEventListener('focus', () => {
-                if (internalCache.urlMap instanceof Map) {
-                    checkAndApplyHistoryDirtyState().catch(() => {});
-                }
-            });
+    async function getFolderHistoryStats(childBookmarks) {
+        if (!Array.isArray(childBookmarks) || childBookmarks.length === 0) {
+            return { totalVisits: 0, lastVisitTime: 0, bookmarkCount: 0, topBookmark: null };
         }
+
+        const targetCanonicals = new Set();
+        const rawUrlsByCanonical = new Map();
+        for (let i = 0; i < childBookmarks.length; i++) {
+            const rawUrl = extractBookmarkRawUrl(childBookmarks[i]);
+            if (!rawUrl) continue;
+            const parsed = parseCanonicalUrl(rawUrl);
+            if (!parsed || !parsed.canonicalUrl) continue;
+            const canonicalUrl = parsed.canonicalUrl;
+            targetCanonicals.add(canonicalUrl);
+            let rawSet = rawUrlsByCanonical.get(canonicalUrl);
+            if (!rawSet) {
+                rawSet = new Set();
+                rawUrlsByCanonical.set(canonicalUrl, rawSet);
+            }
+            rawSet.add(rawUrl);
+        }
+
+        if (targetCanonicals.size === 0) {
+            return computeFolderAggregatedStats(childBookmarks, new Map());
+        }
+
+        const anchorTime = Date.now();
+        const rebuildStartDay = getRebuildStartDay(anchorTime);
+        const canUseWarmMemory = (internalCache.urlMap instanceof Map) && !internalCache.staleByPeer;
+        if (canUseWarmMemory) {
+            touchMemory();
+        }
+
+        if (canUseWarmMemory) {
+            const whitelistStillIncomplete = !internalCache.syncedWithCompleteWhitelist && isTempSectionsReady();
+            if (!whitelistStillIncomplete && (anchorTime - (internalCache.lastSyncTime || 0) <= WATERMARK_INTERVAL_MS)) {
+                const stored = await storageLocalGet([
+                    STORAGE_KEY_PURGED_AT,
+                    STORAGE_KEY_OVERFLOW_AT,
+                    STORAGE_KEY_DELETED_URLS
+                ]);
+                if ((internalCache.urlMap instanceof Map) &&
+                    !hasUnprocessedDeletionSignal(stored, internalCache.lastSyncTime)) {
+                    return computeFolderAggregatedStats(childBookmarks, internalCache.urlMap);
+                }
+            }
+            const warmResult = await ensureMemoryLoaded({ awaitSync: true });
+            return computeFolderAggregatedStats(childBookmarks, (warmResult && warmResult.urlMap) || internalCache.urlMap);
+        }
+
+        let stored = null;
+
+        const rawSnapshotPromise = (!canUseWarmMemory && typeof window !== 'undefined' && typeof window.SearchIndexDb?.getBookmarkVisitStats === 'function')
+            ? window.SearchIndexDb.getBookmarkVisitStats().catch(() => null)
+            : Promise.resolve(null);
+
+        const [resolvedStorage, rawSnapshot] = await Promise.all([
+            stored ? Promise.resolve(stored) : storageLocalGet([STORAGE_KEY_PURGED_AT]),
+            rawSnapshotPromise
+        ]);
+
+        const purgedAt = Math.max(0, Number(resolvedStorage[STORAGE_KEY_PURGED_AT]) || 0);
+        let effectivePurgedAt = purgedAt;
+        let useLedgerBase = false;
+        let rawBaseMap = null;
+
+        if (canUseWarmMemory) {
+            const memSyncTime = Number(internalCache.lastSyncTime) || 0;
+            const memPurged = purgedAt > memSyncTime;
+            effectivePurgedAt = memPurged ? purgedAt : Math.max(purgedAt, Number(internalCache.lastPurgedAt) || 0);
+            useLedgerBase = !memPurged;
+        } else if (isValidV4RawSnapshot(rawSnapshot)) {
+            const snapSyncTime = Number(rawSnapshot.meta?.lastSyncTime) || 0;
+            const snapPurged = purgedAt > snapSyncTime;
+            effectivePurgedAt = snapPurged ? purgedAt : Math.max(purgedAt, Number(rawSnapshot.meta?.lastPurgedAt) || 0);
+            if (!snapPurged) {
+                useLedgerBase = true;
+                rawBaseMap = extractOldLedgerBasesFromRawSnapshot(rawSnapshot, targetCanonicals, rebuildStartDay);
+            }
+        }
+
+        const statsMap = new Map();
+        const canonicalList = Array.from(targetCanonicals);
+
+        for (let start = 0; start < canonicalList.length; start += GET_VISITS_BATCH_SIZE) {
+            const slice = canonicalList.slice(start, start + GET_VISITS_BATCH_SIZE);
+            await Promise.all(slice.map(async (canonicalUrl) => {
+                const base = useLedgerBase
+                    ? (canUseWarmMemory
+                        ? extractOldLedgerBaseFromWarmMemory(canonicalUrl, rebuildStartDay)
+                        : (rawBaseMap?.get(canonicalUrl) || { baseCount: 0, baseLastVisitTime: 0, knownVariants: [] }))
+                    : { baseCount: 0, baseLastVisitTime: 0, knownVariants: [] };
+
+                const candidateSet = new Set(rawUrlsByCanonical.get(canonicalUrl));
+                for (let j = 0; j < base.knownVariants.length; j++) {
+                    if (base.knownVariants[j]) candidateSet.add(base.knownVariants[j]);
+                }
+                const candidateUrls = Array.from(candidateSet);
+                const bucketed = await collectBucketedVisitsForCanonical(candidateUrls, anchorTime, effectivePurgedAt);
+                statsMap.set(
+                    canonicalUrl,
+                    mergeBucketedVisitsWithBase(bucketed, base.baseCount, base.baseLastVisitTime, rebuildStartDay)
+                );
+            }));
+
+            if (start + GET_VISITS_BATCH_SIZE < canonicalList.length) {
+                await yieldToMainThread();
+            }
+        }
+
+        return computeFolderAggregatedStats(childBookmarks, { urlMap: statsMap });
     }
 
-    setupStorageSyncListener();
-
-    // 导出全局对象
     const HistoryStatsService = {
         normalizeHistoryUrl,
-        getProtoAgnosticUrl,
+        getProtoAgnosticUrl: normalizeHistoryUrl,
         extractHostname,
         extractLeafBookmarks,
         setBookmarkTargets,
         registerBookmarkProvider,
-        ensureHistoryStatsIndex,
+        seedNewBookmarks,
+        ensureMemoryLoaded,
+        ensureHistoryStatsIndex: ensureMemoryLoaded,
         getBookmarkStatsFromIndex,
         getSingleUrlHistoryStats,
-        syncSingleBookmarkStats: async (targetUrl, targetTitle = '') => {
-            if (!targetUrl || typeof targetUrl !== 'string') return { visitCount: 0, lastVisitTime: 0 };
-            const stats = await getSingleUrlHistoryStats(targetUrl, targetTitle);
-            if (stats && stats.visitCount > 0 && internalCache.urlMap instanceof Map) {
-                const parsed = parseUrlFast(targetUrl);
-                const norm = parsed ? parsed.normUrl : targetUrl;
-                if (norm) {
-                    let existing = internalCache.urlMap.get(norm);
-                    if (!existing) {
-                        existing = {
-                            visitCount: stats.visitCount,
-                            lastVisitTime: stats.lastVisitTime,
-                            domain: parsed ? parsed.domain : extractHostname(targetUrl),
-                            title: targetTitle,
-                            variants: new Map([[targetUrl, { visitCount: stats.visitCount, lastVisitTime: stats.lastVisitTime }]])
-                        };
-                        internalCache.urlMap.set(norm, existing);
-                    } else {
-                        existing.variants.set(targetUrl, { visitCount: stats.visitCount, lastVisitTime: stats.lastVisitTime });
-                        let totalVisits = 0;
-                        let maxTime = 0;
-                        for (const vData of existing.variants.values()) {
-                            totalVisits += (vData.visitCount || 0);
-                            if (vData.lastVisitTime > maxTime) maxTime = vData.lastVisitTime;
-                        }
-                        existing.visitCount = totalVisits;
-                        existing.lastVisitTime = maxTime;
-                    }
-                    invalidateDomainAggregatesCache();
-                    saveIndexToPersistentStorage(internalCache.urlMap, Date.now());
-                }
-            }
-            return stats;
-        },
+        getFolderHistoryStats,
         computeFolderAggregatedStats,
         getDomainStats,
-        performIncrementalDeltaSync: () => performWatermarkSync(internalCache.lastSyncTime),
+        performIncrementalDeltaSync,
         isCacheReady: () => !!(internalCache.urlMap instanceof Map),
-        clearCache: () => {
-            if (persistentSaveTimer) {
-                clearTimeout(persistentSaveTimer);
-                persistentSaveTimer = null;
-            }
-            internalCache.urlMap = null;
-            internalCache.protoAgnosticMap = null;
-            internalCache.titleDomainMap = null;
-            internalCache.domainAggregatesCache = null;
-            internalCache.redirectBookmarkUrls = null;
-            if (internalCache.zeroVisitNormUrls) {
-                internalCache.zeroVisitNormUrls.clear();
-            }
-            internalCache.loadedAt = 0;
-            internalCache.lastSyncTime = 0;
-
-            if (typeof window !== 'undefined' && window.SearchIndexDb && typeof window.SearchIndexDb.saveBookmarkVisitStats === 'function') {
-                window.SearchIndexDb.saveBookmarkVisitStats(null).catch?.(() => {});
-            }
-            dispatchStatsUpdatedEvent();
-        }
+        touchMemory,
+        releaseMemory,
+        clearCache
     };
 
     root.HistoryStatsService = HistoryStatsService;

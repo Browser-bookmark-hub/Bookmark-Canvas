@@ -9,7 +9,7 @@
     const STORE_COORDINATES = 'coordinates';
     const SNAPSHOT_META_KEY = 'snapshot';
     const DIRTY_META_KEY = 'dirty_state';
-    const RECORD_STORAGE_FORMAT = 'records-v1';
+    const RECORD_STORAGE_FORMAT = 'shards-v3';
     const INDEX_MODE = 'mode';
     const INDEX_OWNER = 'ownerKey';
     const SHARD_KEYS = {
@@ -189,6 +189,7 @@
         return !!(
             meta &&
             meta.complete === true &&
+            meta.storageFormat === RECORD_STORAGE_FORMAT &&
             normalizeSignature(meta.signature) === normalizeSignature(signature)
         );
     }
@@ -371,6 +372,22 @@
         return { item: entry, order: fallbackOrder };
     }
 
+    /**
+     * Strip live tree payloads (rawItem/children) before persisting search records
+     * so IndexedDB does not store multi-megabyte duplicated section/folder subtrees.
+     */
+    function sanitizeRecordItemForPersistence(item) {
+        if (!item || typeof item !== 'object') return item;
+        const copy = Object.assign({}, item);
+        if (Object.prototype.hasOwnProperty.call(copy, 'rawItem')) {
+            delete copy.rawItem;
+        }
+        if (Object.prototype.hasOwnProperty.call(copy, 'children')) {
+            delete copy.children;
+        }
+        return copy;
+    }
+
     function createRecordsForList(list, mode) {
         const safeList = Array.isArray(list) ? list : [];
         const normalizedMode = normalizeMode(mode);
@@ -384,7 +401,7 @@
                 mode: normalizedMode,
                 ownerKey,
                 order,
-                item
+                item: sanitizeRecordItemForPersistence(item)
             });
         });
         return records;
@@ -452,6 +469,27 @@
         return { bookmark, card, description, coordinates };
     }
 
+    function sanitizeListForShardPersistence(list) {
+        const safeList = Array.isArray(list) ? list : [];
+        const sanitized = [];
+        for (let i = 0; i < safeList.length; i++) {
+            const { item } = unwrapRecordInput(safeList[i], i);
+            if (!item || typeof item !== 'object') continue;
+            sanitized.push(sanitizeRecordItemForPersistence(item));
+        }
+        return sanitized;
+    }
+
+    function sanitizeCoordinatesForShardPersistence(coordinates) {
+        const safe = coordinates && typeof coordinates === 'object' ? coordinates : {};
+        const cleaned = {};
+        for (const [id, coord] of Object.entries(safe)) {
+            if (!id || !coord || typeof coord !== 'object') continue;
+            cleaned[String(id)] = Object.assign({}, coord);
+        }
+        return cleaned;
+    }
+
     async function saveSnapshot(snapshot) {
         const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
         const signature = normalizeSignature(safeSnapshot.signature);
@@ -459,19 +497,10 @@
             throw new Error('Cannot save search index without signature');
         }
 
-        const bookmarkIndex = Array.isArray(safeSnapshot.bookmarkIndex) ? safeSnapshot.bookmarkIndex : [];
-        const cardIndex = Array.isArray(safeSnapshot.cardIndex) ? safeSnapshot.cardIndex : [];
-        const descriptionIndex = Array.isArray(safeSnapshot.descriptionIndex) ? safeSnapshot.descriptionIndex : [];
-        const coordinates = safeSnapshot.coordinates && typeof safeSnapshot.coordinates === 'object'
-            ? safeSnapshot.coordinates
-            : {};
-
-        const records = createRecordsFromSnapshot({
-            bookmarkIndex,
-            cardIndex,
-            descriptionIndex
-        });
-        const coordinateRecords = createCoordinateRecords(coordinates);
+        const bookmarkIndex = sanitizeListForShardPersistence(safeSnapshot.bookmarkIndex);
+        const cardIndex = sanitizeListForShardPersistence(safeSnapshot.cardIndex);
+        const descriptionIndex = sanitizeListForShardPersistence(safeSnapshot.descriptionIndex);
+        const coordinates = sanitizeCoordinatesForShardPersistence(safeSnapshot.coordinates);
 
         const db = await openSearchDb();
         const tx = db.transaction([STORE_META, STORE_SHARDS, STORE_RECORDS, STORE_COORDINATES], 'readwrite');
@@ -490,19 +519,20 @@
                 bookmark: bookmarkIndex.length,
                 card: cardIndex.length,
                 description: descriptionIndex.length,
-                coordinates: coordinateRecords.length
+                coordinates: Object.keys(coordinates).length
             }
         };
 
-        const writes = [
-            shardStore.clear(),
+        // 整块按模式写入 STORE_SHARDS（读取快 ~9x），并清空旧 STORE_RECORDS / STORE_COORDINATES 释放空间
+        await Promise.all([
             recordStore.clear(),
             coordStore.clear(),
-            metaStore.put(meta, SNAPSHOT_META_KEY),
-            ...records.map(record => recordStore.put(record)),
-            ...coordinateRecords.map(record => coordStore.put(record))
-        ];
-        await Promise.all(writes);
+            shardStore.put(bookmarkIndex, SHARD_KEYS.bookmark),
+            shardStore.put(cardIndex, SHARD_KEYS.card),
+            shardStore.put(descriptionIndex, SHARD_KEYS.description),
+            shardStore.put(coordinates, SHARD_KEYS.coordinates),
+            metaStore.put(meta, SNAPSHOT_META_KEY)
+        ]);
         await tx.done;
 
         return meta;
@@ -525,7 +555,7 @@
         const db = await openSearchDb();
         const existingMeta = await db.get(STORE_META, SNAPSHOT_META_KEY);
         if (!isRecordMeta(existingMeta)) {
-            return { applied: false, reason: 'record-storage-not-ready' };
+            return { applied: false, reason: 'shard-storage-not-ready' };
         }
 
         const baseSignature = normalizeSignature(safeSnapshot.baseSignature);
@@ -533,27 +563,46 @@
             return { applied: false, reason: 'base-signature-mismatch' };
         }
 
-        const records = createRecordsFromSnapshot(safeSnapshot)
-            .filter(record => ownerKeys.includes(record.ownerKey));
-        const coordinateRecords = createCoordinateRecords(safeSnapshot.coordinates)
-            .filter(record => ownerKeys.includes(record.ownerKey));
+        const ownerSet = new Set(ownerKeys);
+        const mergeListByOwner = (existingList, patchList) => {
+            const kept = (Array.isArray(existingList) ? existingList : [])
+                .filter(item => item && !ownerSet.has(inferOwnerKeyFromItem(item)));
+            const replacements = sanitizeListForShardPersistence(patchList)
+                .filter(item => item && ownerSet.has(inferOwnerKeyFromItem(item)));
+            return kept.concat(replacements);
+        };
 
-        const tx = db.transaction([STORE_META, STORE_RECORDS, STORE_COORDINATES], 'readwrite');
-        const metaStore = tx.objectStore(STORE_META);
-        const recordStore = tx.objectStore(STORE_RECORDS);
-        const coordStore = tx.objectStore(STORE_COORDINATES);
-
-        await Promise.all([
-            ...ownerKeys.map(ownerKey => deleteByOwnerKey(recordStore, ownerKey)),
-            ...ownerKeys.map(ownerKey => deleteByOwnerKey(coordStore, ownerKey))
+        const readTx = db.transaction(STORE_SHARDS, 'readonly');
+        const readShardStore = readTx.objectStore(STORE_SHARDS);
+        const [oldBookmark, oldCard, oldDescription, oldCoordinates] = await Promise.all([
+            readShardStore.get(SHARD_KEYS.bookmark),
+            readShardStore.get(SHARD_KEYS.card),
+            readShardStore.get(SHARD_KEYS.description),
+            readShardStore.get(SHARD_KEYS.coordinates)
         ]);
+        await readTx.done;
 
-        await Promise.all([
-            ...records.map(record => recordStore.put(record)),
-            ...coordinateRecords.map(record => coordStore.put(record))
-        ]);
+        const nextBookmark = mergeListByOwner(oldBookmark, safeSnapshot.bookmarkIndex);
+        const nextCard = mergeListByOwner(oldCard, safeSnapshot.cardIndex);
+        const nextDescription = mergeListByOwner(oldDescription, safeSnapshot.descriptionIndex);
+        const nextCoordinates = {};
+        if (oldCoordinates && typeof oldCoordinates === 'object') {
+            for (const [id, coord] of Object.entries(oldCoordinates)) {
+                if (!id || !coord || typeof coord !== 'object') continue;
+                if (ownerSet.has(normalizeOwnerKey(coord.ownerKey || coord.__ownerKey || ''))) continue;
+                nextCoordinates[id] = coord;
+            }
+        }
+        const patchCoords = sanitizeCoordinatesForShardPersistence(safeSnapshot.coordinates);
+        for (const [id, coord] of Object.entries(patchCoords)) {
+            if (ownerSet.has(normalizeOwnerKey(coord.ownerKey || coord.__ownerKey || ''))) {
+                nextCoordinates[id] = coord;
+            }
+        }
 
-        const counts = await countRecordStores(recordStore, coordStore);
+        const writeTx = db.transaction([STORE_META, STORE_SHARDS], 'readwrite');
+        const metaStore = writeTx.objectStore(STORE_META);
+        const shardStore = writeTx.objectStore(STORE_SHARDS);
         const meta = Object.assign({}, existingMeta, {
             signature,
             complete: true,
@@ -562,26 +611,36 @@
             builtAt: existingMeta.builtAt || Date.now(),
             updatedAt: Date.now(),
             lastPatchOwnerKeys: ownerKeys,
-            counts
+            counts: {
+                bookmark: nextBookmark.length,
+                card: nextCard.length,
+                description: nextDescription.length,
+                coordinates: Object.keys(nextCoordinates).length
+            }
         });
 
-        await metaStore.put(meta, SNAPSHOT_META_KEY);
-        await tx.done;
+        await Promise.all([
+            shardStore.put(nextBookmark, SHARD_KEYS.bookmark),
+            shardStore.put(nextCard, SHARD_KEYS.card),
+            shardStore.put(nextDescription, SHARD_KEYS.description),
+            shardStore.put(nextCoordinates, SHARD_KEYS.coordinates),
+            metaStore.put(meta, SNAPSHOT_META_KEY)
+        ]);
+        await writeTx.done;
 
         return meta;
     }
 
     async function loadCoordinatesForOwners(db, ownerKeys) {
-        const keys = Array.from(new Set((Array.isArray(ownerKeys) ? ownerKeys : [])
+        const keySet = new Set((Array.isArray(ownerKeys) ? ownerKeys : [])
             .map(normalizeOwnerKey)
-            .filter(Boolean)));
-        if (keys.length === 0) return {};
+            .filter(Boolean));
+        if (keySet.size === 0) return {};
 
-        const tx = db.transaction(STORE_COORDINATES, 'readonly');
-        const ownerIndex = tx.store.index(INDEX_OWNER);
-        const lists = await Promise.all(keys.map(ownerKey => ownerIndex.getAll(ownerKey)));
-        await tx.done;
-        return coordinateRecordsToObject(lists.flat());
+        const allRecords = await db.getAll(STORE_COORDINATES);
+        const matched = (Array.isArray(allRecords) ? allRecords : [])
+            .filter(record => record && keySet.has(normalizeOwnerKey(record.ownerKey)));
+        return coordinateRecordsToObject(matched);
     }
 
     async function loadRecordModeSnapshot(db, meta, mode) {
@@ -624,9 +683,6 @@
         const { db, meta, dirtyState } = await getMetaWithDirtyState();
         if (!isFreshMeta(meta, signature) || !isDirtyStateClean(dirtyState)) return null;
 
-        if (isRecordMeta(meta)) {
-            return loadRecordModeSnapshot(db, meta, mode);
-        }
         return loadLegacyModeSnapshot(db, meta, mode);
     }
 
@@ -675,14 +731,11 @@
         const { db, meta, dirtyState } = await getMetaWithDirtyState();
         const allowStale = !!(options && options.allowStale === true);
         if (allowStale) {
-            if (!isCompleteMeta(meta)) return null;
+            if (!isRecordMeta(meta)) return null;
         } else {
             if (!isFreshMeta(meta, signature) || !isDirtyStateClean(dirtyState)) return null;
         }
 
-        if (isRecordMeta(meta)) {
-            return loadRecordAllSnapshot(db, meta);
-        }
         return loadLegacyAllSnapshot(db, meta);
     }
 

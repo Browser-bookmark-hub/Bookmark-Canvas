@@ -59,12 +59,28 @@ let canvasClipboardOperation = Promise.resolve();
 let canvasClipboardActiveEntryId = null;
 let canvasClipboardResetTimer = null;
 
-// Clean up any residual session storage clipboard keys from prior versions
-try {
-  if (browserAPI?.storage?.session) {
-    browserAPI.storage.session.remove([CANVAS_CLIPBOARD_STORAGE_KEY]).catch?.(() => {});
-  }
-} catch (_) {}
+function cleanupLegacyStorageKeys() {
+  try {
+    if (browserAPI?.storage?.session) {
+      browserAPI.storage.session.remove([CANVAS_CLIPBOARD_STORAGE_KEY]).catch?.(() => {});
+    }
+    if (browserAPI?.storage?.local) {
+      browserAPI.storage.local.remove([
+        'bcs:history-stats-ledger',
+        'canvasHistoryRemovedAt',
+        'canvasHistoryStatsLedger',
+        'canvasHistoryStatsDirty',
+        'canvasHistoryStatsVersion',
+        'canvasHistoryStatsRemovedAll',
+        'canvasHistoryStatsPrunedAt',
+        'canvasHistoryStatsRemovedUrls',
+        'canvas_history_removed_at',
+        'canvas_history_deleted_items',
+        'canvas_history_deleted_version'
+      ]).catch?.(() => {});
+    }
+  } catch (_) {}
+}
 
 function cloneCanvasClipboardValue(value) {
   try {
@@ -662,101 +678,122 @@ function registerCanvasPermanentBookmarkDirtyListener() {
   } catch (_) { }
 }
 
-const CANVAS_HISTORY_STATS_DIRTY_KEY = 'canvasHistoryStatsDirty';
-const CANVAS_HISTORY_STATS_VERSION_KEY = 'canvasHistoryStatsVersion';
-const CANVAS_HISTORY_STATS_REMOVED_ALL_KEY = 'canvasHistoryStatsRemovedAll';
-const CANVAS_HISTORY_STATS_PRUNED_AT_KEY = 'canvasHistoryStatsPrunedAt';
-const CANVAS_HISTORY_STATS_REMOVED_URLS_KEY = 'canvasHistoryStatsRemovedUrls';
-const CANVAS_HISTORY_STATS_MAX_BUFFERED_URLS = 300;
+const CANVAS_HISTORY_PURGED_AT_KEY = 'canvas_history_purged_at';
+const CANVAS_HISTORY_OVERFLOW_AT_KEY = 'canvas_history_overflow_at';
+const CANVAS_HISTORY_DELETED_URLS_KEY = 'canvas_history_deleted_urls';
+const CANVAS_HISTORY_STATS_SYNCED_AT_KEY = 'canvas_history_stats_synced_at';
+const CANVAS_HISTORY_DELETED_URL_LIMIT = 500;
+const CANVAS_HISTORY_PENDING_HARD_CAP = 5000;
+const CANVAS_HISTORY_REMOVED_DEBOUNCE_MS = 300;
 
-let canvasHistoryStatsRemovedDebounceTimer = null;
-let canvasHistoryStatsPendingRemovedAll = false;
-let canvasHistoryStatsPendingRemovedUrls = new Set();
-let canvasHistoryStatsExceededLimit = false;
+let pendingCanvasHistoryPurgeAt = 0;
+const pendingCanvasHistoryDeletedUrls = new Map();
+let canvasHistoryRemovedFlushTimer = null;
+let canvasHistoryRemovedWriteChain = Promise.resolve();
+
+function queueCanvasHistoryRemovedFlush(immediate = false) {
+  if (canvasHistoryRemovedFlushTimer !== null) {
+    clearTimeout(canvasHistoryRemovedFlushTimer);
+    canvasHistoryRemovedFlushTimer = null;
+  }
+  if (immediate) {
+    canvasHistoryRemovedWriteChain = canvasHistoryRemovedWriteChain
+      .then(() => flushCanvasHistoryRemovedEvents())
+      .catch(() => {});
+    return;
+  }
+  canvasHistoryRemovedFlushTimer = setTimeout(() => {
+    canvasHistoryRemovedFlushTimer = null;
+    canvasHistoryRemovedWriteChain = canvasHistoryRemovedWriteChain
+      .then(() => flushCanvasHistoryRemovedEvents())
+      .catch(() => {});
+  }, CANVAS_HISTORY_REMOVED_DEBOUNCE_MS);
+}
+
+async function flushCanvasHistoryRemovedEvents() {
+  const hadPurge = pendingCanvasHistoryPurgeAt > 0;
+  pendingCanvasHistoryPurgeAt = 0;
+  const batchUrls = new Map(pendingCanvasHistoryDeletedUrls);
+  pendingCanvasHistoryDeletedUrls.clear();
+
+  const flushTs = Date.now();
+  if (hadPurge) {
+    await storageLocalSet({ [CANVAS_HISTORY_PURGED_AT_KEY]: flushTs }).catch(() => {});
+    await storageLocalRemove([CANVAS_HISTORY_OVERFLOW_AT_KEY, CANVAS_HISTORY_DELETED_URLS_KEY]).catch(() => {});
+  }
+
+  if (batchUrls.size === 0) return;
+
+  if (batchUrls.size > CANVAS_HISTORY_DELETED_URL_LIMIT) {
+    await storageLocalSet({ [CANVAS_HISTORY_OVERFLOW_AT_KEY]: flushTs }).catch(() => {});
+    await storageLocalRemove([CANVAS_HISTORY_DELETED_URLS_KEY]).catch(() => {});
+    return;
+  }
+
+  const stored = await storageLocalGet([
+    CANVAS_HISTORY_DELETED_URLS_KEY,
+    CANVAS_HISTORY_OVERFLOW_AT_KEY,
+    CANVAS_HISTORY_PURGED_AT_KEY,
+    CANVAS_HISTORY_STATS_SYNCED_AT_KEY
+  ]).catch(() => ({}));
+
+  const resetCutoff = Math.max(
+    Number(stored?.[CANVAS_HISTORY_PURGED_AT_KEY]) || 0,
+    Number(stored?.[CANVAS_HISTORY_OVERFLOW_AT_KEY]) || 0,
+    Number(stored?.[CANVAS_HISTORY_STATS_SYNCED_AT_KEY]) || 0
+  );
+  const merged = new Map();
+  const existingTuples = Array.isArray(stored?.[CANVAS_HISTORY_DELETED_URLS_KEY])
+    ? stored[CANVAS_HISTORY_DELETED_URLS_KEY]
+    : [];
+
+  for (let i = 0; i < existingTuples.length; i++) {
+    const item = existingTuples[i];
+    if (Array.isArray(item) && typeof item[0] === 'string' && item[0]) {
+      const ts = Number(item[1]) || 0;
+      if (ts > resetCutoff) {
+        const prev = merged.get(item[0]) || 0;
+        if (ts > prev) merged.set(item[0], ts);
+      }
+    }
+  }
+
+  for (const url of batchUrls.keys()) {
+    merged.set(url, flushTs);
+  }
+
+  if (merged.size > CANVAS_HISTORY_DELETED_URL_LIMIT) {
+    await storageLocalSet({ [CANVAS_HISTORY_OVERFLOW_AT_KEY]: flushTs }).catch(() => {});
+    await storageLocalRemove([CANVAS_HISTORY_DELETED_URLS_KEY]).catch(() => {});
+    return;
+  }
+
+  await storageLocalSet({
+    [CANVAS_HISTORY_DELETED_URLS_KEY]: Array.from(merged.entries())
+  }).catch(() => {});
+}
 
 function registerCanvasHistoryRemovedListener() {
   try {
     if (!browserAPI?.history?.onVisitRemoved?.addListener) return;
     browserAPI.history.onVisitRemoved.addListener((removed) => {
-      try {
-        if (!removed) return;
-        if (removed.allHistory) {
-          canvasHistoryStatsPendingRemovedAll = true;
-          canvasHistoryStatsPendingRemovedUrls.clear();
-        } else if (Array.isArray(removed.urls)) {
-          if (!canvasHistoryStatsExceededLimit) {
-            for (let i = 0; i < removed.urls.length; i++) {
-              if (canvasHistoryStatsPendingRemovedUrls.size < CANVAS_HISTORY_STATS_MAX_BUFFERED_URLS) {
-                canvasHistoryStatsPendingRemovedUrls.add(removed.urls[i]);
-              } else {
-                // 单次或累计超过 300 条（如用户在浏览器清除了近3个月或全选清空大量历史），自动升阶为批量大清理时间戳
-                canvasHistoryStatsExceededLimit = true;
-                canvasHistoryStatsPendingRemovedUrls.clear();
-                break;
-              }
-            }
-          }
+      if (!removed) return;
+      const now = Date.now();
+      if (removed.allHistory === true) {
+        pendingCanvasHistoryPurgeAt = now;
+        pendingCanvasHistoryDeletedUrls.clear();
+        queueCanvasHistoryRemovedFlush(true);
+        return;
+      }
+      const urls = Array.isArray(removed.urls) ? removed.urls : [];
+      if (urls.length === 0) return;
+      for (let i = 0; i < urls.length; i++) {
+        const rawUrl = urls[i];
+        if (typeof rawUrl === 'string' && rawUrl) {
+          pendingCanvasHistoryDeletedUrls.set(rawUrl, now);
         }
-
-        if (canvasHistoryStatsRemovedDebounceTimer) {
-          clearTimeout(canvasHistoryStatsRemovedDebounceTimer);
-        }
-        // 500ms 防抖合并：避免高频删除或批量清理时向 storage 疯狂写入引发 I/O 震荡
-        canvasHistoryStatsRemovedDebounceTimer = setTimeout(async () => {
-          try {
-            const isAll = canvasHistoryStatsPendingRemovedAll;
-            const exceeded = canvasHistoryStatsExceededLimit;
-            const bufferedUrls = Array.from(canvasHistoryStatsPendingRemovedUrls);
-
-            canvasHistoryStatsPendingRemovedAll = false;
-            canvasHistoryStatsExceededLimit = false;
-            canvasHistoryStatsPendingRemovedUrls.clear();
-
-            const nowTs = Date.now();
-            if (isAll) {
-              await storageLocalSet({
-                [CANVAS_HISTORY_STATS_DIRTY_KEY]: true,
-                [CANVAS_HISTORY_STATS_VERSION_KEY]: nowTs,
-                [CANVAS_HISTORY_STATS_REMOVED_ALL_KEY]: true
-              });
-              await storageLocalRemove([CANVAS_HISTORY_STATS_REMOVED_URLS_KEY, CANVAS_HISTORY_STATS_PRUNED_AT_KEY]);
-            } else if (exceeded) {
-              // 超过上限的大批量或时间范围清理：记录时间戳，由前台在空闲阶段完成全量对齐
-              await storageLocalSet({
-                [CANVAS_HISTORY_STATS_DIRTY_KEY]: true,
-                [CANVAS_HISTORY_STATS_VERSION_KEY]: nowTs,
-                [CANVAS_HISTORY_STATS_PRUNED_AT_KEY]: nowTs
-              });
-              await storageLocalRemove([CANVAS_HISTORY_STATS_REMOVED_URLS_KEY, CANVAS_HISTORY_STATS_REMOVED_ALL_KEY]);
-            } else if (bufferedUrls.length > 0) {
-              // 1~300 条删除：合并已有暂存队列，前台白名单比对后 0ms 忽略或单点修补，绝不重拉10万条
-              const current = await storageLocalGet([
-                CANVAS_HISTORY_STATS_REMOVED_URLS_KEY
-              ]);
-              const mergedSet = new Set(Array.isArray(current[CANVAS_HISTORY_STATS_REMOVED_URLS_KEY]) ? current[CANVAS_HISTORY_STATS_REMOVED_URLS_KEY] : []);
-              for (const u of bufferedUrls) {
-                mergedSet.add(u);
-              }
-              if (mergedSet.size > CANVAS_HISTORY_STATS_MAX_BUFFERED_URLS) {
-                await storageLocalSet({
-                  [CANVAS_HISTORY_STATS_DIRTY_KEY]: true,
-                  [CANVAS_HISTORY_STATS_VERSION_KEY]: nowTs,
-                  [CANVAS_HISTORY_STATS_PRUNED_AT_KEY]: nowTs
-                });
-                await storageLocalRemove([CANVAS_HISTORY_STATS_REMOVED_URLS_KEY, CANVAS_HISTORY_STATS_REMOVED_ALL_KEY]);
-              } else {
-                await storageLocalSet({
-                  [CANVAS_HISTORY_STATS_DIRTY_KEY]: true,
-                  [CANVAS_HISTORY_STATS_VERSION_KEY]: nowTs,
-                  [CANVAS_HISTORY_STATS_REMOVED_URLS_KEY]: Array.from(mergedSet)
-                });
-                await storageLocalRemove([CANVAS_HISTORY_STATS_REMOVED_ALL_KEY, CANVAS_HISTORY_STATS_PRUNED_AT_KEY]);
-              }
-            }
-          } catch (_) { }
-          canvasHistoryStatsRemovedDebounceTimer = null;
-        }, 500);
-      } catch (_) { }
+      }
+      queueCanvasHistoryRemovedFlush(pendingCanvasHistoryDeletedUrls.size >= CANVAS_HISTORY_PENDING_HARD_CAP);
     });
   } catch (_) { }
 }
@@ -1026,6 +1063,7 @@ async function closeSidePanelInWindow(windowId) {
 
 if (browserAPI?.runtime?.onInstalled) {
   browserAPI.runtime.onInstalled.addListener(() => {
+    cleanupLegacyStorageKeys();
     initSidePanel();
     refreshSidePanelOpenWindows().catch(() => {});
     clearExtensionBadge();
@@ -1040,7 +1078,6 @@ try {
   }
 } catch (_) { }
 
-initSidePanel();
 registerCanvasForegroundActivePortListener();
 registerSidePanelTogglePortListener();
 registerCanvasPermanentBookmarkDirtyListener();
@@ -1268,6 +1305,7 @@ async function fetchImageAsDataUrl(url, options = {}) {
 if (browserAPI.tabs && browserAPI.tabs.onUpdated) {
   browserAPI.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     try {
+      if (!hasRunnableCanvasForegroundPort()) return;
       if (!changeInfo?.favIconUrl || !tab?.url) return;
       if (!tab.url.startsWith('http://') && !tab.url.startsWith('https://')) return;
 

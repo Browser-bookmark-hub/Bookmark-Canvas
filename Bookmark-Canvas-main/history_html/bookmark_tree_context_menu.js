@@ -7898,7 +7898,7 @@ function renderInfoSubmenu(context) {
     const treeIconEl = nodeEl ? nodeEl.querySelector('.tree-icon') : null;
     if (treeIconEl) {
         if (treeIconEl.tagName.toLowerCase() === 'img') {
-            nodeIconHtml = `<img src="${escapeHtml(treeIconEl.src)}" class="info-card-favicon" style="width: 14px; height: 14px; border-radius: 3px; object-fit: contain; flex-shrink: 0; margin-right: 4px;" onerror="this.outerHTML='<i class=\\'fas fa-bookmark\\' style=\\'color: #f59e0b; font-size: 13.5px;\\'></i>'">`;
+            nodeIconHtml = `<img src="${escapeHtml(treeIconEl.src)}" class="info-card-favicon" style="width: 14px; height: 14px; border-radius: 3px; object-fit: contain; flex-shrink: 0; margin-right: 4px;">`;
         } else {
             const iconClass = treeIconEl.className || '';
             const color = context.isFolder ? '#2563eb' : '#f59e0b';
@@ -8112,8 +8112,8 @@ function renderInfoSubmenu(context) {
             const visitCount = Number(data.historyStats.visitCount) || 0;
             const lastVisitTime = data.historyStats.lastVisitTime ? formatInfoTime(data.historyStats.lastVisitTime) : '';
             const visitsText = visitCount > 0
-                ? (lang === 'zh_CN' ? `${visitCount} 次 (近3个月)` : `${visitCount} visits (3 mo)`)
-                : (lang === 'zh_CN' ? '近3个月无访问' : 'No visits (3 mo)');
+                ? (lang === 'zh_CN' ? `${visitCount} 次` : `${visitCount} visits`)
+                : (lang === 'zh_CN' ? '暂无访问记录' : 'No visits recorded');
             statsHtml = `
                 <div class="info-card-row info-stats-visits-row">
                     <span class="info-card-label">${lang === 'zh_CN' ? '访问频次' : 'VISITS'}</span>
@@ -8243,6 +8243,22 @@ function renderInfoSubmenu(context) {
             e.stopPropagation();
             hideContextMenu();
         });
+    };
+
+    const bindInfoFaviconFallback = () => {
+        if (!contextSubmenu) return;
+        const img = contextSubmenu.querySelector('.info-card-favicon');
+        if (img && !img.__fallbackBound) {
+            img.__fallbackBound = true;
+            img.addEventListener('error', () => {
+                const icon = document.createElement('i');
+                icon.className = 'fas fa-bookmark';
+                icon.style.cssText = 'color: #f59e0b; font-size: 13.5px;';
+                if (img.parentNode) {
+                    img.parentNode.replaceChild(icon, img);
+                }
+            }, { once: true });
+        }
     };
 
     const bindNoteEditorEvent = (data) => {
@@ -8384,8 +8400,8 @@ function renderInfoSubmenu(context) {
                 const visitCount = Number(res.historyStats.visitCount) || 0;
                 const lastVisitTime = res.historyStats.lastVisitTime ? formatInfoTime(res.historyStats.lastVisitTime) : '';
                 const visitsText = visitCount > 0
-                    ? (lang === 'zh_CN' ? `${visitCount} 次 (近3个月)` : `${visitCount} visits (3 mo)`)
-                    : (lang === 'zh_CN' ? '近3个月无访问' : 'No visits (3 mo)');
+                    ? (lang === 'zh_CN' ? `${visitCount} 次` : `${visitCount} visits`)
+                    : (lang === 'zh_CN' ? '暂无访问记录' : 'No visits recorded');
                 renderedStatsHtml = `
                     <div class="info-card-row info-stats-visits-row">
                         <span class="info-card-label">${lang === 'zh_CN' ? '访问频次' : 'VISITS'}</span>
@@ -8433,6 +8449,20 @@ function renderInfoSubmenu(context) {
             const ph = contextSubmenu.querySelector('[data-role="info-stats-placeholder"]');
             if (ph) ph.remove();
         });
+    };
+
+    const resolveFolderStatsForInfo = async (folderNode, maxLeaves = Infinity) => {
+        const hss = (typeof window !== 'undefined') ? window.HistoryStatsService : null;
+        if (!folderNode || !hss) return null;
+        const leaves = (typeof hss.extractLeafBookmarks === 'function')
+            ? hss.extractLeafBookmarks(folderNode, maxLeaves)
+            : [];
+        if (leaves.length === 0) return null;
+        if (typeof hss.getFolderHistoryStats === 'function') {
+            return hss.getFolderHistoryStats(leaves);
+        }
+        const statsIndex = await hss.ensureHistoryStatsIndex();
+        return hss.computeFolderAggregatedStats(leaves, statsIndex);
     };
 
     if (isTemporary) {
@@ -8491,6 +8521,7 @@ function renderInfoSubmenu(context) {
         if (contextSubmenu.__activeInfoToken !== requestToken) return;
         contextSubmenu.innerHTML = renderCard(cardData);
         bindInfoCloseEvent();
+        bindInfoFaviconFallback();
         bindCopyEvent();
         bindPathToggleEvent();
         bindNoteEditorEvent(cardData);
@@ -8506,22 +8537,7 @@ function renderInfoSubmenu(context) {
                     } catch (_) {}
                 } else if (entry.item && (!entry.item.url || entry.item.type === 'folder') && window.HistoryStatsService) {
                     try {
-                        const leaves = (typeof window.HistoryStatsService.extractLeafBookmarks === 'function')
-                            ? window.HistoryStatsService.extractLeafBookmarks(entry.item)
-                            : [];
-                        if (leaves.length > 0) {
-                            if (!window.HistoryStatsService.isCacheReady() && typeof window.ensureCanvasSearchIndexForModeLoaded === 'function') {
-                                try {
-                                    await window.ensureCanvasSearchIndexForModeLoaded('bookmark');
-                                } catch (_) {}
-                            }
-                            if (window.HistoryStatsService.isCacheReady()) {
-                                folderStats = window.HistoryStatsService.computeFolderAggregatedStats(leaves);
-                            } else {
-                                const statsIndex = await window.HistoryStatsService.ensureHistoryStatsIndex();
-                                folderStats = window.HistoryStatsService.computeFolderAggregatedStats(leaves, statsIndex);
-                            }
-                        }
+                        folderStats = await resolveFolderStatsForInfo(entry.item);
                     } catch (_) {}
                 }
                 return { historyStats, folderStats };
@@ -8610,6 +8626,7 @@ function renderInfoSubmenu(context) {
             if (contextSubmenu.__activeInfoToken !== requestToken) return;
             contextSubmenu.innerHTML = renderCard(cardData);
             bindInfoCloseEvent();
+            bindInfoFaviconFallback();
             bindCopyEvent();
             bindPathToggleEvent();
             bindNoteEditorEvent(cardData);
@@ -8623,30 +8640,21 @@ function renderInfoSubmenu(context) {
                         try {
                             historyStats = await window.HistoryStatsService.getSingleUrlHistoryStats(node.url, node.title);
                         } catch (_) {}
-                    } else if (!node.url && window.HistoryStatsService && chrome && chrome.bookmarks && typeof chrome.bookmarks.getSubTree === 'function') {
+                    } else if (!node.url && window.HistoryStatsService) {
                         try {
-                            const subtrees = await new Promise((resolve) => {
-                                chrome.bookmarks.getSubTree(node.id, (tree) => {
-                                    if (chrome.runtime.lastError || !tree || !tree[0]) resolve([]);
-                                    else resolve(tree);
+                            let folderNode = typeof readPermanentNodeForPayload === 'function'
+                                ? await readPermanentNodeForPayload(node.id)
+                                : null;
+                            if (!folderNode && chrome && chrome.bookmarks && typeof chrome.bookmarks.getSubTree === 'function') {
+                                const subtrees = await new Promise((resolve) => {
+                                    chrome.bookmarks.getSubTree(node.id, (tree) => {
+                                        if (chrome.runtime.lastError || !tree || !tree[0]) resolve([]);
+                                        else resolve(tree);
+                                    });
                                 });
-                            });
-                            const childBookmarks = (typeof window.HistoryStatsService.extractLeafBookmarks === 'function')
-                                ? window.HistoryStatsService.extractLeafBookmarks(subtrees[0], Infinity)
-                                : [];
-                            if (childBookmarks.length > 0) {
-                                if (!window.HistoryStatsService.isCacheReady() && typeof window.ensureCanvasSearchIndexForModeLoaded === 'function') {
-                                    try {
-                                        await window.ensureCanvasSearchIndexForModeLoaded('bookmark');
-                                    } catch (_) {}
-                                }
-                                if (window.HistoryStatsService.isCacheReady()) {
-                                    folderStats = window.HistoryStatsService.computeFolderAggregatedStats(childBookmarks);
-                                } else {
-                                    const statsIndex = await window.HistoryStatsService.ensureHistoryStatsIndex();
-                                    folderStats = window.HistoryStatsService.computeFolderAggregatedStats(childBookmarks, statsIndex);
-                                }
+                                folderNode = subtrees[0] || null;
                             }
+                            folderStats = await resolveFolderStatsForInfo(folderNode, Infinity);
                         } catch (_) {}
                     }
                     return { historyStats, folderStats };

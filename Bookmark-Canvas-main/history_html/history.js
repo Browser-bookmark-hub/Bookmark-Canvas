@@ -17219,9 +17219,11 @@ function performSearch(query) {
                 searchCanvasAndRender(normalizedQuery, { source: 'input' });
             };
 
-            const ensureIndex = typeof window.ensureCanvasSearchIndexForActiveMode === 'function'
-                ? window.ensureCanvasSearchIndexForActiveMode
-                : null;
+            const ensureIndex = typeof window.ensureCanvasSearchIndexForQuery === 'function'
+                ? () => window.ensureCanvasSearchIndexForQuery(normalizedQuery)
+                : (typeof window.ensureCanvasSearchIndexForActiveMode === 'function'
+                    ? window.ensureCanvasSearchIndexForActiveMode
+                    : null);
             if (ensureIndex) {
                 Promise.resolve()
                     .then(() => ensureIndex())
@@ -17369,6 +17371,11 @@ async function handleBookmarkCreateRealtime(id, bookmark, options = {}) {
             schedulePermanentTreeSharedMutationRefresh('onCreated');
         }
         scheduleCachedCurrentTreeSnapshotRefresh('onCreated');
+        if (bookmark && bookmark.url && typeof window !== 'undefined' && window.HistoryStatsService &&
+            typeof window.HistoryStatsService.isCacheReady === 'function' && window.HistoryStatsService.isCacheReady() &&
+            typeof window.HistoryStatsService.seedNewBookmarks === 'function') {
+            window.HistoryStatsService.seedNewBookmarks([bookmark]).catch(() => {});
+        }
     }
 }
 

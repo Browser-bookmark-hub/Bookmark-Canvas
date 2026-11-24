@@ -1,6 +1,6 @@
 # Privacy Policy for Bookmark Canvas
 
-**Last Updated:** 2026-11-21
+**Last Updated:** 2026-11-26
 
 This Privacy Policy explains how Bookmark Canvas (the “Extension”) handles information. The Extension is designed around a local-first principle: **your bookmark and canvas data remain under your control.**
 
@@ -9,7 +9,7 @@ This Privacy Policy explains how Bookmark Canvas (the “Extension”) handles i
 The Extension handles the following information only to provide its bookmark-canvas features:
 
 - **Bookmarks and bookmark metadata:** bookmark titles, URLs, folder structure, Tags, and Notes. This information is needed to display, organize, search, import, export, and update bookmarks in the canvas.
-- **Browsing history for bookmark analytics (local only):** when bookmark visit statistics or heat search (@热度 / @hot) are triggered on demand, the Extension reads your local browsing history solely for URLs matching your existing bookmarks. Browsing history for non-bookmarked web pages is strictly filtered out and discarded immediately.
+- **Browsing history for bookmark analytics (local only):** when bookmark visit statistics, heat/recent search (@热度 / @hot, @最近 / @recent), or folder/bookmark info are used, and during idle warmup shortly after the canvas page or side panel opens, the Extension reads your local browsing history solely for URLs matching your existing bookmarks. Browsing history for non-bookmarked web pages is strictly filtered out and discarded immediately without entering the visit ledger; a small local buffer of browser history-removal signals may be temporarily kept in local storage solely to reconcile deletions and is automatically pruned as snapshots sync.
 - **Canvas data and settings:** Permanent Sections, Temporary Sections, Blank Sections, Card Groups, connections, descriptions, layout, local indexes, and related preferences.
 - **GitHub configuration and credentials:** if you choose GitHub Push/Pull, the configured repository details and Personal Access Token are handled so the Extension can authenticate directly with GitHub.
 - **Favicon-related data:** bookmark URLs may be used to display favicon images; favicon data may be cached locally by the browser or Extension.
@@ -33,8 +33,9 @@ The Extension requests the following permissions only for its declared functiona
 
 - `sidePanel`: display Bookmark Canvas in the browser Side Panel.
 - `bookmarks`: read and update bookmarks, folders, and bookmark-tree structure.
-- `history`: compute local visit frequency and heat statistics exclusively for your saved bookmarks on demand, entirely within the local browser.
+- `history`: compute and reconcile local visit frequency and heat statistics exclusively for your saved bookmarks (including local history-deletion reconciliation), during idle warmup after the canvas or side panel opens and when you search or view statistics, entirely within the local browser.
 - `storage` and `unlimitedStorage`: persist canvas documents, settings, indexes, and caches locally.
+- `clipboardWrite`: copy bookmark URLs, titles, or canvas content to the clipboard when requested by the user.
 - `downloads`: export canvas packages to your device.
 - `tabs`, `activeTab`, `tabGroups`, and `windows`: support canvas navigation and browser-tab, tab-group, and window-related interactions initiated through the Extension.
 - `commands`: provide the Extension's keyboard shortcuts.
