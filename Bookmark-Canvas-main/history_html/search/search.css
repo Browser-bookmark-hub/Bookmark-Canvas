@@ -430,21 +430,25 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     margin: 5px 0 4px;
 }
 
-.search-bookmark-filter-help-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
+.search-bookmark-filter-help-btn,
+.search-mode-menu-item .mode-desc .search-bookmark-filter-help-btn,
+html.side-panel-mode .search-mode-menu-item .mode-desc .search-bookmark-filter-help-btn {
+    position: relative;
+    top: -0.5px;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 14px !important;
+    height: 14px !important;
     margin-left: 4px;
-    padding: 0;
-    border: none;
+    padding: 0 !important;
+    border: none !important;
     outline: none;
-    background: transparent;
-    color: var(--text-tertiary);
-    opacity: 0.85;
-    cursor: pointer;
-    font-size: 11px;
+    background: transparent !important;
+    color: var(--text-tertiary) !important;
+    opacity: 0.85 !important;
+    cursor: pointer !important;
+    font-size: 11px !important;
     line-height: 1;
     vertical-align: middle;
     transition: color 0.15s ease, opacity 0.15s ease;
@@ -454,15 +458,19 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     appearance: none;
 }
 
-.search-bookmark-filter-help-btn i {
+.search-bookmark-filter-help-btn i,
+.search-mode-menu-item .mode-desc .search-bookmark-filter-help-btn i {
     font-size: 11px;
     line-height: 1;
     vertical-align: middle;
 }
 
-.search-bookmark-filter-help-btn:hover {
-    color: var(--text-primary);
-    opacity: 1;
+.search-bookmark-filter-help-btn:hover,
+.search-mode-menu-item .mode-desc .search-bookmark-filter-help-btn:hover,
+html.side-panel-mode .search-mode-menu-item .mode-desc .search-bookmark-filter-help-btn:hover {
+    color: var(--text-primary) !important;
+    background: transparent !important;
+    opacity: 1 !important;
 }
 
 .canvas-bookmark-to-temp-btn {
@@ -476,17 +484,20 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     border-radius: 8px;
     border: 1px solid rgba(128, 128, 128, 0.28);
     background: transparent;
-    color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f));
+    color: var(--text-secondary);
+    font-size: 12.5px;
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
     user-select: none;
     box-sizing: border-box;
+    transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 
 .canvas-bookmark-to-temp-btn:hover {
-    border-color: color-mix(in srgb, var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f)) 50%, rgba(128, 128, 128, 0.28));
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f)) 14%, transparent);
+    border-color: var(--accent-primary, #2563eb);
+    background: color-mix(in srgb, var(--accent-primary, #2563eb) 12%, transparent);
+    color: var(--accent-primary, #2563eb);
 }
 
 .canvas-bookmark-to-temp-btn-compact {
@@ -494,6 +505,12 @@ html.side-panel-mode .search-container.side-panel-search-collapsing .search-resu
     height: 24px;
     min-width: 24px;
     border-radius: 6px;
+    font-size: 11px;
+}
+
+.canvas-bookmark-to-temp-btn i {
+    color: inherit;
+    pointer-events: none;
 }
 
 .canvas-bookmark-to-temp-btn .canvas-dir-icon-badge {
@@ -6418,7 +6435,7 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     font-weight: 700;
 }
 
-/* ==================== 候选右上角特殊临时栏目说明气泡与操作菜单 ==================== */
+/* ==================== 候选右上角生成与导出菜单浮层、二级配置浮层与底部勾选栏 ==================== */
 .canvas-temp-section-bubble {
     position: fixed;
     z-index: 100010;
@@ -6428,11 +6445,11 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     padding: 10px 12px;
     background: var(--bg-elevated, #ffffff);
     color: var(--text-primary, #1f2937);
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-    font-size: 11.5px;
-    line-height: 1.2;
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.14));
+    border-radius: 11px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+    font-size: 12px;
+    line-height: 1.25;
     white-space: nowrap;
     pointer-events: auto;
     opacity: 0;
@@ -6440,7 +6457,8 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     transform: translateY(2px);
     box-sizing: border-box;
     user-select: none;
-    min-width: 260px;
+    min-width: 304px;
+    max-width: min(344px, calc(100vw - 20px));
 }
 
 .canvas-temp-section-bubble.visible {
@@ -6452,7 +6470,7 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     background: var(--bg-elevated, #1e2025);
     color: var(--text-primary, #f3f4f6);
     border-color: rgba(255, 255, 255, 0.18);
-    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.52);
 }
 
 .canvas-temp-section-bubble .canvas-temp-bubble-arrow {
@@ -6483,7 +6501,7 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
 }
 
@@ -6491,12 +6509,26 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    min-width: 0;
+}
+
+.canvas-temp-bubble-header-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.canvas-temp-bubble-scope-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+    line-height: 1;
 }
 
 .canvas-temp-bubble-icon {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--canvas-dir-color-special-temp, var(--quick-add-special-temp-color, #e9973f));
+    font-size: 12.5px;
+    color: var(--accent-primary, #2563eb);
     line-height: 1;
     display: inline-flex;
     align-items: center;
@@ -6505,28 +6537,27 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 
 .canvas-temp-bubble-title {
     font-weight: 600;
-    font-size: 11.5px;
+    font-size: 12px;
     color: inherit;
-    line-height: 1;
+    line-height: 1.2;
 }
 
 .canvas-temp-bubble-help-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 17px;
-    height: 17px;
+    width: 18px;
+    height: 18px;
     padding: 0;
     border: none;
     background: transparent;
     color: var(--text-secondary, #888888);
-    opacity: 0.75;
+    opacity: 0.78;
     border-radius: 50%;
     cursor: pointer;
     flex-shrink: 0;
     font-size: 11.5px;
     line-height: 1;
-    margin-left: 2px;
     transition: all 0.15s ease;
 }
 
@@ -6535,7 +6566,6 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     opacity: 1;
     color: var(--canvas-dir-color-special-temp, #e9973f);
     background: rgba(233, 151, 63, 0.14);
-    transform: scale(1.08);
 }
 
 /* ==================== 特殊临时栏目独立上层说明气泡 ==================== */
@@ -6723,34 +6753,15 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     width: 100%;
 }
 
-/* 分区卡片与标题 */
-.canvas-temp-bubble-section {
+/* 普通模式单行范围栏（前15 / 前50 / 全部 / 自定 + 勾选） */
+.canvas-temp-bubble-scope-block {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     width: 100%;
 }
 
-.canvas-temp-bubble-section-header {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 10.5px;
-    font-weight: 600;
-    color: var(--text-secondary, #6b7280);
-    line-height: 1;
-    margin-bottom: 1px;
-    letter-spacing: 0.2px;
-}
-
-.canvas-temp-bubble-section-header i {
-    font-size: 10px;
-    opacity: 0.85;
-    color: var(--canvas-dir-color-special-temp, #e9973f);
-}
-
-/* 胶囊分片选项栏（全部 + 前 N 项一整排） */
-.canvas-temp-bubble-chips-wrap {
+.canvas-temp-bubble-scope-row {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -6760,13 +6771,14 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 .canvas-temp-bubble-chip {
     flex: 1;
     min-width: 0;
-    padding: 4px 0;
-    border-radius: 5px;
+    height: 26px;
+    padding: 0 4px;
+    border-radius: 6px;
     border: 1px solid var(--border-color, rgba(128, 128, 128, 0.24));
     background: var(--bg-secondary, rgba(128, 128, 128, 0.06));
     color: var(--text-primary);
-    font-size: 10.5px;
-    font-weight: 600;
+    font-size: 11.5px;
+    font-weight: 500;
     cursor: pointer;
     text-align: center;
     box-sizing: border-box;
@@ -6774,41 +6786,547 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 }
 
 .canvas-temp-bubble-chip:hover {
-    border-color: var(--canvas-dir-color-special-temp, #e9973f);
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 18%, transparent);
+    border-color: rgba(233, 151, 63, 0.6);
     color: var(--canvas-dir-color-special-temp, #e9973f);
 }
 
-.canvas-temp-bubble-chip.canvas-temp-bubble-chip-all {
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 12%, rgba(128, 128, 128, 0.06));
-    border-color: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 35%, rgba(128, 128, 128, 0.24));
+.canvas-temp-bubble-chip.active {
+    background: rgba(233, 151, 63, 0.14);
+    border-color: rgba(233, 151, 63, 0.6);
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+    font-weight: 600;
+}
+
+.canvas-temp-bubble-select-entry-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.26));
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+    color: var(--text-primary);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+
+.canvas-temp-bubble-select-entry-btn i {
+    font-size: 11px;
+    opacity: 0.85;
+}
+
+.canvas-temp-bubble-select-entry-btn:hover {
+    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+    background: rgba(233, 151, 63, 0.12);
     color: var(--canvas-dir-color-special-temp, #e9973f);
 }
 
-.canvas-temp-bubble-chip.canvas-temp-bubble-chip-all:hover {
-    background: var(--canvas-dir-color-special-temp, #e9973f);
-    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+/* 三组单行动作 */
+.canvas-temp-bubble-actions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.canvas-temp-bubble-action-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    min-height: 26px;
+}
+
+.canvas-export-row-title-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.canvas-export-row-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.canvas-export-row-icon.is-json {
+    color: #10b981;
+}
+
+.canvas-export-row-icon.is-md {
+    color: #0ea5e9;
+}
+
+.canvas-export-row-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.canvas-export-row-label-muted {
+    color: var(--text-secondary, #6b7280);
+}
+
+.canvas-export-info-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-secondary, #6b7280);
+    cursor: pointer;
+    flex-shrink: 0;
+    font-size: 12px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.canvas-export-info-btn:hover,
+.canvas-export-info-btn.is-active {
+    background: rgba(128, 128, 128, 0.14);
+    color: var(--accent-primary, #2563eb);
+}
+
+.canvas-export-row-btns {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+.canvas-export-special-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.28));
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+    color: var(--text-primary);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    box-sizing: border-box;
+    transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.canvas-export-special-btn:hover {
+    background: var(--bg-hover, rgba(128, 128, 128, 0.16));
+    border-color: rgba(128, 128, 128, 0.48);
+}
+
+.canvas-export-special-star {
+    font-size: 12.5px;
+    line-height: 1;
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+}
+
+.canvas-export-blank-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(136, 136, 136, 0.38);
+    background: rgba(136, 136, 136, 0.1);
+    color: var(--text-primary);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    box-sizing: border-box;
+    transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.canvas-export-blank-btn:hover {
+    background: rgba(136, 136, 136, 0.18);
+    border-color: rgba(136, 136, 136, 0.62);
+}
+
+.canvas-export-blank-btn .canvas-dir-icon-badge-md {
+    min-width: 20px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #888888;
+    border-color: rgba(136, 136, 136, 0.45);
+    background: rgba(136, 136, 136, 0.12);
+}
+
+.canvas-export-op-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.28));
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+    color: var(--text-primary);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    box-sizing: border-box;
+    transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.canvas-export-op-btn i {
+    font-size: 10.5px;
+    opacity: 0.8;
+}
+
+.canvas-export-op-btn:hover {
+    background: var(--bg-hover, rgba(128, 128, 128, 0.16));
+    border-color: rgba(128, 128, 128, 0.48);
+}
+
+/* ==================== 二级 ⓘ 信息配置浮层 ==================== */
+.canvas-export-config-popover {
+    position: fixed;
+    z-index: 100025;
+    width: 256px;
+    max-width: calc(100vw - 20px);
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 11px;
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.14));
+    background: var(--bg-elevated, #ffffff);
+    color: var(--text-primary, #1f2937);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+    font-size: 12px;
+    line-height: 1.4;
+    box-sizing: border-box;
+    user-select: none;
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateY(3px);
+    transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.canvas-export-config-popover.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+[data-theme="dark"] .canvas-export-config-popover {
+    background: var(--bg-elevated, #1e2025);
+    color: var(--text-primary, #f3f4f6);
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.56);
+}
+
+.canvas-export-config-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.18));
+}
+
+.canvas-export-config-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.canvas-export-config-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-secondary, #6b7280);
+    cursor: pointer;
+    flex-shrink: 0;
+    font-size: 11px;
+    transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.canvas-export-config-close-btn:hover {
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.14));
+    border-color: var(--border-color, rgba(128, 128, 128, 0.22));
+    color: var(--text-primary);
+}
+
+.canvas-export-config-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.canvas-export-segmented {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px;
+    padding: 2px;
+    border-radius: 7px;
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.24));
+    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+}
+
+.canvas-export-seg-btn {
+    height: 24px;
+    padding: 0 6px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-secondary, #6b7280);
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.canvas-export-seg-btn.active {
+    background: var(--accent-primary, #2563eb);
     color: #ffffff;
+    font-weight: 600;
 }
 
-[data-theme="dark"] .canvas-temp-bubble-chip.canvas-temp-bubble-chip-all {
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 16%, rgba(255, 255, 255, 0.06));
-    border-color: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 40%, rgba(255, 255, 255, 0.2));
+.canvas-export-pills-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.canvas-export-field-pill {
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 5px;
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.26));
+    background: transparent;
+    color: var(--text-secondary, #6b7280);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.14s ease;
+}
+
+.canvas-export-field-pill:hover {
+    border-color: rgba(233, 151, 63, 0.55);
+    color: var(--text-primary);
+}
+
+.canvas-export-field-pill.is-selected {
+    background: rgba(233, 151, 63, 0.14);
+    border-color: rgba(233, 151, 63, 0.58);
     color: var(--canvas-dir-color-special-temp, #e9973f);
+    font-weight: 600;
 }
 
-[data-theme="dark"] .canvas-temp-bubble-chip.canvas-temp-bubble-chip-all:hover {
-    background: var(--canvas-dir-color-special-temp, #e9973f);
-    border-color: var(--canvas-dir-color-special-temp, #e9973f);
+.canvas-export-config-hint {
+    font-size: 11.5px;
+    color: var(--text-secondary, #6b7280);
+    line-height: 1.45;
+}
+
+.canvas-export-config-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11.5px;
+    color: var(--text-secondary, #6b7280);
+    padding-top: 2px;
+}
+
+.canvas-export-cols-select-all {
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--accent-primary, #2563eb);
+    cursor: pointer;
+}
+
+.canvas-export-cols-select-all:hover {
+    text-decoration: underline;
+}
+
+/* ==================== 极简底部勾选控制条 ==================== */
+.canvas-search-selection-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 12px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    font-size: 12px;
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 8%, var(--bg-elevated, #ffffff));
+    border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+    user-select: none;
+}
+
+[data-theme="dark"] .canvas-search-selection-bar {
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 11%, var(--bg-elevated, #1e2025));
+    border-top-color: rgba(255, 255, 255, 0.14);
+}
+
+.search-results-panel.view-grid.selection-mode-active .canvas-search-selection-bar {
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 55;
+    margin-top: auto;
+}
+
+body:not(.header-dock-bottom) .search-results-panel.selection-mode-active .canvas-search-selection-bar {
+    padding-bottom: 14px;
+    border-bottom-left-radius: 11px;
+    border-bottom-right-radius: 11px;
+}
+
+body.header-dock-bottom .search-results-panel.selection-mode-active .canvas-search-selection-bar {
+    padding-bottom: 8px;
+    border-bottom-left-radius: 11px;
+    border-bottom-right-radius: 11px;
+}
+
+body:not(.header-dock-bottom) .search-results-panel.view-grid.selection-mode-active .search-panel-resize-handle.handle-bottom {
+    margin-top: -14px !important;
+}
+
+.search-results-panel.view-table.selection-mode-active .canvas-search-tabulator .tabulator-tableholder {
+    padding-bottom: 4px !important;
+}
+
+.canvas-selection-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.canvas-selection-bar-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 600;
+    color: var(--canvas-dir-color-special-temp, #e9973f);
+    white-space: nowrap;
+}
+
+.canvas-selection-bar-sep {
+    color: var(--border-color, rgba(128, 128, 128, 0.4));
+}
+
+.canvas-selection-bar-link {
+    border: none;
+    background: transparent;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary, #6b7280);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.14s ease, background-color 0.14s ease;
+}
+
+.canvas-selection-bar-link:first-of-type {
+    color: var(--text-primary);
+}
+
+.canvas-selection-bar-link:hover:not(:disabled) {
+    background: rgba(128, 128, 128, 0.12);
+    color: var(--text-primary);
+}
+
+.canvas-selection-bar-link.is-exit:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.canvas-selection-bar-link.is-disabled,
+.canvas-selection-bar-link:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+}
+
+.canvas-search-selection-bar-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 7px;
+    border: 1px solid var(--accent-primary, #2563eb);
+    background: var(--accent-primary, #2563eb);
     color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: filter 0.14s ease, opacity 0.14s ease;
 }
 
-.canvas-temp-bubble-chip.canvas-temp-bubble-chip-custom {
-    color: var(--text-secondary);
+.canvas-selection-bar-action-icon {
+    font-size: 11px;
 }
 
-.canvas-temp-bubble-chip.canvas-temp-bubble-chip-custom:hover {
-    color: var(--canvas-dir-color-special-temp, #e9973f);
+.canvas-search-selection-bar-action-btn:not(.has-selected) {
+    opacity: 0.52;
+}
+
+.canvas-search-selection-bar-action-btn.has-selected:hover {
+    filter: brightness(0.95);
+}
+
+.canvas-selection-bar-caret {
+    font-size: 10px;
+    opacity: 0.9;
+}
+
+@container search-panel (max-width: 440px) {
+    .canvas-search-selection-bar {
+        padding-left: 8px;
+        padding-right: 8px;
+        gap: 6px;
+    }
+    .canvas-selection-bar-left {
+        gap: 5px;
+    }
+    .canvas-selection-bar-caret {
+        display: none;
+    }
+    .canvas-search-selection-bar-action-btn {
+        height: 25px;
+        padding: 0 9px;
+        font-size: 11.5px;
+    }
 }
 
 /* 自定义前 N 项输入行 */
@@ -6817,7 +7335,6 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     align-items: center;
     gap: 6px;
     width: 100%;
-    margin-top: 5px;
     padding: 4px 6px;
     background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
     border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
@@ -6833,7 +7350,7 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     flex: 1;
     min-width: 0;
     padding: 3px 6px;
-    font-size: 11px;
+    font-size: 11.5px;
     border: 1px solid var(--border-color, rgba(128, 128, 128, 0.28));
     border-radius: 4px;
     background: var(--bg-primary, #ffffff);
@@ -6855,18 +7372,18 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
 .canvas-temp-custom-confirm-btn {
     flex: 0 0 auto;
     padding: 3px 8px;
-    font-size: 11px;
+    font-size: 11.5px;
     font-weight: 600;
     border-radius: 4px;
     border: 1px solid var(--canvas-dir-color-special-temp, #e9973f);
     background: var(--canvas-dir-color-special-temp, #e9973f);
     color: #ffffff;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: filter 0.15s ease;
 }
 
 .canvas-temp-custom-confirm-btn:hover {
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 85%, #000);
+    filter: brightness(0.95);
 }
 
 .canvas-temp-custom-cancel-btn {
@@ -6891,101 +7408,20 @@ html.side-panel-mode .canvas-bookmark-type-toggle.is-domain-active .canvas-bookm
     color: var(--text-primary);
 }
 
-/* 通用按钮 */
-.canvas-temp-bubble-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    width: 100%;
-    padding: 5.5px 9px;
-    border-radius: 6px;
-    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.28));
-    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
-    color: var(--text-primary);
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    box-sizing: border-box;
-    transition: all 0.15s ease;
-}
-
-.canvas-temp-bubble-btn:hover {
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 18%, transparent);
-    border-color: var(--canvas-dir-color-special-temp, #e9973f);
-    color: var(--canvas-dir-color-special-temp, #e9973f);
-}
-
-.canvas-temp-bubble-btn-enter {
-    border-color: var(--border-color, rgba(128, 128, 128, 0.3));
-    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
-    color: var(--text-primary);
-}
-
-.canvas-temp-bubble-btn-enter:hover {
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 14%, transparent);
-    border-color: var(--canvas-dir-color-special-temp, #e9973f);
-    color: var(--canvas-dir-color-special-temp, #e9973f);
-}
-
-/* 勾选模式活跃状态双按钮栏：左边【清空】，右边【退出】 */
-.canvas-temp-bubble-mode-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-}
-
-.canvas-temp-bubble-mode-row .canvas-temp-bubble-btn {
-    flex: 1 1 50%;
-    min-width: 0;
-    justify-content: center;
-    padding: 5px 8px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.canvas-temp-bubble-clear-btn {
-    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
-    color: var(--text-secondary);
-    border-color: var(--border-color, rgba(128, 128, 128, 0.28));
-}
-
-.canvas-temp-bubble-clear-btn:hover:not(:disabled):not(.is-disabled) {
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 14%, transparent);
-    border-color: var(--canvas-dir-color-special-temp, #e9973f);
-    color: var(--canvas-dir-color-special-temp, #e9973f);
-}
-
-.canvas-temp-bubble-clear-btn:disabled,
-.canvas-temp-bubble-clear-btn.is-disabled {
-    opacity: 0.45;
-    cursor: not-allowed !important;
-}
-
-.canvas-temp-bubble-exit-btn,
-.canvas-temp-bubble-mode-row .canvas-temp-bubble-toggle-mode.is-exit {
-    background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
-    color: var(--text-secondary);
-    border-color: var(--border-color, rgba(128, 128, 128, 0.28));
-}
-
-.canvas-temp-bubble-exit-btn:hover,
-.canvas-temp-bubble-mode-row .canvas-temp-bubble-toggle-mode.is-exit:hover {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 0.4);
-    color: #ef4444;
-}
-
 /* ==================== 勾选模式（Selection Mode）视觉高亮 ==================== */
-/* 1. 生成特殊临时栏目按钮进入勾选模式或点击打开菜单时的橙色边框与激活高光 */
+/* 1. 导出按钮激活、展开菜单或进入勾选模式时的边框与高亮 */
 .canvas-bookmark-to-temp-btn.is-active,
-.canvas-bookmark-to-temp-btn.is-menu-open,
+.canvas-bookmark-to-temp-btn.is-menu-open {
+    border-color: var(--accent-primary, #2563eb) !important;
+    background: color-mix(in srgb, var(--accent-primary, #2563eb) 16%, transparent) !important;
+    color: var(--accent-primary, #2563eb) !important;
+}
+
 .canvas-bookmark-to-temp-btn.is-selection-mode {
     border-color: var(--canvas-dir-color-special-temp, #e9973f) !important;
-    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 20%, transparent) !important;
+    background: color-mix(in srgb, var(--canvas-dir-color-special-temp, #e9973f) 18%, transparent) !important;
     color: var(--canvas-dir-color-special-temp, #e9973f) !important;
-    box-shadow: 0 0 0 1.5px var(--canvas-dir-color-special-temp, #e9973f), 0 0 8px rgba(233, 151, 63, 0.35) !important;
+    box-shadow: 0 0 0 1px var(--canvas-dir-color-special-temp, #e9973f) !important;
 }
 
 /* 2. 勾选模式：防误触机制（子元素指针穿透，纯声明式零残留）与网格高亮 */
