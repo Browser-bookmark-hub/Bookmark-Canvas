@@ -3253,7 +3253,9 @@ function handleSearchResultsPanelClick(e) {
     if (panelType !== 'results' && panelType !== 'root-browse') return;
 
     if (tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
-        const inBubbleOrBtn = e.target && e.target.closest && e.target.closest('#searchTempSectionBubble, .canvas-bookmark-to-temp-btn');
+        const inBubbleOrBtn = e.target && e.target.closest && e.target.closest(
+            '#searchTempSectionBubble, .canvas-bookmark-to-temp-btn, .canvas-search-selection-bar-action-btn, #canvasTempSectionHelpPopover, #canvasSearchExportConfigPopover'
+        );
         if (!inBubbleOrBtn) {
             hideTempSectionBubble(true);
         }
@@ -3277,6 +3279,7 @@ function handleSearchResultsPanelClick(e) {
             '.canvas-bookmark-to-temp-btn, .canvas-bookmark-selection-confirm-btn, #searchTempSectionBubble, .canvas-temp-bubble-btn, .canvas-temp-bubble-chip, ' +
             '.canvas-search-selection-bar, .canvas-search-selection-bar-action-btn, .canvas-selection-bar-link, ' +
             '#canvasSearchExportConfigPopover, .canvas-export-info-btn, .canvas-export-field-pill, .canvas-export-seg-btn, .canvas-export-config-close-btn, ' +
+            '#canvasTempSectionHelpPopover, .canvas-temp-bubble-help-btn, .canvas-temp-help-popover-close-btn, ' +
             '.canvas-domain-temp-btn, #canvasDomainTempBubble, .canvas-table-subdomain-pill-btn, #canvasSubdomainPopover, .search-domain-subdomains-count, ' +
             '.canvas-domain-nav-banner, .canvas-domain-nav-back-btn, .canvas-domain-nav-clear-focus-btn, ' +
             '.canvas-bookmark-view-toggle-btn, .canvas-bookmark-toolbar-actions, ' +
@@ -4575,7 +4578,7 @@ function scheduleSearchTitleTooltip(targetEl, fullTitle, delayMs = 700, options 
 }
 
 // ==================== 搜索模式：多格式导出与特殊临时栏目拓展系统 ====================
-const CANVAS_SEARCH_EXPORT_JSON_MODE_KEY = 'bookmark_canvas_search_export_json_mode';
+const CANVAS_SEARCH_EXPORT_JSON_MODE_KEY = 'bookmark_canvas_search_export_json_mode_v2';
 const CANVAS_SEARCH_EXPORT_JSON_FIELDS_KEY = 'bookmark_canvas_search_export_json_fields';
 const CANVAS_SEARCH_EXPORT_TABLE_EXCLUDED_COLS_PREFIX = 'bookmark_canvas_search_table_md_excluded_';
 const CANVAS_SEARCH_EXPORT_GRID_MD_FIELDS_KEY = 'bookmark_canvas_search_export_grid_md_fields';
@@ -5032,7 +5035,7 @@ function unwrapSearchItemsForTempPayload(items, options = {}) {
         if (!candidate) return;
         const norm = candidate.rawItem || candidate;
         if (!norm) return;
-        const isFold = norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true;
+        const isFold = isSearchResultFolderCandidate(candidate);
         const isBm = !isFold;
 
         if (!preserveExplicitSelection) {
@@ -5297,47 +5300,59 @@ function getOrderedSelectionRawEntries(isTableView) {
     return selectedOrdered;
 }
 
+function isSearchResultFolderCandidate(entry) {
+    if (!entry) return false;
+    const raw = entry.rawItem || entry;
+    return entry.nodeType === 'folder'
+        || entry.type === 'folder'
+        || entry.isFolder === true
+        || (raw && (raw.nodeType === 'folder' || raw.type === 'folder' || raw.isFolder === true));
+}
+
+function isSearchResultBookmarkOrGroupEntry(entry) {
+    if (!entry || entry.type === 'bookmark-group-more' || entry.isChild || entry.domainChild) return false;
+    const t = entry.type || (entry.rawItem && entry.rawItem.type) || '';
+    return t === 'bookmark-item' || t === 'bookmark-group';
+}
+
 function collectScopedGridCandidatePool() {
     const filter = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.bookmarkTypeFilter) || '';
+    const primaryPool = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
+        ? searchUiState.resultAll
+        : ((typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.results)) ? searchUiState.results : []);
+
     if (filter === 'domain') {
         const cache = (typeof ensureDomainCacheForQuery === 'function')
             ? ensureDomainCacheForQuery((searchUiState && searchUiState.query) || '')
             : null;
-        if (cache && Array.isArray(cache.results)) {
-            return cache.results;
+        if (cache && Array.isArray(cache.results) && cache.results.length > 0) {
+            return cache.results.filter(r => r && !r.domainChild);
         }
-        const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
-            ? searchUiState.resultAll
-            : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
-        return allCandidates.filter(r => r && (r.type === 'domain-group' || (r.rawItem && r.rawItem.type === 'domain-group')));
+        return primaryPool.filter(r => r && !r.domainChild && (r.type === 'domain-group' || (r.rawItem && r.rawItem.type === 'domain-group')));
     }
+
     if (filter === 'folder') {
-        const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
-            ? searchUiState.resultAll
-            : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
-        return allCandidates.filter(r => {
-            const norm = r && (r.rawItem || r);
-            return norm && (norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true);
-        });
+        const matched = primaryPool.filter(r => isSearchResultBookmarkOrGroupEntry(r) && isSearchResultFolderCandidate(r));
+        if (matched.length > 0) return matched;
+        const sourcePool = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultSource)) ? searchUiState.resultSource : [];
+        return sourcePool.filter(r => isSearchResultBookmarkOrGroupEntry(r) && isSearchResultFolderCandidate(r));
     }
+
     if (filter === 'bookmark') {
-        const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
-            ? searchUiState.resultAll
-            : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
-        return allCandidates.filter(r => {
-            const norm = r && (r.rawItem || r);
-            const isFold = norm && (norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true);
-            return norm && !isFold && (norm.type === 'bookmark-item' || norm.type === 'bookmark-group');
-        });
+        const matched = primaryPool.filter(r => isSearchResultBookmarkOrGroupEntry(r) && !isSearchResultFolderCandidate(r));
+        if (matched.length > 0) return matched;
+        const sourcePool = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultSource)) ? searchUiState.resultSource : [];
+        return sourcePool.filter(r => isSearchResultBookmarkOrGroupEntry(r) && !isSearchResultFolderCandidate(r));
     }
+
+    const allMatched = primaryPool.filter(isSearchResultBookmarkOrGroupEntry);
+    if (allMatched.length > 0) return allMatched;
+
     const groups = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.bookmarkGroupModel) || null;
-    if (Array.isArray(groups) && groups.length) {
-        return groups;
+    if (Array.isArray(groups) && groups.length && typeof buildCanvasBookmarkGroupedResultsFromModel === 'function') {
+        return buildCanvasBookmarkGroupedResultsFromModel(groups).filter(isSearchResultBookmarkOrGroupEntry);
     }
-    const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
-        ? searchUiState.resultAll
-        : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
-    return allCandidates.filter(r => r && (r.type === 'bookmark-item' || r.type === 'bookmark-group'));
+    return [];
 }
 
 async function collectBookmarkExportTargetContext(targetCountOverride = null) {
@@ -5441,20 +5456,35 @@ async function collectBookmarkExportTargetContext(targetCountOverride = null) {
     } else {
         const rawList = [];
         const rawEntryLookup = new WeakMap();
+        const registerLookup = (node, visualEntry) => {
+            if (node && typeof node === 'object' && !rawEntryLookup.has(node)) {
+                rawEntryLookup.set(node, visualEntry);
+            }
+        };
         visualRows.forEach((r) => {
-            const raw = (r && r.rawItem) ? r.rawItem : r;
-            if (!raw) return;
-            rawList.push(raw);
-            rawEntryLookup.set(raw, r);
-            if (Array.isArray(raw.targetItems)) {
-                raw.targetItems.forEach((t) => {
-                    if (t && typeof t === 'object' && !rawEntryLookup.has(t)) rawEntryLookup.set(t, r);
+            if (!r) return;
+            const srcItem = isTableView ? (r.rawItem || r) : r;
+            if (!srcItem) return;
+            rawList.push(srcItem);
+            registerLookup(srcItem, r);
+            registerLookup(srcItem.rawItem, r);
+            if (Array.isArray(srcItem.targetItems)) {
+                srcItem.targetItems.forEach((t) => {
+                    registerLookup(t, r);
+                    if (t && t.rawItem) registerLookup(t.rawItem, r);
                 });
             }
-            if (Array.isArray(raw.children)) {
-                raw.children.forEach((c) => {
+            if (Array.isArray(srcItem.childItems)) {
+                srcItem.childItems.forEach((t) => {
+                    registerLookup(t, r);
+                    if (t && t.rawItem) registerLookup(t.rawItem, r);
+                });
+            }
+            if (Array.isArray(srcItem.children)) {
+                srcItem.children.forEach((c) => {
                     const ci = c && c.item ? c.item : c;
-                    if (ci && typeof ci === 'object' && !rawEntryLookup.has(ci)) rawEntryLookup.set(ci, r);
+                    registerLookup(ci, r);
+                    if (ci && ci.rawItem) registerLookup(ci.rawItem, r);
                 });
             }
         });
@@ -5795,7 +5825,7 @@ function buildSearchGridMarkdownList(visualRows, isZh, options = {}) {
             return;
         }
 
-        const isFold = norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true;
+        const isFold = isSearchResultFolderCandidate(entry);
         const rawTitle = String(norm.title || entry.title || norm.url || entry.url || (isZh ? '未命名条目' : 'Untitled')).trim();
         const tagStr = extractSearchItemTagsSummary(entry);
         const tagSuffix = tagStr ? ` ${tagStr}` : '';
@@ -6183,7 +6213,7 @@ async function handleSearchExportAction(actionType) {
     }
 
     if (actionType === 'copy-json' || actionType === 'export-json') {
-        showCanvasToastSafe(isZh ? '正在整理原格式 JSON…' : 'Preparing JSON…', 'info', 1200);
+        showCanvasToastSafe(isZh ? '正在整理 JSON…' : 'Preparing JSON…', 'info', 1200);
         const protocolObj = await buildSearchExportJsonProtocol(context);
         const jsonText = JSON.stringify(protocolObj, null, 2);
         const isRich = getSearchExportJsonMode() === 'rich';
@@ -6194,7 +6224,7 @@ async function handleSearchExportAction(actionType) {
             const ok = await copySearchExportText(jsonText);
             showCanvasToastSafe(
                 ok
-                    ? (isZh ? `已复制原格式 JSON（${isRich ? '含搜索详情' : '仅原格式'} · ${context.visualRows.length} 项）` : `Copied JSON (${context.visualRows.length} items)`)
+                    ? (isZh ? `已复制 JSON（${isRich ? '含搜索详情' : '默认导出格式'} · ${context.visualRows.length} 项）` : `Copied JSON (${context.visualRows.length} items)`)
                     : (isZh ? '复制到剪贴板失败' : 'Copy failed'),
                 ok ? 'success' : 'error',
                 2200
@@ -6203,7 +6233,7 @@ async function handleSearchExportAction(actionType) {
             const filename = `bookmark-canvas-search-${formatSearchExportTimestampForFilename()}.json`;
             downloadSearchExportTextFile(jsonText, filename, 'application/json;charset=utf-8');
             showCanvasToastSafe(
-                isZh ? `已导出 ${filename}（${isRich ? '含搜索详情' : '仅原格式'}）` : `Exported ${filename}`,
+                isZh ? `已导出 ${filename}（${isRich ? '含搜索详情' : '默认导出格式'}）` : `Exported ${filename}`,
                 'success',
                 2200
             );
@@ -6396,7 +6426,7 @@ function showTempSectionHelpPopover(targetBtn) {
                 <div class="canvas-temp-help-divider"></div>
                 <div class="canvas-temp-help-row">
                     <span class="canvas-temp-help-badge">${escapeHtml(isZh ? '多格式输出与 ⓘ 配置' : 'Multi-Format & ⓘ Config')}</span>
-                    <span class="canvas-temp-help-text">${escapeHtml(isZh ? '点击「原格式 JSON」或「Markdown」右侧的 ⓘ 按钮，可切换精简原格式 / 含搜索详情字段，以及表格所见即所得导出列。' : 'Click ⓘ next to JSON or Markdown to toggle search metadata fields or filter exported table columns.')}</span>
+                    <span class="canvas-temp-help-text">${escapeHtml(isZh ? '点击「JSON」或「Markdown」右侧的 ⓘ 按钮，可切换默认导出格式 / 含搜索详情字段，以及表格所见即所得导出列。' : 'Click ⓘ next to JSON or Markdown to toggle default format / search metadata fields or filter exported table columns.')}</span>
                 </div>
             </div>
         </div>
@@ -6578,12 +6608,12 @@ function renderSearchExportConfigPopoverBody() {
     let bodyHtml = '';
 
     if (currentExportConfigPopoverType === 'json') {
-        titleText = isZh ? '原格式 JSON · 内容切换' : 'JSON · Field Options';
+        titleText = isZh ? 'JSON · 内容切换' : 'JSON · Field Options';
         const isRich = getSearchExportJsonMode() === 'rich';
         const fieldsSet = getSearchExportJsonFieldsSet();
         bodyHtml = `
             <div class="canvas-export-segmented">
-                <button type="button" data-json-mode="native" class="canvas-export-seg-btn${!isRich ? ' active' : ''}">${escapeHtml(isZh ? '仅原格式 (tag/note)' : 'Original Only')}</button>
+                <button type="button" data-json-mode="native" class="canvas-export-seg-btn${!isRich ? ' active' : ''}">${escapeHtml(isZh ? '默认导出格式' : 'Default Format')}</button>
                 <button type="button" data-json-mode="rich" class="canvas-export-seg-btn${isRich ? ' active' : ''}">${escapeHtml(isZh ? '含搜索详情' : 'With Details')}</button>
             </div>
             ${isRich ? `
@@ -6984,7 +7014,7 @@ function showTempSectionBubble(targetBtn, options = {}) {
                 <div class="canvas-temp-bubble-action-row">
                     <div class="canvas-export-row-title-group">
                         <i class="fas fa-code canvas-export-row-icon is-json" aria-hidden="true"></i>
-                        <span class="canvas-export-row-label">${escapeHtml(isZh ? '原格式 JSON' : 'Canvas JSON')}</span>
+                        <span class="canvas-export-row-label">JSON</span>
                         <button type="button" class="canvas-export-info-btn${currentExportConfigPopoverType === 'json' ? ' is-active' : ''}" data-config-type="json" title="${escapeHtml(isZh ? '切换携带详情字段' : 'Configure JSON fields')}" aria-label="${escapeHtml(isZh ? '配置 JSON 字段' : 'Configure JSON fields')}" aria-expanded="${currentExportConfigPopoverType === 'json' ? 'true' : 'false'}">
                             <i class="fas fa-info-circle" aria-hidden="true"></i>
                         </button>
@@ -9658,7 +9688,9 @@ function handleSearchResultsPanelMouseOut(e) {
 function handleSearchOutsideClick(e) {
     let wasBubbleVisible = false;
     if (tempSectionBubbleEl && tempSectionBubbleEl.classList.contains('visible')) {
-        const inBubbleOrBtn = e.target && e.target.closest && e.target.closest('#searchTempSectionBubble, .canvas-bookmark-to-temp-btn');
+        const inBubbleOrBtn = e.target && e.target.closest && e.target.closest(
+            '#searchTempSectionBubble, .canvas-bookmark-to-temp-btn, .canvas-search-selection-bar-action-btn, #canvasTempSectionHelpPopover, #canvasSearchExportConfigPopover'
+        );
         if (!inBubbleOrBtn) {
             wasBubbleVisible = true;
             hideTempSectionBubble(true);
@@ -9698,7 +9730,8 @@ function handleSearchOutsideClick(e) {
     if (e.target && e.target.closest && e.target.closest(
         '#searchGridDetailsBubble, #searchGridGroupPopover, ' +
         '.canvas-grid-details-bubble, .canvas-grid-group-popover, ' +
-        '.canvas-temp-section-bubble, .search-result-title-tooltip, ' +
+        '.canvas-temp-section-bubble, #canvasSearchExportConfigPopover, .canvas-export-config-popover, ' +
+        '#canvasTempSectionHelpPopover, .canvas-temp-help-popover, .search-result-title-tooltip, ' +
         '#searchHistoryHelpPopover, .search-hint-help-popover, .perf-help-popover'
     )) {
         return;
@@ -28584,19 +28617,12 @@ async function collectBookmarkItemsForTempSection(targetCount = null) {
         const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
             ? searchUiState.resultAll
             : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
-        candidatePool = allCandidates.filter(r => {
-            const norm = r && (r.rawItem || r);
-            return norm && (norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true);
-        });
+        candidatePool = allCandidates.filter(r => isSearchResultBookmarkOrGroupEntry(r) && isSearchResultFolderCandidate(r));
     } else if (filter === 'bookmark') {
         const allCandidates = (typeof searchUiState !== 'undefined' && searchUiState && Array.isArray(searchUiState.resultAll) && searchUiState.resultAll.length > 0)
             ? searchUiState.resultAll
             : ((typeof searchUiState !== 'undefined' && searchUiState && searchUiState.results) || []);
-        candidatePool = allCandidates.filter(r => {
-            const norm = r && (r.rawItem || r);
-            const isFold = norm && (norm.nodeType === 'folder' || norm.type === 'folder' || norm.isFolder === true);
-            return norm && !isFold && (norm.type === 'bookmark-item' || norm.type === 'bookmark-group');
-        });
+        candidatePool = allCandidates.filter(r => isSearchResultBookmarkOrGroupEntry(r) && !isSearchResultFolderCandidate(r));
     } else {
         const groups = (typeof searchUiState !== 'undefined' && searchUiState && searchUiState.bookmarkGroupModel) || null;
         if (Array.isArray(groups) && groups.length) {
